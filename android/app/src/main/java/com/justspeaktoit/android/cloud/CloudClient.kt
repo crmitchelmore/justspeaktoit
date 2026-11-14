@@ -56,6 +56,15 @@ interface CloudService {
 
     /** [systemPrompt] is the full cleanup instruction, built by [CleanupPolicy.systemPrompt]. */
     fun cleanup(model: CleanupModel, apiKey: String, transcript: String, systemPrompt: String, call: CallHandle): String
+
+    /** Sends a voice edit, built by [VoiceEditPolicy], to the cleanup model's route; returns the raw reply. */
+    fun rewriteSelection(
+        model: CleanupModel,
+        apiKey: String,
+        systemPrompt: String,
+        userMessage: String,
+        call: CallHandle,
+    ): String
 }
 
 /**
@@ -110,13 +119,27 @@ class CloudClient(
         call: CallHandle,
     ): String {
         val json = CloudWire.cleanupBody(model.apiName, transcript, CloudWire.cleanupMaxTokens(model), systemPrompt)
-            .toByteArray()
-        val url = CloudWire.cleanupUrl(model)
-        val body = post(url, apiKey, "application/json", call) { conn ->
-            conn.setFixedLengthStreamingMode(json.size)
-            conn.outputStream.use { it.write(json) }
+        return CloudWire.cleanupText(chat(model, apiKey, json, call))
+    }
+
+    override fun rewriteSelection(
+        model: CleanupModel,
+        apiKey: String,
+        systemPrompt: String,
+        userMessage: String,
+        call: CallHandle,
+    ): String {
+        val json = CloudWire.chatBody(model.apiName, systemPrompt, userMessage, CloudWire.cleanupMaxTokens(model))
+        return CloudWire.rewriteText(chat(model, apiKey, json, call))
+    }
+
+    /** Posts a chat completion to the model's own route and returns the response body. */
+    private fun chat(model: CleanupModel, apiKey: String, json: String, call: CallHandle): String {
+        val bytes = json.toByteArray()
+        return post(CloudWire.cleanupUrl(model), apiKey, "application/json", call) { conn ->
+            conn.setFixedLengthStreamingMode(bytes.size)
+            conn.outputStream.use { it.write(bytes) }
         }
-        return CloudWire.cleanupText(body)
     }
 
     internal fun post(

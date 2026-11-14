@@ -129,7 +129,9 @@ extension SettingsSearchCatalog {
             id: "desktop.selectedTextSpeech", title: "Selected-text speech", section: .voiceOutput,
             systemImage: "text.bubble",
             summary: "Read selected text aloud from any app.",
-            keywords: ["speak selection", "read selected text", "accessibility"],
+            keywords: [
+                "speak selection", "read selected text", "accessibility", "voice edit", "edit selection by voice"
+            ],
             platforms: .linux
         ),
         SettingsSearchEntry(

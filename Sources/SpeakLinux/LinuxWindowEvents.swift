@@ -82,6 +82,8 @@ private func linuxHostActionEvent(
         linuxActionShortcutEdit(value, holder: holder)
     case .speakSelectedText:
         holder.speakSelectedText()
+    case .voiceEdit:
+        holder.toggleVoiceEdit()
     case .apiKeys:
         linuxRequestDialog(jsti_window_request_api_keys(),
                            refusal: "API Keys could not be opened. Try again when the app is idle.")

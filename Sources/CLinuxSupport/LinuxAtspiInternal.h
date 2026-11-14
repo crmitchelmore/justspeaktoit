@@ -22,7 +22,9 @@
 typedef struct Session Session;
 typedef enum { CORRECTION_SESSION, SELECTION_SESSION } SessionPurpose;
 typedef enum { CLEANUP_UNKNOWN, CLEANUP_EVENT, CLEANUP_APPLICATION } CleanupShape;
-typedef enum { FRESH, DISPATCHED, INSERTED, SAMPLING, FINISHED } Phase;
+/* SELECTED and REPLACING belong only to voice-edit selection leases: the
+ * selection was read and is held unchanged, then its one replacement runs. */
+typedef enum { FRESH, DISPATCHED, INSERTED, SAMPLING, FINISHED, SELECTED, REPLACING } Phase;
 
 struct JSTIAtspiTarget {
     gint refs, cancelled, captured, dispatched;
@@ -32,7 +34,7 @@ struct JSTIAtspiTarget {
     GPtrArray *parents;
     guint32 pid;
     Phase phase;
-    gint start, end, count, initial_count, insert_events, mutations;
+    gint start, end, count, initial_count, insert_events, delete_events, mutations;
     gchar *original, *tracked, *left, *right;
     gboolean left_edge, right_edge;
     GArray *signals;
@@ -59,7 +61,9 @@ typedef struct { gint pending; } SelectionAdmission;
 typedef struct { guint64 generation, offer; gboolean exhausted; } ConsentLedger;
 
 struct JSTIAtspiSelection {
-    gint refs, started;
+    gint refs, started, replaced;
+    /* A voice-edit lease outlives dictation, so each step has its own budget. */
+    gboolean edit;
     JSTIAtspiTarget *target;
     SelectionAdmission *admission;
     gint64 deadline;
@@ -128,6 +132,7 @@ gboolean insertion_observed(JSTIAtspiTarget *t, gboolean accepted, gint caret, g
 gint insert(JSTIAtspiTarget *t, const gchar *text, gint64 deadline);
 gboolean selection_range_valid(gint selections, gint start, gint end, gint count);
 gboolean request_allowed(SessionPurpose purpose, gint kind);
+gboolean replacement_observed(JSTIAtspiTarget *t, gint count, gint final_count, const char *observed);
 
 #pragma GCC visibility pop
 

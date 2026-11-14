@@ -21,8 +21,9 @@ void object_event(GDBusConnection *bus, const gchar *sender, const gchar *path,
         g_variant_unref(value); g_variant_unref(wrapped); g_variant_unref(properties);
         if (!ok) invalidate(t);
     } else if (g_strcmp0(signal, "TextCaretMoved") == 0 || g_strcmp0(signal, "TextSelectionChanged") == 0) {
-        /* Re-admit the same known control, but never retarget an outstanding read. */
-        if (t->session->purpose == SELECTION_SESSION) {
+        /* Re-admit the same known control, but never retarget an outstanding
+         * read. Our own replacement moves the caret; its text is tracked. */
+        if (t->session->purpose == SELECTION_SESSION && t->phase != REPLACING) {
             invalidate(t); queue_target_readmission(t);
         }
     } else {

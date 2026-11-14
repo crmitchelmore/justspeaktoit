@@ -373,8 +373,8 @@ the harness; no real desktop key map is modified. This check is NOT_RUN locally
 and does not qualify AltGr, arbitrary layouts, runtime remapping or Wayland.
 
 With the app **already running**, desktop keyboard settings can also bind
-`justspeaktoit --speak-clipboard`, `justspeaktoit --speak-selected-text` and
-`justspeaktoit --paste-last-history`.
+`justspeaktoit --speak-clipboard`, `justspeaktoit --speak-selected-text`,
+`justspeaktoit --edit-selection-by-voice` and `justspeaktoit --paste-last-history`.
 The same running-app forwarding path supports `--stop-speech`,
 `--pause-resume-speech`, and `--quick-voice-1`, `--quick-voice-2` or
 `--quick-voice-3`. Quick Voice selects the corresponding saved favorite; it does
@@ -403,7 +403,7 @@ construction or store access. A valid `--toggle`, with optional `--background`
 or repeated identical toggle flags, keeps its existing cold-launch and
 running-app dictation behavior; it is not changed into a running-only command.
 Busy/recording states refuse clipboard/selected-text speech, History paste, Pause/Resume and
-Quick Voice; closing or modal-disabled windows refuse all commands. Stop follows
+Quick Voice; `--edit-selection-by-voice` toggles, so it is accepted while listening to finish the edit; closing or modal-disabled windows refuse all commands. Stop follows
 its own control's availability as described above. Refusal returns a nonzero exit
 status. Status 0 means admitted
 to the running app, not that speech or paste completed; results and provider
@@ -420,6 +420,18 @@ Output provider. Correction-learning consent does not authorize this read-only
 session; neither settings nor imports grant it. Stop access revokes pending
 reads before requesting speech Stop, and shutdown revokes access before draining
 settings. The app does not enable desktop accessibility.
+
+**Edit Selection by Voice** (`--edit-selection-by-voice`, the X11 global
+binding or a desktop keybinding) uses the same session access. The command
+arms one lease on the admitted field and reads its selection; you dictate an
+instruction and press the binding again to finish, and the cleanup model
+rewrites the text. The selection and instruction go to the configured cleanup
+provider. The app then replaces only that field's unchanged selection through
+AT-SPI `EditableText` (delete, then insert) and confirms it by reading the
+field back. Any focus, caret, selection or text change in the field during
+dictation, or a field without `EditableText`, aborts the edit and copies the
+rewrite instead; it never types into another field. There is no tray item,
+because clicking the tray moves focus off the captured field.
 
 Capture on the command path uses only an already-admitted field receipt. A
 single pending lease across session restarts prevents queued target accumulation.
@@ -659,7 +671,7 @@ native execution are NOT_RUN here.** Exact-head Apple/portable checks,
 X11/GTK coexistence, registration failures, physical repeat/lock/layout
 behavior and shutdown still need native qualification. Xlib server loss can
 remain fatal despite reporting poll-detected listener failures. Linux
-system-wide Escape and voice editing remain separate gaps.
+system-wide Escape remains a separate gap.
 
 ### Escape and dictation delivery
 

@@ -94,6 +94,7 @@ package enum DesktopNativeLinuxEvent: Int32, CaseIterable, Sendable {
     case cloudSyncSignIn = 61
     case cloudSyncSignOut = 62
     case cloudSyncNow = 63
+    case voiceEdit = 114
     case actionShortcutEdit = 115
     case apiKeys = 117
     case permissions = 118

@@ -1582,6 +1582,21 @@ sessions:
           - "Open a password field and check the keyboard's microphone; then deny the microphone permission and try the keyboard."
         expected: "The tile and shortcut open the app and start dictating (after unlocking when locked). Both shared files are transcribed into History. The keyboard inserts the final text, is disabled in the password field, and explains a denied permission. Switching keyboards stops dictation without inserting stray text."
         final_gate: true
+      - id: "android-keyboard-voice-edit"
+        issues:
+          - 1620
+        title: "Dictation keyboard: rewrite selected text by voice and never touch another field"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1620 keyboard voice edit"
+        steps:
+          - "With an OpenRouter key saved, open a notes app with the Just Speak to It keyboard and check Edit is greyed out with nothing selected."
+          - "Type or dictate a made-up sentence, select part of it, tap Edit, read the notice naming the provider and tap Edit again. Say make it more formal, then tap Done."
+          - "Select text again, tap Edit and while it says Rewriting switch to another field or move the selection; then repeat with Airplane mode on."
+          - "Turn Airplane mode off, remove the OpenRouter key in Settings, then select text and tap Edit."
+          - "With TalkBack on, focus the Edit key with and without a selection."
+        expected: "Edit is enabled only with a selection. The rewrite replaces only the selected words and the rest of the sentence is unchanged. Moving away or changing the selection leaves the text as it was with a message that it changed, Airplane mode leaves it unchanged with a network message, and a missing key names the provider without recording. TalkBack reads Edit with its state and a description of what it does."
+        final_gate: false
       - id: "android-raw-configuration-editor"
         issues:
           - 1608
@@ -1889,6 +1904,21 @@ sessions:
           - "Open the app, wait a minute, then quit normally and open it again."
           - "Ask the owner to look in Sentry for a desktop.unclean_exit event from this build."
         expected: "Exactly one unclean-exit report arrives, with the app version and OS but no transcript text, file path, user name or installation ID. A normal quit and relaunch sends nothing more."
+        final_gate: false
+      - id: "linux-voice-edit-selection"
+        issues:
+          - 1620
+        title: "Edit Selection by Voice rewrites only the captured selection"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Linux, an Alpha build that includes the #1620 Linux voice edit change, with a cleanup model and its key set up"
+        steps:
+          - "Bind justspeaktoit --edit-selection-by-voice to a key in your desktop's keyboard settings (on X11 you can instead turn on Global for Edit Selection by Voice in Keyboard › Action shortcuts)."
+          - "Open Voice Output › Selection access, choose Allow and accept. In gedit or GNOME Text Editor, type a made-up sentence and select one word of it."
+          - "Press the binding, say make this uppercase, then press the binding again. Check only the selected word changes and the rest of the line is untouched."
+          - "Select another word and press the binding, then click elsewhere in the same document before pressing the binding again."
+          - "Press the binding with nothing selected, and once more after choosing Stop access in Voice Output."
+        expected: "The first edit replaces exactly the selected word once and the app reports the captured selection was replaced. Moving the caret or focus during dictation leaves the document unchanged and says the rewrite was copied instead; pasting shows the rewrite. With nothing selected or access stopped the app explains that it needs selected text it can read, then stops without listening or typing anywhere."
         final_gate: false
   - id: "decisions"
     device: "Decision"

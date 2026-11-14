@@ -107,7 +107,7 @@ The flags live in `Project.swift`; release selection is in
 | F19 | Command palette | Yes | N/A | Yes | Yes | N/A | | Windows and Linux also list recent History. |
 | F20 | Compare models | Yes | N/A | Yes | Yes | N/A | #1622 | Desktop-only by owner decision. |
 | F21 | Voice output / read aloud | Yes | Yes | Yes | Yes | Partial | #1631 | Android: system TTS only. |
-| F22 | Voice edit of selected text | Yes | Yes | Yes | No | No | #1620 | |
+| F22 | Voice edit of selected text | Yes | Yes | Yes | Partial | Yes | #1620 | Linux: external editable AT-SPI fields with session selection access only. Android: from the dictation keyboard. |
 | F23 | Hands-free and silence auto-stop | Yes | Yes | Yes | Yes | Yes | | Android: Cloud mode only. |
 | F24 | Insert text into other apps | Yes | Limited | Yes | Limited | Yes | | |
 | F25 | Recording HUD / live text overlay | Yes | Yes | Yes | Yes | Partial | #1592 | Android shows an ongoing foreground-service notification with Stop, but no live text. |
@@ -329,13 +329,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Desktop SSML is capped at 64 KiB and never split. Groq PlayAI voices retired on 2025-12-31 and must not return (`Sources/SpeakCore/GroqTTSCatalog.swift`). Voice settings transfer atomically on desktop hosts ([desktop voice sources](desktop-voice-sources.md)).
 
 ### F22 Voice edit of selected text
-- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux No · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Partial · Android Yes
 - **Excluded:** none
-- **Gaps:** Linux, Android #1620.
+- **Gaps:** Linux #1620 (works only in external editable AT-SPI fields after **Voice Output > Selection access > Allow...**; toolkits without AT-SPI `EditableText` or with no app accessibility are unavailable, and Wayland needs a desktop keybinding to `--edit-selection-by-voice`).
 - **How:** Capture the selection and its target, dictate an instruction, rewrite with the cleanup model, then replace only in the captured target; never redirect to another field.
-- **Refs:** `Sources/SpeakCore/PostProcessing/VoiceEditPolicy.swift`, `Sources/SpeakDesktop/Voice/DesktopVoiceEdit.swift`, `Sources/SpeakDesktopHost/Voice/DesktopHostVoiceEdit.swift`, `Sources/SpeakApp/VoiceEdit/VoiceEditController.swift`, `Sources/SpeakWindows/WindowsVoiceEdit.swift`
+- **Refs:** `Sources/SpeakCore/PostProcessing/VoiceEditPolicy.swift`, `Sources/SpeakDesktop/Voice/DesktopVoiceEdit.swift`, `Sources/SpeakDesktopHost/Voice/DesktopHostVoiceEdit.swift`, `Sources/SpeakApp/VoiceEdit/VoiceEditController.swift`, `Sources/SpeakWindows/WindowsVoiceEdit.swift`, `android/app/src/main/java/com/justspeaktoit/android/ime/VoiceEdit.kt`, `android/app/src/main/java/com/justspeaktoit/android/cloud/VoiceEditPolicy.kt`, `Sources/SpeakDesktop/Voice/DesktopVoiceEditTarget.swift`, `Sources/SpeakLinux/LinuxVoiceEdit.swift`, `Sources/CLinuxSupport/LinuxAtspiRequests.c`
 - **Sunset:** none
-- **Nuances:** The Mac rejects missing or cross-process AX targets (`Sources/SpeakApp/Output/AccessibilityTextOutput.swift`).
+- **Nuances:** The Mac rejects missing or cross-process AX targets (`Sources/SpeakApp/Output/AccessibilityTextOutput.swift`). Linux arms one AT-SPI selection lease when the command runs; any focus, caret, selection or text change in that field during dictation aborts the edit and copies the rewrite instead, and a replacement is confirmed by reading back the field. It has no tray item because clicking the tray moves focus off the captured field. Android takes the prompt and formatting words from SpeakCore through `cloud_catalog.json`. Its keyboard Edit key is enabled only while the field reports a selection. It records the instruction with the keyboard's own recogniser and rewrites with the profile's or saved cleanup model and that provider's key, even when cleanup is off. The first Edit in a keyboard session names the provider, which receives only the selection and instruction, and waits for a second tap. Before committing, the keyboard re-reads the field's package, id, selection range and selected text; if any differ or the input restarted, it leaves the text alone and says so.
 
 ### F23 Hands-free and silence auto-stop
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

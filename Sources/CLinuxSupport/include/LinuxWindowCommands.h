@@ -39,6 +39,7 @@ int32_t jsti_window_run_action(int32_t run, const char *page, int32_t slot);
 #define JSTI_TOGGLE_ARGUMENT "--toggle"
 #define JSTI_SPEAK_CLIPBOARD_ARGUMENT "--speak-clipboard"
 #define JSTI_SPEAK_SELECTED_TEXT_ARGUMENT "--speak-selected-text"
+#define JSTI_EDIT_SELECTION_BY_VOICE_ARGUMENT "--edit-selection-by-voice"
 #define JSTI_PASTE_LAST_HISTORY_ARGUMENT "--paste-last-history"
 #define JSTI_STOP_SPEECH_ARGUMENT "--stop-speech"
 #define JSTI_PAUSE_SPEECH_ARGUMENT "--pause-resume-speech"

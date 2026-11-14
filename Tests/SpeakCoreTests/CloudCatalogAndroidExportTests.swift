@@ -95,6 +95,18 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         XCTAssertEqual(cleanup?["systemPrompt"], TranscriptCleanupPolicy.systemPrompt())
     }
 
+    func testDocumentCarriesVoiceEditPromptAndFormattingTerms() throws {
+        let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
+        let voiceEdit = try XCTUnwrap(object?["voiceEdit"] as? [String: Any])
+        XCTAssertEqual(voiceEdit["systemPrompt"] as? String, VoiceEditPolicy.systemPrompt)
+        XCTAssertEqual(voiceEdit["quoteTerms"] as? [String], VoiceEditFormattingIntent.quoteTerms)
+        XCTAssertEqual(voiceEdit["codeFenceTerms"] as? [String], VoiceEditFormattingIntent.codeFenceTerms)
+        XCTAssertEqual(voiceEdit["whitespaceTerms"] as? [String], VoiceEditFormattingIntent.whitespaceTerms)
+        // Android appends a blank line and the JSON payload to the intro, as `userMessage` does.
+        let intro = try XCTUnwrap(voiceEdit["userMessageIntro"] as? String)
+        XCTAssertTrue(VoiceEditPolicy.userMessage(selection: "a", instruction: "b").hasPrefix(intro + "\n\n{"))
+    }
+
     func testCleanupModelsAreNativeRoutesThenOpenRouterSlugs() throws {
         let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
         let models = try XCTUnwrap(object?["cleanupModels"] as? [[String: String]])

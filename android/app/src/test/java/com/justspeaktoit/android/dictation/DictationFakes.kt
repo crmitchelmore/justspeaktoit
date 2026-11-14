@@ -256,9 +256,14 @@ internal class FakeCloud : CloudService {
     val cleanups = CopyOnWriteArrayList<String>()
     val cleanupPrompts = CopyOnWriteArrayList<String>()
 
+    data class Rewrite(val model: CleanupModel, val apiKey: String, val systemPrompt: String, val userMessage: String)
+
+    val rewrites = CopyOnWriteArrayList<Rewrite>()
+
     /** Runs on an IO thread; may block until the call is cancelled. */
     @Volatile var onTranscribe: (CallHandle) -> String = { "hello world" }
     @Volatile var onCleanup: (String) -> String = { "Hello, world." }
+    @Volatile var onRewrite: (CallHandle) -> String = { "Rewritten." }
 
     override fun transcribe(
         model: CloudModel,
@@ -284,6 +289,17 @@ internal class FakeCloud : CloudService {
         cleanups += transcript
         cleanupPrompts += systemPrompt
         return onCleanup(transcript)
+    }
+
+    override fun rewriteSelection(
+        model: CleanupModel,
+        apiKey: String,
+        systemPrompt: String,
+        userMessage: String,
+        call: CallHandle,
+    ): String {
+        rewrites += Rewrite(model, apiKey, systemPrompt, userMessage)
+        return onRewrite(call)
     }
 }
 

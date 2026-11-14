@@ -89,11 +89,17 @@ int32_t jsti_atspi_selection_contract_self_test(void) {
     ok &= jsti_atspi_selection_read(&empty, NULL, 0) == 0 && !g_atomic_int_get(&empty.started)
         && jsti_atspi_selection_read(&empty, output, sizeof(output)) == 0 && g_atomic_int_get(&empty.started)
         && jsti_atspi_selection_read(&empty, output, sizeof(output)) == 0 && output[0] == '\0';
+    /* A plain selection lease never replaces; an edit lease only after its read. */
+    JSTIAtspiSelection edit = {0}; edit.edit = TRUE;
+    ok &= jsti_atspi_voice_edit_replace(&empty, "x") == 0 && !g_atomic_int_get(&empty.replaced)
+        && jsti_atspi_voice_edit_replace(&edit, "x") == 0 && !g_atomic_int_get(&edit.replaced)
+        && jsti_atspi_voice_edit_replace(NULL, "x") == 0 && jsti_atspi_voice_edit_is_current(&empty) == 0
+        && jsti_atspi_voice_edit_is_current(NULL) == 0;
     selection_token = advance_consent(&selection, TRUE);
     advance_consent(&observation, FALSE);
     ok &= consent_action_current(&selection, TRUE, selection_token);
     for (gint kind = -1; kind <= 4; ++kind) {
-        ok &= request_allowed(SELECTION_SESSION, kind) == (kind == 3);
+        ok &= request_allowed(SELECTION_SESSION, kind) == (kind == 3 || kind == 4);
         ok &= request_allowed(CORRECTION_SESSION, kind) == (kind >= 0 && kind <= 2);
     }
     Session s = {0}; s.purpose = SELECTION_SESSION; s.epoch = 7; s.focus = 8;
@@ -155,6 +161,33 @@ static gboolean tracking_contract(void) {
     t.phase = FINISHED;
     ok &= !track(&t, "insert", 4, 1, "z");
     g_free(t.tracked);
+    return ok;
+}
+static gboolean replacement_contract(void) {
+    Session s = {0}; s.purpose = SELECTION_SESSION; s.epoch = 3; s.focus = 4;
+    JSTIAtspiTarget t = {0};
+    t.session = &s; t.epoch = 3; t.focus = 4; t.phase = SELECTED;
+    t.start = 2; t.end = 6; t.original = "Susy"; t.tracked = "Sue";
+    /* Before dispatch any text change is foreign. */
+    gboolean ok = !track(&t, "delete", 2, 4, "Susy");
+    t.phase = REPLACING;
+    ok &= !track(&t, "insert", 2, 3, "Sue") && !track(&t, "delete", 3, 4, "usy ")
+        && !track(&t, "delete", 2, 3, "Sus") && !track(&t, "delete", 2, 4, "Susi")
+        && track(&t, "delete:system", 2, 4, "Susy") && !track(&t, "delete", 2, 4, "Susy")
+        && !track(&t, "insert", 3, 3, "Sue") && !track(&t, "insert", 2, 3, "Sum")
+        && track(&t, "insert", 2, 3, "Sue") && !track(&t, "insert", 2, 3, "Sue");
+    ok &= t.delete_events == 1 && t.insert_events == 1;
+    ok &= replacement_observed(&t, 10, 9, "Sue") && !replacement_observed(&t, 10, 10, "Sue")
+        && !replacement_observed(&t, 10, 9, "Sum") && !replacement_observed(&t, 10, 9, NULL);
+    s.focus = 5; ok &= !replacement_observed(&t, 10, 9, "Sue"); s.focus = 4;
+    t.phase = FINISHED; ok &= !replacement_observed(&t, 10, 9, "Sue") && !track(&t, "insert", 2, 1, "x");
+    /* A caret or selection move invalidates a held selection, but not our own edit. */
+    t.owner = ":1.5"; t.path = "/edit"; t.phase = REPLACING;
+    object_event(NULL, t.owner, t.path, OBJECT_EVENT, "TextCaretMoved", NULL, &t);
+    ok &= current_target(&t);
+    t.phase = SELECTED;
+    object_event(NULL, t.owner, t.path, OBJECT_EVENT, "TextCaretMoved", NULL, &t);
+    ok &= !current_target(&t);
     return ok;
 }
 static gboolean observational_contract(void) {
@@ -228,6 +261,6 @@ static gboolean consent_contract(void) {
     return ok;
 }
 int32_t jsti_atspi_contract_self_test(void) {
-    return bitmap_contract() && tracking_contract() && observational_contract()
+    return bitmap_contract() && tracking_contract() && replacement_contract() && observational_contract()
         && cleanup_contract() && consent_contract() ? 0 : -1;
 }

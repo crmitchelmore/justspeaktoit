@@ -120,4 +120,15 @@ class CloudCatalogParityTest {
         assertEquals(prompt.getInt("maximumBytes"), GeneratedCloudCatalog.KEYWORD_PROMPT_MAX_BYTES)
         assertEquals(prompt.getInt("maximumTerms"), GeneratedCloudCatalog.KEYWORD_PROMPT_MAX_TERMS)
     }
+
+    @Test
+    fun testVoiceEditPromptAndFormattingWords_matchTheGeneratedCatalogue() {
+        val edit = asset.getJSONObject("voiceEdit")
+        fun strings(name: String) = edit.getJSONArray(name).let { array -> (0 until array.length()).map(array::getString) }
+        assertEquals(edit.getString("systemPrompt"), VoiceEditPolicy.systemPrompt)
+        assertTrue(VoiceEditPolicy.userMessage("a", "b").startsWith(edit.getString("userMessageIntro") + "\n\n"))
+        assertEquals(strings("quoteTerms"), GeneratedCloudCatalog.VOICE_EDIT_QUOTE_TERMS)
+        assertEquals(strings("codeFenceTerms"), GeneratedCloudCatalog.VOICE_EDIT_CODE_FENCE_TERMS)
+        assertEquals(strings("whitespaceTerms"), GeneratedCloudCatalog.VOICE_EDIT_WHITESPACE_TERMS)
+    }
 }

@@ -95,6 +95,18 @@ for product in "${PRODUCTS[@]}"; do
     product_args+=(--products "$product")
 done
 
+# SwiftPM keeps a full checkout and build of every baseline commit it has
+# compared against in .build/<triple>/apidiff/<sha>{,-checkout} and never
+# prunes them, so a long-lived build directory (pre-pr's warm mirror) grows by
+# several GB per main commit until the disk fills. Keep only this baseline's.
+if baseline_commit=$(git rev-parse --verify --quiet "${BASELINE}^{commit}"); then
+    for apidiff_dir in .build/*/apidiff; do
+        [[ -d "$apidiff_dir" ]] || continue
+        find "$apidiff_dir" -mindepth 1 -maxdepth 1 \
+            ! -name "$baseline_commit" ! -name "${baseline_commit}-checkout" -exec rm -rf -- {} +
+    done
+fi
+
 echo "==> Diagnosing public API against ${BASELINE} for: ${PRODUCTS[*]}"
 # Stream the same public diagnostics while retaining the exact text for the existing gate.
 output_file="$baseline_manifest_dir/diagnose-output.log"

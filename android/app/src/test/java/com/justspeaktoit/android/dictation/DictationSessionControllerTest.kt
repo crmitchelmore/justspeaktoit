@@ -246,7 +246,7 @@ class DictationSessionControllerTest {
         startCloud()
         onMain { controller.stop() }
         await(states) { it.dictation.text() == "Kubernetes works" }
-        assertEquals("Kubernetes", cloud.transcriptions.single().prompt)
+        assertEquals(listOf("Kubernetes"), cloud.transcriptions.single().vocabulary)
     }
 
     @Test

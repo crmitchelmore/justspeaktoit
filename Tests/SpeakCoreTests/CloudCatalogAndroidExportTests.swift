@@ -37,10 +37,47 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
             if model.id.hasPrefix("openai/") {
                 XCTAssertTrue(OpenAITranscriptionModels.directBatchModelIDs.contains(model.id), model.id)
             } else {
-                XCTAssertTrue(model.id.hasPrefix("groq/"), model.id)
+                let provider = String(model.id.prefix { $0 != "/" })
+                XCTAssertTrue(CloudCatalogAndroidExport.transcriptionProviderIDs.contains(provider), model.id)
             }
         }
         XCTAssertEqual(models.first?.id, OpenAITranscriptionModels.gptTranscribeCatalogID)
+    }
+
+    /// Android offers every provider whose shared batch client iOS calls, plus OpenAI and Reson8.
+    func testAndroidTranscriptionProvidersCoverEverySharedBatchClientProvider() {
+        XCTAssertEqual(
+            Set(CloudCatalogAndroidExport.transcriptionProviderIDs),
+            BatchTranscriptionRouting.iosSharedClientProviderIDs.union(["openai", "reson8"])
+        )
+        let offered = Set(CloudCatalogAndroidExport.transcriptionModels.map(\.id))
+        for option in ModelCatalog.batchTranscription where ModelRetirements.retirement(for: option.id) == nil {
+            let provider = String(option.id.prefix { $0 != "/" })
+            guard provider != "openai", CloudCatalogAndroidExport.transcriptionProviderIDs.contains(provider) else {
+                continue
+            }
+            XCTAssertTrue(offered.contains(option.id), option.id)
+        }
+    }
+
+    func testOnlyOpenAICompatibleModelsTakeAPromptAndOnlyReson8NamesItsLanguages() throws {
+        let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
+        let models = try XCTUnwrap(object?["transcriptionModels"] as? [[String: Any]])
+        for model in models {
+            let id = try XCTUnwrap(model["catalogId"] as? String)
+            let provider = try XCTUnwrap(model["provider"] as? String)
+            if model["supportsPrompt"] as? Bool == true {
+                XCTAssertTrue(CloudCatalogAndroidExport.openAICompatibleProviderIDs.contains(provider), id)
+            }
+            let codes = model["languageCodes"] as? [String]
+            if let reson8 = Reson8Model(modelID: id) {
+                XCTAssertEqual(codes, reson8.languageCodes.sorted(), id)
+            } else {
+                XCTAssertNil(codes, id)
+            }
+        }
+        XCTAssertEqual(Set(models.compactMap { $0["catalogId"] as? String }.filter { $0.hasPrefix("reson8/") }),
+                       Set(Reson8Model.allCases.map(\.batchID)))
     }
 
     func testDocumentCarriesCredentialsCleanupModelAndPrompt() throws {
@@ -49,8 +86,10 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         let providers = object?["providers"] as? [[String: String]]
         XCTAssertEqual(
             providers?.map { $0["credentialId"] },
-            ["openai.apiKey", "groq.apiKey", "openrouter.apiKey", "anthropic.apiKey", "google.apiKey", "mistral.apiKey"]
+            CloudCatalogAndroidExport.transcriptionProviderIDs.map(ProviderCredentialCatalogue.apiKeyIdentifier(for:))
+                + ["openrouter.apiKey", "anthropic.apiKey", "google.apiKey"]
         )
+        XCTAssertEqual(providers?.first?["credentialId"], "openai.apiKey")
         let cleanup = object?["cleanup"] as? [String: String]
         XCTAssertEqual(cleanup?["model"], ModelCatalog.defaultPostProcessingModel)
         XCTAssertEqual(cleanup?["systemPrompt"], TranscriptCleanupPolicy.systemPrompt())

@@ -1680,6 +1680,23 @@ sessions:
           - "With TalkBack on, repeat the search and open a model's details, then use Back to return to the browser and to the picker."
         expected: "The browser lists only OpenRouter models, the result count changes as you search and filter, and no matches shows a clear message. The details page shows pricing (or says it is not listed) before choosing. After choosing, the Browse row shows OpenRouter \u203a the model name and cleanup uses it. TalkBack reads every control's name and state, announces the result count, and Back goes details, browser, picker."
         final_gate: false
+      - id: "android-batch-provider-catalogue"
+        issues:
+          - 1636
+        title: "Cloud transcription: Deepgram, AssemblyAI, ElevenLabs, Speechmatics and other providers"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, an Alpha APK that includes the #1636 batch provider catalogue"
+        prerequisites:
+          - "A working API key for at least two of AssemblyAI, Deepgram, ElevenLabs, Mistral, Modulate, Reson8, Rev.ai, Soniox or Speechmatics. Use made-up sentences only."
+        steps:
+          - "Settings: open API keys and save the keys. Each provider has its own row."
+          - "Tap Check balance on each Deepgram, ElevenLabs or Rev.ai key you saved."
+          - "Choose Cloud, open the cloud model list and pick a model from a provider you have a key for."
+          - "Under Personal corrections add \"Kubernetes\" (Vocabulary only), then record \"batch provider check one two three, Kubernetes\" and stop."
+          - "Repeat with a second provider, then open History."
+        expected: "The model list shows AssemblyAI, Deepgram, ElevenLabs, Mistral, Modulate, Reson8, Rev AI, Soniox and Speechmatics models after OpenAI and Groq. Each recording returns the spoken words with Kubernetes spelt correctly, History names the chosen model, and a missing or wrong key names that provider's key. Deepgram shows dollars of credit (or its unit left), ElevenLabs shows characters left of the plan's limit, and Rev AI shows seconds left with a note that the total is unknown."
+        final_gate: false
   - id: "windows"
     device: "Windows"
     title: "Windows"

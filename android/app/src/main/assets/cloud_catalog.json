@@ -526,6 +526,43 @@
       "id" : "groq"
     },
     {
+      "credentialId" : "assemblyai.apiKey",
+      "id" : "assemblyai"
+    },
+    {
+      "credentialId" : "deepgram.apiKey",
+      "id" : "deepgram"
+    },
+    {
+      "credentialId" : "elevenlabs.apiKey",
+      "id" : "elevenlabs"
+    },
+    {
+      "chatCompletionsURL" : "https://api.mistral.ai/v1/chat/completions",
+      "credentialId" : "mistral.apiKey",
+      "id" : "mistral"
+    },
+    {
+      "credentialId" : "modulate.apiKey",
+      "id" : "modulate"
+    },
+    {
+      "credentialId" : "reson8.apiKey",
+      "id" : "reson8"
+    },
+    {
+      "credentialId" : "revai.apiKey",
+      "id" : "revai"
+    },
+    {
+      "credentialId" : "soniox.apiKey",
+      "id" : "soniox"
+    },
+    {
+      "credentialId" : "speechmatics.apiKey",
+      "id" : "speechmatics"
+    },
+    {
       "credentialId" : "openrouter.apiKey",
       "id" : "openrouter"
     },
@@ -538,11 +575,6 @@
       "chatCompletionsURL" : "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
       "credentialId" : "google.apiKey",
       "id" : "google"
-    },
-    {
-      "chatCompletionsURL" : "https://api.mistral.ai/v1/chat/completions",
-      "credentialId" : "mistral.apiKey",
-      "id" : "mistral"
     }
   ],
   "transcriptionModels" : [
@@ -561,6 +593,228 @@
       "languageField" : "language",
       "provider" : "groq",
       "supportsPrompt" : true
+    },
+    {
+      "apiName" : "universal-3-5-pro",
+      "catalogId" : "assemblyai/universal-3-5-pro",
+      "displayName" : "AssemblyAI Universal-3.5 Pro",
+      "languageField" : "language",
+      "provider" : "assemblyai",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "universal-2",
+      "catalogId" : "assemblyai/universal-2",
+      "displayName" : "AssemblyAI Universal-2",
+      "languageField" : "language",
+      "provider" : "assemblyai",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "nova-3",
+      "catalogId" : "deepgram/nova-3",
+      "displayName" : "Deepgram Nova-3",
+      "languageField" : "language",
+      "provider" : "deepgram",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "nova",
+      "catalogId" : "deepgram/nova",
+      "displayName" : "Deepgram Nova",
+      "languageField" : "language",
+      "provider" : "deepgram",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "enhanced",
+      "catalogId" : "deepgram/enhanced",
+      "displayName" : "Deepgram Enhanced",
+      "languageField" : "language",
+      "provider" : "deepgram",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "base",
+      "catalogId" : "deepgram/base",
+      "displayName" : "Deepgram Base",
+      "languageField" : "language",
+      "provider" : "deepgram",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "scribe_v3",
+      "catalogId" : "elevenlabs/scribe_v3",
+      "displayName" : "ElevenLabs Scribe v3",
+      "languageField" : "language",
+      "provider" : "elevenlabs",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "scribe_v2",
+      "catalogId" : "elevenlabs/scribe_v2",
+      "displayName" : "ElevenLabs Scribe v2",
+      "languageField" : "language",
+      "provider" : "elevenlabs",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "scribe_v2_medical",
+      "catalogId" : "elevenlabs/scribe_v2_medical",
+      "displayName" : "ElevenLabs Scribe v2 Medical",
+      "languageField" : "language",
+      "provider" : "elevenlabs",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "voxtral-mini-transcribe-3-0",
+      "catalogId" : "mistral/voxtral-mini-transcribe-3-0",
+      "displayName" : "Voxtral Mini Transcribe 3 (Mistral, Preview)",
+      "languageField" : "language",
+      "provider" : "mistral",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "voxtral-small-transcribe-3-0",
+      "catalogId" : "mistral/voxtral-small-transcribe-3-0",
+      "displayName" : "Voxtral Small Transcribe 3 (Mistral, Preview)",
+      "languageField" : "language",
+      "provider" : "mistral",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "velma-2-stt-batch",
+      "catalogId" : "modulate/velma-2-stt-batch",
+      "displayName" : "Modulate Velma-2 Batch",
+      "languageField" : "language",
+      "provider" : "modulate",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "velma-2-stt-batch-english-vfast",
+      "catalogId" : "modulate/velma-2-stt-batch-english-vfast",
+      "displayName" : "Modulate Velma-2 Batch (English Fast)",
+      "languageField" : "language",
+      "provider" : "modulate",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "rumble-2",
+      "catalogId" : "reson8/rumble-2",
+      "displayName" : "Reson8 Rumble-2",
+      "languageCodes" : [
+        "af",
+        "ar",
+        "az",
+        "be",
+        "bg",
+        "bn",
+        "bs",
+        "ca",
+        "ceb",
+        "cs",
+        "da",
+        "de",
+        "el",
+        "en",
+        "es",
+        "et",
+        "eu",
+        "fa",
+        "fi",
+        "fil",
+        "fr",
+        "fy",
+        "gl",
+        "hi",
+        "hr",
+        "hu",
+        "id",
+        "is",
+        "it",
+        "ja",
+        "jv",
+        "ko",
+        "lt",
+        "lv",
+        "mk",
+        "mr",
+        "ms",
+        "mt",
+        "nb",
+        "nl",
+        "pl",
+        "pt",
+        "ro",
+        "ru",
+        "sk",
+        "sl",
+        "sq",
+        "sr",
+        "sv",
+        "ta",
+        "th",
+        "tr",
+        "uk",
+        "vi",
+        "yue",
+        "zh"
+      ],
+      "languageField" : "language",
+      "provider" : "reson8",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "resonant-1",
+      "catalogId" : "reson8/resonant-1",
+      "displayName" : "Reson8 Resonant-1",
+      "languageCodes" : [
+        "de",
+        "en",
+        "es",
+        "fr",
+        "fy",
+        "it",
+        "nl",
+        "pl",
+        "pt",
+        "sv"
+      ],
+      "languageField" : "language",
+      "provider" : "reson8",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "default",
+      "catalogId" : "revai/default",
+      "displayName" : "Rev.ai",
+      "languageField" : "language",
+      "provider" : "revai",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "stt-async-v6",
+      "catalogId" : "soniox/stt-async-v6",
+      "displayName" : "Soniox Async v6",
+      "languageField" : "language",
+      "provider" : "soniox",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "enhanced",
+      "catalogId" : "speechmatics/enhanced",
+      "displayName" : "Speechmatics Enhanced (Batch)",
+      "languageField" : "language",
+      "provider" : "speechmatics",
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "standard",
+      "catalogId" : "speechmatics/standard",
+      "displayName" : "Speechmatics Standard (Batch)",
+      "languageField" : "language",
+      "provider" : "speechmatics",
+      "supportsPrompt" : false
     }
   ],
   "version" : 1

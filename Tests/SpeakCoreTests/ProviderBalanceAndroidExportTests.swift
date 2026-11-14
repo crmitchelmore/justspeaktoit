@@ -40,7 +40,7 @@ final class ProviderBalanceAndroidExportTests: XCTestCase {
         XCTAssertEqual(object?["requestTimeoutSeconds"] as? Int, 15)
         let accounts = try XCTUnwrap(object?["accounts"] as? [[String: Any]])
         let readable = accounts.filter { $0["support"] as? String == "balance" }.compactMap { $0["id"] as? String }
-        XCTAssertEqual(readable, ["openrouter"])
+        XCTAssertEqual(readable, ["deepgram", "elevenlabs", "revai", "openrouter"])
         XCTAssertTrue(Set(readable).isSubset(of: ProviderBalanceSources.accountIDs))
         for account in accounts where account["support"] as? String == "billingLinkOnly" {
             XCTAssertFalse((account["reason"] as? String ?? "").isEmpty, "\(account)")

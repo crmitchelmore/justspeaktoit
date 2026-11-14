@@ -44,7 +44,7 @@ final class SettingsSchemaAndroidExportTests: XCTestCase {
         var context = SettingsValidationContext(currentValues: [:])
         context.platform = .android
         let report = SettingsValidator.validate(
-            settings: ["cloud_model": .string("deepgram/nova-3"), "postProcessingEnabled": .bool(true)],
+            settings: ["cloud_model": .string(CartesiaBatchClient.catalogID), "postProcessingEnabled": .bool(true)],
             context: context)
         XCTAssertEqual(report.errors.map(\.path), ["settings.cloud_model"])
         XCTAssertEqual(report.ignoredKeys, ["postProcessingEnabled"])

@@ -7,6 +7,8 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.DecimalFormat
+import java.text.DecimalFormatSymbols
 import java.util.Locale
 
 /**
@@ -62,6 +64,12 @@ sealed interface BalanceState {
     /** Spendable money left on the account. */
     data class Cash(val amount: BigDecimal, val currency: String) : BalanceState
 
+    /** Metered units left, such as Rev AI seconds; a null [total] means the provider gave no limit. */
+    data class Allowance(val remaining: Double, val total: Double?, val unit: String) : BalanceState
+
+    /** Units left on a free plan, such as ElevenLabs characters. */
+    data class FreeQuota(val remaining: Double, val total: Double?, val unit: String) : BalanceState
+
     /** Money spent with nothing spendable left, explained by [note]. */
     data class Usage(val spent: BigDecimal, val currency: String, val note: String) : BalanceState
 
@@ -73,12 +81,17 @@ sealed interface BalanceState {
 object BalanceFormatter {
     fun summary(state: BalanceState): String = when (state) {
         is BalanceState.Cash -> "${money(state.amount, state.currency)} credit"
+        is BalanceState.Allowance -> allowance(state.remaining, state.total, state.unit, "left")
+        is BalanceState.FreeQuota -> allowance(state.remaining, state.total, state.unit, "left on the free tier")
         is BalanceState.Usage -> "${money(state.spent, state.currency)} used"
         is BalanceState.Unknown -> "Balance unknown"
     }
 
     fun detail(state: BalanceState): String? = when (state) {
         is BalanceState.Cash -> null
+        // A provider that omits the limit says nothing about the total, and silence must not read as unlimited.
+        is BalanceState.Allowance -> if (state.total == null) NO_LIMIT else null
+        is BalanceState.FreeQuota -> if (state.total == null) NO_QUOTA else null
         is BalanceState.Usage -> state.note
         is BalanceState.Unknown -> state.reason
     }
@@ -90,6 +103,22 @@ object BalanceFormatter {
         detail(state)?.let { parts += if (it.last() in ".!?") it else "$it." }
         return parts.joinToString(" ")
     }
+
+    const val NO_LIMIT = "The provider did not report a limit, so the total is unknown."
+    const val NO_QUOTA = "The provider did not report a quota, so the total is unknown."
+
+    /** SpeakCore's `number`: grouped thousands, and two decimals only for a fractional value. */
+    fun number(value: Double): String {
+        val pattern = if (value == Math.rint(value)) "#,##0" else "#,##0.##"
+        return DecimalFormat(pattern, DecimalFormatSymbols(Locale.US)).format(value)
+    }
+
+    private fun allowance(remaining: Double, total: Double?, unit: String, label: String): String =
+        if (total == null) {
+            "${number(remaining)} $unit $label (limit unknown)"
+        } else {
+            "${number(remaining)} of ${number(total)} $unit $label"
+        }
 
     fun money(amount: BigDecimal, currency: String): String {
         val digits = String.format(Locale.US, "%.2f", amount.setScale(2, RoundingMode.HALF_UP))
@@ -213,6 +242,11 @@ object ProviderBalanceClients {
     /** Android's transports, one per readable account it lists; the parity test keeps them in step. */
     fun defaults(directory: BalanceDirectory): List<ProviderBalanceClient> {
         val http = UrlConnectionBalanceHttp(directory.requestTimeoutSeconds * 1000)
-        return listOf(OpenRouterBalanceClient(http))
+        return listOf(
+            DeepgramBalanceClient(http),
+            ElevenLabsBalanceClient(http),
+            RevAIBalanceClient(http),
+            OpenRouterBalanceClient(http),
+        )
     }
 }

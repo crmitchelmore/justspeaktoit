@@ -45,9 +45,9 @@ internal class HistoryRetry(
             } else {
                 val key = withContext(io) { secrets.read(model.provider.credentialId) }
                     ?: throw CloudException(DictationFailure.MissingKey, "No key")
-                val prompt = PersonalCorrections.vocabularyPrompt(corrections)
+                val vocabulary = corrections.map { it.writeAs }
                 val text = capture.call(deadlineMs, model.provider) { call ->
-                    cloud.transcribe(model, key, file, languageTag, call, prompt = prompt)
+                    cloud.transcribe(model, key, file, languageTag, call, vocabulary = vocabulary)
                 }.trim().let { PersonalCorrections.apply(it, corrections) }
                 if (text.isEmpty()) {
                     entry.copy(failure = DictationFailure.NoSpeech.name)

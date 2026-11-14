@@ -208,6 +208,18 @@ Cartesia and Gladia are wired on both platforms:
 `ModelCredentialResolver` resolves the provider's own key rather than the
 OpenRouter fallback.
 
+## Android upload paths
+
+Android offers the providers in `CloudCatalogAndroidExport.transcriptionProviderIDs`
+(issue #1636): OpenAI and Groq through the OpenAI-compatible form, and AssemblyAI,
+Deepgram, ElevenLabs, Mistral, Modulate, Reson8, Rev AI, Soniox and Speechmatics
+through Kotlin clients in `android/app/src/main/java/com/justspeaktoit/android/cloud/BatchWire.kt`
+(requests and parsers) and `BatchTranscriber.kt` (upload, polling and cleanup).
+They mirror the shared clients above field for field; `BatchWireTest` and
+`BatchTranscriberTest` pin them. Each model's Reson8 language list is exported
+as `languageCodes`. Android always sends a concrete language, so Automatic
+means the phone's language. The remaining catalogue routes are tracked in #1724.
+
 ## Verification status
 
 Request construction, job-state handling, cancellation (including the

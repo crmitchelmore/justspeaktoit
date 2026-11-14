@@ -346,7 +346,13 @@ gboolean command_forwarding_self_test(void) {
         ui.closing = TRUE;
         okay = okay && forward_window_command(run, slot, TRUE) == 3 && capture.calls == 1;
         ui.closing = FALSE;
-        if (run != 3) {
+        if (run == 13) {
+            /* Voice edit toggles, so a forwarded second run must reach the host while listening. */
+            ui.state = JSTI_STATE_RECORDING;
+            okay = okay && forward_window_command(run, slot, TRUE) == 0 && capture.calls == 2 &&
+                capture.event == JSTI_EVENT_VOICE_EDIT;
+            ui.state = JSTI_STATE_IDLE;
+        } else if (run != 3) {
             ui.state = JSTI_STATE_WORKING;
             okay = okay && forward_window_command(run, slot, TRUE) == 3 && capture.calls == 1;
             ui.state = JSTI_STATE_RECORDING;

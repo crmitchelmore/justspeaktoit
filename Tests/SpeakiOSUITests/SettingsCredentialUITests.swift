@@ -45,8 +45,10 @@ final class SettingsCredentialUITests: XCTestCase {
         app.terminate()
         try launch(app, region: "ap-southeast-1")
         try openAlibaba(app)
+        XCTAssertTrue(app.staticTexts["Set"].waitForExistence(timeout: 15), "Startup must load the saved row")
+        // The list opens at the top and the lazy Form builds the clear button
+        // only once it scrolls near it, below the region sections.
         let clear = app.buttons["Clear Stored Key"]
-        XCTAssertTrue(clear.waitForExistence(timeout: 15), "Startup must load the saved row")
         try reveal(clear, in: app)
         clear.tap()
         try wait { !app.buttons["Clear Stored Key"].exists }

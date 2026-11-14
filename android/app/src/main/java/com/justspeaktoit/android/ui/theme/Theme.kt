@@ -1,11 +1,14 @@
 package com.justspeaktoit.android.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
+import android.os.Build
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 
 // The Mac app's brand palette (Color.brandAccent, brandAccentDeep, brandAccentWarm).
 val BrandAccent = Color(0xFFFF6B3D)
@@ -30,7 +33,19 @@ private val DarkColors = darkColorScheme(
     onSecondary = Color(0xFF2B1600),
 )
 
+/** Wallpaper (Material You) colour schemes exist from Android 12. */
+val supportsDynamicColor: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+
+/** [dark] is the resolved appearance (see `AppAppearance.isDark`), not the phone's setting. */
 @Composable
-fun JustSpeakTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors, content = content)
+fun JustSpeakTheme(dark: Boolean, dynamicColor: Boolean = false, content: @Composable () -> Unit) {
+    val colors = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val context = LocalContext.current
+            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+        dark -> DarkColors
+        else -> LightColors
+    }
+    MaterialTheme(colorScheme = colors, content = content)
 }

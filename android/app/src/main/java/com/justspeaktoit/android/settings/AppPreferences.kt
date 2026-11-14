@@ -136,6 +136,15 @@ class AppPreferences(context: Context) : DictationPreferences {
         get() = if (prefs.contains(KEY_ONBOARDING)) prefs.getBoolean(KEY_ONBOARDING, false) else null
         set(value) = prefs.edit { if (value == null) remove(KEY_ONBOARDING) else putBoolean(KEY_ONBOARDING, value) }
 
+    var appearance: AppAppearance
+        get() = AppAppearance.fromRawValue(prefs.getString(KEY_APPEARANCE, null))
+        set(value) = prefs.edit { putString(KEY_APPEARANCE, value.rawValue) }
+
+    /** Wallpaper (Material You) colours instead of the brand palette; Android 12 and later only. */
+    var dynamicColor: Boolean
+        get() = prefs.getBoolean(KEY_DYNAMIC_COLOR, false)
+        set(value) = prefs.edit { putBoolean(KEY_DYNAMIC_COLOR, value) }
+
     companion object {
         const val FILE_NAME = "jsti_prefs"
 
@@ -144,6 +153,10 @@ class AppPreferences(context: Context) : DictationPreferences {
 
         /** Crash-report consent (`telemetry.DiagnosticsConsent`), the key the Mac and iOS apps use. */
         const val KEY_DIAGNOSTICS_CONSENT = "diagnosticsConsent"
+
+        /** The canonical cross-platform key and values (`system`, `light`, `dark`). */
+        private const val KEY_APPEARANCE = "appearance"
+        private const val KEY_DYNAMIC_COLOR = "dynamicColor"
 
         /** The canonical cross-platform key, shared with the Mac, iOS, Windows and Linux apps. */
         const val KEY_KEEP_AUDIO_ON_CANCEL = "keepAudioOnCancel"

@@ -67,6 +67,7 @@ import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.dictation.DictationUiState
 import com.justspeaktoit.android.dictation.SilenceSettings
 import com.justspeaktoit.android.settings.ApiKeyStatusFilter
+import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RecordingSoundSettings
 import com.justspeaktoit.android.settings.SettingsSearchEntry
@@ -74,6 +75,7 @@ import com.justspeaktoit.android.settings.SettingsSearchIndex
 import com.justspeaktoit.android.settings.SettingsSearchRecents
 import com.justspeaktoit.android.settings.SettingsSearchResult
 import com.justspeaktoit.android.tips.TipJarUiState
+import com.justspeaktoit.android.ui.theme.supportsDynamicColor
 
 class SettingsActions(
     val onBack: () -> Unit,
@@ -99,7 +101,11 @@ class SettingsActions(
     val onPreviewRecordingSound: () -> Unit = {},
     val onSilenceChanged: (SilenceSettings) -> Unit = {},
     val onRunSetup: () -> Unit = {},
+    val onAppearanceChanged: (AppearanceChoice) -> Unit = {},
 )
+
+/** The app-wide theme choice: light, dark or the phone's, and wallpaper colours where supported. */
+data class AppearanceChoice(val appearance: AppAppearance = AppAppearance.System, val dynamicColor: Boolean = false)
 
 const val PRIVACY_POLICY_URL = "https://justspeaktoit.com/privacy"
 
@@ -114,6 +120,7 @@ fun SettingsScreen(
     state: DictationUiState,
     actions: SettingsActions,
     privacy: PrivacyChoices = PrivacyChoices(),
+    appearance: AppearanceChoice = AppearanceChoice(),
     tips: TipJarUiState = TipJarUiState(),
 ) {
     val context = LocalContext.current
@@ -313,6 +320,10 @@ fun SettingsScreen(
             CorrectionsEditor(state.corrections, actions.onCorrectionsChanged)
 
             HorizontalDivider()
+            SectionTitle(R.string.settings_appearance_title, anchor("android.appearance"))
+            AppearanceSection(appearance, actions.onAppearanceChanged)
+
+            HorizontalDivider()
             SectionTitle(R.string.settings_raw_config_title, anchor("general.rawConfiguration"))
             RawConfigurationEditor(state, actions.onApplyConfiguration)
 
@@ -471,6 +482,54 @@ private fun CleanupPromptField(title: String, saved: String?, onChange: (String)
         }
     }
 }
+
+@Composable
+private fun AppearanceSection(choice: AppearanceChoice, onChange: (AppearanceChoice) -> Unit) {
+    AppAppearance.entries.forEach { option ->
+        val selected = option == choice.appearance
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(AutomationIds.appearanceOption(option.rawValue))
+                .selectable(
+                    selected = selected,
+                    role = Role.RadioButton,
+                    onClick = { onChange(choice.copy(appearance = option)) },
+                ),
+        ) {
+            RadioButton(selected = selected, onClick = null)
+            Text(stringResource(option.label), modifier = Modifier.padding(start = 8.dp))
+        }
+    }
+    if (!supportsDynamicColor) return
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(AutomationIds.SETTINGS_DYNAMIC_COLOR)
+            .toggleable(
+                value = choice.dynamicColor,
+                role = Role.Switch,
+                onValueChange = { onChange(choice.copy(dynamicColor = it)) },
+            ),
+    ) {
+        Text(
+            stringResource(R.string.settings_dynamic_color_label),
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(checked = choice.dynamicColor, onCheckedChange = null)
+    }
+    Text(stringResource(R.string.settings_dynamic_color_note), style = MaterialTheme.typography.bodyMedium)
+}
+
+private val AppAppearance.label: Int
+    @StringRes get() = when (this) {
+        AppAppearance.System -> R.string.settings_appearance_system
+        AppAppearance.Light -> R.string.settings_appearance_light
+        AppAppearance.Dark -> R.string.settings_appearance_dark
+    }
 
 @Composable
 private fun SectionTitle(@StringRes title: Int, modifier: Modifier = Modifier) {

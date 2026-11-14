@@ -123,7 +123,7 @@ The flags live in `Project.swift`; release selection is in
 | F35 | Automation (CLI, MCP, App Intents) | Yes | Yes | Yes | Yes | Limited | | |
 | F36 | Usage insights dashboard | Yes | No | Yes | Yes | Partial | #1623 | Android: 7-day card on History. |
 | F37 | Opt-in analytics and crash reporting | Yes | Yes | Partial | Partial | Yes | #1624 | Windows, Linux: crash reports ship; release workflows do not stamp the PostHog project key yet (owner step #1744), so analytics stays off. |
-| F38 | Tip jar / paid access | Yes | Yes | No | No | Partial | #1625 | Paid access is compiled dark. Android: tip jar only. |
+| F38 | Tip jar / paid access | Yes | Yes | Partial | Partial | Partial | #1625 | Paid access is compiled dark. Windows, Linux: About's Support development opens GitHub Sponsors or Ko-fi; no paid access. Android: tip jar only. |
 | F39 | Audio file import | Yes | Yes | Yes | Yes | Yes | | |
 | F40 | Launch at login | Yes | N/A | Yes | Yes | N/A | | |
 | F41 | Updates | Yes | N/A | Yes | Yes | N/A | | |
@@ -473,13 +473,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Sentry is EU-hosted; PostHog covers product events only ([analytics plan](analytics-plan.md), [PostHog maintenance](posthog-maintenance.md)). The desktop consent keys are `desktopAnalyticsConsent` and `desktopDiagnosticsConsent`, distinct from the Mac's `analyticsEnabled` and the Apple/Android string `analyticsConsent`/`diagnosticsConsent`, so a transferred Mac or phone preference never opts a desktop in.
 
 ### F38 Tip jar / paid access
-- **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android Partial
+- **Platforms:** macOS Yes · iOS Yes · Windows Partial · Linux Partial · Android Partial
 - **Excluded:** none
-- **Gaps:** Windows, Linux, Android #1625 (Android: tip jar only, no paid access).
-- **How:** The tip jar uses StoreKit, and Google Play Billing consumables with the same product IDs on Android. Paid access proxies requests through a Cloudflare Worker (`workers/paid-access`) that holds vendor keys, so subscribers need no API keys; it is entitlement-checked at routing time.
-- **Refs:** `Sources/SpeakApp/App/TipStore.swift`, `Sources/SpeakApp/Views/TipJarView.swift`, `Sources/SpeakApp/PaidAccess/PaidAccessManager.swift`, `workers/paid-access`, `android/app/src/main/java/com/justspeaktoit/android/tips/PlayBillingTipStore.kt`
+- **Gaps:** Windows, Linux, Android #1625 (Windows and Linux: web tips only, no Microsoft Store add-on or paid access; Android: tip jar only, no paid access).
+- **How:** The tip jar uses StoreKit, and Google Play Billing consumables with the same product IDs on Android. Windows and Linux (like the direct-download Mac build) show the canonical `TipWebLink` list from SpeakCore, GitHub Sponsors and Ko-fi, in About's Support development; the tipper chooses the amount in the browser and nothing unlocks. Paid access proxies requests through a Cloudflare Worker (`workers/paid-access`) that holds vendor keys, so subscribers need no API keys; it is entitlement-checked at routing time.
+- **Refs:** `Sources/SpeakApp/App/TipStore.swift`, `Sources/SpeakApp/Views/TipJarView.swift`, `Sources/SpeakApp/PaidAccess/PaidAccessManager.swift`, `workers/paid-access`, `android/app/src/main/java/com/justspeaktoit/android/tips/PlayBillingTipStore.kt`, `Sources/SpeakCore/TipCatalog.swift` (`TipWebLink`), `Sources/SpeakDesktopHost/Native/DesktopNativeLists.swift` (`configureTipJar`), `Sources/CWindowsSupport/WindowsWindowAbout.cpp`, `Sources/CLinuxSupport/LinuxWindowSettingsPages.c`
 - **Sunset:** Paid access stays compiled dark (`TUIST_PAID_ACCESS`) until the owner launches it ([paid access](paid-access.md)).
-- **Nuances:** Use `@ObservedObject` for `TipStore.shared`, never `@StateObject`. Stale preferences can't enable paid access in a public build. Android thanks the user only after Play confirms the consume, and retries a failed one so the tier can be bought again and isn't refunded.
+- **Nuances:** Use `@ObservedObject` for `TipStore.shared`, never `@StateObject`. Stale preferences can't enable paid access in a public build. Android thanks the user only after Play confirms the consume, and retries a failed one so the tier can be bought again and isn't refunded. Keep `TipWebLink` in step with `.github/FUNDING.yml`. Desktop tips are web links because the paid-access worker has no tip route: its Stripe checkout sells a subscription behind Sign in with Apple.
 
 ### F39 Audio file import
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

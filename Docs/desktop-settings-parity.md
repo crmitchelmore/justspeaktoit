@@ -614,6 +614,9 @@ privacy, releases, feature requests and the MIT licence. GTK links reflow at
 narrow widths; Win32 uses its existing themed keyboard-accessible buttons.
 Browser-launch failures are surfaced. Building or opening About never fetches
 release data, installs an updater, downloads code or changes an app.
+About also has Support development: the shared `TipWebLink` pages (GitHub
+Sponsors and Ko-fi, as on the direct-download Mac build) open in the browser.
+Tips are optional and unlock nothing (#1625).
 
 Automatic native Linux job `118172561007` failed to compile source `2bbc95b5`
 (synthetic merge `f7ef4c5558ff083f456d44d2aae12999f1c6e2bf`) because the

@@ -23,6 +23,15 @@ extension SettingsSearchCatalog {
             platforms: [.linux, .windows]
         ),
         SettingsSearchEntry(
+            id: "desktop.supportDevelopment", title: "Support development", section: .about,
+            systemImage: "heart.fill",
+            summary: "Leave an optional tip on GitHub Sponsors or Ko-fi. Tips don't unlock features.",
+            keywords: [
+                "tip jar", "tip", "donate", "support", "sponsor", "github sponsors", "ko-fi", "buy me a coffee"
+            ],
+            platforms: [.windows, .linux]
+        ),
+        SettingsSearchEntry(
             id: "desktop.dataBackup", title: "Data backup", section: .dataMigration, systemImage: "archivebox",
             summary: "Save History, settings and vocabulary, with optional audio, app profiles and API keys, "
                 + "in a ZIP backup, or restore one.",

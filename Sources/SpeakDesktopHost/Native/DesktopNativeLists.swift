@@ -70,6 +70,18 @@ package enum DesktopNativeLists {
         }
     }
 
+    /// Shows About's Support development links, which open a web tip page in the browser.
+    package static func configureTipJar<Link>(
+        link: (CString, CString) -> Link, configure: (UnsafePointer<Link>?, Int) -> Int32
+    ) throws {
+        let result = withRows(TipWebLink.allCases, row: { item, strings in
+            link(strings.add(item.title), strings.add(item.url.absoluteString))
+        }, call: configure)
+        guard result == 0 else {
+            throw DesktopHostError(message: "The tip jar links could not be configured.")
+        }
+    }
+
     /// Shows History's model filter rows and the selected filter; false when the window refused it.
     package static func historyFilters<Model>(
         models: [String], selection: DesktopHistoryFilter, model: (CString, CString, Int32) -> Model,

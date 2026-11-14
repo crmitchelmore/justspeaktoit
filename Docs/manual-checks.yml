@@ -669,6 +669,32 @@ sessions:
           - "Remove the OpenRouter key."
         expected: "OpenRouter shows its credit in dollars with when it was checked, and Orca reads the new line. Typing never stalls. OpenAI says why no figure is shown and gives its billing page. The invalid key shows Balance unknown with a reason and no key text; after removal the line asks for a key."
         final_gate: false
+      - id: "windows-tip-jar"
+        issues:
+          - 1625
+        title: "Windows: About's Support development opens the tip pages"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Windows, the first Alpha build that includes the #1625 desktop tip jar"
+        steps:
+          - "With Narrator running, open About and Tab to the Support development buttons."
+          - "Choose GitHub Sponsors, then return to the app and choose Ko-fi."
+          - "Search Settings for tip jar and choose the result."
+        expected: "Narrator reads each button's name. Each button opens its page (github.com/sponsors/crmitchelmore, ko-fi.com/crmitchelmore) in the default browser, nothing in the app changes or unlocks, and the search result opens About. At the smallest window size the row stays inside the About card."
+        final_gate: false
+      - id: "linux-tip-jar"
+        issues:
+          - 1625
+        title: "Linux: About's Support development opens the tip pages"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Linux, the first Alpha build that includes the #1625 desktop tip jar"
+        steps:
+          - "With Orca running, open About and Tab to the Support development card's buttons."
+          - "Choose GitHub Sponsors, then return to the app and choose Ko-fi."
+          - "Search Settings for tip jar and choose the result."
+        expected: "Orca reads each button's name and that tips are optional and unlock nothing. Each button opens its page (github.com/sponsors/crmitchelmore, ko-fi.com/crmitchelmore) in the default browser, nothing in the app changes or unlocks, and the search result opens About."
+        final_gate: false
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"

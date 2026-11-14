@@ -104,6 +104,14 @@ final class DesktopSettingsSearchTests: XCTestCase {
         XCTAssertNil(DesktopSettingsSearch.entries(for: .linux).first { $0.id.hasPrefix("windows.") })
     }
 
+    func testTipJarSearchOpensAboutOnBothDesktops() throws {
+        for platform: SettingsSearchPlatforms in [.windows, .linux] {
+            let session = DesktopSettingsSearchSession(platform: platform)
+            XCTAssertEqual(session.results(for: "tip jar").first?.title, "Support development")
+            XCTAssertEqual(try XCTUnwrap(session.choose(0)).destination, .about)
+        }
+    }
+
     func testSessionRanksResultsAndRecordsRecents() throws {
         let session = DesktopSettingsSearchSession(platform: .linux)
         XCTAssertTrue(session.results(for: "").isEmpty)

@@ -77,6 +77,9 @@ package enum DesktopNativeBindings {
         try DesktopNativeLists.configureAbout(
             for: platform, link: { JSTIAboutLink(title: $0, url: $1) }, configure: jsti_window_configure_about
         )
+        try DesktopNativeLists.configureTipJar(
+            link: { JSTIAboutLink(title: $0, url: $1) }, configure: jsti_window_configure_tip_links
+        )
     }
 
     /// False when the window refused the filter controls.

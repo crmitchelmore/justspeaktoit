@@ -17,8 +17,9 @@ test('archive verifier accepts duplicate extension resources and rejects Stable 
  const source='a'.repeat(40),notes='Frozen notes',item={version:'3.2.0',build:'1000.0.1',notesHash:digest(notes)};
  const manifest=join(root,'manifest.json');writeFileSync(manifest,JSON.stringify({source,train:'alpha',surfaces:{ios:item}}));
  const plist=(path,obj)=>execFileSync('python3',['-c','import plistlib,json,sys;open(sys.argv[1],"wb").write(plistlib.dumps(json.loads(sys.argv[2])))',path,JSON.stringify(obj)]);
- const info={CFBundleIdentifier:'com.justspeaktoit.ios.alpha',SpeakReleaseTrain:'alpha',CFBundleShortVersionString:item.version,CFBundleVersion:item.build,GitCommitSHA:source,NSMicrophoneUsageDescription:'Record speech for dictation.',NSSpeechRecognitionUsageDescription:'Recognize speech for dictation.'};
- plist(join(app,'Info.plist'),info);plist(join(ext,'Info.plist'),{...info,CFBundleIdentifier:info.CFBundleIdentifier+'.keyboard'});
+ const extInfo={CFBundleIdentifier:'com.justspeaktoit.ios.alpha',SpeakReleaseTrain:'alpha',CFBundleShortVersionString:item.version,CFBundleVersion:item.build,GitCommitSHA:source,NSMicrophoneUsageDescription:'Record speech for dictation.',NSSpeechRecognitionUsageDescription:'Recognize speech for dictation.'};
+ const info={...extInfo,NSLocalNetworkUsageDescription:'Find your Mac to send it transcripts.',NSBonjourServices:['_speakalpha._tcp']};
+ plist(join(app,'Info.plist'),info);plist(join(ext,'Info.plist'),{...extInfo,CFBundleIdentifier:info.CFBundleIdentifier+'.keyboard'});
  copyFileSync('SpeakiOSApp/PrivacyInfo.xcprivacy',join(app,'PrivacyInfo.xcprivacy'));
  copyFileSync('JustSpeakKeyboard/PrivacyInfo.xcprivacy',join(ext,'PrivacyInfo.xcprivacy'));
  const intentMetadata=writeIntents(app);
@@ -75,9 +76,17 @@ test('archive verifier accepts duplicate extension resources and rejects Stable 
   assert.throws(verify,error=>error.stderr.toString().includes(message));
  }
  writeFileSync(metadataPath,JSON.stringify(intentMetadata));
- for(const [key,value] of [['NSLocalNetworkUsageDescription','Internal OpenClaw gateway'],['NSBonjourServices',['_jsti._tcp']]]){
-  plist(join(app,'Info.plist'),{...info,[key]:value});
-  assert.throws(verify,error=>error.stderr.toString().includes('unavailable local-network feature'));
+ // Send to Mac (#1640): the iOS app must declare its own train's receiver service and a purpose string.
+ for(const [change,message] of [
+  [{NSBonjourServices:['_jsti._tcp']},'Bonjour service'],
+  [{NSBonjourServices:['_speaktransport._tcp']},'Bonjour service'],
+  [{NSBonjourServices:['_speakalpha._tcp','_jsti._tcp']},'Bonjour service'],
+  [{NSBonjourServices:undefined},'Bonjour service'],
+  [{NSLocalNetworkUsageDescription:undefined},'local-network purpose string'],
+  [{NSLocalNetworkUsageDescription:'$(UNRESOLVED)'},'local-network purpose string']
+ ]){
+  plist(join(app,'Info.plist'),{...info,...change});
+  assert.throws(verify,error=>error.stderr.toString().includes(message));
  }
  plist(join(app,'Info.plist'),info);assert.match(verify().toString(),/Verified ios alpha/);
  // The watch pair uses its own App Group, never the iPhone one.
@@ -116,7 +125,7 @@ test('Stable archive accepts the actual widget and keyboard source plists',t=>{
  const manifest=join(root,'manifest.json');writeFileSync(manifest,JSON.stringify({source,train:'stable',surfaces:{ios:item}}));
  const plist=(path,obj)=>execFileSync('python3',['-c','import plistlib,json,sys;open(sys.argv[1],"wb").write(plistlib.dumps(json.loads(sys.argv[2])))',path,JSON.stringify(obj)]);
  const info={CFBundleIdentifier:config.iosBundleIdentifier,SpeakReleaseTrain:'stable',CFBundleShortVersionString:item.version,CFBundleVersion:item.build,GitCommitSHA:source,NSMicrophoneUsageDescription:'Record speech for dictation.',NSSpeechRecognitionUsageDescription:'Recognize speech for dictation.'};
- plist(join(app,'Info.plist'),info);
+ plist(join(app,'Info.plist'),{...info,NSLocalNetworkUsageDescription:'Find your Mac to send it transcripts.',NSBonjourServices:[config.transportServiceType]});
  copyFileSync('SpeakiOSApp/PrivacyInfo.xcprivacy',join(app,'PrivacyInfo.xcprivacy'));
  writeIntents(app);
  plist(join(app,'signed.plist'),{'com.apple.developer.icloud-container-identifiers':[config.cloudContainer,config.iosCloudContainer],'com.apple.developer.ubiquity-kvstore-identifier':'TEAM.'+config.iosKVStoreIdentifier,'com.apple.security.application-groups':[config.iosAppGroup]});

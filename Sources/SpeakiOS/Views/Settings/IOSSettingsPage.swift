@@ -71,7 +71,7 @@ enum IOSSettingsPage: String, CaseIterable, Identifiable, Hashable {
         case .recording:
             return ["Hardware Trigger", "Microphone", "Behavior", "Just Speak Keyboard", "Focus Capture Overrides"]
         case .results: return ["Saved Results", "Recordings"]
-        case .sync: return ["Sync"]
+        case .sync: return ["Sync", "Send to Mac"]
         case .privacy: return ["Troubleshooting", "Capture Health", "Privacy & Debugging"]
         case .about: return ["About"]
         }

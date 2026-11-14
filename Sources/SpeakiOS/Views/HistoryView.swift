@@ -11,6 +11,7 @@ public struct HistoryView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var historyManager = iOSHistoryManager.shared
     @ObservedObject private var syncEngine = HistorySyncEngine.shared
+    @ObservedObject private var sendToMac = SendToMacService.shared
     @State private var showingClearConfirmation = false
     @State private var showSkeletonLoading = false
     @State private var showingFilters = false
@@ -108,6 +109,7 @@ public struct HistoryView: View {
         .refreshable {
             await historyManager.triggerSync()
         }
+        .sendToMacStatusBanner(sendToMac)
         .sheet(item: $issueReport) { IOSIssueReportPreview(controller: $0) }
         .task { await historyManager.loadIfNeededAndWait() }
         .onReceive(historyManager.$items) { items in
@@ -227,7 +229,10 @@ public struct HistoryView: View {
                         onDelete: { Task { await historyManager.removeAndWait(item) } },
                         onReport: {
                             issueReport = IOSIssueReportController(snapshot: IOSIssueReporter.snapshot(for: item))
-                        }
+                        },
+                        onSendToMac: sendToMac.sendAction(
+                            text: item.bestText, model: item.model, duration: item.duration
+                        )
                     )
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {

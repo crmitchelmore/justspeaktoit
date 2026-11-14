@@ -1206,6 +1206,22 @@ sessions:
           - "With VoiceOver on, swipe through the filter sheet."
         expected: "Search matches transcript text and model names. Errors only shows only failed entries, the model filter shows only that model, and the date range includes entries from the whole of each chosen day, early morning and late evening alike. No matches offers Clear Search and Filters, which restores every entry. Every entry is still there after reopening. VoiceOver reads each toggle, picker and date with its name and state."
         final_gate: false
+      - id: "iphone-send-to-mac"
+        issues:
+          - 1640
+        title: "Send to Mac: pair the phone, send a History item, forget the Mac"
+        minutes: 5
+        core: false
+        build: "TestFlight Just Speak to It Alpha, the first build that includes the iOS Send to Mac sender, and a direct-download Mac Alpha"
+        steps:
+          - "On the Mac open Settings \u203a General \u203a Send to Mac, turn it on and note the pairing code. Click into a scratch note on the Mac."
+          - "On the phone open Settings \u203a Sync & Transfer \u203a Send to Mac, allow Local Network access, tap Pair with <your Mac>, enter the code and tap Pair."
+          - "In History long-press an entry and choose Send to Mac."
+          - "On the Mac tap Regenerate Code, then send another History item from the phone."
+          - "Tap Forget This Mac and confirm, then long-press a History item. Search Settings for \"send to mac\"."
+          - "With VoiceOver on, repeat one send and listen to the result."
+        expected: "Pairing shows the Mac as paired. The first send shows Sent to <your Mac> and the text is pasted once at the Mac's cursor. After regenerating the code the send fails with a message asking you to pair again, and the phone never re-pairs on its own. After forgetting, History no longer offers Send to Mac. Search finds Send to Mac and opens Sync & Transfer. VoiceOver announces sent and failed results."
+        final_gate: false
       - id: "owner-ios-upload-required-reason-apis"
         issues:
           - 1644

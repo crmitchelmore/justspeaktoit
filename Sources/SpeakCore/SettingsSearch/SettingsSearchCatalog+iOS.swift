@@ -97,6 +97,14 @@ extension SettingsSearchCatalog {
             platforms: .iOS
         ),
         SettingsSearchEntry(
+            id: "ios.sendToMac", title: "Send to Mac", section: .dataMigration, systemImage: "desktopcomputer",
+            summary: "Pair with a Mac on your network and send it finished transcripts.",
+            keywords: [
+                "send to mac", "pair", "pairing code", "bonjour", "local network", "forget mac", "paste on mac"
+            ],
+            platforms: .iOS
+        ),
+        SettingsSearchEntry(
             id: "ios.troubleshooting", title: "Troubleshooting", section: .troubleshooting,
             systemImage: "wrench.and.screwdriver",
             summary: "Find what's stopping dictation and fix it.",

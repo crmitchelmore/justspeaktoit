@@ -42,13 +42,12 @@ public final class InMemoryTransportCredentialStore: TransportCredentialStore, @
 /// client and the shipping server can be exercised against each other in one
 /// test process.
 ///
-/// There is no shipping caller. The iOS "Send to Mac" screen that used to drive
-/// it was removed because nothing ever called `sendTranscript` — pairing worked
-/// and no transcript was ever delivered. This type is retained deliberately as
-/// the client that `TransportLoopbackTests` drives against the real server, so
-/// the receiver keeps its wire-protocol coverage. The `speak` CLI and MCP instead
-/// use `UnixSocketAutomationClient` with the separate local `AutomationServer`.
-/// Do not delete this client without replacing the receiver's loopback coverage.
+/// The iOS "Send to Mac" sender drives it through `SendToMacSender`, which
+/// opens one connection per transcript and waits for the Mac's acknowledgement
+/// (`deliverTranscript`). `TransportLoopbackTests` drives it against the real
+/// server, so the receiver keeps its wire-protocol coverage. The `speak` CLI and
+/// MCP instead use `UnixSocketAutomationClient` with the separate local
+/// `AutomationServer`.
 @MainActor
 public final class MacConnection: ObservableObject {
     public enum ConnectionState: Equatable {
@@ -66,6 +65,8 @@ public final class MacConnection: ObservableObject {
     private var receiveTask: Task<Void, Never>?
     private var sessionToken: String?
     private var sequenceNumber = 0
+    private var receivedAcks: Set<Int> = []
+    private var pendingAcks: [Int: CheckedContinuation<Void, Error>] = [:]
 
     /// Protocol version this client announces in its hello.
     ///
@@ -181,7 +182,57 @@ public final class MacConnection: ObservableObject {
         try await channel.send(.sessionEnd(end))
     }
 
+    /// Delivers one finished transcript as a whole session and waits until the
+    /// Mac acknowledges it.
+    ///
+    /// Throws `MacConnectionDeliveryError.notConnected` unless `connect` has
+    /// succeeded, `.acknowledgementTimedOut` when the Mac does not confirm the
+    /// transcript within `acknowledgementTimeout`, and `.connectionLost` when the
+    /// connection fails while waiting.
+    public func deliverTranscript(
+        _ text: String,
+        sessionId: String = UUID().uuidString,
+        model: String,
+        duration: TimeInterval,
+        acknowledgementTimeout: Duration = .seconds(5)
+    ) async throws {
+        guard let channel = self.connectedChannel() else { throw MacConnectionDeliveryError.notConnected }
+        self.sequenceNumber = 0
+        try await channel.send(.sessionStart(SessionStartMessage(sessionId: sessionId, model: model)))
+        self.sequenceNumber += 1
+        let sequence = self.sequenceNumber
+        let chunk = TranscriptChunkMessage(sessionId: sessionId, sequenceNumber: sequence, text: text, isFinal: true)
+        try await channel.send(.transcriptChunk(chunk))
+        try await self.waitForAcknowledgement(of: sequence, timeout: acknowledgementTimeout)
+        let wordCount = text.split(whereSeparator: \.isWhitespace).count
+        let end = SessionEndMessage(sessionId: sessionId, finalText: text, duration: duration, wordCount: wordCount)
+        // The Mac already has the transcript; a lost session end changes nothing it shows.
+        try? await channel.send(.sessionEnd(end))
+    }
+
     // MARK: - Private
+
+    private func waitForAcknowledgement(of sequence: Int, timeout: Duration) async throws {
+        if self.receivedAcks.remove(sequence) != nil { return }
+        guard self.state == .connected else { throw MacConnectionDeliveryError.connectionLost }
+        let timer = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            self?.resolveAcknowledgement(sequence, with: .failure(MacConnectionDeliveryError.acknowledgementTimedOut))
+        }
+        defer { timer.cancel() }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            self.pendingAcks[sequence] = continuation
+        }
+    }
+
+    private func resolveAcknowledgement(_ sequence: Int, with result: Result<Void, Error>) {
+        guard let continuation = self.pendingAcks.removeValue(forKey: sequence) else {
+            if case .success = result { self.receivedAcks.insert(sequence) }
+            return
+        }
+        continuation.resume(with: result)
+    }
 
     private func connectedChannel() -> TransportChannel? {
         guard self.state == .connected else { return nil }
@@ -240,6 +291,8 @@ public final class MacConnection: ObservableObject {
         switch message {
         case .ping:
             Task { try? await channel.send(.pong) }
+        case .ack(let ack):
+            self.resolveAcknowledgement(ack.sequenceNumber, with: .success(()))
         case .error(let error):
             self.fail(with: error.message)
         default:
@@ -270,5 +323,29 @@ public final class MacConnection: ObservableObject {
         self.sessionToken = nil
         self.connectedMacName = nil
         self.sequenceNumber = 0
+        self.receivedAcks = []
+        let pending = self.pendingAcks
+        self.pendingAcks = [:]
+        for continuation in pending.values {
+            continuation.resume(throwing: MacConnectionDeliveryError.connectionLost)
+        }
+    }
+}
+
+/// Why `MacConnection.deliverTranscript` could not confirm a delivery.
+public enum MacConnectionDeliveryError: Error, Equatable, LocalizedError {
+    case notConnected
+    case acknowledgementTimedOut
+    case connectionLost
+
+    public var errorDescription: String? {
+        switch self {
+        case .notConnected:
+            "Not connected to the Mac."
+        case .acknowledgementTimedOut:
+            "The Mac did not confirm it received the transcript."
+        case .connectionLost:
+            "The connection to the Mac was lost before it confirmed the transcript."
+        }
     }
 }

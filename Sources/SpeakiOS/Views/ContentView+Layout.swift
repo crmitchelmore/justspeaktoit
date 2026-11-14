@@ -9,13 +9,7 @@ import UIKit
 extension ContentView {
     var transcriptLayer: some View {
         VStack {
-            if let notice = handsFree.captureStopNotice
-                ?? coordinator.captureStopNotice ?? backgroundService.captureStopNotice {
-                Text(notice)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("captureStopNotice")
-            }
+            captureNotices
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(

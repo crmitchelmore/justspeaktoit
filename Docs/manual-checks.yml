@@ -684,6 +684,21 @@ sessions:
           - "With a saved Deepgram or ElevenLabs key selected, tap Check key."
         expected: "With the microphone off, a red Microphone row is listed first and the summary says something is stopping dictation; after turning it back on and returning, the row turns green without reopening the page. The missing key row names the provider and opens API Keys. Check key reports whether the provider accepted the saved key, and a rejected key turns the row red."
         final_gate: false
+      - id: "iphone-microphone-selection"
+        issues:
+          - 1637
+        title: "Recording uses the chosen microphone and falls back visibly"
+        minutes: 4
+        core: false
+        build: "TestFlight Just Speak to It Alpha, a build that includes #1637"
+        steps:
+          - "Connect a wired or Bluetooth headset (or a USB microphone)."
+          - "Settings \u203a Recording & Shortcuts \u203a Microphone: choose the built-in microphone, then dictate a sentence while speaking into the phone, not the headset."
+          - "Choose the headset microphone and dictate again into the headset."
+          - "Disconnect the headset, then dictate once more and look at the recording screen and the Microphone picker."
+          - "Choose System Default."
+        expected: "Each recording uses the chosen microphone. With the headset gone, recording still works on the built-in microphone, the recording screen says the chosen microphone isn't connected, and the picker shows Saved Microphone (Not Connected). Choosing System Default clears the notice."
+        final_gate: false
       - id: "iphone-clipboard-e2e"
         issues:
           - 934

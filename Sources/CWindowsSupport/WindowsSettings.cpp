@@ -5,11 +5,12 @@
 #include <vector>
 
 void jsti_show_local_cleanup(HWND owner);
+bool jsti_show_openrouter_browser(HWND owner, int32_t purpose, int32_t selected, int32_t &chosen);
 
 namespace {
 enum SettingControl {
     enabledID = 300, modelID, promptID, keyID, warningID, modelLabelID, promptLabelID, keyLabelID,
-    locationLabelID, locationID, directivesID, tagsID, manageID, modeLabelID
+    locationLabelID, locationID, directivesID, tagsID, manageID, modeLabelID, browseID
 };
 struct Configuration {
     std::vector<std::wstring> models;
@@ -57,7 +58,9 @@ void layout(HWND window) {
     move(warningID, scale(window, 154), scale(window, 48));
     move(modelLabelID, scale(window, 210), scale(window, 22));
     move(modelID, scale(window, 236), scale(window, 260));
+    // Manage (Local) and Browse OpenRouter models (Remote) share a row; one is shown.
     move(manageID, scale(window, 274), row);
+    move(browseID, scale(window, 274), row);
     move(directivesID, scale(window, 316), row);
     move(tagsID, scale(window, 356), row);
     move(promptLabelID, scale(window, 398), scale(window, 22));
@@ -102,6 +105,7 @@ void updateModelControls(HWND window, const SettingsDialog &dialog) {
     ShowWindow(GetDlgItem(window, keyID), location == 1 ? SW_SHOW : SW_HIDE);
     ShowWindow(GetDlgItem(window, keyLabelID), location == 1 ? SW_SHOW : SW_HIDE);
     ShowWindow(GetDlgItem(window, manageID), local ? SW_SHOW : SW_HIDE);
+    ShowWindow(GetDlgItem(window, browseID), location == 1 ? SW_SHOW : SW_HIDE);
     if (location != 1) SetDlgItemTextW(window, keyID, L"");
 }
 
@@ -148,6 +152,7 @@ bool createControls(HWND window, SettingsDialog &dialog) {
         add(L"STATIC", L"Post-processing &model", 0, modelLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, modelID) &&
         add(L"BUTTON", L"&Manage downloaded GGUF models...", BS_PUSHBUTTON | WS_TABSTOP, manageID) &&
+        add(L"BUTTON", L"&Browse OpenRouter models…", BS_PUSHBUTTON | WS_TABSTOP, browseID) &&
         add(L"BUTTON", L"Include personal lexicon &directives", BS_AUTOCHECKBOX | WS_TABSTOP, directivesID) &&
         add(L"BUTTON", L"Include lexicon context &tags", BS_AUTOCHECKBOX | WS_TABSTOP, tagsID) &&
         add(L"STATIC", L"&Instructions for the model", 0, promptLabelID) &&
@@ -268,6 +273,25 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 SetDlgItemTextW(window, warningID, L"Models could not be displayed. Close and reopen these settings.");
                 EnableWindow(GetDlgItem(window, IDOK), FALSE);
             }
+            return 0;
+        }
+        if (LOWORD(wparam) == browseID && HIWORD(wparam) == BN_CLICKED) {
+            int32_t chosen = -1;
+            if (!jsti_show_openrouter_browser(window, JSTI_OPENROUTER_BROWSER_CLEANUP, dialog->remoteSelected, chosen))
+                return 0;
+            if (static_cast<size_t>(chosen) >= remoteBoundary(dialog->config)) {
+                SetDlgItemTextW(window, warningID, L"That OpenRouter model is no longer listed. Choose another.");
+                return 0;
+            }
+            SendDlgItemMessageW(window, locationID, CB_SETCURSEL, 1, 0);
+            dialog->remoteSelected = chosen;
+            if (!selectLocation(window, *dialog, chosen, false)) {
+                SetDlgItemTextW(window, warningID, L"Models could not be displayed. Close and reopen these settings.");
+                EnableWindow(GetDlgItem(window, IDOK), FALSE);
+                return 0;
+            }
+            // The picker now shows "OpenRouter › name"; Apply saves it with the other settings.
+            SetFocus(GetDlgItem(window, modelID));
             return 0;
         }
         if (LOWORD(wparam) == IDOK) { apply(window, *dialog); return 0; }
@@ -396,7 +420,8 @@ static bool localCleanupSourcesSelfTest(HWND owner, std::string &error) {
         && IsWindowEnabled(GetDlgItem(window, promptID)) && IsWindowEnabled(GetDlgItem(window, directivesID))
         && controlText(window, modeLabelID) == L"Mode: Finished transcript (local, completed-only)"
         && !(GetWindowLongPtrW(GetDlgItem(window, keyID), GWL_STYLE) & WS_VISIBLE)
-        && (GetWindowLongPtrW(GetDlgItem(window, manageID), GWL_STYLE) & WS_VISIBLE);
+        && (GetWindowLongPtrW(GetDlgItem(window, manageID), GWL_STYLE) & WS_VISIBLE)
+        && !(GetWindowLongPtrW(GetDlgItem(window, browseID), GWL_STYLE) & WS_VISIBLE);
     SendDlgItemMessageW(window, modelID, CB_SETCURSEL, 0, 0);
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(modelID, CBN_SELCHANGE), 0);
     okay = okay && !IsWindowEnabled(GetDlgItem(window, promptID)) &&
@@ -410,7 +435,9 @@ static bool localCleanupSourcesSelfTest(HWND owner, std::string &error) {
     okay = okay && SendDlgItemMessageW(window, modelID, CB_GETCOUNT, 0, 0) == 2
         && SendDlgItemMessageW(window, modelID, CB_GETCURSEL, 0, 0) == 1
         && controlText(window, modeLabelID) == L"Mode: Finished transcript (remote, optional streaming previews)"
-        && SendDlgItemMessageW(window, modelID, CB_GETITEMDATA, 1, 0) == 1;
+        && SendDlgItemMessageW(window, modelID, CB_GETITEMDATA, 1, 0) == 1
+        && (GetWindowLongPtrW(GetDlgItem(window, browseID), GWL_STYLE) & WS_VISIBLE)
+        && !(GetWindowLongPtrW(GetDlgItem(window, manageID), GWL_STYLE) & WS_VISIBLE);
     SetDlgItemTextW(window, keyID, L"must-not-reach-local-callback");
     SendDlgItemMessageW(window, locationID, CB_SETCURSEL, 0, 0);
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(locationID, CBN_SELCHANGE), 0);

@@ -20,6 +20,10 @@ excluded from the shared settings-transfer catalogue: each installation opts in.
   Preferences form, under Post-processing. **Apply** refreshes stale metadata
   before the existing cleanup picker is repopulated. Startup only restores the
   bounded cache. There is no background timer or mid-edit picker replacement.
+  With the Remote source selected, **Browse OpenRouter models…** opens a native
+  browser over the same picker's OpenRouter entries (bundled, then discovered):
+  search, provider and zero-listed-price filters, a details pane with pricing, and
+  **Use for cleanup**. Choosing selects that picker entry; Apply saves it (#1618).
 - **Android:** no discovery yet (#1618). **Browse OpenRouter models…** browses the
   bundled OpenRouter cleanup routes exported in the `openRouterBrowser` section of
   `cloud_catalog.json`; its filter is a Kotlin port of `OpenRouterBrowserFilter`

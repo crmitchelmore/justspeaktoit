@@ -108,6 +108,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_troubleshooting_self_test(ui.window, error, capacity) != 0) return -1;
     if (jsti_api_keys_self_test(ui.window, error, capacity) != 0) return -1;
     if (jsti_permissions_self_test(ui.window, error, capacity) != 0) return -1;
+    if (jsti_openrouter_browser_self_test(ui.window, error, capacity) != 0) return -1;
     if (jsti_setup_self_test(ui.window, error, capacity) != 0) return -1;
     if (!cancel_key_self_test()) return fail(error, capacity, "Escape cancellation ownership or repeat guards failed");
     if (polish_prompt_self_test(error, capacity) != 0) return -1;

@@ -484,7 +484,11 @@ void layoutSettings(HWND window, const RECT &content) {
         else place(window, sourceLabelID, box(left, y, 1, 1));
         if (mode) { label(95, y); control(modeID, y); y += row + scale(window, 12); }
         label(90, y); control(modelID, y); y += row + scale(window, 12);
-        place(window, modelStatusID, RECT{left, y, right - scale(window, 180), y + row + scale(window, 12)});
+        const bool browse = shown(openRouterBrowseID) && state.wanted.count(openRouterBrowseID) != 0;
+        const int browseWidth = scale(window, 232);
+        place(window, modelStatusID, RECT{left, y, right - scale(window, browse ? 180 + 12 + 232 : 180),
+                                          y + row + scale(window, 12)});
+        place(window, openRouterBrowseID, box(right - scale(window, 180) - browseWidth, y, browseWidth, row));
         button(modelRefreshID, y, scale(window, 168)); button(localModelsID, y, scale(window, 168));
         y += row + scale(window, 24);
         label(91, y);

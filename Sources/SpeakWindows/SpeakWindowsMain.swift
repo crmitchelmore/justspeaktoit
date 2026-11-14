@@ -4,6 +4,7 @@ import CWindowsSupport
 import SpeakCore
 import SpeakDesktop
 import SpeakDesktopHost
+import SpeakDesktopNativeBindings
 import SpeakWindowsPlatform
 
 final class WindowsEventContext: DesktopNativeEventHolder {
@@ -232,6 +233,7 @@ enum SpeakWindowsMain {
         defer { holder.cancelIssueReports() }
         defer { holder.hotKeyResource.stop() }
         try WindowsNative.configureAbout()
+        try DesktopNativeBindings.configureOpenRouterBrowser()
         let providerCallbacks = try WindowsNative.beginVoiceProviderCallbacks(holder)
         defer { WindowsNative.endVoiceProviderCallbacks(providerCallbacks) }
         try await configureWindow(controller: controller, holder: holder)

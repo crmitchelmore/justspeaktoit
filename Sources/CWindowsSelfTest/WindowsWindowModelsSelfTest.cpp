@@ -332,15 +332,16 @@ bool windowModelSourceChecks(WindowCheck &check) {
     const bool remoteShown = populateModels(window) && hasSourceChoice() && checkBounds() &&
         IsWindowVisible(GetDlgItem(window, sourceID)) && IsWindowEnabled(GetDlgItem(window, sourceID)) &&
         IsWindowVisible(GetDlgItem(window, modelRefreshID)) && !IsWindowVisible(GetDlgItem(window, localModelsID)) &&
-        IsWindowVisible(GetDlgItem(window, modeID));
+        IsWindowVisible(GetDlgItem(window, openRouterBrowseID)) && IsWindowVisible(GetDlgItem(window, modeID));
     const bool localChosen = changeSource(1, 2) && !IsWindowVisible(GetDlgItem(window, modeID)) &&
+        !IsWindowVisible(GetDlgItem(window, openRouterBrowseID)) &&
         IsWindowVisible(GetDlgItem(window, localModelsID)) && !IsWindowVisible(GetDlgItem(window, modelRefreshID)) &&
         IsWindowEnabled(GetDlgItem(window, importID)) && checkBounds() &&
         GetDlgItemTextW(window, 90, localLabel, 64) > 0 && std::wstring(localLabel).find(L"On-device") == 0;
     jsti_window_update(nullptr, nullptr, 1);
     applyUpdate(window);
     const bool sourceLocked = !IsWindowEnabled(GetDlgItem(window, sourceID)) &&
-        !IsWindowEnabled(GetDlgItem(window, localModelsID));
+        !IsWindowEnabled(GetDlgItem(window, localModelsID)) && !IsWindowEnabled(GetDlgItem(window, openRouterBrowseID));
     jsti_window_update(nullptr, nullptr, 0);
     applyUpdate(window);
     if (!remoteShown || !localChosen || !sourceLocked || !changeSource(0, 0) || !check.changeMode(1, 1) ||

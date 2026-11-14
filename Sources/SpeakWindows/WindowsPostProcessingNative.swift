@@ -12,7 +12,7 @@ extension WindowsNative {
             throw WindowsNativeError(message: "Post-processing settings are no longer available.")
         }
         picker.publish([])
-        let models = DesktopPostProcessing.nativeModels(
+        let (models, browser) = DesktopPostProcessing.nativeChoices(
             selected: options.modelIdentifier, rememberedRemote: options.lastRemoteModelIdentifier
         )
         guard let local = models.firstIndex(where: { $0.id == LocalPostProcessingModel.builtInRulesModelID }) else {
@@ -43,6 +43,7 @@ extension WindowsNative {
             throw WindowsNativeError(message: "Could not configure local/remote cleanup sources.")
         }
         picker.publish(models)
+        DesktopHostOpenRouterBrowser.publish(browser)
     }
 }
 

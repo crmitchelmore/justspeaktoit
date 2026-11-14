@@ -99,6 +99,9 @@ void jsti_show_automation_settings(HWND owner, bool (*enabled)(), void (*toggle)
 bool jsti_automation_settings_self_test(HWND owner, std::string &error);
 void jsti_show_system_resources(HWND owner, void (*emit)(HWND owner, int event, const char *text));
 bool jsti_system_resources_self_test(HWND owner, std::string &error);
+// Browse OpenRouter models… (#1618), modal. True with `chosen` set to the picked slot.
+bool jsti_show_openrouter_browser(HWND owner, int32_t purpose, int32_t selected, int32_t &chosen);
+bool jsti_openrouter_browser_self_test(HWND owner, std::string &error);
 
 int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t errorCapacity);
 // WindowsWindowBridge.cpp; also called by the action shortcuts and the self-test.
@@ -113,6 +116,8 @@ constexpr UINT audioCleanupMessage = WM_APP + 23;
 constexpr int hotkeyID = 1;
 constexpr int modelRefreshID = 140;
 constexpr int modelStatusID = 141;
+// Opens Browse OpenRouter models… for Remote Batch transcription models.
+constexpr int openRouterBrowseID = 142;
 enum Control {
     modelID = 100, keyID, saveID, recordID, importID, copyID, transcriptID, statusID,
     historyID, historyDetailID, retryID, exportID, openAudioID, processingID, microphoneID, modeID,

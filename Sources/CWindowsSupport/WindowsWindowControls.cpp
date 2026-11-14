@@ -179,6 +179,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Configure &post-processing…", BS_PUSHBUTTON | WS_TABSTOP, processingID) &&
         add(L"STATIC", L"OpenRouter discovery not loaded.", 0, modelStatusID) &&
         add(L"BUTTON", L"Refresh &models", BS_PUSHBUTTON | WS_TABSTOP, modelRefreshID) &&
+        add(L"BUTTON", L"&Browse OpenRouter models…", BS_PUSHBUTTON | WS_TABSTOP, openRouterBrowseID) &&
         add(L"BUTTON", L"Local mo&dels…", BS_PUSHBUTTON | WS_TABSTOP, localModelsID) &&
         add(L"STATIC", L"&API key (Windows Credential Manager)", 0, 91) &&
         add(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP, keyID) &&

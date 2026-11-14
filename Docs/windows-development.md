@@ -240,6 +240,12 @@ Reson8 and StepFun. The canonical
 shared catalogue owns their identifiers, metadata and routes. OpenRouter model
 discovery uses the same cache and refresh policy as Apple; native model controls
 refresh without changing an active recording or reusing an earlier model index.
+With Remote Batch selected, **Browse OpenRouter models…** opens a Win32 browser
+(`WindowsOpenRouterBrowser.cpp`) over the picker's OpenRouter routes, with search,
+provider and zero-listed-price filters and a details pane; Choose selects that
+route while idle. The Post-processing dialog has the same button for its Remote
+source; Apply saves the choice. Pages come from the shared
+`DesktopOpenRouterBrowser` through `OpenRouterBrowser.h` (#1618).
 Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs,
 Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, three Azure live routes and xAI's
 dedicated speech-to-text live models use shared Swift clients with the native

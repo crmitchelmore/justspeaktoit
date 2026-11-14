@@ -552,6 +552,25 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 refreshSetup(window);
             }
             return 0;
+        case openRouterBrowseID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, openRouterBrowseID) && IsWindowEnabled(window)) {
+                int32_t chosen = -1;
+                if (!jsti_show_openrouter_browser(window, JSTI_OPENROUTER_BROWSER_TRANSCRIPTION,
+                                                  modelsState().preferredModels[0], chosen)) return 0;
+                // Recording may have started while the browser was open.
+                if (!idleControl(window, modelID) || static_cast<size_t>(chosen) >= modelsState().modelModes.size() ||
+                    modelsState().modelModes[static_cast<size_t>(chosen)] != 0) {
+                    showFailure(window, "The chosen OpenRouter model can't be used right now.");
+                    return 0;
+                }
+                modelsState().activeMode = 0;
+                modelsState().preferredModels[0] = chosen;
+                if (!populateModels(window)) { showFailure(window, "Windows could not display the chosen model."); return 0; }
+                SetDlgItemTextW(window, keyID, L"");
+                emit(window, JSTI_EVENT_MODEL_CHANGED);
+                refreshSetup(window);
+            }
+            return 0;
         case localModelsID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, localModelsID) && IsWindowEnabled(window)) {
                 jsti_show_local_models(window);

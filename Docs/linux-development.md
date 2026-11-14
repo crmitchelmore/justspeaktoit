@@ -300,6 +300,13 @@ and Record; the status line sits at the bottom of every page.
   accessible names. The screenshot tour requires light/dark filter-popover
   artifacts; source assertions and snapshots do not replace physical accessibility
   acceptance.
+- **Browse OpenRouter models…**: Transcription (Remote Batch) and
+  Post-processing (Remote) open a modal GTK browser (`LinuxOpenRouterBrowser.c`)
+  over the picker's OpenRouter entries, with search, provider and
+  zero-listed-price filters, a details pane with pricing and a model-page link.
+  Choosing selects that picker entry, labelled `OpenRouter › name`; cleanup
+  choices save on Apply. Pages come from the shared `DesktopOpenRouterBrowser`,
+  so Windows shows the same rows (#1618).
 - Totals and row wording come from the shared `DesktopHistoryInsights` and
   `DesktopHistoryRowSummary` (SpeakDesktop), counted and formatted as the Mac
   counts them, so Windows shows the same figures.

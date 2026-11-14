@@ -114,8 +114,14 @@ extension CommandPaletteAction {
 
     /// The catalogue's shortcut commands whose action is in `runnable`, in
     /// display order. Commands that run no shortcut are left to the host.
-    public static func runnable(_ runnable: Set<DesktopShortcutAction>) -> [CommandPaletteAction] {
-        catalogue.filter { $0.shortcut.map(runnable.contains) ?? false }
+    public static func runnable(_ actions: Set<DesktopShortcutAction>) -> [CommandPaletteAction] {
+        // An explicit closure: passing `actions.contains` unapplied to
+        // `Optional.map` crashes Swift 6.2.3's optimiser (SILCombine) in the
+        // Windows release build.
+        catalogue.filter { command in
+            guard let action = command.shortcut else { return false }
+            return actions.contains(action)
+        }
     }
 
     private static func shortcut(

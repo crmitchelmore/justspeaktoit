@@ -144,6 +144,21 @@ class DictationViewModelTest {
     }
 
     @Test
+    fun testRejectedKey_isMarkedRejectedUntilTheKeyIsSavedAgain() {
+        h.cloud.onTranscribe = { throw CloudException(DictationFailure.InvalidKey, "401") }
+        startCloud()
+        h.onMain { h.viewModel.stop() }
+        val failed = h.awaitState { it.dictation is DictationState.Failed }
+
+        assertTrue(CloudProvider.OpenAI in failed.rejectedKeys)
+        assertTrue(CloudProvider.OpenAI in failed.keyErrors)
+
+        h.onMain { h.viewModel.saveKey(CloudProvider.OpenAI, "sk-new") }
+        val saved = h.awaitState { CloudProvider.OpenAI !in it.rejectedKeys }
+        assertFalse(CloudProvider.OpenAI in saved.keyErrors)
+    }
+
+    @Test
     fun testMicrophoneThatCannotOpen_failsAsAudioAndLeavesNoFile() {
         h.recorders.opens = false
         val vm = h.ready()

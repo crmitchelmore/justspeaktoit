@@ -114,7 +114,7 @@ The flags live in `Project.swift`; release selection is in
 | F26 | Menu bar / tray presence | Yes | N/A | Yes | Yes | N/A | | |
 | F27 | Resources-in-use status | Yes | Yes | Yes | Yes | Yes | | |
 | F28 | Report an issue with diagnostics | Yes | Yes | Yes | Yes | Yes | | |
-| F29 | Troubleshooting page | Yes | Yes | Yes | Yes | No | #1634 | Phone rules shared in SpeakCore; Android to port them. |
+| F29 | Troubleshooting page | Yes | Yes | Yes | Yes | Yes | | Phone rules shared in SpeakCore; Android reads them from an exported asset. |
 | F30 | Onboarding and permissions guide | Yes | Yes | Yes | Yes | Yes | | |
 | F31 | API keys page | Yes | Yes | Yes | Yes | Yes | | |
 | F32 | Provider credit balances | Yes | Yes | Yes | Yes | Yes | | Android reads OpenRouter; its other providers link to billing. |
@@ -392,13 +392,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Android mirrors the SpeakCore JSON schema in Kotlin with `platform` `android`, and its History records no stage timings, so its timeline is always empty. Reports never include transcript text, audio, raw errors, logs, keys, persistent IDs or absolute timestamps ([transcript logging](SECURITY_TRANSCRIPT_LOGGING.md)).
 
 ### F29 Troubleshooting page
-- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android No
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** Android #1634.
+- **Gaps:** none
 - **How:** Check permissions, devices, keys and connectivity, explain each failure and link straight to its fix.
-- **Refs:** `Sources/SpeakCore/Desktop/DesktopTroubleshooting.swift`, `Sources/SpeakCore/Troubleshooting/MobileTroubleshooting.swift`, `Sources/SpeakApp/Views/TroubleshootingView.swift`, `Sources/SpeakiOS/Views/Settings/IOSTroubleshootingView.swift`, `Sources/SpeakiOS/Views/CaptureHealthView.swift`, `Sources/SpeakWindows/WindowsTroubleshooting.swift`, `Sources/SpeakLinux/LinuxTroubleshooting.swift`
+- **Refs:** `Sources/SpeakCore/Desktop/DesktopTroubleshooting.swift`, `Sources/SpeakCore/Troubleshooting/MobileTroubleshooting.swift`, `Sources/SpeakApp/Views/TroubleshootingView.swift`, `Sources/SpeakiOS/Views/Settings/IOSTroubleshootingView.swift`, `Sources/SpeakiOS/Views/CaptureHealthView.swift`, `Sources/SpeakWindows/WindowsTroubleshooting.swift`, `Sources/SpeakLinux/LinuxTroubleshooting.swift`, `Sources/SpeakCore/Troubleshooting/MobileTroubleshootingAndroidExport.swift`, `android/app/src/main/java/com/justspeaktoit/android/diagnostics/Troubleshooting.kt`, `android/app/src/main/java/com/justspeaktoit/android/ui/TroubleshootingSection.kt`
 - **Sunset:** none
-- **Nuances:** Re-read permission state after the user returns; a click is not proof of a grant. Phones use `MobileTroubleshooting` (microphone and speech permissions, on-device model, missing/rejected/unreadable keys, keyboard Full Access); a key is reported rejected only after Check key asks the provider. Capture Health stays the deeper capture self-test.
+- **Nuances:** Re-read permission state after the user returns; a click is not proof of a grant. Phones use `MobileTroubleshooting` (microphone and speech permissions, on-device model, missing/rejected/unreadable keys, keyboard Full Access); a key is reported rejected only after Check key asks the provider. Capture Health stays the deeper capture self-test. Android evaluates the same rules from `assets/troubleshooting.json` (exported with `scripts/update-android-assets`, Android wording via `MobileTroubleshooting.Platform.android`) as a Settings section: it has no speech permission or Full Access, has no Check key, so a key is rejected only after a provider returned 401 during dictation, and the mode choice and model download it links to live on the Dictation screen.
 
 ### F30 Onboarding and permissions guide
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

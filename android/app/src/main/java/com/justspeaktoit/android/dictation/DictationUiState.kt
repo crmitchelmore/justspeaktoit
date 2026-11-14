@@ -52,6 +52,8 @@ data class DictationUiState(
     val checkableBalances: Set<String> = emptySet(),
     /** Checked or checking balances by account id; never holds a key. */
     val balances: Map<String, BalanceEntry> = emptyMap(),
+    /** Providers that refused their saved key, a subset of [keyErrors]; saving or removing the key clears it. */
+    val rejectedKeys: Set<CloudProvider> = emptySet(),
     /** True until a discarded recording has released the microphone. */
     val releasingMicrophone: Boolean = false,
     /** A Cloud recording paused while another app holds audio focus. */

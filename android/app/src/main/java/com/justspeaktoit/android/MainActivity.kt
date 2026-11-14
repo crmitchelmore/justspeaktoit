@@ -56,6 +56,7 @@ import com.justspeaktoit.android.ui.OnboardingStatus
 import com.justspeaktoit.android.ui.AppearanceChoice
 import com.justspeaktoit.android.ui.SettingsActions
 import com.justspeaktoit.android.ui.SettingsScreen
+import com.justspeaktoit.android.ui.TroubleshootingFacts
 import com.justspeaktoit.android.ui.theme.JustSpeakTheme
 import java.io.FileNotFoundException
 import java.time.LocalDate
@@ -76,7 +77,7 @@ class MainActivity : ComponentActivity() {
         mutableStateOf(AppearanceChoice(prefs.appearance, prefs.dynamicColor))
     }
 
-    // The guide asks for the microphone without starting a recording; every other request starts one.
+    // The guide and Troubleshooting ask for the microphone without starting a recording; every other request starts one.
     private var startAfterGrant = true
 
     private val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -226,9 +227,14 @@ class MainActivity : ComponentActivity() {
                                 onImportCredentialsChanged = viewModel::setImportCredentials,
                                 onApplyConfigurationImport = viewModel::applyConfigurationImport,
                                 onDismissConfiguration = viewModel::dismissConfigurationImport,
+                                onRequestMicrophone = ::requestMicWithoutRecording,
+                                onOpenAppSettings = ::openAppSettings,
+                                onOpenKeyboardSettings = { startActivity(SetupSystem.keyboardSettingsIntent()) },
+                                onChooseMode = { screen = Screen.Dictation },
                             ),
                             privacy = privacyChoices,
                             tips = tips,
+                            troubleshooting = TroubleshootingFacts(mic, setupStatus.value.keyboardEnabled),
                         )
                         Screen.Onboarding -> OnboardingScreen(
                             state = state,
@@ -379,10 +385,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun onboardingActions(dictation: DictationActions) = OnboardingActions(
-        onRequestMic = {
-            startAfterGrant = false
-            requestMic.launch(Manifest.permission.RECORD_AUDIO)
-        },
+        onRequestMic = ::requestMicWithoutRecording,
         onOpenAppSettings = ::openAppSettings,
         onOpenKeyboardSettings = { startActivity(SetupSystem.keyboardSettingsIntent()) },
         onAddTile = if (SetupSystem.canRequestTile) {
@@ -397,6 +400,12 @@ class MainActivity : ComponentActivity() {
         onFinish = ::finishOnboarding,
         dictation = dictation,
     )
+
+    /** The setup guide and Troubleshooting ask for the microphone without starting a recording. */
+    private fun requestMicWithoutRecording() {
+        startAfterGrant = false
+        requestMic.launch(Manifest.permission.RECORD_AUDIO)
+    }
 
     private fun hasMic() =
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED

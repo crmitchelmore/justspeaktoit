@@ -57,6 +57,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.justspeaktoit.android.R
 import com.justspeaktoit.android.diagnostics.AndroidIssueEnvironment
+import com.justspeaktoit.android.diagnostics.AndroidTroubleshooting
+import com.justspeaktoit.android.diagnostics.TroubleshootingFix
+import com.justspeaktoit.android.diagnostics.TroubleshootingRules
 import com.justspeaktoit.android.diagnostics.IssueFacts
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CleanupModelPicker
@@ -116,12 +119,19 @@ class SettingsActions(
     val onImportCredentialsChanged: (Boolean) -> Unit = {},
     val onApplyConfigurationImport: () -> Unit = {},
     val onDismissConfiguration: () -> Unit = {},
+    val onRequestMicrophone: () -> Unit = {},
+    val onOpenAppSettings: () -> Unit = {},
+    val onOpenKeyboardSettings: () -> Unit = {},
+    /** Opens the dictation screen, where the mode is chosen and the on-device model downloaded. */
+    val onChooseMode: () -> Unit = {},
 )
 
 /** The app-wide theme choice: light, dark or the phone's, and wallpaper colours where supported. */
 data class AppearanceChoice(val appearance: AppAppearance = AppAppearance.System, val dynamicColor: Boolean = false)
 
 const val PRIVACY_POLICY_URL = "https://justspeaktoit.com/privacy"
+
+private const val API_KEYS_ANCHOR = "android.apiKeys"
 
 /** Where a search result scrolls to on this screen. */
 private fun anchorFor(entry: SettingsSearchEntry): String = when {
@@ -136,12 +146,16 @@ fun SettingsScreen(
     privacy: PrivacyChoices = PrivacyChoices(),
     appearance: AppearanceChoice = AppearanceChoice(),
     tips: TipJarUiState = TipJarUiState(),
+    troubleshooting: TroubleshootingFacts = TroubleshootingFacts(),
 ) {
     val context = LocalContext.current
     val searchIndex = remember {
         context.assets.open("settings_search.json").bufferedReader().use {
             SettingsSearchIndex.fromCatalogueJson(it.readText())
         }
+    }
+    val troubleshootingRules = remember {
+        context.assets.open(TroubleshootingRules.ASSET).bufferedReader().use { TroubleshootingRules.parse(it.readText()) }
     }
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
@@ -171,6 +185,21 @@ fun SettingsScreen(
         if (target.startsWith(SettingsSearchIndex.KEY_PREFIX)) keyFilter = ApiKeyStatusFilter.All
         highlighted = target
         scope.launch { anchors[target]?.let { scrollState.animateScrollTo(it) } }
+    }
+    fun applyFix(fix: TroubleshootingFix) {
+        when (fix) {
+            TroubleshootingFix.RequestMicrophone -> actions.onRequestMicrophone()
+            TroubleshootingFix.OpenSystemSettings -> actions.onOpenAppSettings()
+            TroubleshootingFix.OpenTranscriptionSettings -> actions.onChooseMode()
+            TroubleshootingFix.OpenApiKeys, TroubleshootingFix.VerifyKey -> {
+                keyFilter = ApiKeyStatusFilter.All
+                highlighted = API_KEYS_ANCHOR
+                scope.launch { anchors[API_KEYS_ANCHOR]?.let { scrollState.animateScrollTo(it) } }
+            }
+            TroubleshootingFix.DisablePostProcessing -> actions.onCleanupChanged(false)
+            TroubleshootingFix.OpenKeyboardSetup -> actions.onOpenKeyboardSettings()
+            TroubleshootingFix.RequestSpeechRecognition -> Unit
+        }
     }
 
     Scaffold { padding ->
@@ -385,7 +414,7 @@ fun SettingsScreen(
             ResourcesInUse(state.resourcesInUse, actions)
 
             HorizontalDivider()
-            SectionTitle(R.string.settings_keys_title, anchor("android.apiKeys"))
+            SectionTitle(R.string.settings_keys_title, anchor(API_KEYS_ANCHOR))
             Text(stringResource(R.string.settings_keys_note), style = MaterialTheme.typography.bodyMedium)
             if (state.keyStoreError) {
                 Text(stringResource(R.string.settings_key_error), color = MaterialTheme.colorScheme.error)
@@ -442,6 +471,17 @@ fun SettingsScreen(
             HorizontalDivider()
             SectionTitle(R.string.settings_support_title, anchor("android.tipJar"))
             TipJarSection(tips, actions.onTip)
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_troubleshooting_title, anchor("android.troubleshooting"))
+            TroubleshootingSection(
+                findings = troubleshootingRules.findings(
+                    AndroidTroubleshooting.input(state, troubleshooting.mic, troubleshooting.keyboardEnabled),
+                ),
+                checking = state.checkingAvailability,
+                fixesFor = { AndroidTroubleshooting.fixes(it, state) },
+                onFix = ::applyFix,
+            )
 
             HorizontalDivider()
             SectionTitle(R.string.settings_setup_title, anchor("android.setupGuide"))

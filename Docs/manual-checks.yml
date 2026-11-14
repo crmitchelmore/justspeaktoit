@@ -1697,6 +1697,21 @@ sessions:
           - "Repeat with a second provider, then open History."
         expected: "The model list shows AssemblyAI, Deepgram, ElevenLabs, Mistral, Modulate, Reson8, Rev AI, Soniox and Speechmatics models after OpenAI and Groq. Each recording returns the spoken words with Kubernetes spelt correctly, History names the chosen model, and a missing or wrong key names that provider's key. Deepgram shows dollars of credit (or its unit left), ElevenLabs shows characters left of the plan's limit, and Rev AI shows seconds left with a note that the total is unknown."
         final_gate: false
+      - id: "android-troubleshooting-page"
+        issues:
+          - 1634
+        title: "Troubleshooting lists what stops dictation and each fix works"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Android, an Alpha APK that includes the #1634 Troubleshooting page"
+        steps:
+          - "Settings: search for \"troubleshoot\" and open the result, with On-device mode chosen and the microphone allowed."
+          - "In the phone's Settings turn the microphone off for Just Speak, return to the app and open Settings › Troubleshooting again; tap Open app settings or Allow microphone, allow it and return."
+          - "Tap Keyboard settings, turn on the Just Speak keyboard and return."
+          - "On the Dictation screen choose Cloud with a model whose key is not saved, then return to Troubleshooting and tap API keys."
+          - "Turn on cleanup with a provider whose key is not saved and tap Turn off cleanup; then repeat with TalkBack on."
+        expected: "Problems are listed first with a matching summary line, and every row turns OK after its fix without reopening the page. The microphone fix opens the permission prompt or app settings, the keyboard fix opens the phone's keyboard list, the missing key row names the provider and jumps to API keys, and Turn off cleanup removes the cleanup key row. TalkBack reads each row with its severity, each fix button with its row, and announces the summary when it changes."
+        final_gate: false
   - id: "windows"
     device: "Windows"
     title: "Windows"

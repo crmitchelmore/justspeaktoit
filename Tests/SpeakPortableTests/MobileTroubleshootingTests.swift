@@ -100,4 +100,23 @@ final class MobileTroubleshootingTests: XCTestCase {
         XCTAssertEqual(keyboard?.severity, .warning)
         XCTAssertEqual(keyboard?.fixes.first, .openKeyboardSetup)
     }
+
+    func testAndroidWording_keepsVerdictsButDropsIOSOnlyAdvice() {
+        let input = Rules.Input(
+            microphone: .denied, recogniser: .unavailable,
+            transcription: Rules.Provider(name: nil, key: .notRequired), keyboard: .ready
+        )
+        let iOS = Rules.findings(input)
+        let android = Rules.findings(input, platform: .android)
+
+        XCTAssertEqual(iOS, Rules.findings(input, platform: .iOS))
+        XCTAssertEqual(android.map(\.check), iOS.map(\.check))
+        XCTAssertEqual(android.first { $0.check == .microphone }?.fixes, [.openSystemSettings])
+        XCTAssertEqual(
+            android.first { $0.check == .recogniser }?.severity, .issue,
+            "Android has no server fallback when the recogniser is missing"
+        )
+        let keyboard = android.first { $0.check == .keyboard }
+        XCTAssertFalse(keyboard?.detail.contains("Full Access") ?? true)
+    }
 }

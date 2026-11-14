@@ -172,6 +172,16 @@ extension SettingsSearchCatalog {
             platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.troubleshooting", title: "Troubleshooting", section: .troubleshooting,
+            systemImage: "wrench.and.screwdriver",
+            summary: "Find what's stopping dictation and fix it.",
+            keywords: [
+                "troubleshoot", "not working", "permissions", "microphone", "speech recognition", "api key",
+                "rejected key", "keyboard", "on-device model", "download model", "fix"
+            ],
+            platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.setupGuide", title: "Setup guide", section: .general,
             systemImage: "sparkles",
             summary: "Run the first-run setup again: microphone, speech route, keyboard, tile and a test dictation.",

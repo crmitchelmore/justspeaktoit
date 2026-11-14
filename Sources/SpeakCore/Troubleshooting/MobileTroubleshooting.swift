@@ -7,8 +7,15 @@ import Foundation
 /// and speech permissions, whether the recogniser can run in the chosen
 /// language, whether the selected provider has a key that works, and whether
 /// the keyboard is set up. Each platform gathers those facts into ``Input``;
-/// every verdict and fix is decided here so the platforms agree.
+/// every verdict and fix is decided here so the platforms agree. Android reads
+/// these rules from the asset `MobileTroubleshootingAndroidExport` writes.
 public enum MobileTroubleshooting {
+    /// The phone app asking. A few verdicts name that platform's own settings.
+    public enum Platform: String, Equatable, Sendable, CaseIterable {
+        case iOS = "ios"
+        case android
+    }
+
     public enum Severity: String, Equatable, Sendable, CaseIterable {
         case issue, warning, info, ok
 
@@ -22,12 +29,12 @@ public enum MobileTroubleshooting {
         }
     }
 
-    public enum Permission: String, Equatable, Sendable {
+    public enum Permission: String, Equatable, Sendable, CaseIterable {
         case granted, denied, restricted, notDetermined
     }
 
     /// Whether the recogniser the selected model uses can run right now.
-    public enum Recogniser: String, Equatable, Sendable {
+    public enum Recogniser: String, Equatable, Sendable, CaseIterable {
         /// The selected model runs on a provider's servers.
         case notRequired
         case ready
@@ -39,7 +46,7 @@ public enum MobileTroubleshooting {
         case unknown
     }
 
-    public enum KeyState: String, Equatable, Sendable {
+    public enum KeyState: String, Equatable, Sendable, CaseIterable {
         case notRequired
         case present
         case missing
@@ -49,7 +56,7 @@ public enum MobileTroubleshooting {
         case unreadable
     }
 
-    public enum Keyboard: String, Equatable, Sendable {
+    public enum Keyboard: String, Equatable, Sendable, CaseIterable {
         /// This build has no keyboard, so there is nothing to check.
         case notOffered
         case notAdded
@@ -160,7 +167,12 @@ public enum MobileTroubleshooting {
     /// on-device model needs no key, a build without a keyboard) are left out
     /// rather than shown as passing.
     public static func findings(_ input: Input) -> [Finding] {
-        let findings = Check.allCases.compactMap { finding(for: $0, input) }
+        findings(input, platform: .iOS)
+    }
+
+    /// ``findings(_:)`` worded for `platform`'s settings.
+    public static func findings(_ input: Input, platform: Platform) -> [Finding] {
+        let findings = Check.allCases.compactMap { finding(for: $0, input, platform: platform) }
         return findings.enumerated().sorted { lhs, rhs in
             lhs.element.severity.priority != rhs.element.severity.priority
                 ? lhs.element.severity.priority < rhs.element.severity.priority
@@ -173,21 +185,21 @@ public enum MobileTroubleshooting {
         findings.map(\.severity).min { $0.priority < $1.priority } ?? .ok
     }
 
-    private static func finding(for check: Check, _ input: Input) -> Finding? {
+    static func finding(for check: Check, _ input: Input, platform: Platform = .iOS) -> Finding? {
         switch check {
         case .microphone:
-            return permissionFinding(check, input.microphone)
+            return permissionFinding(check, input.microphone, platform: platform)
         case .speechRecognition:
-            return input.speechRecognition.map { permissionFinding(check, $0) }
+            return input.speechRecognition.map { permissionFinding(check, $0, platform: platform) }
         case .recogniser:
-            return recogniserFinding(input.recogniser)
+            return recogniserFinding(input.recogniser, platform: platform)
         case .transcriptionKey:
-            return keyFinding(check, input.transcription, role: "Transcription")
+            return keyFinding(check, input.transcription, role: "Transcription", platform: platform)
         case .postProcessingKey:
             guard input.postProcessingEnabled else { return nil }
-            return keyFinding(check, input.postProcessing, role: "Cleanup")
+            return keyFinding(check, input.postProcessing, role: "Cleanup", platform: platform)
         case .keyboard:
-            return keyboardFinding(input.keyboard)
+            return keyboardFinding(input.keyboard, platform: platform)
         }
     }
 }

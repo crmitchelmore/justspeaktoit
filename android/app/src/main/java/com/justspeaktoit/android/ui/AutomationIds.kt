@@ -82,6 +82,13 @@ object AutomationIds {
     const val SETTINGS_SILENCE_THRESHOLD = "settings.silenceThreshold"
 
     const val SETTINGS_RUN_SETUP = "settings.runSetup"
+    const val TROUBLESHOOTING_SUMMARY = "settings.troubleshooting.summary"
+
+    /** One per finding, keyed by the shared check ID (for example `microphone-permission`). */
+    fun troubleshootingFinding(check: String) = "settings.troubleshooting.$check"
+
+    /** One per fix button, keyed by the shared check and fix IDs, e.g. `settings.troubleshooting.keyboard.openKeyboardSetup`. */
+    fun troubleshootingFix(check: String, fix: String) = "settings.troubleshooting.$check.$fix"
     const val ONBOARDING_PROGRESS = "onboarding.progress"
     const val ONBOARDING_NEXT = "onboarding.next"
     const val ONBOARDING_BACK = "onboarding.back"

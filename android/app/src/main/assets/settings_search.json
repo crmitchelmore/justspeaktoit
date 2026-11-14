@@ -431,6 +431,29 @@
       "title" : "Support development"
     },
     {
+      "id" : "android.troubleshooting",
+      "keywords" : [
+        "troubleshoot",
+        "not working",
+        "permissions",
+        "microphone",
+        "speech recognition",
+        "api key",
+        "rejected key",
+        "keyboard",
+        "on-device model",
+        "download model",
+        "fix"
+      ],
+      "section" : "troubleshooting",
+      "sectionTitle" : "Troubleshooting",
+      "settingKeys" : [
+
+      ],
+      "summary" : "Find what's stopping dictation and fix it.",
+      "title" : "Troubleshooting"
+    },
+    {
       "id" : "android.setupGuide",
       "keywords" : [
         "onboarding",

@@ -1,7 +1,7 @@
 import Foundation
 
 extension MobileTroubleshooting {
-    static func permissionFinding(_ check: Check, _ permission: Permission) -> Finding {
+    static func permissionFinding(_ check: Check, _ permission: Permission, platform: Platform = .iOS) -> Finding {
         let isMicrophone = check == .microphone
         let title = isMicrophone ? "Microphone" : "Speech Recognition"
         let image = isMicrophone ? "mic" : "waveform"
@@ -25,7 +25,9 @@ extension MobileTroubleshooting {
             return Finding(
                 check: check, title: "\(title) Is Turned Off",
                 detail: isMicrophone
-                    ? "Recording cannot start. Turn the microphone on for Just Speak in Settings."
+                    ? (platform == .android
+                        ? "Recording cannot start. Allow the microphone in Just Speak's app permissions."
+                        : "Recording cannot start. Turn the microphone on for Just Speak in Settings.")
                     : "The on-device model cannot run. Turn speech recognition on for Just Speak in Settings, "
                         + "or choose a cloud model.",
                 severity: .issue,
@@ -42,7 +44,8 @@ extension MobileTroubleshooting {
         }
     }
 
-    static func recogniserFinding(_ recogniser: Recogniser) -> Finding? {
+    static func recogniserFinding(_ recogniser: Recogniser, platform: Platform = .iOS) -> Finding? {
+        if platform == .android { return androidRecogniserFinding(recogniser) }
         let image = "cpu"
         switch recogniser {
         case .notRequired:
@@ -83,7 +86,7 @@ extension MobileTroubleshooting {
         }
     }
 
-    static func keyFinding(_ check: Check, _ provider: Provider, role: String) -> Finding? {
+    static func keyFinding(_ check: Check, _ provider: Provider, role: String, platform: Platform = .iOS) -> Finding? {
         guard let name = provider.name, provider.key != .notRequired else { return nil }
         let isCleanup = check == .postProcessingKey
         let image = "key"
@@ -119,14 +122,18 @@ extension MobileTroubleshooting {
         case .unreadable:
             return Finding(
                 check: check, title: "\(role) Key Could Not Be Read",
-                detail: "Saved keys could not be read, often because the device has not been unlocked since it "
-                    + "restarted. This does not mean the key is missing.",
+                detail: platform == .android
+                    ? "The saved \(name) key could not be read securely. This does not mean it is missing; "
+                        + "if it keeps happening, save the key again."
+                    : "Saved keys could not be read, often because the device has not been unlocked since it "
+                        + "restarted. This does not mean the key is missing.",
                 severity: .warning, fixes: [.openAPIKeys], systemImage: image
             )
         }
     }
 
-    static func keyboardFinding(_ keyboard: Keyboard) -> Finding? {
+    static func keyboardFinding(_ keyboard: Keyboard, platform: Platform = .iOS) -> Finding? {
+        if platform == .android, let finding = androidKeyboardFinding(keyboard) { return finding }
         let image = "keyboard"
         switch keyboard {
         case .notOffered:
@@ -150,6 +157,69 @@ extension MobileTroubleshooting {
                 detail: "The keyboard is added and has Full Access.",
                 severity: .ok, systemImage: image
             )
+        }
+    }
+}
+
+/// Android's wording where its system differs: the recogniser is whichever one the chosen dictation mode
+/// uses (on-device or the phone's speech service) and the model is downloaded from the dictation screen;
+/// the keyboard is turned on in the phone's keyboard list and has no Full Access.
+extension MobileTroubleshooting {
+    static func androidRecogniserFinding(_ recogniser: Recogniser) -> Finding? {
+        let image = "cpu"
+        switch recogniser {
+        case .notRequired:
+            return nil
+        case .ready:
+            return Finding(
+                check: .recogniser, title: "Speech Recogniser Ready",
+                detail: "The recogniser your dictation mode uses supports your spoken language and is ready.",
+                severity: .ok, systemImage: image
+            )
+        case .needsDownload:
+            return Finding(
+                check: .recogniser, title: "On-Device Model Not Downloaded",
+                detail: "Your spoken language is supported, but its on-device model is not on the phone yet. "
+                    + "Download it from the dictation screen, or choose another mode.",
+                severity: .warning, fixes: [.openTranscriptionSettings], systemImage: image
+            )
+        case .unsupportedLanguage:
+            return Finding(
+                check: .recogniser, title: "Language Not Supported On Device",
+                detail: "The on-device recogniser has no model for your spoken language. "
+                    + "Choose another language or another dictation mode.",
+                severity: .issue, fixes: [.openTranscriptionSettings], systemImage: image
+            )
+        case .unavailable:
+            return Finding(
+                check: .recogniser, title: "Speech Recogniser Unavailable",
+                detail: "This phone does not offer the recogniser your dictation mode needs, so recording cannot "
+                    + "start. Choose another mode, such as a cloud model.",
+                severity: .issue, fixes: [.openTranscriptionSettings], systemImage: image
+            )
+        case .unknown:
+            return recogniserFinding(.unknown)
+        }
+    }
+
+    /// Nil for a state Android never reports, which keeps the shared wording.
+    static func androidKeyboardFinding(_ keyboard: Keyboard) -> Finding? {
+        let image = "keyboard"
+        switch keyboard {
+        case .notAdded:
+            return Finding(
+                check: .keyboard, title: "Keyboard Not Turned On",
+                detail: "Turn on the Just Speak keyboard in the phone's keyboard settings to dictate in other apps.",
+                severity: .info, fixes: [.openKeyboardSetup], systemImage: image
+            )
+        case .ready:
+            return Finding(
+                check: .keyboard, title: "Keyboard Ready",
+                detail: "The Just Speak keyboard is turned on in the phone's keyboard settings.",
+                severity: .ok, systemImage: image
+            )
+        case .notOffered, .needsFullAccess:
+            return nil
         }
     }
 }

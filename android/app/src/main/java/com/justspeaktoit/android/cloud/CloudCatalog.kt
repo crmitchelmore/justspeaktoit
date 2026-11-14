@@ -20,6 +20,8 @@ internal data class CloudModelSpec(
     val languageField: String,
     val supportsPrompt: Boolean,
     val languageCodes: List<String>?,
+    val languageHints: Map<String, String>?,
+    val requiresPCM16WAV: Boolean,
 )
 
 /** A language row of `assets/cloud_catalog.json` (SpeakCore's `TranscriptionLanguageCatalog`). */
@@ -46,6 +48,11 @@ enum class CloudProvider(val id: String, val displayName: String, val baseUrl: S
     RevAI("revai", "Rev AI", "https://api.rev.ai/speechtotext/v1"),
     Soniox("soniox", "Soniox", "https://api.soniox.com/v1"),
     Speechmatics("speechmatics", "Speechmatics", "https://eu1.asr.api.speechmatics.com"),
+    Cartesia("cartesia", "Cartesia", "https://api.cartesia.ai"),
+    Gladia("gladia", "Gladia", "https://api.gladia.io"),
+    Meta("meta", "Meta", "https://api.meta.ai/v1"),
+    Smallest("smallest", "Smallest AI", "https://api.smallest.ai/waves/v1"),
+    XAI("xai", "xAI", "https://api.x.ai/v1"),
     ;
 
     /** OpenAI and Groq take the OpenAI `/audio/transcriptions` form; the rest use [BatchTranscriber]. */
@@ -70,8 +77,15 @@ data class CloudModel(
     val languageField: String,
     /** Whether the model takes a vocabulary glossary as its `prompt` form field. */
     val supportsPrompt: Boolean = false,
-    /** The only languages the model accepts (Reson8); null when the provider takes any. */
+    /** The only languages the model accepts (Reson8, Smallest); null when the provider takes any. */
     val languageCodes: List<String>? = null,
+    /**
+     * The hint each primary language subtag sends (Gladia, Meta, xAI); a language outside it is sent as
+     * automatic detection. Null when the provider takes any language code.
+     */
+    val languageHints: Map<String, String>? = null,
+    /** Whether the provider takes only the canonical 16 kHz mono 16-bit WAV Android records (Meta, Inkling). */
+    val requiresPCM16WAV: Boolean = false,
 )
 
 /** A cleanup route: a native provider's own API, or OpenRouter. */
@@ -103,6 +117,8 @@ object CloudCatalog {
             languageField = it.languageField,
             supportsPrompt = it.supportsPrompt,
             languageCodes = it.languageCodes,
+            languageHints = it.languageHints,
+            requiresPCM16WAV = it.requiresPCM16WAV,
         )
     }
 

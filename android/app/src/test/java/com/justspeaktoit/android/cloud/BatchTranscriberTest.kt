@@ -48,6 +48,7 @@ class BatchTranscriberTest {
 
     @Test
     fun testEveryCatalogueModel_hasATranscriptionRoute() {
+        audio.writeBytes(WavFormat.header(2) + ByteArray(2))
         val failing = BatchTranscriber(transport = { _, _ -> BatchWire.Response(401, "") }, background = {})
         for (model in CloudCatalog.transcriptionModels.filterNot { it.provider.isOpenAICompatible }) {
             val error = assertThrows(CloudException::class.java) {
@@ -179,6 +180,110 @@ class BatchTranscriberTest {
         val reson8 = transcriber(emptyList())
         val error = assertThrows(CloudException::class.java) {
             reson8.transcribe(model("reson8/rumble-2"), "k", audio, null, CallHandle(), wav, emptyList())
+        }
+        assertEquals(DictationFailure.AudioTooLarge, error.failure)
+        assertTrue(sent.isEmpty())
+    }
+
+    @Test
+    fun testGladia_pollsUntilDoneAndCancelsAnAbandonedJob() {
+        val base = CloudProvider.Gladia.baseUrl
+        val gladia = model("gladia/solaria-1")
+        val text = transcriber(
+            listOf(
+                "POST $base/v2/upload" to ok("""{"audio_url":"https://cdn/a"}"""),
+                "POST $base/v2/pre-recorded" to ok("""{"id":"j","result_url":"$base/v2/pre-recorded/j"}"""),
+                "GET $base/v2/pre-recorded/j" to ok("""{"status":"queued"}"""),
+                "GET $base/v2/pre-recorded/j" to ok("""{"status":"done","result":{"transcription":{"full_transcript":"Hi"}}}"""),
+            ),
+        ).transcribe(gladia, "k", audio, null, CallHandle(), wav, emptyList())
+        assertEquals("Hi", text)
+        assertEquals(1, pauses)
+        assertTrue(sent.all { it.headers["x-gladia-key"] == "k" })
+
+        sent.clear()
+        val cancelled = transcriber(
+            listOf(
+                "POST $base/v2/upload" to ok("""{"audio_url":"https://cdn/a"}"""),
+                "POST $base/v2/pre-recorded" to ok("""{"id":"j","result_url":"https://elsewhere/j"}"""),
+                "GET $base/v2/pre-recorded/j" to ok("""{"status":"processing"}"""),
+                "DELETE $base/v2/pre-recorded/j" to ok(""),
+            ),
+            pause = BatchPause { _, handle ->
+                handle.cancel()
+                BatchTranscriber.SLEEP.pause(1, handle)
+            },
+        )
+        assertThrows(CloudException::class.java) {
+            cancelled.transcribe(gladia, "k", audio, null, CallHandle(), wav, emptyList())
+        }
+        assertEquals("DELETE $base/v2/pre-recorded/j", sent.last().let { "${it.method} ${it.url}" })
+    }
+
+    @Test
+    fun testGemini_uploadsALargeRecordingThroughTheFilesApi() {
+        RandomAccessFile(audio, "rw").use { it.setLength(BatchWire.GEMINI_INLINE_BYTES + 1) }
+        val base = BatchWire.GEMINI_URL
+        val text = transcriber(
+            listOf(
+                "POST $base/upload/v1beta/files" to BatchWire.Response(200, "{}", mapOf("x-goog-upload-url" to "https://upload/s")),
+                "POST https://upload/s" to ok("""{"file":{"name":"files/a","uri":"https://files/a","state":"PROCESSING"}}"""),
+                "GET $base/v1beta/files/a" to ok("""{"state":"PROCESSING"}"""),
+                "GET $base/v1beta/files/a" to ok("""{"state":"ACTIVE"}"""),
+                "POST $base/v1beta/interactions" to ok("""{"output_text":"Hello"}"""),
+            ),
+        ).transcribe(model("google/gemini-3.5-transcribe"), "k", audio, null, CallHandle(), wav, emptyList())
+        assertEquals("Hello", text)
+        assertEquals(2, pauses)
+        assertTrue(sent.last().body is BatchWire.Body.Json)
+
+        sent.clear()
+        val missing = transcriber(listOf("POST $base/upload/v1beta/files" to ok("{}")))
+        val error = assertThrows(CloudException::class.java) {
+            missing.transcribe(model("google/gemini-3.5-transcribe"), "k", audio, null, CallHandle(), wav, emptyList())
+        }
+        assertEquals(DictationFailure.Server, error.failure)
+    }
+
+    @Test
+    fun testMeta_checksTheWavAndMapsItsStatuses() {
+        val meta = model("meta/muse-voice-transcribe-1.0")
+        val notWav = transcriber(emptyList())
+        val unreadable = assertThrows(CloudException::class.java) {
+            notWav.transcribe(meta, "k", audio, null, CallHandle(), wav, emptyList())
+        }
+        assertEquals(DictationFailure.UnsupportedAudio, unreadable.failure)
+        assertTrue(sent.isEmpty())
+
+        audio.writeBytes(WavFormat.header(2) + ByteArray(2))
+        val rejected = transcriber(listOf("POST ${CloudProvider.Meta.baseUrl}/asr/transcribe" to BatchWire.Response(413, "")))
+        val error = assertThrows(CloudException::class.java) {
+            rejected.transcribe(meta, "k", audio, null, CallHandle(), wav, emptyList())
+        }
+        assertEquals(DictationFailure.AudioTooLarge, error.failure)
+    }
+
+    @Test
+    fun testOpenRouter_refusesWebmAndSendsInklingAsWav() {
+        val inkling = CloudCatalog.transcriptionModels.first { it.catalogId == "thinkingmachines/inkling" }
+        val webm = SharedAudio.Format("webm", "audio/webm")
+        val error = assertThrows(CloudException::class.java) {
+            transcriber(emptyList()).transcribe(inkling, "k", audio, null, CallHandle(), webm, emptyList())
+        }
+        assertEquals(DictationFailure.UnsupportedAudio, error.failure)
+
+        audio.writeBytes(WavFormat.header(2) + ByteArray(2))
+        val text = transcriber(
+            listOf("POST ${CloudProvider.OpenRouter.baseUrl}/chat/completions" to ok("""{"choices":[{"message":{"content":"Hi"}}]}""")),
+        ).transcribe(inkling, "k", audio, null, CallHandle(), wav, emptyList())
+        assertEquals("Hi", text)
+    }
+
+    @Test
+    fun testSmallest_refusesRecordingsOverItsUploadLimit() {
+        RandomAccessFile(audio, "rw").use { it.setLength(BatchWire.SMALLEST_MAX_AUDIO_BYTES + 1) }
+        val error = assertThrows(CloudException::class.java) {
+            transcriber(emptyList()).transcribe(model("smallest/pulse-pro"), "k", audio, null, CallHandle(), wav, emptyList())
         }
         assertEquals(DictationFailure.AudioTooLarge, error.failure)
         assertTrue(sent.isEmpty())

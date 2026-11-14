@@ -69,6 +69,11 @@ enum class ProviderType(val raw: String, private val providerId: String = raw) {
     RevAI("rev_ai", "revai"),
     Soniox("soniox"),
     Speechmatics("speechmatics"),
+    Cartesia("cartesia"),
+    Gladia("gladia"),
+    Meta("meta"),
+    Smallest("smallest"),
+    XAI("xai"),
     Other("other"),
     ;
 

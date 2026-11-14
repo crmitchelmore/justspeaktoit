@@ -142,6 +142,9 @@ abstract class GenerateCloudCatalog : DefaultTask() {
         @Suppress("UNCHECKED_CAST")
         fun codes(value: Any?): String = (value as List<Any?>?)
             ?.joinToString(", ", prefix = "listOf(", postfix = ")") { lit(it) } ?: "null"
+        @Suppress("UNCHECKED_CAST")
+        fun hints(value: Any?): String = (value as Map<String, Any?>?)?.toSortedMap()?.entries
+            ?.joinToString(", ", prefix = "mapOf(", postfix = ")") { "${lit(it.key)} to ${lit(it.value)}" } ?: "null"
         val models = objects("transcriptionModels").joinToString("") {
             "        CloudModelSpec(\n" +
                 "            catalogId = ${lit(it["catalogId"])},\n" +
@@ -151,6 +154,8 @@ abstract class GenerateCloudCatalog : DefaultTask() {
                 "            languageField = ${lit(it["languageField"])},\n" +
                 "            supportsPrompt = ${it["supportsPrompt"] as Boolean},\n" +
                 "            languageCodes = ${codes(it["languageCodes"])},\n" +
+                "            languageHints = ${hints(it["languageHints"])},\n" +
+                "            requiresPCM16WAV = ${it["requiresPCM16WAV"] as Boolean},\n" +
                 "        ),\n"
         }
         val cleanupModels = objects("cleanupModels").joinToString("") {

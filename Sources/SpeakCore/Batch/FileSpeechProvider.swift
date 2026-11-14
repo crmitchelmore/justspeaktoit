@@ -74,6 +74,9 @@ public enum FileSpeechProvider: String, CaseIterable, Sendable {
         return allCases.first { $0.modelIDs.contains(identifier) }
     }
 
+    /// Pulse Pro transcribes English only; any other explicit language fails before upload.
+    static let smallestLanguageCodes: Set<String> = ["en"]
+
     static func languageCode(_ language: String?) -> String? {
         let value = language?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !value.isEmpty, value.lowercased() != "automatic", value.lowercased() != "auto" else { return nil }

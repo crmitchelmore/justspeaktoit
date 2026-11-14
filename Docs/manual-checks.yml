@@ -1805,6 +1805,22 @@ sessions:
           - "Drag the recording-sound volume slider to its lowest point and tap Show current: recordingSoundVolume is 0.02, not 0."
         expected: "Every listed setting appears with its current value, out-of-range values are refused, applied values show in Settings and the theme at once, and the volume never drops below the shared 2% floor."
         final_gate: false
+      - id: "android-batch-remaining-providers"
+        issues:
+          - 1724
+        title: "Cloud transcription: Cartesia, Gladia, Gemini, Meta, Smallest, xAI and OpenRouter audio"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, an Alpha APK that includes #1724"
+        prerequisites:
+          - "A working API key for at least two of Cartesia, Gladia, Google (Gemini), Meta, Smallest AI, xAI or OpenRouter. Use made-up sentences only."
+        steps:
+          - "Settings: open API keys and save the keys. Each provider has its own row."
+          - "Choose Cloud, open the cloud model list and pick a model from a provider you have a key for (for OpenRouter, pick Inkling or a Gemini model marked OpenRouter; Smallest AI needs the dictation language set to English)."
+          - "Record \"remaining providers check one two three\" for about ten seconds and stop."
+          - "Repeat with a second provider, then open History."
+        expected: "The model list shows Cartesia, Gladia, Gemini 3.5 Transcribe, Meta Muse Voice, Smallest AI Pulse Pro, Grok Voice Transcribe and the OpenRouter audio models. Each recording returns the spoken words, History names the chosen model, and a missing or wrong key names that provider's key."
+        final_gate: false
   - id: "windows"
     device: "Windows"
     title: "Windows"

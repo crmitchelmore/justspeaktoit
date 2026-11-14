@@ -5,6 +5,7 @@ import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -209,13 +210,22 @@ class CloudClient(
                         out.write(body.multipart.tail)
                     }
                 }
+                is BatchWire.Body.Base64Json -> {
+                    conn.doOutput = true
+                    conn.setFixedLengthStreamingMode(body.contentLength())
+                    conn.outputStream.use { body.writeTo(it) }
+                }
             }
             val status = conn.responseCode
             if (status !in 200..299) {
                 conn.errorStream?.close()
                 return BatchWire.Response(status, "")
             }
-            return BatchWire.Response(status, conn.inputStream.use { CloudWire.readBody(it, BatchWire.MAX_RESPONSE_BYTES) })
+            val headers = conn.headerFields.orEmpty().entries
+                .filter { (name, values) -> name != null && !values.isNullOrEmpty() }
+                .associate { (name, values) -> name.lowercase(Locale.ROOT) to values.first() }
+            val text = conn.inputStream.use { CloudWire.readBody(it, BatchWire.MAX_RESPONSE_BYTES) }
+            return BatchWire.Response(status, text, headers)
         } catch (e: IOException) {
             if (call.released) throw RequestReleasedException(e)
             throw CloudException(CloudWire.failureForIo(e), "Network error", e)

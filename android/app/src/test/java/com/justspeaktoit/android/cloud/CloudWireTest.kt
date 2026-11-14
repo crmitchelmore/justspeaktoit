@@ -136,7 +136,6 @@ class CloudWireTest {
     @Test
     fun testCatalogue_fallsBackToDefaultForUnknownModel() {
         assertEquals(CloudCatalog.defaultTranscriptionModel, CloudCatalog.transcriptionModel("retired/model"))
-        assertTrue(CloudCatalog.transcriptionModels.all { it.provider != CloudProvider.OpenRouter })
     }
 
     @Test

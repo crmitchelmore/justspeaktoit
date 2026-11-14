@@ -133,7 +133,7 @@ public struct FileSpeechBatchClient: TranscriptionProvider {
         var body = audio
         switch provider {
         case .smallest:
-            guard code == nil || code == "en" else {
+            guard code.map(FileSpeechProvider.smallestLanguageCodes.contains) ?? true else {
                 throw FileSpeechError.unsupportedLanguage("Pulse Pro", code ?? "")
             }
             components = URLComponents(string: "https://api.smallest.ai/waves/v1/stt/")!

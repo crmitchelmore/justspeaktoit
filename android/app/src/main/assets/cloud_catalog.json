@@ -233,6 +233,269 @@
       "id" : "ru_RU"
     }
   ],
+  "openRouterBrowser" : {
+    "allProvidersTitle" : "All providers",
+    "browseButtonTitle" : "Browse OpenRouter models…",
+    "cleanupIntro" : "Use your OpenRouter key for transcript cleanup. Bundled models are tested for cleanup; discovered models are not.",
+    "cleanupModels" : [
+      {
+        "contextLength" : 1000000,
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/anthropic/claude-haiku-5.5",
+        "name" : "Claude Haiku 5.5",
+        "pricing" : "$0.10/$0.50 / 1M",
+        "provider" : "Anthropic",
+        "searchText" : [
+          "Claude Haiku 5.5",
+          "anthropic/claude-haiku-5.5",
+          "Anthropic's fastest, lowest-cost Claude via OpenRouter.",
+          "Anthropic"
+        ],
+        "selectionId" : "anthropic/claude-haiku-5.5",
+        "slug" : "anthropic/claude-haiku-5.5",
+        "speed" : "Medium",
+        "strengths" : [
+          "Fast",
+          "Cheap"
+        ],
+        "subtitle" : "anthropic/claude-haiku-5.5 · $0.10/$0.50 / 1M",
+        "summary" : "Anthropic's fastest, lowest-cost Claude via OpenRouter."
+      },
+      {
+        "contextLength" : 1000000,
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/anthropic/claude-sonnet-5.5",
+        "name" : "Claude Sonnet 5.5",
+        "pricing" : "$2.00/$10 / 1M",
+        "provider" : "Anthropic",
+        "searchText" : [
+          "Claude Sonnet 5.5",
+          "anthropic/claude-sonnet-5.5",
+          "Anthropic's newest Sonnet via OpenRouter, for structure- and tone-preserving cleanup.",
+          "Anthropic"
+        ],
+        "selectionId" : "anthropic/claude-sonnet-5.5",
+        "slug" : "anthropic/claude-sonnet-5.5",
+        "speed" : "Medium",
+        "strengths" : [
+          "Quality",
+          "Leading"
+        ],
+        "subtitle" : "anthropic/claude-sonnet-5.5 · $2.00/$10 / 1M",
+        "summary" : "Anthropic's newest Sonnet via OpenRouter, for structure- and tone-preserving cleanup."
+      },
+      {
+        "contextLength" : 1048576,
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/google/gemini-2.5-flash-lite",
+        "name" : "Gemini 2.5 Flash Lite",
+        "pricing" : "$0.10/$0.40 / 1M",
+        "provider" : "Google",
+        "searchText" : [
+          "Gemini 2.5 Flash Lite",
+          "google/gemini-2.5-flash-lite",
+          "Very fast and inexpensive for everyday cleanup.",
+          "Google"
+        ],
+        "selectionId" : "google/gemini-2.5-flash-lite",
+        "slug" : "google/gemini-2.5-flash-lite",
+        "speed" : "Fast",
+        "strengths" : [
+          "Fast",
+          "Cheap"
+        ],
+        "subtitle" : "google/gemini-2.5-flash-lite · $0.10/$0.40 / 1M",
+        "summary" : "Very fast and inexpensive for everyday cleanup."
+      },
+      {
+        "contextLength" : 1048576,
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/google/gemini-3.1-flash-lite",
+        "name" : "Gemini 3.1 Flash Lite",
+        "pricing" : "$0.25/$1.50 / 1M",
+        "provider" : "Google",
+        "searchText" : [
+          "Gemini 3.1 Flash Lite",
+          "google/gemini-3.1-flash-lite",
+          "Latest Gemini Flash Lite generation with low cost and a long context window.",
+          "Google"
+        ],
+        "selectionId" : "google/gemini-3.1-flash-lite",
+        "slug" : "google/gemini-3.1-flash-lite",
+        "speed" : "Fast",
+        "strengths" : [
+          "Fast",
+          "Cheap"
+        ],
+        "subtitle" : "google/gemini-3.1-flash-lite · $0.25/$1.50 / 1M",
+        "summary" : "Latest Gemini Flash Lite generation with low cost and a long context window."
+      },
+      {
+        "contextLength" : 1048576,
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/google/gemini-3.5-flash-lite",
+        "name" : "Gemini 3.5 Flash Lite",
+        "pricing" : "$0.30/$2.50 / 1M",
+        "provider" : "Google",
+        "searchText" : [
+          "Gemini 3.5 Flash Lite",
+          "google/gemini-3.5-flash-lite",
+          "Newest Gemini Flash Lite; Google's replacement for Gemini 2.5 Flash.",
+          "Google"
+        ],
+        "selectionId" : "google/gemini-3.5-flash-lite",
+        "slug" : "google/gemini-3.5-flash-lite",
+        "speed" : "Medium",
+        "strengths" : [
+          "Fast"
+        ],
+        "subtitle" : "google/gemini-3.5-flash-lite · $0.30/$2.50 / 1M",
+        "summary" : "Newest Gemini Flash Lite; Google's replacement for Gemini 2.5 Flash."
+      },
+      {
+        "contextLength" : 262144,
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/mistralai/mistral-small-2603",
+        "name" : "Mistral Small 4",
+        "pricing" : "$0.15/$0.60 / 1M",
+        "provider" : "Mistral",
+        "searchText" : [
+          "Mistral Small 4",
+          "mistralai/mistral-small-2603",
+          "Newest Mistral Small generation; very inexpensive for simple formatting.",
+          "Mistral"
+        ],
+        "selectionId" : "mistralai/mistral-small-2603",
+        "slug" : "mistralai/mistral-small-2603",
+        "speed" : "Fast",
+        "strengths" : [
+          "Fast",
+          "Cheap"
+        ],
+        "subtitle" : "mistralai/mistral-small-2603 · $0.15/$0.60 / 1M",
+        "summary" : "Newest Mistral Small generation; very inexpensive for simple formatting."
+      },
+      {
+        "contextLength" : 1050000,
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/openai/gpt-6-astra",
+        "name" : "GPT-6 Astra",
+        "pricing" : "$10/$50 / 1M",
+        "provider" : "OpenAI",
+        "searchText" : [
+          "GPT-6 Astra",
+          "openai/gpt-6-astra",
+          "OpenAI's flagship GPT-6 option via OpenRouter, at a higher token cost. Base token pricing shown; long-context rates may be higher.",
+          "OpenAI"
+        ],
+        "selectionId" : "openai/gpt-6-astra",
+        "slug" : "openai/gpt-6-astra",
+        "speed" : "Medium",
+        "strengths" : [
+          "Leading"
+        ],
+        "subtitle" : "openai/gpt-6-astra · $10/$50 / 1M",
+        "summary" : "OpenAI's flagship GPT-6 option via OpenRouter, at a higher token cost. Base token pricing shown; long-context rates may be higher."
+      },
+      {
+        "contextLength" : 1050000,
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/openai/gpt-6-luna",
+        "name" : "GPT-6 Luna",
+        "pricing" : "$0.10/$0.50 / 1M",
+        "provider" : "OpenAI",
+        "searchText" : [
+          "GPT-6 Luna",
+          "openai/gpt-6-luna",
+          "Cost-efficient GPT-6 option via OpenRouter. Base token pricing shown; long-context rates may be higher.",
+          "OpenAI"
+        ],
+        "selectionId" : "openai/gpt-6-luna",
+        "slug" : "openai/gpt-6-luna",
+        "speed" : "Medium",
+        "strengths" : [
+          "Cheap"
+        ],
+        "subtitle" : "openai/gpt-6-luna · $0.10/$0.50 / 1M",
+        "summary" : "Cost-efficient GPT-6 option via OpenRouter. Base token pricing shown; long-context rates may be higher."
+      },
+      {
+        "contextLength" : 1050000,
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/openai/gpt-6.1-sol",
+        "name" : "GPT-6.1 Sol",
+        "pricing" : "$2.00/$10 / 1M",
+        "provider" : "OpenAI",
+        "searchText" : [
+          "GPT-6.1 Sol",
+          "openai/gpt-6.1-sol",
+          "OpenAI's middle GPT-6 tier via OpenRouter, priced below Astra. Base token pricing shown; long-context rates may be higher.",
+          "OpenAI"
+        ],
+        "selectionId" : "openai/gpt-6.1-sol",
+        "slug" : "openai/gpt-6.1-sol",
+        "speed" : "Medium",
+        "strengths" : [
+
+        ],
+        "subtitle" : "openai/gpt-6.1-sol · $2.00/$10 / 1M",
+        "summary" : "OpenAI's middle GPT-6 tier via OpenRouter, priced below Astra. Base token pricing shown; long-context rates may be higher."
+      },
+      {
+        "contextLength" : 1050000,
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/openai/gpt-6.1-terra",
+        "name" : "GPT-6.1 Terra",
+        "pricing" : "$1.00/$5.00 / 1M",
+        "provider" : "OpenAI",
+        "searchText" : [
+          "GPT-6.1 Terra",
+          "openai/gpt-6.1-terra",
+          "Balanced GPT-6.1 quality and cost via OpenRouter. Base token pricing shown; long-context rates may be higher.",
+          "OpenAI"
+        ],
+        "selectionId" : "openai/gpt-6.1-terra",
+        "slug" : "openai/gpt-6.1-terra",
+        "speed" : "Medium",
+        "strengths" : [
+          "Quality"
+        ],
+        "subtitle" : "openai/gpt-6.1-terra · $1.00/$5.00 / 1M",
+        "summary" : "Balanced GPT-6.1 quality and cost via OpenRouter. Base token pricing shown; long-context rates may be higher."
+      },
+      {
+        "contextLength" : 1000000,
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/qwen/qwen3.8-flash",
+        "name" : "Qwen3.8 Flash",
+        "pricing" : "$0.15/$0.47 / 1M",
+        "provider" : "Qwen",
+        "searchText" : [
+          "Qwen3.8 Flash",
+          "qwen/qwen3.8-flash",
+          "Newest fast Qwen model with low-cost long-context cleanup.",
+          "Qwen"
+        ],
+        "selectionId" : "qwen/qwen3.8-flash",
+        "slug" : "qwen/qwen3.8-flash",
+        "speed" : "Medium",
+        "strengths" : [
+          "Fast",
+          "Cheap"
+        ],
+        "subtitle" : "qwen/qwen3.8-flash · $0.15/$0.47 / 1M",
+        "summary" : "Newest fast Qwen model with low-cost long-context cleanup."
+      }
+    ],
+    "cleanupTitle" : "OpenRouter cleanup models",
+    "pricingCaveat" : "Base prices can vary by context and provider; check OpenRouter before use.",
+    "pricingUnlisted" : "Pricing is not listed for this model.",
+    "routeNote" : "Cleanup requests for this model are sent to OpenRouter with your OpenRouter key.",
+    "searchPlaceholder" : "Search models",
+    "selectedTitle" : "Selected for cleanup",
+    "useTitle" : "Use for cleanup",
+    "zeroPricesTitle" : "Zero listed prices"
+  },
   "profiles" : {
     "cloudTranscriptionRouting" : "remoteBatch",
     "fields" : [

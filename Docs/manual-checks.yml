@@ -1650,6 +1650,20 @@ sessions:
           - "Save an invalid OpenRouter key and tap Check balance, then remove the key."
         expected: "OpenRouter shows its credit in dollars and when it was checked, and TalkBack reads the update. Typing never stalls. OpenAI explains why no figure is shown and opens its billing page. The invalid key shows Balance unknown with a reason and no key text; after removal the line asks for a key."
         final_gate: false
+      - id: "android-openrouter-cleanup-browser"
+        issues:
+          - 1618
+        title: "Browse OpenRouter cleanup models, check details, then choose one"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1618 OpenRouter cleanup browser"
+        steps:
+          - "Settings \u203a Clean up transcripts: open the cleanup model picker. Check native-provider models are listed first, followed by a separate Browse OpenRouter models\u2026 row."
+          - "Tap Browse OpenRouter models\u2026, search for a made-up name, then clear it; choose a provider and turn on Zero listed prices, then turn it off and choose All providers."
+          - "Open a model: read its pricing, context, speed and strengths, then tap Use for cleanup. Reopen the picker and check the Browse row."
+          - "With TalkBack on, repeat the search and open a model's details, then use Back to return to the browser and to the picker."
+        expected: "The browser lists only OpenRouter models, the result count changes as you search and filter, and no matches shows a clear message. The details page shows pricing (or says it is not listed) before choosing. After choosing, the Browse row shows OpenRouter \u203a the model name and cleanup uses it. TalkBack reads every control's name and state, announces the result count, and Back goes details, browser, picker."
+        final_gate: false
   - id: "windows"
     device: "Windows"
     title: "Windows"

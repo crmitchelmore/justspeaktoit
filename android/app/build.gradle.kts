@@ -111,12 +111,16 @@ abstract class GenerateCloudCatalog : DefaultTask() {
     @TaskAction
     fun generate() {
         @Suppress("UNCHECKED_CAST")
-        val json = JsonSlurper().parse(catalog.get().asFile) as Map<String, Any?>
+        val json = JsonSlurper().parse(catalog.get().asFile, "UTF-8") as Map<String, Any?>
         val version = json["version"] as Int
         check(version == 1) { "cloud_catalog.json version $version is not understood; update this generator" }
         fun lit(value: Any?): String = "\"" + value.toString()
             .replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$")
             .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\""
+        fun optLit(value: Any?): String = if (value == null) "null" else lit(value)
+        fun optInt(value: Any?): String = (value as Number?)?.toInt()?.toString() ?: "null"
+        @Suppress("UNCHECKED_CAST")
+        fun strings(value: Any?): String = (value as List<Any?>).joinToString(", ", "listOf(", ")") { lit(it) }
         @Suppress("UNCHECKED_CAST")
         fun objects(key: String) = json[key] as List<Map<String, Any?>>
         @Suppress("UNCHECKED_CAST")
@@ -152,6 +156,26 @@ abstract class GenerateCloudCatalog : DefaultTask() {
             .toSortedMap().entries.joinToString("") {
                 "        ${lit(it.key)} to ${lit(it.value)},\n"
             }
+        @Suppress("UNCHECKED_CAST")
+        val browser = json["openRouterBrowser"] as Map<String, Any?>
+        @Suppress("UNCHECKED_CAST")
+        val browserModels = (browser["cleanupModels"] as List<Map<String, Any?>>).joinToString("") {
+            "        OpenRouterBrowserModelSpec(\n" +
+                "            selectionId = ${lit(it["selectionId"])},\n" +
+                "            slug = ${lit(it["slug"])},\n" +
+                "            name = ${lit(it["name"])},\n" +
+                "            provider = ${lit(it["provider"])},\n" +
+                "            subtitle = ${lit(it["subtitle"])},\n" +
+                "            summary = ${lit(it["summary"])},\n" +
+                "            speed = ${lit(it["speed"])},\n" +
+                "            pricing = ${optLit(it["pricing"])},\n" +
+                "            contextLength = ${optInt(it["contextLength"])},\n" +
+                "            strengths = ${strings(it["strengths"])},\n" +
+                "            hasZeroPrices = ${it["hasZeroPrices"] as Boolean},\n" +
+                "            searchText = ${strings(it["searchText"])},\n" +
+                "            modelPageUrl = ${optLit(it["modelPageURL"])},\n" +
+                "        ),\n"
+        }
         @Suppress("UNCHECKED_CAST")
         val profiles = json["profiles"] as Map<String, Any?>
         @Suppress("UNCHECKED_CAST")
@@ -197,6 +221,23 @@ abstract class GenerateCloudCatalog : DefaultTask() {
             |    const val PROFILE_CLOUD_TRANSCRIPTION_ROUTING = ${lit(profiles["cloudTranscriptionRouting"])}
             |    val PROFILE_FIELDS: List<String> = listOf(
             |${profileFields.trimEnd('\n')}
+            |    )
+            |
+            |    /** SpeakCore's `OpenRouterModelBrowserCatalog`: the shared browser copy and cleanup rows. */
+            |    const val OPENROUTER_BROWSE_TITLE = ${lit(browser["browseButtonTitle"])}
+            |    const val OPENROUTER_CLEANUP_TITLE = ${lit(browser["cleanupTitle"])}
+            |    const val OPENROUTER_CLEANUP_INTRO = ${lit(browser["cleanupIntro"])}
+            |    const val OPENROUTER_SEARCH_PLACEHOLDER = ${lit(browser["searchPlaceholder"])}
+            |    const val OPENROUTER_ALL_PROVIDERS = ${lit(browser["allProvidersTitle"])}
+            |    const val OPENROUTER_ZERO_PRICES = ${lit(browser["zeroPricesTitle"])}
+            |    const val OPENROUTER_PRICING_CAVEAT = ${lit(browser["pricingCaveat"])}
+            |    const val OPENROUTER_PRICING_UNLISTED = ${lit(browser["pricingUnlisted"])}
+            |    const val OPENROUTER_CLEANUP_USE = ${lit(browser["useTitle"])}
+            |    const val OPENROUTER_CLEANUP_SELECTED = ${lit(browser["selectedTitle"])}
+            |    const val OPENROUTER_CLEANUP_ROUTE_NOTE = ${lit(browser["routeNote"])}
+            |
+            |    val openRouterCleanupModels: List<OpenRouterBrowserModelSpec> = listOf(
+            |${browserModels.trimEnd('\n')}
             |    )
             |}
             |

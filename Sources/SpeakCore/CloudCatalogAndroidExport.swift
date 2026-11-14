@@ -85,6 +85,27 @@ public enum CloudCatalogAndroidExport {
         let selectionId, displayName, provider, apiName: String
     }
 
+    /// One OpenRouter cleanup model as the browser lists and describes it
+    /// (`OpenRouterModelBrowserCatalog.cleanupItems`), so Android shows the Mac's rows and details.
+    private struct BrowserModel: Encodable {
+        let selectionId, slug, name, provider, subtitle, summary, speed: String
+        /// `ModelCatalog.Pricing.displayName`, when the catalogue lists rates.
+        let pricing: String?
+        let contextLength: Int?
+        let strengths: [String]
+        let hasZeroPrices: Bool
+        let searchText: [String]
+        let modelPageURL: String?
+    }
+
+    /// The **Browse OpenRouter models…** browser's shared copy and cleanup rows.
+    private struct OpenRouterBrowser: Encodable {
+        let browseButtonTitle, cleanupTitle, cleanupIntro, searchPlaceholder, allProvidersTitle: String
+        let zeroPricesTitle, pricingCaveat, pricingUnlisted: String
+        let useTitle, selectedTitle, routeNote: String
+        let cleanupModels: [BrowserModel]
+    }
+
     private struct Document: Encodable {
         let version: Int
         let providers: [Provider]
@@ -97,6 +118,7 @@ public enum CloudCatalogAndroidExport {
         let languages: [Language]
         let keywordPrompt: KeywordPrompt
         let profiles: Profiles
+        let openRouterBrowser: OpenRouterBrowser
     }
 
     public static func json() throws -> Data {
@@ -121,7 +143,8 @@ public enum CloudCatalogAndroidExport {
                 storageKey: DataMigrationProfileCatalog.defaultsKey,
                 cloudTranscriptionRouting: DictationProfileTranscriptionRouting.remoteBatch.rawValue,
                 fields: DictationProfile.CodingKeys.allCases.map(\.rawValue)
-            )
+            ),
+            openRouterBrowser: openRouterBrowser
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -167,6 +190,31 @@ public enum CloudCatalogAndroidExport {
         return CleanupModel(
             selectionId: option.id, displayName: option.displayName,
             provider: OpenRouterService.providerID, apiName: option.id
+        )
+    }
+
+    private static var openRouterBrowser: OpenRouterBrowser {
+        typealias Browser = OpenRouterModelBrowserCatalog
+        let models = Browser.cleanupItems(options: cleanupModels).map { item in
+            let option = cleanupModels.first { $0.id == item.id }
+            return BrowserModel(
+                selectionId: item.id, slug: item.slug, name: item.name, provider: item.provider,
+                subtitle: item.subtitle, summary: item.summary,
+                speed: option?.latencyTier.displayName ?? "", pricing: item.pricing?.displayName,
+                contextLength: item.contextLength, strengths: option?.tags.map(\.displayName) ?? [],
+                hasZeroPrices: item.hasZeroPrices, searchText: item.searchText,
+                modelPageURL: item.modelPageURL?.absoluteString
+            )
+        }
+        return OpenRouterBrowser(
+            browseButtonTitle: Browser.browseButtonTitle, cleanupTitle: Browser.title(for: .cleanup),
+            cleanupIntro: Browser.intro(for: .cleanup), searchPlaceholder: Browser.searchPlaceholder,
+            allProvidersTitle: Browser.allProvidersTitle, zeroPricesTitle: Browser.zeroPricesTitle,
+            pricingCaveat: Browser.pricingCaveat,
+            pricingUnlisted: Browser.pricingUnlisted,
+            useTitle: Browser.actionTitle(for: .cleanup, selected: false),
+            selectedTitle: Browser.actionTitle(for: .cleanup, selected: true),
+            routeNote: Browser.routeNote(for: .cleanup), cleanupModels: models
         )
     }
 

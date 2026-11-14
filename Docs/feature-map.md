@@ -95,7 +95,7 @@ The flags live in `Project.swift`; release selection is in
 | F07 | Remote cleanup (OpenRouter and native LLMs) | Yes | Yes | Yes | Yes | Yes | | |
 | F08 | Local LLM cleanup | Yes | No | Yes | Yes | No | #1650 | |
 | F09 | Custom cleanup prompt | Yes | Yes | Yes | Yes | Yes | | |
-| F10 | Browse OpenRouter models picker | Yes | Yes | No | No | Partial | #1618 | Android: searchable cleanup list only. |
+| F10 | Browse OpenRouter models picker | Yes | Yes | No | No | Partial | #1618 | Android: cleanup browser with details over the bundled catalogue; no live discovery or transcription browser. |
 | F11 | Dictation profiles | Yes | Limited | Yes | Yes | Limited | | iOS and Android cannot see the frontmost app. |
 | F12 | Vocabulary, corrections, pronunciation | Yes | Yes | Yes | Yes | Partial | #1626 | Android: corrections only. Corrections also restore the stored spelling's case. |
 | F13 | Transcription language selection | Yes | Yes | Yes | Yes | Yes | | |
@@ -224,10 +224,10 @@ The flags live in `Project.swift`; release selection is in
 - **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android Partial
 - **Excluded:** none
 - **Gaps:** Windows, Linux, Android #1618.
-- **How:** Bundled models first, then live-discovered OpenRouter models after an explicit opt-in; selecting one saves its slug and adds it to the picker.
-- **Refs:** `Sources/SpeakCore/AppleUI/OpenRouterCleanupBrowser.swift`, `Sources/SpeakCore/AppleUI/OpenRouterModelBrowser.swift`, `Sources/SpeakCore/AppleUI/OpenRouterTranscriptionBrowser.swift`, `android/app/src/main/java/com/justspeaktoit/android/cloud/CleanupModelPicker.kt`
+- **How:** Bundled models first, then live-discovered OpenRouter models after an explicit opt-in; selecting one saves its slug and adds it to the picker. Pickers list native-provider models, then a separate **Browse OpenRouter models…** button; the browser searches, filters by provider and zero listed prices, and opens a details page (pricing, context, speed, strengths) before **Use this model**. Browser copy, item ordering and filter rules live in `OpenRouterModelBrowserCatalog` and `OpenRouterBrowserFilter` (SpeakCore). Android consumes them through the `openRouterBrowser` section of the exported `cloud_catalog.json` plus a Kotlin port of the filter, both checked against `Tests/Fixtures/openrouter-browser/`.
+- **Refs:** `Sources/SpeakCore/AppleUI/OpenRouterCleanupBrowser.swift`, `Sources/SpeakCore/AppleUI/OpenRouterModelBrowser.swift`, `Sources/SpeakCore/AppleUI/OpenRouterTranscriptionBrowser.swift`, `Sources/SpeakCore/OpenRouter/OpenRouterModelBrowserCatalog.swift`, `android/app/src/main/java/com/justspeaktoit/android/cloud/CleanupModelPicker.kt`, `android/app/src/main/java/com/justspeaktoit/android/cloud/OpenRouterBrowser.kt`, `android/app/src/main/java/com/justspeaktoit/android/ui/CleanupModelPickerDialog.kt`
 - **Sunset:** `CleanupModelDiscoveryView` is deprecated in favour of `OpenRouterCleanupBrowser` (`Sources/SpeakCore/AppleUI/CleanupModelDiscoveryView.swift`); delete it in the next declared breaking API change.
-- **Nuances:** Streaming pickers have no browse button because OpenRouter can't stream ([OpenRouter audio](openrouter-audio.md)). Discovery behaviour: [cleanup model discovery](cleanup-model-discovery.md).
+- **Nuances:** Streaming pickers have no browse button because OpenRouter can't stream ([OpenRouter audio](openrouter-audio.md)). Discovery behaviour: [cleanup model discovery](cleanup-model-discovery.md). Remaining for #1618: the Windows and Linux browser dialogs, Android live cleanup discovery, and the Android OpenRouter transcription route and browser.
 
 ### F11 Dictation profiles
 - **Platforms:** macOS Yes · iOS Limited · Windows Yes · Linux Yes · Android Limited

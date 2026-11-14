@@ -47,9 +47,8 @@ public struct OpenRouterTranscriptionBrowser: View {
 
     public var body: some View {
         OpenRouterModelBrowser(
-            title: "OpenRouter transcription models",
-            intro: "Use your OpenRouter key for batch transcription. Bundled models are listed first; "
-                + "browsing downloads model metadata only.",
+            title: OpenRouterModelBrowserCatalog.title(for: .transcription),
+            intro: OpenRouterModelBrowserCatalog.intro(for: .transcription),
             items: items,
             status: OpenRouterBrowserStatus(
                 isRefreshing: catalog.isRefreshing, errorMessage: catalog.errorMessage,
@@ -72,9 +71,9 @@ public struct OpenRouterTranscriptionBrowser: View {
                     OpenRouterOptionDetail(
                         option: option,
                         purpose: .batchTranscription,
-                        actionTitle: "Use for transcription",
-                        selectedTitle: "Selected for transcription",
-                        routeNote: "Recordings for this model are sent to OpenRouter with your OpenRouter key.",
+                        actionTitle: OpenRouterModelBrowserCatalog.actionTitle(for: .transcription, selected: false),
+                        selectedTitle: OpenRouterModelBrowserCatalog.actionTitle(for: .transcription, selected: true),
+                        routeNote: OpenRouterModelBrowserCatalog.routeNote(for: .transcription),
                         isSelected: item.id.caseInsensitiveCompare(selection) == .orderedSame,
                         onSelect: choose
                     )

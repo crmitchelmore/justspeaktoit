@@ -1,6 +1,7 @@
 package com.justspeaktoit.android.ui
 
 import com.justspeaktoit.android.resources.SystemResourceKind
+import java.util.Locale
 
 /**
  * Stable test tags for controls that screen readers and automation agents drive.
@@ -160,7 +161,17 @@ object AutomationIds {
     fun learnedCorrectionDismiss(index: Int) = "settings.learnedCorrections.dismiss.$index"
     const val CLEANUP_PICKER_BACK = "cleanupPicker.back"
     const val CLEANUP_PICKER_SEARCH = "cleanupPicker.search"
+    /** The **Browse OpenRouter models…** row under the native models. */
     const val CLEANUP_PICKER_OPENROUTER = "cleanupPicker.openRouter"
+    const val CLEANUP_PICKER_PROVIDER = "cleanupPicker.provider"
+    const val CLEANUP_PICKER_ALL_PROVIDERS = "cleanupPicker.provider.all"
+    const val CLEANUP_PICKER_ZERO_PRICES = "cleanupPicker.zeroPrices"
+    const val CLEANUP_PICKER_MODEL_PAGE = "cleanupPicker.detail.modelPage"
+    const val CLEANUP_PICKER_USE = "cleanupPicker.detail.use"
+
+    /** One per OpenRouter vendor in the provider filter, keyed by its name (for example `meta-llama`). */
+    fun cleanupPickerProvider(name: String) =
+        "cleanupPicker.provider." + name.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]+"), "-").trim('-')
 
     /** One per cleanup model, keyed by its stable selection ID (for example `native/openai/gpt-6-luna`). */
     fun cleanupPickerModel(selectionId: String) = "cleanupPicker.model.$selectionId"

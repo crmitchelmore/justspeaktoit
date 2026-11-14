@@ -71,6 +71,24 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         XCTAssertTrue(models.allSatisfy { !($0["selectionId"] ?? "").hasPrefix("local/") })
     }
 
+    func testOpenRouterBrowserDescribesEveryOpenRouterCleanupModel() throws {
+        let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
+        let browser = try XCTUnwrap(object?["openRouterBrowser"] as? [String: Any])
+        XCTAssertEqual(browser["browseButtonTitle"] as? String, OpenRouterModelBrowserCatalog.browseButtonTitle)
+        XCTAssertEqual(browser["useTitle"] as? String, "Use for cleanup")
+        let cleanup = try XCTUnwrap(object?["cleanupModels"] as? [[String: String]])
+        let openRouter = cleanup.filter { $0["provider"] == OpenRouterService.providerID }
+            .compactMap { $0["selectionId"] }
+        let rows = try XCTUnwrap(browser["cleanupModels"] as? [[String: Any]])
+        XCTAssertEqual(rows.count, openRouter.count)
+        XCTAssertEqual(Set(rows.compactMap { $0["selectionId"] as? String }), Set(openRouter))
+        for row in rows {
+            XCTAssertEqual(row["slug"] as? String, row["selectionId"] as? String)
+            XCTAssertFalse((row["provider"] as? String ?? "").isEmpty)
+            XCTAssertFalse((row["searchText"] as? [String] ?? []).isEmpty)
+        }
+    }
+
     func testDocumentCarriesLanguagesAndVocabularyPromptRules() throws {
         let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
         let languages = try XCTUnwrap(object?["languages"] as? [[String: String]])

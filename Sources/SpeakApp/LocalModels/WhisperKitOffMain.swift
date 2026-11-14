@@ -1,5 +1,4 @@
 import Foundation
-import class SpeakCore.WhisperKitFileCancellation
 import WhisperKit
 
 /// Keeps WhisperKit's model loading and decoding off the main actor.

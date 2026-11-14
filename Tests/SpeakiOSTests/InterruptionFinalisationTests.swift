@@ -274,9 +274,8 @@ final class InterruptionFinalisationTests: XCTestCase { // swiftlint:disable:thi
         for _ in 0..<30 { await Task.yield() }
     }
 
-    /// Polls for up to ten seconds; loaded CI simulators took over two (#1761).
     private func settle(until condition: @autoclosure @MainActor () -> Bool) async {
-        for _ in 0..<1_000 where !condition() {
+        for _ in 0..<200 where !condition() {
             try? await Task.sleep(for: .milliseconds(10))
         }
         await settle()

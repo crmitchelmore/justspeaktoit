@@ -337,8 +337,6 @@ var iosAppDependencies: [TargetDependency] = [
     .package(product: "SpeakiOSLib"),
     .package(product: "SpeakSync"),
     .package(product: "Sentry"),
-    // Downloaded local transcription models (issue #1650); runs Core ML in process.
-    .package(product: "WhisperKit"),
     .target(name: "JustSpeakToItWidgetExtension")
 ]
 if isIOSKeyboardEnabled {

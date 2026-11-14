@@ -19,16 +19,6 @@ extension SettingsSearchCatalog {
             platforms: .iOS
         ),
         SettingsSearchEntry(
-            id: "ios.downloadedModels", title: "Downloaded Models", section: .transcription,
-            systemImage: "arrow.down.circle",
-            summary: "Download Whisper models to transcribe recordings on the device, or import one from Hugging Face.",
-            keywords: [
-                "downloaded models", "local model", "whisper", "whisperkit", "download", "hugging face", "import",
-                "offline", "private", "on device", "remove model", "storage"
-            ],
-            platforms: .iOS
-        ),
-        SettingsSearchEntry(
             id: "ios.autoCorrections", title: "Auto-Corrections", section: .postProcessing,
             systemImage: "text.badge.checkmark",
             summary: "Learn corrections from edits to transcripts the Just Speak Keyboard inserted, "

@@ -84,7 +84,6 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         return await controller.selectedIndex()
     }
     LinuxCloudSync.configure(holder)
-    LinuxPhoneReceiver.configure(holder)
     let context = holder.callbackContext
     let windowFailure = runGTKEventLoop(selected: selected, context: context, holder: holder)
     LinuxWindow.endVoiceProviderCallbacks(providerCallbacks)
@@ -109,7 +108,6 @@ private func shutDownWindow(controller: LinuxAppController, holder: LinuxEventCo
         holder.apiKeys.stop()
         _ = await holder.automation.applyOffThread(enabled: false)
         await LinuxCloudSync.shutDown(holder)
-        await LinuxPhoneReceiver.shutDown(holder)
         // Closing first cancels a shortcut's transcription instead of waiting
         // on its provider; queued shortcuts then find the controller closed.
         let report = await controller.close()

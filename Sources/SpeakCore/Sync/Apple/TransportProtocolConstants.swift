@@ -3,7 +3,7 @@ import Foundation
 /// The labels and sizes of the encrypted Send to Mac channel (protocol v2), in
 /// one place.
 ///
-/// `TransportHandshakeLabel` (both receivers and the Apple sender) reads
+/// `TransportSecureSession.swift` and `TransportDeviceCredential.swift` read
 /// them, and `SendToMacProtocolAndroidExport` publishes them with test vectors
 /// for the Android sender, so a change here reaches every sender at once. Each
 /// label is part of the key schedule: changing one breaks every peer that

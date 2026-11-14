@@ -89,31 +89,10 @@ struct TranscriptionSettingsPage: View {
             showingAPIKeys: $showingAPIKeys,
             openURL: openURL
         )
-
-        SearchableSettingsSection("Downloaded Models") {
-            IOSDownloadedModelsList()
-        }
     }
 
     @ViewBuilder
     private var localModelRows: some View {
-        Picker("Local Engine", selection: localTranscriptionModeBinding) {
-            Text("Apple Speech").tag(IOSTranscriptionMode.streaming)
-            Text("Downloaded Model").tag(IOSTranscriptionMode.batch)
-        }
-        .pickerStyle(.segmented)
-        .accessibilityLabel("Local Engine")
-        .accessibilityIdentifier("localTranscriptionEnginePicker")
-
-        if settings.localTranscriptionMode == .batch {
-            IOSDownloadedModelPicker()
-        } else {
-            appleSpeechRows
-        }
-    }
-
-    @ViewBuilder
-    private var appleSpeechRows: some View {
         // Never hidden: on-device transcription bypasses paid routing
         // entirely, so hiding this picker would leave no way to choose
         // the engine that is actually doing the work.
@@ -273,13 +252,6 @@ struct TranscriptionSettingsPage: View {
         Binding(
             get: { settings.transcriptionLocation },
             set: { settings.selectTranscriptionLocation($0) }
-        )
-    }
-
-    private var localTranscriptionModeBinding: Binding<IOSTranscriptionMode> {
-        Binding(
-            get: { settings.localTranscriptionMode },
-            set: { settings.selectLocalTranscriptionMode($0) }
         )
     }
 

@@ -24,7 +24,6 @@
 #include "LinuxClipboard.h"
 #include "LinuxCredentials.h"
 #include "LinuxCloudSync.h"
-#include "LinuxPhoneReceiver.h"
 #include "LinuxSystemResources.h"
 #include "LinuxAudioCapture.h"
 #include "LinuxAudioPlayback.h"

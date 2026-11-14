@@ -205,7 +205,6 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"&Inspect backup...", BS_PUSHBUTTON | WS_TABSTOP, backupInspectID) &&
         add(L"BUTTON", L"Restore backup...", BS_PUSHBUTTON | WS_TABSTOP, backupRestoreID) &&
         add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
-        add(L"BUTTON", L"Send from &phone…", BS_PUSHBUTTON | WS_TABSTOP, phoneReceiverID) &&
         add(L"STATIC", aboutState().aboutDetails.c_str(), 0, aboutDetailsID) &&
         add(L"BUTTON", L"Ru&n setup again…", BS_PUSHBUTTON | WS_TABSTOP, setupGuideID) &&
         add(L"BUTTON", L"&Windows permissions…", BS_PUSHBUTTON | WS_TABSTOP, permissionsID) &&
@@ -286,7 +285,6 @@ void updateSettingsButtons(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, localModelsID), recording == 0 && jsti_local_models_available());
     EnableWindow(GetDlgItem(window, cloudSyncID), recording == 0 && jsti_cloud_sync_available());
-    EnableWindow(GetDlgItem(window, phoneReceiverID), recording == 0 && jsti_phone_receiver_available());
     EnableWindow(GetDlgItem(window, azureID), recording == 0 && jsti_azure_resource_available());
     EnableWindow(GetDlgItem(window, automationSettingsID), recording == 0);
     EnableWindow(GetDlgItem(window, apiKeysID), recording == 0 && jsti_api_keys_available());

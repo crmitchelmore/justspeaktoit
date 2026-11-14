@@ -17,7 +17,8 @@ extension TransportChannel {
 
     /// Mac side: the refusal a phone gets when the credential it names is unknown
     /// or revoked. The phone does not fall back to the code on its own.
-    public static let revokedCredentialMessage = TransportReceiverWording.mac.revokedCredential
+    public static let revokedCredentialMessage =
+        "This device is no longer paired with this Mac. Pair again with the code shown on the Mac."
 
     /// Phone side: agrees session keys with the Mac using `pairingCode`.
     ///
@@ -126,10 +127,9 @@ extension TransportChannel {
             credentialID: handshake.clientShare.credentialID,
             requestsCredential: handshake.clientShare.requestsCredential == true
         )
-        let result = authorize(proof)
-        guard let message = TransportReceiverWording.mac.refusal(
-            for: result, usedCredential: proof.credentialID != nil
-        ) else {
+        let message: String
+        switch authorize(proof) {
+        case .accepted:
             guard var keys = proof.acceptedKeys else { throw TransportSecurityError.unauthenticatedFrame }
             let issued = proof.issuedCredential
             try await self.sendFrame(try keys.outbound.seal(TransportKeySchedule.serverFinished(issuing: issued)))
@@ -137,13 +137,26 @@ extension TransportChannel {
             self.sessionCredentialID = proof.credentialID ?? issued?.id
             self.sessionUsedCredential = proof.credentialID != nil
             return
+        case .rejected where proof.credentialID != nil:
+            message = Self.revokedCredentialMessage
+        case .rejected:
+            message = "Invalid pairing code"
+        case .lockedOut(let retryAfter):
+            let seconds = Int(retryAfter.rounded(.up))
+            message = "Too many failed pairing attempts. Try again in \(seconds) seconds."
         }
         try? await self.sendPlaintext(.authResult(AuthResultMessage(success: false, errorMessage: message)))
         throw TransportRejection(message: message)
     }
 
     private func refuse(_ refusal: TransportServerHandshake.Refusal, serverVersion: Int) async -> Error {
-        guard let reply = refusal.reply(serverVersion: serverVersion, wording: .mac) else {
+        let reply: ErrorMessage
+        switch refusal {
+        case .plaintextHello(let version) where version == serverVersion:
+            reply = ErrorMessage(code: 426, message: "Send to Mac requires an encrypted connection")
+        case .plaintextHello(let version), .versionMismatch(let version):
+            reply = .protocolMismatch(clientVersion: version, serverVersion: serverVersion)
+        case .malformed:
             return TransportSecurityError.malformedHandshake
         }
         try? await self.sendPlaintext(.error(reply))

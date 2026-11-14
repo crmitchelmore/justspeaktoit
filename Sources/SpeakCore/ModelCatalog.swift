@@ -708,14 +708,6 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     public static let localTranscriptionOptions: [Option] = localTranscription.map(\.option)
 
-    /// The `localTranscription` entries iOS and iPadOS can run: WhisperKit's
-    /// Core ML models only (`LocalModelHostSupport.iOS`), for batch
-    /// transcription of completed recordings. Phonon needs the Fermion
-    /// executable, which iOS cannot spawn. A new WhisperKit entry appears on
-    /// iOS automatically; never list iOS models separately.
-    public static let iOSLocalTranscription: [LocalTranscriptionModel] =
-        LocalModelHostSupport.iOS.executableModels(in: localTranscription)
-
     /// Cloud cleanup choices supported on every platform. Platform-specific
     /// local cleanup engines remain in `postProcessing` for macOS.
     /// Computed so a running process drops models on their shutdown day.

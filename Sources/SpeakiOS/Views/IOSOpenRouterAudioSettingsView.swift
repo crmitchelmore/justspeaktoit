@@ -65,22 +65,8 @@ extension AppSettings {
         selectRemoteTranscriptionMode(.batch)
     }
 
-    /// Whether a recording can run through `identifier` now: a curated batch
-    /// model, or a downloaded model that is on this device.
-    static func canRunBatchModel(_ identifier: String) -> Bool {
-        if IOSLocalTranscriptionModels.isDownloadedModelID(identifier) {
-            return IOSLocalTranscriptionModels.isReady(identifier)
-        }
-        return supportedBatchModels.contains { $0.id == identifier }
-    }
-
-    /// A downloaded `local/...` model counts only once it is downloaded and
-    /// this process can run it; it never routes to a cloud provider instead.
     static func supportsBatchModel(_ identifier: String) -> Bool {
-        if IOSLocalTranscriptionModels.isDownloadedModelID(identifier) {
-            return IOSLocalTranscriptionModels.isReady(identifier)
-        }
-        return OpenRouterTranscriptionSelection.modelID(from: identifier) != nil
+        OpenRouterTranscriptionSelection.modelID(from: identifier) != nil
             || supportedBatchModels.contains { $0.id == identifier }
     }
 }

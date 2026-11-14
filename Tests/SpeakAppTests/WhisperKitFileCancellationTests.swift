@@ -1,5 +1,4 @@
 import Foundation
-import class SpeakCore.WhisperKitFileCancellation
 import WhisperKit
 import XCTest
 

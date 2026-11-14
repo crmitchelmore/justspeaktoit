@@ -45,7 +45,7 @@ final class BatchCredentialBoundaryTests: XCTestCase {
         for model in [
             "elevenlabs/manual-model", " \nelevenlabs/manual-model\t ", "xai/grok-voice",
             "cartesia/unknown", "deepgram/unknown", "speechmatics/batch",
-            "apple/unknown", "system/unknown"
+            "local/whisper", "apple/unknown", "system/unknown"
         ] {
             // Both an empty key and a nonexistent file would fail differently
             // if credential access or audio preparation ran before the guard.

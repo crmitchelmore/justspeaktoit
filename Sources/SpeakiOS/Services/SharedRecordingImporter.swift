@@ -69,13 +69,13 @@ public final class SharedRecordingImporter: ObservableObject {
         let settings = credentialSettings ?? AppSettings.shared
         await settings.ensureKeysLoaded()
         let model = settings.batchTranscriptionModel
-        guard AppSettings.canRunBatchModel(model) else {
+        guard AppSettings.supportedBatchModels.contains(where: { $0.id == model }) else {
             // Every waiting item would fail the same way, so say it once and
             // leave them in the inbox: the user can fix the model in Settings
             // and the next foreground picks them up.
             lastOutcome = .failed(
                 filename: pending[0].originalFilename,
-                message: Self.unavailableModelMessage(model)
+                message: AutomationIntentError.unsupportedBatchModel(model).localizedDescription
             )
             return
         }
@@ -212,18 +212,6 @@ public final class SharedRecordingImporter: ObservableObject {
 
     /// A safe, non-identifying name for the log. Never the provider's own
     /// message, which can carry an HTTP response body.
-    /// Names a missing download rather than calling the model unsupported.
-    static func unavailableModelMessage(_ model: String) -> String {
-        do {
-            if IOSLocalTranscriptionModels.isDownloadedModelID(model) {
-                _ = try IOSLocalTranscriptionModels.requireReady(model)
-            }
-        } catch {
-            return error.localizedDescription
-        }
-        return AutomationIntentError.unsupportedBatchModel(model).localizedDescription
-    }
-
     private static func failureClassification(_ error: Error) -> String {
         if let rejection = error as? SharedAudioImportRejection {
             return "rejected/\(String(describing: rejection).prefix(while: { $0 != "(" }))"

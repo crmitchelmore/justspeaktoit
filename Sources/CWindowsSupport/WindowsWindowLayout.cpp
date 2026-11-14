@@ -73,7 +73,7 @@ unsigned pagesOf(int identifier) {
     case pronunciationID: return page(pronunciationPage);
     case comparisonID: return page(transcriptionPage);
     case shortcutValueID: case shortcutID: case actionShortcutsID: return page(keyboardPage);
-    case cloudSyncID: case phoneReceiverID: return page(cloudSyncPage);
+    case cloudSyncID: return page(cloudSyncPage);
     case aboutDetailsID: case setupGuideID: case permissionsID: case troubleshootingID: return page(aboutPage);
     default: return page(transcriptionPage);
     }
@@ -551,11 +551,6 @@ void layoutSettings(HWND window, const RECT &content) {
             L"Sign in with your Apple ID to sync History with your Mac. Only transcripts sync; audio stays on the "
             L"device that recorded it. API keys can be imported from your Mac with its key-sync passphrase.", row);
         place(window, cloudSyncID, box(left, y, scale(window, 220), row));
-        top = y + row + densitySpace(window, 20, visualDensity.card_padding) + gap;
-        const int phone = layoutSettingsCard(window, top, content, 0xE8EA, L"Send from phone",
-            L"Dictate on your iPhone or iPad and have the transcript typed here, at the cursor. Off until you turn "
-            L"it on; phones pair with a six-digit code and the link between them is encrypted.", row);
-        place(window, phoneReceiverID, box(left, phone, scale(window, 220), row));
         break;
     }
     default: break;

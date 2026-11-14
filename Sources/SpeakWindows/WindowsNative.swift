@@ -13,8 +13,7 @@ enum WindowsNative {
         guard result == 0 else { throw WindowsNativeError(message: String(cString: buffer)) }
     }
 
-    /// The `--self-test` checks for storage, staging, Launch at login, streaming, audio, the automation pipe
-    /// and the Send from phone listener.
+    /// The `--self-test` checks for storage, staging, Launch at login, streaming, audio and the automation pipe.
     static func storageMediaAndAutomationSelfTests() throws {
         try checked { jsti_private_storage_self_test($0, $1) }
         try checked { jsti_login_item_self_test($0, $1) }
@@ -23,7 +22,6 @@ enum WindowsNative {
         try checked { jsti_audio_conversion_self_test($0, $1) }
         try checked { jsti_audio_playback_self_test($0, $1) }
         try checked { jsti_automation_pipe_self_test($0, $1) }
-        try checked { jsti_transport_self_test($0, $1) }
     }
 
     static func update(_ status: String, transcript: String? = nil, state: Int32 = -1) {

@@ -153,8 +153,7 @@ final class DesktopSettingsSearchTests: XCTestCase {
             "deepgramStopGracePeriod": "Legacy key migrated to liveStopGracePeriod.",
             "mistralTTSModel": appleOnly, "ttsSpeed": appleOnly, "ttsPitch": appleOnly, "ttsAutoPlay": appleOnly,
             "ttsSaveToDirectory": appleOnly, "ttsUseSSML": appleOnly, "livePolishTailWindowChars": state,
-            "enableSendToMac": "Apple-only key; the desktop receiver keeps its switch in its sealed state, "
-                + "indexed as desktop.receiveFromPhone.",
+            "enableSendToMac": appleOnly,
             "analyticsEnabled": "Apple-only switch; Windows and Linux consent is a local editor projection.",
             "paidAccessRoutingEnabled": appleOnly, "simpleModelChoices": appleOnly,
             "ttsPronunciationDictionary": "Edited on the Pronunciation page, whose page root is indexed.",

@@ -39,11 +39,72 @@ import Foundation
 // on its own; re-pairing takes the user (#1643). The first pairing is still
 // exposed to an impostor that is present at that moment.
 
+/// The peer refused the connection and said why, for example a wrong pairing
+/// code, a lockout or a protocol-version mismatch.
+public struct TransportRejection: LocalizedError, Equatable, Sendable {
+    public let message: String
+
+    public init(message: String) {
+        self.message = message
+    }
+
+    public var errorDescription: String? {
+        self.message
+    }
+}
+
+/// Failures of the encrypted channel itself.
+public enum TransportSecurityError: Error, Equatable, Sendable {
+    /// A message was sent or received before the encrypted session existed.
+    case notEncrypted
+    /// A frame failed authentication: wrong key, tampered, replayed or reordered.
+    case unauthenticatedFrame
+    /// The peer's handshake frame was not a valid key share.
+    case malformedHandshake
+}
+
+extension TransportSecurityError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .notEncrypted:
+            "The connection is not encrypted yet"
+        case .unauthenticatedFrame:
+            "Received a message that was not sealed with this session's key"
+        case .malformedHandshake:
+            "The peer sent an invalid encryption handshake"
+        }
+    }
+}
+
+/// The only plaintext frame each side sends in protocol v2.
+///
+/// The optional fields are omitted when unset, so a key share without them is
+/// byte-for-byte what earlier builds send, and earlier Macs ignore them.
+struct TransportKeyShare: Codable, Equatable {
+    var protocolVersion: Int
+    /// Raw X25519 public key, 32 bytes.
+    var keyShare: Data
+    /// Phone only: the credential this session is keyed with, instead of the code.
+    var credentialID: UUID?
+    /// Phone only: asks the Mac to issue a credential once the code is proved.
+    var requestsCredential: Bool?
+
+    static func decode(_ frame: Data) -> TransportKeyShare? {
+        guard let share = try? JSONDecoder().decode(TransportKeyShare.self, from: frame),
+              share.keyShare.count == TransportProtocolConstants.keyByteCount else { return nil }
+        return share
+    }
+
+    func encoded() throws -> Data {
+        try JSONEncoder().encode(self)
+    }
+}
+
 /// One direction of the sealed channel. The nonce is the frame counter, so
 /// frames must be opened in the order they were sealed, exactly once.
 struct TransportFrameCipher: Sendable {
-    private static let associatedData = TransportHandshakeLabel.frameAssociatedData
-    static let overhead = TransportHandshakeLabel.tagByteCount
+    private static let associatedData = Data(TransportProtocolConstants.frameAssociatedData.utf8)
+    static let overhead = TransportProtocolConstants.tagByteCount
 
     private let key: SymmetricKey
     private(set) var counter: UInt64 = 0
@@ -84,9 +145,9 @@ struct TransportFrameCipher: Sendable {
     }
 
     private static func nonce(_ counter: UInt64) throws -> ChaChaPoly.Nonce {
-        guard let bytes = TransportHandshakeLabel.nonce(counter) else {
-            throw TransportSecurityError.unauthenticatedFrame
-        }
+        guard counter < UInt64.max else { throw TransportSecurityError.unauthenticatedFrame }
+        var bytes = Data(count: TransportProtocolConstants.nonceByteCount - MemoryLayout<UInt64>.size)
+        withUnsafeBytes(of: counter.bigEndian) { bytes.append(contentsOf: $0) }
         return try ChaChaPoly.Nonce(data: bytes)
     }
 }
@@ -104,8 +165,8 @@ struct TransportKeySchedule: Sendable {
         case server
     }
 
-    static let clientFinished = TransportHandshakeLabel.clientFinished
-    static let serverFinished = TransportHandshakeLabel.serverFinished
+    static let clientFinished = Data(TransportProtocolConstants.clientFinished.utf8)
+    static let serverFinished = Data(TransportProtocolConstants.serverFinished.utf8)
 
     /// The X25519 secret. Internal only so the Android test vectors can publish it.
     let sharedSecret: Data
@@ -125,17 +186,22 @@ struct TransportKeySchedule: Sendable {
         guard secretBytes.contains(where: { $0 != 0 }) else { throw TransportSecurityError.malformedHandshake }
         self.sharedSecret = secretBytes
 
-        let transcript = TransportHandshakeLabel.transcript(clientFrame: clientFrame, serverFrame: serverFrame)
-        self.transcriptHash = Data(SHA256.hash(data: transcript))
+        var transcript = SHA256()
+        transcript.update(data: Data(TransportProtocolConstants.transcriptLabel.utf8))
+        for frame in [clientFrame, serverFrame] {
+            withUnsafeBytes(of: UInt32(frame.count).bigEndian) { transcript.update(bufferPointer: $0) }
+            transcript.update(data: frame)
+        }
+        self.transcriptHash = Data(transcript.finalize())
     }
 
     /// The pre-shared key both devices hold once the user has entered the code.
     static func pairingKey(for pairingCode: String) -> SymmetricKey {
         HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: Data(pairingCode.utf8)),
-            salt: TransportHandshakeLabel.pairingKeySalt,
-            info: TransportHandshakeLabel.preSharedKeyInfo,
-            outputByteCount: 32
+            salt: Data(TransportProtocolConstants.pairingKeySalt.utf8),
+            info: Data(TransportProtocolConstants.preSharedKeyInfo.utf8),
+            outputByteCount: TransportProtocolConstants.keyByteCount
         )
     }
 
@@ -159,15 +225,18 @@ struct TransportKeySchedule: Sendable {
     func directionKeys(preSharedKey: SymmetricKey) -> (clientToServer: SymmetricKey, serverToClient: SymmetricKey) {
         let pairingKey = preSharedKey.withUnsafeBytes { Data($0) }
         let inputKeyMaterial = SymmetricKey(data: self.sharedSecret + pairingKey)
-        func key(_ direction: String) -> SymmetricKey {
+        func key(_ info: String) -> SymmetricKey {
             HKDF<SHA256>.deriveKey(
                 inputKeyMaterial: inputKeyMaterial,
                 salt: self.transcriptHash,
-                info: TransportHandshakeLabel.sessionKeyInfo(direction),
+                info: Data(info.utf8),
                 outputByteCount: TransportProtocolConstants.keyByteCount
             )
         }
-        return (key(TransportHandshakeLabel.clientToServer), key(TransportHandshakeLabel.serverToClient))
+        return (
+            key(TransportProtocolConstants.clientToServerInfo),
+            key(TransportProtocolConstants.serverToClientInfo)
+        )
     }
 }
 
@@ -241,7 +310,12 @@ struct TransportClientHandshake {
 
 /// The Mac's half of the handshake.
 struct TransportServerHandshake {
-    typealias Refusal = TransportHandshakeRefusal
+    enum Refusal: Error, Equatable {
+        /// A plaintext `hello` from a peer that does not encrypt.
+        case plaintextHello(protocolVersion: Int)
+        case versionMismatch(protocolVersion: Int)
+        case malformed
+    }
 
     let frame: Data
     let schedule: TransportKeySchedule
@@ -249,7 +323,15 @@ struct TransportServerHandshake {
     let clientShare: TransportKeyShare
 
     init(clientFrame: Data, protocolVersion: Int = SpeakTransportProtocolVersion) throws {
-        let share = try Refusal.keyShare(in: clientFrame, protocolVersion: protocolVersion)
+        guard let share = TransportKeyShare.decode(clientFrame) else {
+            if case .hello(let hello)? = try? Self.plaintextDecoder.decode(TransportMessage.self, from: clientFrame) {
+                throw Refusal.plaintextHello(protocolVersion: hello.protocolVersion)
+            }
+            throw Refusal.malformed
+        }
+        guard share.protocolVersion == protocolVersion else {
+            throw Refusal.versionMismatch(protocolVersion: share.protocolVersion)
+        }
         let privateKey = Curve25519.KeyAgreement.PrivateKey()
         let frame = try TransportKeyShare(
             protocolVersion: protocolVersion,
@@ -268,4 +350,10 @@ struct TransportServerHandshake {
         self.frame = frame
         self.clientShare = share
     }
+
+    private static let plaintextDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
 }

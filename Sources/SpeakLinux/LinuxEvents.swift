@@ -40,8 +40,6 @@ final class LinuxEventContext: DesktopNativeEventHolder, @unchecked Sendable {
     lazy var systemResources = LinuxSystemResources.makeMonitor()
     /// Set before the window opens, when iCloud sync is configured.
     var cloudSync: LinuxCloudSync?
-    /// Set before the window opens: Send from phone, off until the user turns it on.
-    var phoneReceiver: LinuxPhoneReceiver?
     /// The sidebar's "Search for anything" palette; read and written on the GTK main thread only.
     lazy var commandPalette = DesktopCommandPaletteSession(
         platform: .linux, runnable: LinuxSettingsSearch.runnable, history: controller.paletteHistory

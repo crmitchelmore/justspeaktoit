@@ -47,7 +47,7 @@ package enum DesktopHostOutputStart {
 }
 
 enum DesktopHostOutputPurpose: Sendable {
-    case recording, historyPaste, phoneTranscript
+    case recording, historyPaste
 }
 
 extension DesktopHostController {
@@ -101,8 +101,6 @@ extension DesktopHostController {
                 guard recording == nil, selectedHistoryID == recordID else { return }
             case .historyPaste:
                 guard canUseHistory else { return }
-            case .phoneTranscript:
-                guard recording == nil else { return }
             }
             update(completion.status, state: 0)
         }
@@ -145,31 +143,6 @@ extension DesktopHostController where Platform: DesktopHostDefaultTextOutputPlat
         case .busy: update("Another text output is still finishing. Try pasting from History again afterward.")
         case .unavailable:
             update("Could not paste from History. Focus a supported text field or choose clipboard-only output.")
-        }
-    }
-
-    /// Inserts a final transcript sent from a paired phone at the captured
-    /// focus, as the Mac receiver does. It is not saved to History: the phone
-    /// keeps its own record.
-    package func insertPhoneTranscript(
-        _ text: String, from deviceName: String, target: Platform.InsertionTarget?
-    ) async {
-        guard !closed, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        // A phone can send faster than a field accepts text: wait for an earlier output.
-        while let pending = outputSlot.task, !closed { await pending.value }
-        guard canUseHistory, outputSlot.task == nil else {
-            update("A transcript from \(deviceName) arrived while Just Speak to It was busy, so it was not inserted.")
-            return
-        }
-        let output = DesktopHostRecordingOutput<Platform>(
-            options: settings.textOutput ?? Platform.defaultTextOutput, target: target
-        )
-        switch beginOutput(text, output: output, recordID: UUID(), purpose: .phoneTranscript) {
-        case .inserting: update("Inserting a transcript from \(deviceName)…")
-        case .copying: update("Copying a transcript from \(deviceName) to the clipboard…")
-        case .busy: update("A transcript from \(deviceName) arrived while another output was finishing.")
-        case .unavailable:
-            update("Could not insert the transcript from \(deviceName). Focus a text field and send it again.")
         }
     }
 }

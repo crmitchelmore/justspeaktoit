@@ -91,9 +91,6 @@ bool jsti_api_keys_self_test(HWND owner, std::string &error);
 bool jsti_cloud_sync_available();
 void jsti_show_cloud_sync_settings(HWND owner);
 bool jsti_cloud_sync_settings_self_test(HWND owner, std::string &error);
-bool jsti_phone_receiver_available();
-void jsti_show_phone_receiver_settings(HWND owner);
-bool jsti_phone_receiver_settings_self_test(HWND owner, std::string &error);
 int jsti_window_recording_state();
 void jsti_show_vocabulary(HWND owner, int kind, void (*emit)(int, const char *, int));
 void jsti_show_vocabulary_result(HWND owner, const char *record, void (*emit)(int, const char *, int));
@@ -209,7 +206,7 @@ constexpr int setupMicrophoneID = 431, setupModelID = 432, setupShortcutID = 433
 // Settings that were menu commands: the automation switch emits
 // AUTOMATION_TOGGLED; the others open the same dialogs as before.
 constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, azureID = 443, cloudSyncID = 444,
-    shortcutValueID = 445, phoneReceiverID = 446, loginItemID = 449,
+    shortcutValueID = 445, loginItemID = 449,
     configurationID = 450;
 constexpr int aboutLinkBaseID = 480, aboutDetailsID = 490;
 // About's Support development row: its label and up to four web tip links.

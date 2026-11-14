@@ -47,13 +47,5 @@ public enum TranscriptPostProcessingPolicy {
         return withoutBlankAudioMarkers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// A Whisper decode's text without `[BLANK_AUDIO]` markers, with runs of
-    /// whitespace collapsed. A silent recording therefore comes back empty.
-    public static func cleanedWhisperTranscript(_ text: String) -> String {
-        text.replacingOccurrences(of: blankAudioMarkerPattern, with: " ", options: .regularExpression)
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     private static let blankAudioMarkerPattern = #"(?i)\s*\[blank_audio\]\s*"#
 }

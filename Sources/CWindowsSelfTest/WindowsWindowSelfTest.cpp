@@ -270,7 +270,6 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             jsti_voice_sources_self_test(window, failure) && jsti_voice_credentials_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_api_keys_self_test(window, failure) &&
             jsti_cloud_sync_settings_self_test(window, failure) &&
-            jsti_phone_receiver_settings_self_test(window, failure) &&
             jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure)
             && jsti_comparison_self_test(window, failure) && jsti_automation_settings_self_test(window, failure) &&
             jsti_system_resources_self_test(window, failure) && jsti_openrouter_browser_self_test(window, failure);

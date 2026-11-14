@@ -487,13 +487,197 @@
         "summary" : "Newest fast Qwen model with low-cost long-context cleanup."
       }
     ],
+    "cleanupModelsURL" : "https://openrouter.ai/api/v1/models",
     "cleanupTitle" : "OpenRouter cleanup models",
+    "discoveryNote" : "Discovery downloads public model details only. No key or transcript is sent. Turning it off keeps your saved model; bundled models remain available offline.",
+    "discoverySettingTitle" : "Discover OpenAI cleanup models via OpenRouter",
+    "emptyResults" : "No matching models. Change the filters or refresh the catalogue.",
     "pricingCaveat" : "Base prices can vary by context and provider; check OpenRouter before use.",
     "pricingUnlisted" : "Pricing is not listed for this model.",
     "routeNote" : "Cleanup requests for this model are sent to OpenRouter with your OpenRouter key.",
     "searchPlaceholder" : "Search models",
     "selectedTitle" : "Selected for cleanup",
+    "streamingNote" : "OpenRouter models can't stream; choose Remote Batch to use one.",
+    "transcriptionIntro" : "Use your OpenRouter key for batch transcription. Bundled models are listed first; browsing downloads model metadata only.",
+    "transcriptionModels" : [
+      {
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/google/gemini-2.5-flash",
+        "name" : "Gemini 2.5 Flash (OpenRouter)",
+        "provider" : "Google",
+        "searchText" : [
+          "Gemini 2.5 Flash (OpenRouter)",
+          "google/gemini-2.5-flash",
+          "Fast multimodal model with strong shorthand transcription.",
+          "Google"
+        ],
+        "selectionId" : "google/gemini-2.5-flash",
+        "slug" : "google/gemini-2.5-flash",
+        "speed" : "Fast",
+        "strengths" : [
+
+        ],
+        "subtitle" : "Bundled · google/gemini-2.5-flash",
+        "summary" : "Fast multimodal model with strong shorthand transcription."
+      },
+      {
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/google/gemini-3.1-flash-lite",
+        "name" : "Gemini 3.1 Flash Lite (OpenRouter)",
+        "provider" : "Google",
+        "searchText" : [
+          "Gemini 3.1 Flash Lite (OpenRouter)",
+          "google/gemini-3.1-flash-lite",
+          "Budget-friendly Gemini multimodal option. Preserved for existing selections.",
+          "Google"
+        ],
+        "selectionId" : "google/gemini-3.1-flash-lite",
+        "slug" : "google/gemini-3.1-flash-lite",
+        "speed" : "Fast",
+        "strengths" : [
+
+        ],
+        "subtitle" : "Bundled · google/gemini-3.1-flash-lite",
+        "summary" : "Budget-friendly Gemini multimodal option. Preserved for existing selections."
+      },
+      {
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/google/gemini-3.1-pro-preview",
+        "name" : "Gemini 3.1 Pro Preview (OpenRouter)",
+        "provider" : "Google",
+        "searchText" : [
+          "Gemini 3.1 Pro Preview (OpenRouter)",
+          "google/gemini-3.1-pro-preview",
+          "Gemini Pro audio understanding for recorded-audio transcription. Uses OpenRouter, not Google's dedicated Transcribe API.",
+          "Google"
+        ],
+        "selectionId" : "google/gemini-3.1-pro-preview",
+        "slug" : "google/gemini-3.1-pro-preview",
+        "speed" : "Medium",
+        "strengths" : [
+          "Quality"
+        ],
+        "subtitle" : "Bundled · google/gemini-3.1-pro-preview",
+        "summary" : "Gemini Pro audio understanding for recorded-audio transcription. Uses OpenRouter, not Google's dedicated Transcribe API."
+      },
+      {
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/google/gemini-3.5-flash-lite",
+        "name" : "Gemini 3.5 Flash Lite (OpenRouter)",
+        "provider" : "Google",
+        "searchText" : [
+          "Gemini 3.5 Flash Lite (OpenRouter)",
+          "google/gemini-3.5-flash-lite",
+          "Current Gemini Flash Lite generation with audio input. Opt-in; keeps saved models unchanged.",
+          "Google"
+        ],
+        "selectionId" : "google/gemini-3.5-flash-lite",
+        "slug" : "google/gemini-3.5-flash-lite",
+        "speed" : "Fast",
+        "strengths" : [
+          "Cheap"
+        ],
+        "subtitle" : "Bundled · google/gemini-3.5-flash-lite",
+        "summary" : "Current Gemini Flash Lite generation with audio input. Opt-in; keeps saved models unchanged."
+      },
+      {
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/google/gemini-3.8-flash",
+        "name" : "Gemini 3.8 Flash (OpenRouter)",
+        "provider" : "Google",
+        "searchText" : [
+          "Gemini 3.8 Flash (OpenRouter)",
+          "google/gemini-3.8-flash",
+          "Current Gemini Flash generation with audio input for recorded-audio transcription.",
+          "Google"
+        ],
+        "selectionId" : "google/gemini-3.8-flash",
+        "slug" : "google/gemini-3.8-flash",
+        "speed" : "Fast",
+        "strengths" : [
+
+        ],
+        "subtitle" : "Bundled · google/gemini-3.8-flash",
+        "summary" : "Current Gemini Flash generation with audio input for recorded-audio transcription."
+      },
+      {
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/mistralai/voxtral-small-24b-2507",
+        "name" : "Voxtral Small 24B (OpenRouter)",
+        "provider" : "Mistral",
+        "searchText" : [
+          "Voxtral Small 24B (OpenRouter)",
+          "mistralai/voxtral-small-24b-2507",
+          "Mistral's audio-capable Voxtral Small for recorded-audio transcription through OpenRouter chat completions, not the direct Mistral transcription endpoint.",
+          "Mistral"
+        ],
+        "selectionId" : "mistralai/voxtral-small-24b-2507",
+        "slug" : "mistralai/voxtral-small-24b-2507",
+        "speed" : "Medium",
+        "strengths" : [
+          "Quality"
+        ],
+        "subtitle" : "Bundled · mistralai/voxtral-small-24b-2507",
+        "summary" : "Mistral's audio-capable Voxtral Small for recorded-audio transcription through OpenRouter chat completions, not the direct Mistral transcription endpoint."
+      },
+      {
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/thinkingmachines/inkling",
+        "name" : "Inkling (OpenRouter)",
+        "provider" : "thinkingmachines",
+        "searchText" : [
+          "Inkling (OpenRouter)",
+          "thinkingmachines/inkling",
+          "Thinking Machines' hosted multimodal model with audio input. Up to 20 minutes, prepared as 16 kHz WAV. Chat completions, not live speech.",
+          "thinkingmachines"
+        ],
+        "selectionId" : "thinkingmachines/inkling",
+        "slug" : "thinkingmachines/inkling",
+        "speed" : "Medium",
+        "strengths" : [
+          "Quality"
+        ],
+        "subtitle" : "Bundled · thinkingmachines/inkling",
+        "summary" : "Thinking Machines' hosted multimodal model with audio input. Up to 20 minutes, prepared as 16 kHz WAV. Chat completions, not live speech."
+      },
+      {
+        "hasZeroPrices" : false,
+        "modelPageURL" : "https://openrouter.ai/thinkingmachines/inkling-small",
+        "name" : "Inkling Small (OpenRouter)",
+        "provider" : "thinkingmachines",
+        "searchText" : [
+          "Inkling Small (OpenRouter)",
+          "thinkingmachines/inkling-small",
+          "Smaller hosted Inkling model for recorded audio, up to 20 minutes as 16 kHz WAV.",
+          "thinkingmachines"
+        ],
+        "selectionId" : "thinkingmachines/inkling-small",
+        "slug" : "thinkingmachines/inkling-small",
+        "speed" : "Medium",
+        "strengths" : [
+          "Cheap"
+        ],
+        "subtitle" : "Bundled · thinkingmachines/inkling-small",
+        "summary" : "Smaller hosted Inkling model for recorded audio, up to 20 minutes as 16 kHz WAV."
+      }
+    ],
+    "transcriptionModelsURL" : "https://openrouter.ai/api/v1/models?output_modalities=transcription",
+    "transcriptionRouteNote" : "Recordings for this model are sent to OpenRouter with your OpenRouter key.",
+    "transcriptionSelectedTitle" : "Selected for transcription",
+    "transcriptionTitle" : "OpenRouter transcription models",
+    "transcriptionUseTitle" : "Use for transcription",
+    "unqualifiedWarning" : "Discovered model: not yet tested for cleanup.",
     "useTitle" : "Use for cleanup",
+    "vendorNames" : {
+      "anthropic" : "Anthropic",
+      "apple" : "Apple",
+      "google" : "Google",
+      "local" : "Local",
+      "meta-llama" : "Meta Llama",
+      "mistralai" : "Mistral",
+      "openai" : "OpenAI",
+      "qwen" : "Qwen"
+    },
     "zeroPricesTitle" : "Zero listed prices"
   },
   "profiles" : {

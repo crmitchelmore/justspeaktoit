@@ -1,5 +1,7 @@
 package com.justspeaktoit.android.cloud
 
+import java.util.Locale
+
 /** A provider row of `assets/cloud_catalog.json`, as written into [GeneratedCloudCatalog]. */
 internal data class CloudProviderSpec(val id: String, val credentialId: String)
 
@@ -136,12 +138,10 @@ object CloudCatalog {
     /** The provider the default cleanup model uses. */
     val cleanupProvider: CloudProvider = CloudProvider.forId(GeneratedCloudCatalog.CLEANUP_PROVIDER)
 
-    // Declared before cleanupModels: object properties initialise in order.
-    /** Matches `ModelPickerGrouping.vendorNames` on the Mac. */
-    private val VENDOR_NAMES = mapOf(
-        "anthropic" to "Anthropic", "google" to "Google", "meta-llama" to "Meta Llama",
-        "mistralai" to "Mistral", "openai" to "OpenAI", "qwen" to "Qwen",
-    )
+    /** SpeakCore's `ModelPickerGrouping.vendorNames`: the vendor an OpenRouter slug is filed under. */
+    fun vendorName(slug: String): String = slug.substringBefore('/').let { prefix ->
+        GeneratedCloudCatalog.openRouterVendorNames[prefix.lowercase(Locale.ROOT)] ?: prefix
+    }
 
     /** Cleanup models in catalogue order: native provider routes, then OpenRouter slugs. */
     val cleanupModels: List<CleanupModel> = GeneratedCloudCatalog.cleanupModels.map {
@@ -152,7 +152,7 @@ object CloudCatalog {
             provider = provider,
             apiName = it.apiName,
             vendor = if (provider == CloudProvider.OpenRouter) {
-                it.apiName.substringBefore('/').let { prefix -> VENDOR_NAMES[prefix] ?: prefix }
+                vendorName(it.apiName)
             } else {
                 provider.displayName
             },
@@ -162,14 +162,58 @@ object CloudCatalog {
     /**
      * A saved choice; a removed model's successor on the same route; otherwise the default.
      */
-    fun cleanupModel(selectionId: String?): CleanupModel {
+    fun cleanupModel(selectionId: String?): CleanupModel =
+        findCleanupModel(selectionId) ?: cleanupModels.first { it.selectionId == CLEANUP_MODEL }
+
+    /**
+     * A bundled cleanup model (or a removed one's successor), or a saved discovered OpenAI model
+     * (`openrouter/cleanup/openai/…`), which stays selected even when discovery is off or offline.
+     */
+    fun findCleanupModel(selectionId: String?): CleanupModel? {
         val current = selectionId?.let { GeneratedCloudCatalog.cleanupModelSuccessors[it] } ?: selectionId
-        return cleanupModels.firstOrNull { it.selectionId == current }
-            ?: cleanupModels.first { it.selectionId == CLEANUP_MODEL }
+        cleanupModels.firstOrNull { it.selectionId == current }?.let { return it }
+        val slug = OpenRouterCleanupSelection.modelId(current) ?: return null
+        return CleanupModel(
+            selectionId = OpenRouterCleanupSelection.selectionId(slug),
+            displayName = discoveredCleanupNames[slug]?.let { "$it (discovered)" } ?: "$slug (saved discovery)",
+            provider = CloudProvider.OpenRouter,
+            apiName = slug,
+            vendor = vendorName(slug),
+        )
     }
 
-    fun transcriptionModel(catalogId: String?): CloudModel =
-        transcriptionModels.firstOrNull { it.catalogId == catalogId } ?: defaultTranscriptionModel
+    fun transcriptionModel(catalogId: String?): CloudModel = findTranscriptionModel(catalogId) ?: defaultTranscriptionModel
+
+    /**
+     * A bundled transcription model, or a saved OpenRouter speech-to-text model
+     * (`openrouter/transcription/…`), which is sent to OpenRouter's dedicated endpoint.
+     */
+    fun findTranscriptionModel(catalogId: String?): CloudModel? {
+        transcriptionModels.firstOrNull { it.catalogId == catalogId }?.let { return it }
+        val slug = OpenRouterTranscriptionSelection.modelId(catalogId) ?: return null
+        return CloudModel(
+            catalogId = OpenRouterTranscriptionSelection.selectionId(slug),
+            displayName = discoveredTranscriptionNames[slug] ?: slug,
+            provider = CloudProvider.OpenRouter,
+            apiName = slug,
+            languageField = "language",
+        )
+    }
+
+    /** Whether a transcription model goes through OpenRouter, so it is labelled "OpenRouter › name". */
+    fun isOpenRouterTranscription(model: CloudModel): Boolean = model.provider == CloudProvider.OpenRouter
+
+    @Volatile
+    private var discoveredCleanupNames: Map<String, String> = emptyMap()
+
+    @Volatile
+    private var discoveredTranscriptionNames: Map<String, String> = emptyMap()
+
+    /** Discovery's latest names, so a saved discovered model shows its name rather than its slug. */
+    fun rememberDiscoveredNames(cleanup: Map<String, String>, transcription: Map<String, String>) {
+        discoveredCleanupNames = cleanup
+        discoveredTranscriptionNames = transcription
+    }
 
     /** Providers whose keys the app can use, in settings order. */
     val providers: List<CloudProvider> = GeneratedCloudCatalog.providers.map { CloudProvider.forId(it.id) }

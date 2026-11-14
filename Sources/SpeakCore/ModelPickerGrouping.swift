@@ -73,7 +73,7 @@ public enum ModelPickerGrouping {
         }
     }
 
-    private static let vendorNames = [
+    static let vendorNames = [
         "anthropic": "Anthropic", "apple": "Apple", "google": "Google", "local": "Local",
         "meta-llama": "Meta Llama", "mistralai": "Mistral", "openai": "OpenAI", "qwen": "Qwen"
     ]

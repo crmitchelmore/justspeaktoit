@@ -282,6 +282,22 @@ class BatchTranscriberTest {
     }
 
     @Test
+    fun testOpenRouter_sendsALiveSpeechToTextModelToTheTranscriptionEndpoint() {
+        val live = CloudCatalog.transcriptionModel("openrouter/transcription/openai/whisper-large-v3")
+        audio.writeBytes(WavFormat.header(2) + ByteArray(2))
+        val text = transcriber(
+            listOf("POST ${CloudProvider.OpenRouter.baseUrl}/audio/transcriptions" to ok("""{"text":" Hello "}""")),
+        ).transcribe(live, "k", audio, null, CallHandle(), wav, emptyList())
+        assertEquals("Hello", text)
+
+        RandomAccessFile(audio, "rw").use { it.setLength(BatchWire.OPENROUTER_STT_MAX_AUDIO_BYTES + 1) }
+        val error = assertThrows(CloudException::class.java) {
+            transcriber(emptyList()).transcribe(live, "k", audio, null, CallHandle(), wav, emptyList())
+        }
+        assertEquals(DictationFailure.AudioTooLarge, error.failure)
+    }
+
+    @Test
     fun testSmallest_refusesRecordingsOverItsUploadLimit() {
         RandomAccessFile(audio, "rw").use { it.setLength(BatchWire.SMALLEST_MAX_AUDIO_BYTES + 1) }
         val error = assertThrows(CloudException::class.java) {

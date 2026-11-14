@@ -13,6 +13,16 @@ extension SettingsSearchCatalog {
             settingKeys: ["cloud_model"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.cloudModel.openRouter", title: "Browse OpenRouter models…", section: .transcription,
+            systemImage: "magnifyingglass",
+            summary: "Browse OpenRouter's audio-input models for batch transcription, with prices and details.",
+            keywords: [
+                "openrouter", "browse openrouter models", "openrouter transcription", "audio models",
+                "speech to text models", "transcription browser", "model pricing", "gemini", "voxtral"
+            ],
+            settingKeys: ["cloud_model"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.language", title: "Dictation language", section: .transcription,
             systemImage: "globe",
             summary: "The language you speak. Automatic uses the phone's language.",
@@ -47,9 +57,10 @@ extension SettingsSearchCatalog {
             keywords: [
                 "post-processing", "polish", "cleanup", "llm", "openrouter", "grammar", "cleanup model",
                 "anthropic", "claude", "openai", "gemini", "groq", "mistral", "browse openrouter models",
-                "openrouter models", "model browser", "model pricing", "zero listed prices"
+                "openrouter models", "model browser", "model pricing", "zero listed prices",
+                "discover models", "model discovery", "live models", "newest models"
             ],
-            settingKeys: ["cleanup_enabled", "cleanup_model"], platforms: .android
+            settingKeys: ["cleanup_enabled", "cleanup_model", "cleanupModelDiscoveryEnabled"], platforms: .android
         ),
         SettingsSearchEntry(
             id: "android.cleanupPrompt", title: "Cleanup prompt", section: .postProcessing,

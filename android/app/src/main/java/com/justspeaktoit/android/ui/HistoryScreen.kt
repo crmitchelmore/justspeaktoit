@@ -102,7 +102,7 @@ fun HistoryScreen(
     )
     val modeLabels = RecognitionMode.entries.associate { it.name to stringResource(it.label()) }
     val modelName: (String) -> String = { key ->
-        modeLabels[key] ?: CloudCatalog.transcriptionModels.firstOrNull { it.catalogId == key }?.displayName ?: key
+        modeLabels[key] ?: CloudCatalog.findTranscriptionModel(key)?.displayName ?: key
     }
     val models = remember(entries, modeLabels) { HistoryFilter.models(entries).sortedBy(modelName) }
     val visible = remember(entries, filter, modeLabels) { filter.matching(entries, modelName = modelName) }
@@ -413,7 +413,7 @@ private fun sourceLabel(entry: HistoryEntry): String? {
     }
     val mode = RecognitionMode.entries.firstOrNull { it.name == entry.mode } ?: return null
     if (mode == RecognitionMode.Cloud) {
-        return CloudCatalog.transcriptionModels.firstOrNull { it.catalogId == entry.model }?.displayName
+        return CloudCatalog.findTranscriptionModel(entry.model)?.displayName
             ?: entry.model
     }
     return stringResource(mode.label())

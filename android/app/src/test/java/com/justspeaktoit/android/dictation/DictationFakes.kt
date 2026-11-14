@@ -324,6 +324,7 @@ internal class MemoryPrefs(
     override var cloudModelId: String? = null,
     override var cleanupModelId: String? = null,
     override var cleanupEnabled: Boolean = false,
+    override var cleanupModelDiscoveryEnabled: Boolean = false,
     override var retention: Retention = Retention.Month,
     override var keepAudioOnCancel: Boolean = true,
     override var keepRecordings: Boolean = false,

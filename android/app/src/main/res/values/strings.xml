@@ -234,7 +234,6 @@
         <item quantity="one">%1$d model from many providers with one OpenRouter key</item>
         <item quantity="other">%1$d models from many providers with one OpenRouter key</item>
     </plurals>
-    <string name="cleanup_picker_no_results">No models match.</string>
     <plurals name="cleanup_picker_result_count">
         <item quantity="one">%1$d model</item>
         <item quantity="other">%1$d models</item>
@@ -248,6 +247,10 @@
     <string name="cleanup_picker_detail_pricing">Input / output</string>
     <string name="cleanup_picker_detail_tokens">%1$s tokens</string>
     <string name="cleanup_picker_detail_link">Model details on OpenRouter</string>
+    <string name="transcription_picker_needs_key">Add your %1$s key to transcribe with this model.</string>
+    <string name="transcription_picker_missing">OpenRouter no longer lists %1$s. It stays selected until you choose another model.</string>
+    <string name="openrouter_discovery_loading">Checking OpenRouter for models…</string>
+    <string name="openrouter_discovery_refresh">Refresh</string>
     <string name="settings_keep_audio_title">Keep audio when a recording is cancelled</string>
     <string name="settings_keep_audio_note">Cancelled cloud recordings stay in History so you can transcribe them later.</string>
     <string name="settings_history_sync_title">History sync</string>

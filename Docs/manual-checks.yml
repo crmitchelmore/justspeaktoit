@@ -1799,6 +1799,22 @@ sessions:
           - "With TalkBack on, repeat the search and open a model's details, then use Back to return to the browser and to the picker."
         expected: "The browser lists only OpenRouter models, the result count changes as you search and filter, and no matches shows a clear message. The details page shows pricing (or says it is not listed) before choosing. After choosing, the Browse row shows OpenRouter \u203a the model name and cleanup uses it. TalkBack reads every control's name and state, announces the result count, and Back goes details, browser, picker."
         final_gate: false
+      - id: "android-openrouter-transcription-browser"
+        issues:
+          - 1618
+        title: "Browse live OpenRouter models for transcription and cleanup, then dictate with one"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1618 OpenRouter transcription browser, with an OpenRouter key saved"
+        steps:
+          - "Settings: under Cloud transcription model, tap Browse OpenRouter models\u2026. Wait for the list to finish checking OpenRouter, then search, choose a provider and turn Zero listed prices on and off."
+          - "Open a model that is not one of the bundled Gemini, Voxtral or Inkling models, read its details, then tap Use for transcription."
+          - "Choose Cloud, record \"OpenRouter browser check one two three\" and stop, then open History."
+          - "Open Clean up transcripts \u203a the cleanup model picker \u203a Browse OpenRouter models\u2026, turn on Discover OpenAI cleanup models via OpenRouter, choose a newly listed model and dictate again."
+          - "Turn on flight mode, force-stop and reopen the app, then open both browsers again and tap Refresh."
+          - "With TalkBack on, open the transcription browser, a model's details and the Refresh button."
+        expected: "The transcription browser lists the bundled OpenRouter models first, then the other audio models OpenRouter lists today. After choosing, the row under the cloud models shows OpenRouter \u203a the model name, the recording returns the spoken words and History names that model. Cleanup lists newly discovered OpenAI models only after the switch is on, and uses the one chosen. Offline, both browsers keep the models found earlier and your choices, Refresh says discovery is unavailable, and nothing else breaks. TalkBack reads every control's name and state."
+        final_gate: false
       - id: "android-batch-provider-catalogue"
         issues:
           - 1636

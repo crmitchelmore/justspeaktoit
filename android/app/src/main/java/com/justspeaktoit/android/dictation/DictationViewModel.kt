@@ -18,6 +18,8 @@ import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.CloudService
 import com.justspeaktoit.android.cloud.NoAudioInputs
+import com.justspeaktoit.android.cloud.OpenRouterDiscovery
+import com.justspeaktoit.android.cloud.OpenRouterDiscoveryStore
 import com.justspeaktoit.android.cloud.ProviderBalanceClient
 import com.justspeaktoit.android.cloud.ProviderBalanceClients
 import com.justspeaktoit.android.cloud.ProviderBalanceStore
@@ -117,6 +119,8 @@ class DictationViewModel internal constructor(
     handsFreeMicrophone: HandsFreeMicrophone = NoHandsFreeMicrophone,
     // Builds opt-in History sync over this ViewModel's History; null leaves sync out of the app.
     historySync: (SyncHistoryEntries) -> HistorySyncService? = { null },
+    // Downloads OpenRouter's public model list for the browsers; tests pass a fake.
+    openRouterFetch: (String) -> String = OpenRouterDiscovery::download,
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     /** Hands-free dictation (#1632): its recordings take their audio from its microphone, pre-roll first. */
     private val handsFree = HandsFreeDictation(
@@ -157,6 +161,7 @@ class DictationViewModel internal constructor(
         DictationUiState(
             cleanupEnabled = prefs.cleanupEnabled,
             cleanupModel = CloudCatalog.cleanupModel(prefs.cleanupModelId),
+            cleanupModelDiscoveryEnabled = prefs.cleanupModelDiscoveryEnabled,
             retention = prefs.retention,
             keepAudioOnCancel = prefs.keepAudioOnCancel,
             silence = prefs.silence,
@@ -186,6 +191,27 @@ class DictationViewModel internal constructor(
         io = io,
         publish = { entries -> _state.update { it.copy(balances = entries) } },
     )
+
+    /** Live OpenRouter models, cached on the device; a saved discovered model resolves once it is read. */
+    private val discovery = OpenRouterDiscoveryStore(
+        cacheDir = File(cacheDir, "openrouter"),
+        scope = scope,
+        io = io,
+        fetch = openRouterFetch,
+        publish = { found ->
+            _state.update {
+                it.copy(
+                    openRouterDiscovery = found,
+                    cleanupModel = CloudCatalog.findCleanupModel(it.cleanupModel.selectionId) ?: it.cleanupModel,
+                )
+            }
+        },
+    )
+
+    init {
+        discovery.restore()
+        discovery.setCleanupEnabled(prefs.cleanupModelDiscoveryEnabled)
+    }
 
     init {
         _state.update {
@@ -466,6 +492,23 @@ class DictationViewModel internal constructor(
         _state.update { it.copy(cleanupEnabled = enabled) }
     }
 
+    /** Chooses a transcription model by ID, including a live OpenRouter one from the browser. */
+    fun chooseTranscriptionModel(id: String) {
+        CloudCatalog.findTranscriptionModel(id)?.let(::chooseCloudModel)
+    }
+
+    /** Opt-in live discovery of OpenAI cleanup models; a saved discovered model stays selected when off. */
+    fun setCleanupModelDiscovery(enabled: Boolean) {
+        prefs.cleanupModelDiscoveryEnabled = enabled
+        _state.update { it.copy(cleanupModelDiscoveryEnabled = enabled) }
+        discovery.setCleanupEnabled(enabled)
+    }
+
+    /** [force] is a Refresh press, which skips the fresh-cache check but not the one-minute floor. */
+    fun refreshTranscriptionModels(force: Boolean) = discovery.refreshTranscription(force)
+
+    fun refreshCleanupModels(force: Boolean) = discovery.refreshCleanup(force)
+
     /** A blank prompt restores the built-in one. Applies from the next cleanup. */
     fun setCleanupPrompt(prompt: String) {
         val saved = prompt.takeIf { it.isNotBlank() }
@@ -519,6 +562,7 @@ class DictationViewModel internal constructor(
                     setCorrections(RawConfigurationValues.corrections(value as Map<*, *>, _state.value.corrections))
                 "cleanup_enabled" -> setCleanupEnabled(value as Boolean)
                 "cleanup_model" -> chooseCleanupModel(CloudCatalog.cleanupModel(value as String))
+                "cleanupModelDiscoveryEnabled" -> setCleanupModelDiscovery(value as Boolean)
                 "keepAudioOnCancel" -> setKeepAudioOnCancel(value as Boolean)
                 "handsFreeDictationEnabled" -> setHandsFree(value as Boolean)
                 "history_retention" -> setRetention(Retention.valueOf(value as String))

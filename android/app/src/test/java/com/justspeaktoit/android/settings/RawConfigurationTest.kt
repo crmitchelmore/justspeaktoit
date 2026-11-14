@@ -110,6 +110,17 @@ class RawConfigurationTest {
     }
 
     @Test
+    fun aLiveOpenRouterModelTheAppHoldsStaysValid() {
+        val transcription = "openrouter/transcription/openai/whisper-large-v3"
+        val cleanup = "openrouter/cleanup/openai/gpt-future"
+        val held = fresh + mapOf("cloud_model" to transcription, "cleanup_model" to cleanup)
+        val report = validate("""{"cloud_model": "$transcription", "cleanup_model": "$cleanup"}""", held)
+        assertTrue(report.isValid)
+        assertEquals(emptyMap<String, Any?>(), report.changes)
+        assertFalse(validate("""{"cloud_model": "openrouter/transcription/openai/other"}""", held).isValid)
+    }
+
+    @Test
     fun rejectsSecretsNewerVersionsAndTrailingText() {
         val secret = RawConfiguration.validate(schema, """{"schemaVersion": 1, "apiKeys": {"openai": "sk-x"}}""", fresh)
         assertEquals(listOf("apiKeys.openai"), secret.errors.map { it.path })

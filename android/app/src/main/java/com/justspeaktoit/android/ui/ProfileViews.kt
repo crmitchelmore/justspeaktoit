@@ -44,6 +44,7 @@ import com.justspeaktoit.android.R
 import com.justspeaktoit.android.cloud.CleanupModelPicker
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.OpenRouterBrowser
 import com.justspeaktoit.android.dictation.DictationLanguages
 import com.justspeaktoit.android.settings.DictationProfile
 
@@ -102,6 +103,7 @@ internal fun ProfilesEditor(
     savedKeys: Set<CloudProvider>,
     onSave: (DictationProfile) -> Unit,
     onDelete: (String) -> Unit,
+    discovery: OpenRouterDiscoveryUi = OpenRouterDiscoveryUi(),
 ) {
     var editing by remember { mutableStateOf<DictationProfile?>(null) }
     var creating by remember { mutableStateOf(false) }
@@ -147,6 +149,7 @@ internal fun ProfilesEditor(
         ProfileEditorDialog(
             initial = current,
             savedKeys = savedKeys,
+            discovery = discovery,
             onSave = {
                 onSave(it)
                 editing = null
@@ -166,13 +169,14 @@ internal fun ProfilesEditor(
     }
 }
 
-/** One choice inside the profile editor. */
-private data class Choice(val key: String?, val label: String)
+/** One choice inside the profile editor; [tag] is its automation ID where it has one. */
+private data class Choice(val key: String?, val label: String, val tag: String? = null)
 
 @Composable
 private fun ProfileEditorDialog(
     initial: DictationProfile?,
     savedKeys: Set<CloudProvider>,
+    discovery: OpenRouterDiscoveryUi,
     onSave: (DictationProfile) -> Unit,
     onDelete: (() -> Unit)?,
     onDismiss: () -> Unit,
@@ -189,7 +193,8 @@ private fun ProfileEditorDialog(
 
     val useSettings = stringResource(R.string.profile_use_settings)
     val otherDevice = base.transcriptionModelId?.takeIf { base.cloudModel == null && !cloudModelChanged }
-    val cloudLabel = CloudCatalog.transcriptionModels.firstOrNull { it.catalogId == cloudModelId }?.displayName
+    val cloudModel = CloudCatalog.findTranscriptionModel(cloudModelId)
+    val cloudLabel = cloudModel?.let { openRouterTranscriptionLabel(it, discovery.state) ?: it.displayName }
         ?: otherDevice?.let { stringResource(R.string.profile_model_elsewhere, it) }
         ?: useSettings
     val languageLabel = languageId?.let { id ->
@@ -285,7 +290,7 @@ private fun ProfileEditorDialog(
                         },
                         cleanupPrompt = prompt.takeIf { it.isNotBlank() },
                     )
-                    val model = CloudCatalog.transcriptionModels.firstOrNull { it.catalogId == cloudModelId }
+                    val model = CloudCatalog.findTranscriptionModel(cloudModelId)
                     onSave(if (cloudModelChanged) saved.withCloudModel(model) else saved)
                 },
                 enabled = name.isNotBlank(),
@@ -300,17 +305,40 @@ private fun ProfileEditorDialog(
     )
 
     when (picking) {
+        // OpenRouter models are chosen in their own browser, like the cleanup picker.
         CLOUD_MODEL -> ChoiceDialog(
             title = stringResource(R.string.profile_cloud_model),
             choices = listOf(Choice(null, useSettings)) +
-                CloudCatalog.transcriptionModels.map { Choice(it.catalogId, it.displayName) },
-            selected = cloudModelId,
+                CloudCatalog.transcriptionModels.filterNot(CloudCatalog::isOpenRouterTranscription)
+                    .map { Choice(it.catalogId, it.displayName) } +
+                Choice(
+                    OPENROUTER,
+                    cloudModel?.let { openRouterTranscriptionLabel(it, discovery.state) }
+                        ?: OpenRouterBrowser.BROWSE_TITLE,
+                    AutomationIds.TRANSCRIPTION_PICKER.openRouter,
+                ),
+            selected = if (cloudModel?.let(CloudCatalog::isOpenRouterTranscription) == true) OPENROUTER else cloudModelId,
+            onChoose = {
+                if (it == OPENROUTER) {
+                    picking = CLOUD_MODEL_OPENROUTER
+                } else {
+                    cloudModelId = it
+                    cloudModelChanged = true
+                    picking = null
+                }
+            },
+            onDismiss = { picking = null },
+        )
+        CLOUD_MODEL_OPENROUTER -> TranscriptionModelPickerDialog(
+            selectedId = cloudModelId.orEmpty(),
+            savedKeys = savedKeys,
+            discovery = discovery,
             onChoose = {
                 cloudModelId = it
                 cloudModelChanged = true
                 picking = null
             },
-            onDismiss = { picking = null },
+            onDismiss = { picking = CLOUD_MODEL },
         )
         LANGUAGE -> ChoiceDialog(
             title = stringResource(R.string.profile_language),
@@ -354,6 +382,7 @@ private fun ProfileEditorDialog(
                 picking = null
             },
             onDismiss = { picking = null },
+            discovery = discovery,
         )
     }
 }
@@ -392,6 +421,7 @@ private fun ChoiceDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .then(choice.tag?.let { Modifier.testTag(it) } ?: Modifier)
                             .selectable(selected = isSelected, role = Role.RadioButton) { onChoose(choice.key) }
                             .padding(vertical = 6.dp),
                     ) {
@@ -408,6 +438,8 @@ private fun ChoiceDialog(
 }
 
 private const val CLOUD_MODEL = "cloudModel"
+private const val CLOUD_MODEL_OPENROUTER = "cloudModel.openRouter"
+private const val OPENROUTER = "openRouter"
 private const val LANGUAGE = "language"
 private const val CLEANUP = "cleanup"
 private const val CLEANUP_MODEL = "cleanupModel"

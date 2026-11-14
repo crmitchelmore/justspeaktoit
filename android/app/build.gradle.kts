@@ -179,7 +179,7 @@ abstract class GenerateCloudCatalog : DefaultTask() {
         @Suppress("UNCHECKED_CAST")
         val browser = json["openRouterBrowser"] as Map<String, Any?>
         @Suppress("UNCHECKED_CAST")
-        val browserModels = (browser["cleanupModels"] as List<Map<String, Any?>>).joinToString("") {
+        fun browserModels(key: String) = (browser[key] as List<Map<String, Any?>>).joinToString("") {
             "        OpenRouterBrowserModelSpec(\n" +
                 "            selectionId = ${lit(it["selectionId"])},\n" +
                 "            slug = ${lit(it["slug"])},\n" +
@@ -195,6 +195,12 @@ abstract class GenerateCloudCatalog : DefaultTask() {
                 "            searchText = ${strings(it["searchText"])},\n" +
                 "            modelPageUrl = ${optLit(it["modelPageURL"])},\n" +
                 "        ),\n"
+        }
+        val browserModels = browserModels("cleanupModels")
+        val browserTranscriptionModels = browserModels("transcriptionModels")
+        @Suppress("UNCHECKED_CAST")
+        val vendorNames = (browser["vendorNames"] as Map<String, Any?>).toSortedMap().entries.joinToString("") {
+            "        ${lit(it.key)} to ${lit(it.value)},\n"
         }
         @Suppress("UNCHECKED_CAST")
         val profiles = json["profiles"] as Map<String, Any?>
@@ -260,6 +266,31 @@ abstract class GenerateCloudCatalog : DefaultTask() {
             |
             |    val openRouterCleanupModels: List<OpenRouterBrowserModelSpec> = listOf(
             |${browserModels.trimEnd('\n')}
+            |    )
+            |
+            |    const val OPENROUTER_TRANSCRIPTION_TITLE = ${lit(browser["transcriptionTitle"])}
+            |    const val OPENROUTER_TRANSCRIPTION_INTRO = ${lit(browser["transcriptionIntro"])}
+            |    const val OPENROUTER_TRANSCRIPTION_USE = ${lit(browser["transcriptionUseTitle"])}
+            |    const val OPENROUTER_TRANSCRIPTION_SELECTED = ${lit(browser["transcriptionSelectedTitle"])}
+            |    const val OPENROUTER_TRANSCRIPTION_ROUTE_NOTE = ${lit(browser["transcriptionRouteNote"])}
+            |    const val OPENROUTER_STREAMING_NOTE = ${lit(browser["streamingNote"])}
+            |    const val OPENROUTER_EMPTY_RESULTS = ${lit(browser["emptyResults"])}
+            |    const val OPENROUTER_UNQUALIFIED_WARNING = ${lit(browser["unqualifiedWarning"])}
+            |
+            |    /** Live discovery: the opt-in cleanup setting, its privacy note and both public endpoints. */
+            |    const val OPENROUTER_DISCOVERY_SETTING_TITLE = ${lit(browser["discoverySettingTitle"])}
+            |    const val OPENROUTER_DISCOVERY_NOTE = ${lit(browser["discoveryNote"])}
+            |    const val OPENROUTER_CLEANUP_MODELS_URL = ${lit(browser["cleanupModelsURL"])}
+            |    const val OPENROUTER_TRANSCRIPTION_MODELS_URL = ${lit(browser["transcriptionModelsURL"])}
+            |
+            |    /** SpeakCore's `ModelPickerGrouping.vendorNames`, keyed by lowercased slug prefix. */
+            |    val openRouterVendorNames: Map<String, String> = mapOf(
+            |${vendorNames.trimEnd('\n')}
+            |    )
+            |
+            |    /** Bundled OpenRouter batch models; live speech-to-text models are merged after them. */
+            |    val openRouterTranscriptionModels: List<OpenRouterBrowserModelSpec> = listOf(
+            |${browserTranscriptionModels.trimEnd('\n')}
             |    )
             |
             |    /** SpeakCore's `VoiceEditPolicy`: the selection-rewrite prompt and the formatting words. */

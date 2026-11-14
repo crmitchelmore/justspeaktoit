@@ -17,6 +17,9 @@ interface DictationPreferences {
     var cloudModelId: String?
     var cleanupModelId: String?
     var cleanupEnabled: Boolean
+
+    /** Whether the cleanup browser also lists OpenAI models OpenRouter offers today; off by default. */
+    var cleanupModelDiscoveryEnabled: Boolean
     var retention: Retention
     var keepAudioOnCancel: Boolean
 
@@ -87,6 +90,10 @@ class AppPreferences(context: Context) : DictationPreferences {
     override var cleanupEnabled: Boolean
         get() = prefs.getBoolean(KEY_CLEANUP, false)
         set(value) = prefs.edit { putBoolean(KEY_CLEANUP, value) }
+
+    override var cleanupModelDiscoveryEnabled: Boolean
+        get() = prefs.getBoolean(KEY_CLEANUP_MODEL_DISCOVERY, false)
+        set(value) = prefs.edit { putBoolean(KEY_CLEANUP_MODEL_DISCOVERY, value) }
 
     override var retention: Retention
         get() {
@@ -229,6 +236,7 @@ class AppPreferences(context: Context) : DictationPreferences {
         private const val KEY_CLOUD_MODEL = "cloud_model"
         private const val KEY_CLEANUP = "cleanup_enabled"
         private const val KEY_CLEANUP_MODEL = "cleanup_model"
+        private const val KEY_CLEANUP_MODEL_DISCOVERY = "cleanupModelDiscoveryEnabled"
 
         /** The canonical cross-platform key; values are SpeakCore `TranscriptionLanguageCatalog` IDs. */
         private const val KEY_LANGUAGE = "preferredLocale"

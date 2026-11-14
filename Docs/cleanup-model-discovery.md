@@ -24,10 +24,15 @@ excluded from the shared settings-transfer catalogue: each installation opts in.
   browser over the same picker's OpenRouter entries (bundled, then discovered):
   search, provider and zero-listed-price filters, a details pane with pricing, and
   **Use for cleanup**. Choosing selects that picker entry; Apply saves it (#1618).
-- **Android:** no discovery yet (#1618). **Browse OpenRouter models…** browses the
-  bundled OpenRouter cleanup routes exported in the `openRouterBrowser` section of
-  `cloud_catalog.json`; its filter is a Kotlin port of `OpenRouterBrowserFilter`
-  checked against the shared `Tests/Fixtures/openrouter-browser/` cases.
+- **Android:** **Browse OpenRouter models…** (under the cleanup model picker, and
+  each profile's) has the same off-by-default **Discover OpenAI cleanup models via
+  OpenRouter** switch. Opening the browser while it is on refreshes metadata older
+  than six hours; **Refresh** asks sooner, subject to the one-minute retry floor.
+  Startup only restores the bounded cache, which names a saved discovery offline.
+  Bundled routes and the endpoint come from the `openRouterBrowser` section of
+  `cloud_catalog.json`; `OpenRouterDiscovery.kt` ports the admission rules and its
+  filter is a Kotlin port of `OpenRouterBrowserFilter`, checked against the shared
+  `Tests/Fixtures/openrouter-browser/` cases (#1618).
 - Disabling discovery cancels an active fetch and hides additional choices.
   An already selected discovery remains selected and usable through the existing
   cleanup flow. It does not grant new inference consent or enable post-processing.

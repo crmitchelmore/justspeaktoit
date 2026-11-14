@@ -171,6 +171,22 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         }
     }
 
+    func testOpenRouterBrowserListsAndroidsBundledOpenRouterTranscriptionModels() throws {
+        let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
+        let browser = try XCTUnwrap(object?["openRouterBrowser"] as? [String: Any])
+        let models = try XCTUnwrap(object?["transcriptionModels"] as? [[String: Any]])
+        let openRouter = models.filter { $0["provider"] as? String == OpenRouterService.providerID }
+            .compactMap { $0["catalogId"] as? String }
+        let rows = try XCTUnwrap(browser["transcriptionModels"] as? [[String: Any]])
+        XCTAssertFalse(openRouter.isEmpty)
+        XCTAssertEqual(Set(rows.compactMap { $0["selectionId"] as? String }), Set(openRouter))
+        XCTAssertEqual(browser["transcriptionUseTitle"] as? String, "Use for transcription")
+        XCTAssertEqual(browser["discoverySettingTitle"] as? String, CleanupModelSelection.settingTitle)
+        XCTAssertEqual(browser["transcriptionModelsURL"] as? String,
+                       OpenRouterModelBrowserCatalog.transcriptionModelsURL.absoluteString)
+        XCTAssertEqual((browser["vendorNames"] as? [String: String])?["openai"], "OpenAI")
+    }
+
     func testDocumentCarriesLanguagesAndVocabularyPromptRules() throws {
         let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
         let languages = try XCTUnwrap(object?["languages"] as? [[String: String]])

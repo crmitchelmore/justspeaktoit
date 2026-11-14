@@ -201,7 +201,9 @@ object RawConfiguration {
             val currentValue = current[key]
             val message = when {
                 field.readOnly && canonical != currentValue -> "Read-only here; change it in the app's Settings."
-                canonical is String && field.allowedValues != null && canonical !in field.allowedValues ->
+                // A value the app already holds, such as a model chosen from live OpenRouter discovery, stays valid.
+                canonical is String && field.allowedValues != null && canonical !in field.allowedValues &&
+                    canonical != currentValue ->
                     "Must be one of: ${field.allowedValues.joinToString(", ")}."
                 canonical is Number && field.minimum != null && field.maximum != null &&
                     canonical.toDouble() !in field.minimum..field.maximum ->

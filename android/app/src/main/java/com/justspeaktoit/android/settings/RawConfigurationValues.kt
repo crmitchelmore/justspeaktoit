@@ -17,6 +17,7 @@ object RawConfigurationValues {
         "personal_corrections" to corrections(state.corrections),
         "cleanup_enabled" to state.cleanupEnabled,
         "cleanup_model" to state.cleanupModel.selectionId,
+        "cleanupModelDiscoveryEnabled" to state.cleanupModelDiscoveryEnabled,
         "keepAudioOnCancel" to state.keepAudioOnCancel,
         "handsFreeDictationEnabled" to state.handsFreeEnabled,
         "history_retention" to state.retention.name,

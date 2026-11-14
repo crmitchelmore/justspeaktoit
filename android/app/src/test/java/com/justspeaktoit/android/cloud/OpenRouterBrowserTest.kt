@@ -4,6 +4,8 @@ import com.justspeaktoit.android.settings.SettingsSearchAsset
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -45,16 +47,104 @@ class OpenRouterBrowserTest {
     fun testCleanupItems_areEveryOpenRouterCleanupModelInSpeakCoreOrder() {
         val items = OpenRouterBrowser.cleanupItems
         val exported = asset.getJSONArray("cleanupModels")
-        val ids = items.map { it.model.selectionId }
+        val ids = items.map { it.selectionId }
         assertEquals((0 until exported.length()).map { exported.getJSONObject(it).getString("selectionId") }, ids)
         assertEquals(CleanupModelPicker.openRouter().map { it.selectionId }.toSet(), ids.toSet())
         assertEquals(ids.size, ids.toSet().size)
         items.forEach { item ->
-            assertTrue(item.model.isOpenRouter)
-            assertEquals(item.model.apiName, item.slug)
-            assertEquals(item.model.vendor, item.provider)
+            val model = CloudCatalog.findCleanupModel(item.selectionId)!!
+            assertTrue(model.isOpenRouter)
+            assertEquals(model.apiName, item.slug)
+            assertEquals(model.vendor, item.provider)
             assertTrue(item.searchText.isNotEmpty())
+            assertFalse(item.discovered)
         }
+    }
+
+    @Test
+    fun testCleanupItems_addDiscoveredOpenAIModelsOnlyWhileDiscoveryIsOn() {
+        val bundled = OpenRouterBrowser.cleanupItems.first { it.provider == "OpenAI" }
+        val found = listOf(
+            DiscoveredCleanupModel("openai/gpt-future", "GPT Future", 0.1, 0.5, 1_050_000),
+            DiscoveredCleanupModel("openai/gpt-future", "GPT Future again", null, null, null),
+            DiscoveredCleanupModel(bundled.slug, "Already bundled", null, null, null),
+        )
+        val off = OpenRouterBrowser.cleanupItems(found, discoveryEnabled = false, selected = null)
+        assertEquals(OpenRouterBrowser.cleanupItems.map { it.selectionId }.toSet(), off.map { it.selectionId }.toSet())
+
+        val on = OpenRouterBrowser.cleanupItems(found, discoveryEnabled = true, selected = null)
+        val discovered = on.filter { it.discovered }
+        assertEquals(listOf("openrouter/cleanup/openai/gpt-future"), discovered.map { it.selectionId })
+        val item = discovered.single()
+        assertEquals("GPT Future (discovered)", item.name)
+        assertEquals("OpenAI", item.provider)
+        assertEquals("\$0.10/\$0.50 / 1M", item.pricing)
+        assertTrue(item.unqualified)
+        assertEquals(on.size, OpenRouterBrowser.cleanupItems.size + 1)
+        assertEquals(
+            on.sortedWith { a, b ->
+                CleanupModelPicker.compareNatural(a.provider, b.provider).takeIf { it != 0 }
+                    ?: CleanupModelPicker.compareNatural(a.name, b.name)
+            },
+            on,
+        )
+    }
+
+    @Test
+    fun testCleanupItems_keepASavedDiscoveredModelThatIsNoLongerListed() {
+        val saved = "openrouter/cleanup/openai/gpt-retired"
+        val items = OpenRouterBrowser.cleanupItems(emptyList(), discoveryEnabled = false, selected = saved)
+        val retained = items.single { it.discovered }
+        assertEquals(saved, retained.selectionId)
+        assertEquals("openai/gpt-retired (saved discovery)", retained.name)
+        val model = CloudCatalog.findCleanupModel(saved)!!
+        assertEquals(CloudProvider.OpenRouter, model.provider)
+        assertEquals("openai/gpt-retired", model.apiName)
+        assertEquals(saved, CloudCatalog.cleanupModel(saved).selectionId)
+        assertNull(CloudCatalog.findCleanupModel("openrouter/cleanup/anthropic/claude"))
+    }
+
+    @Test
+    fun testTranscriptionItems_areTheBundledModelsThenLiveSpeechToTextModelsByName() {
+        val bundled = OpenRouterBrowser.transcriptionItems
+        assertTrue(bundled.isNotEmpty())
+        bundled.forEach { item ->
+            val model = CloudCatalog.findTranscriptionModel(item.selectionId)!!
+            assertEquals(CloudProvider.OpenRouter, model.provider)
+            assertTrue(CloudCatalog.isOpenRouterTranscription(model))
+        }
+        val audio = { id: String, name: String, output: String ->
+            OpenRouterAudioModel(id, name, "", listOf("audio"), listOf(output), mapOf("audio" to "0"), null)
+        }
+        val items = OpenRouterBrowser.transcriptionItems(
+            listOf(
+                audio("vendor/zeta", "Zeta", "transcription"),
+                audio("vendor/alpha", "Alpha", "transcription"),
+                audio("vendor/alpha", "Alpha again", "transcription"),
+                audio("vendor/voice", "Voice", "speech"),
+            ),
+        )
+        assertEquals(bundled, items.take(bundled.size))
+        val live = items.drop(bundled.size)
+        assertEquals(
+            listOf("openrouter/transcription/vendor/alpha", "openrouter/transcription/vendor/zeta"),
+            live.map { it.selectionId },
+        )
+        assertTrue(live.all { it.discovered && it.hasZeroPrices })
+        assertEquals(mapOf("audio" to "0"), live.first().listedPrices)
+        assertEquals("https://openrouter.ai/vendor/alpha", live.first().modelPageUrl)
+        assertNull(OpenRouterBrowser.modelPageUrl("a/b/c"))
+    }
+
+    @Test
+    fun testFindTranscriptionModel_routesASavedLiveModelToOpenRouter() {
+        val model = CloudCatalog.transcriptionModel("openrouter/transcription/vendor/new-model")
+        assertEquals(CloudProvider.OpenRouter, model.provider)
+        assertEquals("vendor/new-model", model.apiName)
+        assertEquals("openrouter/transcription/vendor/new-model", model.catalogId)
+        assertEquals("OpenRouter › Whisper", OpenRouterBrowser.selectionLabel("Whisper"))
+        assertNull(CloudCatalog.findTranscriptionModel("openrouter/transcription/bad"))
+        assertEquals(CloudCatalog.defaultTranscriptionModel, CloudCatalog.transcriptionModel("acme/unknown"))
     }
 
     @Test

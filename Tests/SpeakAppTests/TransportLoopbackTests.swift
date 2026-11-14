@@ -70,7 +70,6 @@ final class TransportLoopbackTests: XCTestCase {
 
         XCTAssertEqual(client.state, .connected, "Authentication must succeed over the shared framing")
         XCTAssertEqual(client.connectedMacName, "Test Mac")
-        XCTAssertEqual(server.connectedDevices.count, 1, "The Mac must list the paired device")
 
         try await client.sendSessionStart(sessionId: "session-1", model: "test-model")
         try await client.sendTranscript(sessionId: "session-1", text: "Hello Mac", isFinal: true)
@@ -78,6 +77,9 @@ final class TransportLoopbackTests: XCTestCase {
         await self.fulfillment(of: [delivery], timeout: 5)
         XCTAssertEqual(inbox.text, "Hello Mac")
         XCTAssertEqual(inbox.sessionId, "session-1")
+        // Auth sends its result before registering the device; the delivered
+        // transcript, handled after it on the same connection, is the barrier.
+        XCTAssertEqual(server.connectedDevices.count, 1, "The Mac must list the paired device")
 
         XCTAssertTrue(PairingManager.shared.isDevicePaired(id: DeviceIdentity.deviceId))
         client.disconnect()

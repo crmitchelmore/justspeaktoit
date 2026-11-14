@@ -60,6 +60,7 @@ test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests (Py
 	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-bundle -p 'test_*.py' -v
 	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-cross -p 'test_*.py' -v
 	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-cloudkit -p 'test_*.py' -v
+	python3 -B scripts/ci/parallel-unittest.py -s scripts/desktop-analytics -p 'test_*.py' -v
 	python3 -B scripts/ci/parallel-unittest.py -s scripts/windows-package -p 'test_*.py' -v
 	python3 -B scripts/ci/parallel-unittest.py -s scripts/migration -p 'test_*.py' -v
 	python3 scripts/generate-release-train-config.py --check

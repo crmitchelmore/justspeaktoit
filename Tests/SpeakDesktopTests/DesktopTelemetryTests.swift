@@ -137,6 +137,56 @@ final class DesktopTelemetryTests: XCTestCase {
         XCTAssertTrue(posts.isEmpty)
     }
 
+    private static let stampedKey = "phc_Stamped0123456789abcdefGHIJKLmnopqrstuv-_x"
+    private static let developerKey = "phc_Developer0123456789abcdefGHIJKLmnopqrstu"
+
+    private func projectKey(configuration: String, environment: [String: String] = [:], stamped: String?) -> String {
+        DesktopTelemetryConfiguration.current(
+            platform: .linux, about: DesktopAboutInformation(configuration: configuration),
+            environment: environment, stampedPostHogProjectKey: stamped
+        ).postHogProjectKey
+    }
+
+    func testProjectKey_ReleaseBuild_UsesStampedKey() {
+        XCTAssertEqual(projectKey(configuration: "release", stamped: Self.stampedKey), Self.stampedKey)
+        XCTAssertEqual(projectKey(configuration: "release", stamped: " \(Self.stampedKey)\n"), Self.stampedKey)
+    }
+
+    func testProjectKey_DevelopmentBuild_IgnoresStampedKey() {
+        XCTAssertEqual(projectKey(configuration: "debug", stamped: Self.stampedKey), "")
+    }
+
+    func testProjectKey_EnvironmentOverride_TakesPrecedence() {
+        let environment = ["JSTI_POSTHOG_PROJECT_KEY": Self.developerKey]
+        XCTAssertEqual(
+            projectKey(configuration: "release", environment: environment, stamped: Self.stampedKey), Self.developerKey
+        )
+        XCTAssertEqual(projectKey(configuration: "debug", environment: environment, stamped: nil), Self.developerKey)
+        XCTAssertEqual(
+            projectKey(configuration: "release", environment: ["JSTI_POSTHOG_PROJECT_KEY": "not-a-key"],
+                       stamped: Self.stampedKey), ""
+        )
+    }
+
+    func testProjectKey_MalformedKeys_AreNoKey() {
+        let malformed = [
+            "", " ", "phc_", "phc_short", "phx_0123456789abcdef", "PHC_0123456789abcdef", "sk-0123456789abcdef",
+            "phc_0123456789abcdef/../x", "phc_0123456789 abcdef", "phc_0123456789abcdef\"", "phc_0123456789abcdé",
+            "phc_" + String(repeating: "a", count: 129)
+        ]
+        for key in malformed {
+            XCTAssertEqual(projectKey(configuration: "release", stamped: key), "", key)
+            XCTAssertNil(DesktopTelemetryConfiguration.validPostHogProjectKey(key), key)
+        }
+        let longest = "phc_" + String(repeating: "a", count: 128)
+        XCTAssertNotNil(DesktopTelemetryConfiguration.validPostHogProjectKey(longest))
+        XCTAssertNotNil(DesktopTelemetryConfiguration.validPostHogProjectKey("phc_12345678"))
+    }
+
+    func testProjectKey_WithoutStampOrOverride_IsEmpty() {
+        XCTAssertEqual(projectKey(configuration: "release", stamped: nil), "")
+    }
+
     func testOptOut_DeletesInstallIDAndStopsSending() async throws {
         let http = RecordingTelemetryHTTP()
         let telemetry = DesktopTelemetry(directory: directory)

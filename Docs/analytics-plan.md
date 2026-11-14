@@ -181,9 +181,17 @@ fail on any non-enum string property, exactly as issue #591 specifies.
   one request at a time; a failure drops the event and is never retried, and
   opting out or quitting discards the queue. Consent and the random ID live in
   the app data folder's `telemetry.json`, never in settings, so imports and
-  `speak config` cannot opt a desktop in. Release packages do not stamp the
-  project key yet, so the key is read only from `JSTI_POSTHOG_PROJECT_KEY` and
-  an unstamped build sends nothing even after opting in (#1624).
+  `speak config` cannot opt a desktop in. Release builds read a project key
+  that `scripts/desktop-analytics/configure-posthog-key.py` writes into
+  `DesktopAnalyticsBuildConfiguration` in the build's checkout (never a
+  commit) from `POSTHOG_PROJECT_KEY`. The Windows x64, Windows ARM64 and Linux
+  Flatpak release workflows do not run it yet (owner step #1744); once they
+  do, only `main` pushes and the Alpha/Stable manifest tags are stamped, and
+  pull request, merge-batch and other branch builds stay keyless. A debug
+  build ignores a stamped key. A set `JSTI_POSTHOG_PROJECT_KEY` overrides the
+  stamped key for development; a key that is not `phc_` followed by 8 to 128
+  letters, digits, `-` or `_` counts as no key, and a keyless build sends
+  nothing even after opting in.
 
 ### Consent: opt-IN, three states, with a real preview
 

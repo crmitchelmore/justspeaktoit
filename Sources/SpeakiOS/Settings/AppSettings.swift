@@ -162,6 +162,11 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(keepAudioOnCancel, forKey: DefaultsKey.keepAudioOnCancel.storageKey) }
     }
 
+    /// The microphone to prefer while recording (`AVAudioSessionPortDescription.uid`); nil follows the system route.
+    @Published public var preferredAudioInputUID: String? {
+        didSet { defaults.set(preferredAudioInputUID, forKey: DefaultsKey.preferredAudioInputUID.storageKey) }
+    }
+
     @Published public var liveActivitiesEnabled: Bool {
         didSet { defaults.set(liveActivitiesEnabled, forKey: DefaultsKey.liveActivitiesEnabled.rawValue) }
     }
@@ -313,6 +318,7 @@ public final class AppSettings: ObservableObject {
         self.liveActivitiesEnabled = defaults.object(forKey: DefaultsKey.liveActivitiesEnabled.rawValue) as? Bool
             ?? true
         self.keepAudioOnCancel = Self.storedKeepAudioOnCancel(in: defaults)
+        self.preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.storageKey)
         let clipboardPolicy = Self.storedClipboardPolicy(in: defaults)
         self.transcriptClipboardLifetime = clipboardPolicy.lifetime
         self.transcriptAllowsUniversalClipboard = clipboardPolicy.allowsUniversalClipboard

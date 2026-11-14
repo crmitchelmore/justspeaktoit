@@ -16,6 +16,12 @@ extension ContentView {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("captureStopNotice")
             }
+            if let notice = microphoneStatus.notice(forSavedUID: settings.preferredAudioInputUID) {
+                Label(notice, systemImage: "mic.slash")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("microphoneFallbackNotice")
+            }
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(

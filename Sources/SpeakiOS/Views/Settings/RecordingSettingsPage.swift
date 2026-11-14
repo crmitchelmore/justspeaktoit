@@ -35,6 +35,10 @@ struct RecordingSettingsPage: View {
             )
         }
 
+        SearchableSettingsSection("Microphone") {
+            MicrophonePicker()
+        }
+
         SearchableSettingsSection("Behavior") {
             Toggle(isOn: $settings.autoStartRecording) {
                 Label("Auto-Start Recording", systemImage: "mic.badge.plus")

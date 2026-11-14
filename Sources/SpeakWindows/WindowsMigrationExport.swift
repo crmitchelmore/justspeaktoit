@@ -25,7 +25,7 @@ extension WindowsHostPlatform {
     package static var migrationArchive: DesktopMigrationBackup.Adapter? {
         .init(
             digests: WindowsSHA256Hasher.provider,
-            archive: { try WindowsMigrationArchive.export($0) },
+            archiveWithCredentials: { try WindowsMigrationArchive.export($0, includeCredentials: $1) },
             publish: { try WindowsMigrationArchive.publish($0, to: $1) }
         )
     }

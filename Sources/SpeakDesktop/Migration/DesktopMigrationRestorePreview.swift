@@ -3,14 +3,14 @@ import SpeakCore
 
 extension DesktopMigrationRestore.Preview {
     /// Plain-language confirmation text. It never includes transcript text,
-    /// profile contents, identifiers or credential values.
+    /// profile contents, setting values, identifiers or credential values.
     public var text: String {
         var lines = ["Review this restore. Nothing has been written yet.", ""]
         for row in self.rows {
             lines.append(contentsOf: Self.describe(row))
         }
         if self.rows.isEmpty {
-            lines.append("This backup has no History text or dictation profiles this device can restore.")
+            lines.append("This backup has nothing this device can restore.")
         }
         if !self.notApplied.isEmpty {
             lines.append("")
@@ -28,8 +28,9 @@ extension DesktopMigrationRestore.Preview {
         }
         lines.append("")
         lines.append(self.offersReplace
-            ? "Merge keeps this device's version of every conflicting profile. "
-                + "Replace makes your profiles match the backup. History always merges."
+            ? "Merge keeps this device's version of anything that conflicts. Replace uses the backup's version "
+                + "for settings, vocabulary, API keys and app profiles, and removes profiles that are not in the "
+                + "backup. History always merges."
             : "Restore merges the backup into this device. Existing items are kept.")
         lines.append("If anything fails, every change is put back.")
         return lines.joined(separator: "\n")
@@ -75,11 +76,12 @@ extension DesktopMigrationRestore.Preview {
     private static func notAppliedReason(_ category: DataMigrationCategory) -> String {
         switch category {
         case .credentials:
-            return category.title + ": never imported automatically; values are not shown."
-        case .recordings:
-            return category.title + " (audio): restore audio on a Mac for now."
-        case .settings:
-            return category.title + ": device settings, shortcuts and microphones stay as they are."
+            return category.title + ": never imported automatically; values are not shown. "
+                + "To import them, restore again and choose to include API keys."
+        case .settings, .connections:
+            return category.title + ": not restored on this device; settings stay as they are."
+        case .models:
+            return category.title + ": model files are never copied. Download them in Local models."
         default:
             return category.title + ": not restored on this device yet."
         }

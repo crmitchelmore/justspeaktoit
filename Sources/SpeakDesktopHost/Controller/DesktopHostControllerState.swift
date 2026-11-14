@@ -46,7 +46,15 @@ struct DesktopHostMigrationWork {
     var restoreTask: Task<Void, Never>?
     var restoreWorker: Task<DesktopMigrationRestore.Preparation, Never>?
     var restoreApplyWorker: Task<DesktopMigrationRestore.Outcome, Never>?
-    var restoreConfirmation: (id: UUID, plan: DesktopMigrationRestore.Plan)?
+    var restoreConfirmation: DesktopHostRestoreConfirmation?
+}
+
+/// A restore preview awaiting the user's answer. `configuration` is the
+/// settings and API-key access the preview was planned against.
+struct DesktopHostRestoreConfirmation {
+    let id: UUID
+    let plan: DesktopMigrationRestore.Plan
+    let configuration: DesktopMigrationRestore.ConfigurationSource?
 }
 
 /// Voice Output and provider API-key work. Each in-flight operation keeps its

@@ -78,6 +78,8 @@ typedef struct BackupChoice {
     GCancellable *cancelled;
     gint32 include_audio;
     gint32 include_profiles;
+    gint32 include_settings; /* 4: settings, vocabulary and connections */
+    gint32 include_api_keys; /* 8: the explicit API-key opt-in, for export and restore */
     gint action; /* 0 export, 1 inspect, 2 restore */
 } BackupChoice;
 

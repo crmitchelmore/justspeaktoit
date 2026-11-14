@@ -86,7 +86,13 @@ void backup_emit_path(const BackupChoice *choice, const char *path) {
         jsti_window_update("Could not choose backup action: invalid request.", NULL, -1);
         return;
     }
-    emit(events[choice->action], path, choice->action != 0 ? 0 : (choice->include_audio | choice->include_profiles));
+    gint32 flags = 0;
+    if (choice->action == 0) {
+        flags = choice->include_audio | choice->include_profiles | choice->include_settings | choice->include_api_keys;
+    } else if (choice->action == 2) {
+        flags = choice->include_api_keys;
+    }
+    emit(events[choice->action], path, flags);
 }
 
 static void backup_chosen(GObject *source, GAsyncResult *result, gpointer data) {
@@ -131,6 +137,8 @@ static void on_backup(GtkButton *button, gpointer data) {
     choice->cancelled = g_cancellable_new();
     choice->include_audio = adw_switch_row_get_active(storage_page()->backup_audio) ? 1 : 0;
     choice->include_profiles = adw_switch_row_get_active(storage_page()->backup_profiles) ? 2 : 0;
+    choice->include_settings = 4;
+    choice->include_api_keys = adw_switch_row_get_active(storage_page()->backup_api_keys) ? 8 : 0;
     choice->action = GPOINTER_TO_INT(data);
     storage_page()->backup_chooser = g_object_ref(choice->cancelled);
     refresh_actions();
@@ -209,10 +217,10 @@ static GtkWidget *migration_restore_dialog_new(
     const char *token, const char *text, gboolean offers_replace, gboolean confirming
 ) {
     GtkWidget *dialog = adw_message_dialog_new(ui.window,
-        confirming ? "Replace app profiles?" : "Restore backup: review before anything is written",
-        confirming ? "Replace your app profiles with the profiles in this backup?\n\n"
-            "Profiles absent from the backup will be removed. History is still only merged. "
-            "Settings, audio and credentials stay unchanged. Changes are rolled back if anything fails."
+        confirming ? "Replace with the backup's version?" : "Restore backup: review before anything is written",
+        confirming ? "Use the backup's version of everything that conflicts?\n\n"
+            "Conflicting settings, vocabulary and API keys take the backup's values, and app profiles absent "
+            "from the backup are removed. History is still only merged. Changes are rolled back if anything fails."
             : text);
     gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
     adw_message_dialog_set_body_use_markup(ADW_MESSAGE_DIALOG(dialog), FALSE);
@@ -220,7 +228,7 @@ static GtkWidget *migration_restore_dialog_new(
     if (!confirming) adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "merge", "Merge backup");
     if (offers_replace) {
         adw_message_dialog_add_response(ADW_MESSAGE_DIALOG(dialog), "replace",
-            confirming ? "Replace profiles" : "Replace profiles...");
+            confirming ? "Replace" : "Replace...");
         adw_message_dialog_set_response_appearance(ADW_MESSAGE_DIALOG(dialog), "replace", ADW_RESPONSE_DESTRUCTIVE);
     }
     adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
@@ -340,8 +348,8 @@ void storage_groups_add(GtkWidget *column) {
     gtk_box_append(GTK_BOX(column), housekeeping);
     GtkWidget *backup = group("Data backup");
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(backup),
-        "Save History text with optional saved audio and app profiles in a ZIP backup. "
-        "ZIPs are not encrypted. Settings and credentials are not included; existing files are never replaced.");
+        "Save History text, settings and vocabulary in a ZIP backup, with optional saved audio, app profiles "
+        "and API keys. ZIPs are not encrypted; existing files are never replaced.");
     storage_page()->backup_audio = ADW_SWITCH_ROW(adw_switch_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(storage_page()->backup_audio), "Include saved recording audio");
     adw_switch_row_set_active(storage_page()->backup_audio, TRUE);
@@ -351,10 +359,16 @@ void storage_groups_add(GtkWidget *column) {
     adw_action_row_set_subtitle(ADW_ACTION_ROW(storage_page()->backup_profiles), "Includes per-app overrides and prompts.");
     adw_switch_row_set_active(storage_page()->backup_profiles, FALSE);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), GTK_WIDGET(storage_page()->backup_profiles));
+    storage_page()->backup_api_keys = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(storage_page()->backup_api_keys), "Include API keys");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(storage_page()->backup_api_keys),
+        "Saves API keys unencrypted in the ZIP, and restores them from a backup. Off by default.");
+    adw_switch_row_set_active(storage_page()->backup_api_keys, FALSE);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(backup), GTK_WIDGET(storage_page()->backup_api_keys));
     GtkWidget *backup_row = adw_action_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(backup_row), "Save a ZIP backup");
     adw_action_row_set_subtitle(ADW_ACTION_ROW(backup_row),
-        "Turn off both optional categories for a History-only backup.");
+        "Settings, vocabulary and History text are always included.");
     storage_page()->backup_export = GTK_BUTTON(gtk_button_new_with_mnemonic("Save _backup…"));
     gtk_widget_set_valign(GTK_WIDGET(storage_page()->backup_export), GTK_ALIGN_CENTER);
     g_signal_connect(storage_page()->backup_export, "clicked", G_CALLBACK(on_backup), NULL);
@@ -372,7 +386,7 @@ void storage_groups_add(GtkWidget *column) {
     GtkWidget *restore_row = adw_action_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(restore_row), "Restore a ZIP backup");
     adw_action_row_set_subtitle(ADW_ACTION_ROW(restore_row),
-        "Preview and confirm History text and app profiles. Settings, audio and credentials stay unchanged.");
+        "Preview, then merge or replace. API keys are restored only with Include API keys on.");
     storage_page()->backup_restore = GTK_BUTTON(gtk_button_new_with_mnemonic("_Restore..."));
     gtk_widget_set_valign(GTK_WIDGET(storage_page()->backup_restore), GTK_ALIGN_CENTER);
     g_signal_connect(storage_page()->backup_restore, "clicked", G_CALLBACK(on_backup), GINT_TO_POINTER(2));
@@ -390,6 +404,7 @@ void storage_refresh_actions(gboolean idle) {
         gboolean backup_idle = idle && storage_page()->backup_chooser == NULL && storage_page()->restore_dialog == NULL;
         gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_audio), backup_idle);
         gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_profiles), backup_idle);
+        gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_api_keys), backup_idle);
         gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_export), backup_idle);
         gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_inspect), backup_idle);
         gtk_widget_set_sensitive(GTK_WIDGET(storage_page()->backup_restore), backup_idle);

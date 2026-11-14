@@ -355,12 +355,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case permissionsID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_permissions(window); return 0;
         case troubleshootingID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_troubleshooting(window); return 0;
         case backupRestoreID:
-            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupRestoreID)) {
-                std::string failure;
-                const std::string selected = jsti::migrationRestore::choose(window, failure);
-                if (!failure.empty()) showFailure(window, failure);
-                else if (!selected.empty()) emit(window, JSTI_EVENT_MIGRATION_RESTORE, selected.c_str());
-            }
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupRestoreID)) restoreMigrationBackup(window);
             return 0;
         case appearanceID:
             if (HIWORD(wparam) == CBN_SELCHANGE) {

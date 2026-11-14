@@ -88,8 +88,11 @@ public enum DesktopLiveTranscription {
             ? TranscriptionLanguageCatalog.providerLanguage(for: language ?? "") : nil
         switch route.provider {
         case .reson8:
+            // Routing admits only `Reson8Model` live IDs.
+            guard let reson8 = Reson8Model(modelID: route.modelID) else { return nil }
             return Reson8LiveClient(
-                apiKey: apiKey, language: hint, sampleRate: route.sampleRate, makeConnection: makeConnection
+                apiKey: apiKey, model: reson8, language: hint, sampleRate: route.sampleRate,
+                makeConnection: makeConnection
             )
         case .openai:
             return OpenAIRealtimeLiveClient(

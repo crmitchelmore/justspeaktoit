@@ -152,7 +152,9 @@ public enum LiveTranscriptionClientFactory {
                 sampleRate: route.sampleRate
             )
         case .reson8:
-            return Reson8LiveClient(apiKey: apiKey, language: language, sampleRate: route.sampleRate)
+            // Routing admits only `Reson8Model` live IDs.
+            guard let model = Reson8Model(modelID: route.modelID) else { return nil }
+            return Reson8LiveClient(apiKey: apiKey, model: model, language: language, sampleRate: route.sampleRate)
         case .apple, .openai:
             return nil
         }

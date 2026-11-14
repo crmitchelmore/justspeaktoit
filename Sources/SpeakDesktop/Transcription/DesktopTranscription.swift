@@ -320,7 +320,9 @@ private extension DesktopTranscription {
             CartesiaBatchClient.catalogID: .cartesia,
             GladiaBatchClient.catalogID: .gladia
         ]
-        for provider in FileSpeechProvider.allCases { mappings[provider.modelID] = .fileSpeech(provider) }
+        for provider in FileSpeechProvider.allCases {
+            for model in provider.modelIDs { mappings[model] = .fileSpeech(provider) }
+        }
         for model in AzureTranscriptionModels.batchIDs { mappings[model] = .prepared(.azure) }
         for model in GeminiTranscribeModels.directBatchModelIDs { mappings[model] = .google }
         for model in OpenAITranscriptionModels.directBatchModelIDs { mappings[model] = .openai }

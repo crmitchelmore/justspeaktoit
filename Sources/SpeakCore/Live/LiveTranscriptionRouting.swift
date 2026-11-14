@@ -165,7 +165,7 @@ public enum LiveTranscriptionRouting {
         guard let slash = trimmed.firstIndex(of: "/") else { return nil }
         let prefix = String(trimmed[trimmed.startIndex..<slash]).lowercased()
         guard let provider = LiveTranscriptionProviderID(rawValue: prefix) else { return nil }
-        if provider == .reson8, trimmed != FileSpeechProvider.reson8LiveID { return nil }
+        if provider == .reson8, Reson8Model.allCases.allSatisfy({ $0.liveID != trimmed }) { return nil }
         if provider == .alibaba, trimmed != AlibabaSpeechModels.funLive { return nil }
 
         return LiveTranscriptionRoute(

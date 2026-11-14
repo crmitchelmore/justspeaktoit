@@ -35,6 +35,9 @@ extension SettingsSchema {
             Field(key: "keepAudioOnCancel", kind: .boolean,
                   summary: "Keep a cancelled cloud recording's audio in History.",
                   defaultValue: .bool(SpeechDefaults.keepAudioOnCancel)),
+            Field(key: "handsFreeDictationEnabled", kind: .boolean,
+                  summary: "Speech starts and stops Cloud recordings.",
+                  defaultValue: .bool(SharedApplicationPreferences.handsFreeDictationEnabled.iOS.defaultValue)),
             Field(key: "history_retention", kind: .enumeration, summary: "How long History keeps transcripts.",
                   defaultValue: .string("Month"), allowedValues: androidHistoryRetentions)
         ]

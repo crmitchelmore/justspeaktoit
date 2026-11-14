@@ -272,6 +272,27 @@
       "title" : "Stop recording after silence"
     },
     {
+      "id" : "android.handsFree",
+      "keywords" : [
+        "hands-free",
+        "hands free",
+        "voice activation",
+        "voice activated",
+        "sound activated",
+        "automatic start",
+        "pre-roll",
+        "listen",
+        "VAD"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+        "handsFreeDictationEnabled"
+      ],
+      "summary" : "Listen for speech in Cloud mode, record from just before you speak and stop when you go quiet.",
+      "title" : "Hands-free dictation"
+    },
+    {
       "id" : "android.appearance",
       "keywords" : [
         "theme",

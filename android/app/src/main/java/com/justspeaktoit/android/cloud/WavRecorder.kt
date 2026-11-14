@@ -77,6 +77,52 @@ object WavFormat {
     private const val FULL_SCALE = 32_768.0
 }
 
+/** Opens the microphone for 16 kHz mono speech capture, as every Cloud recording uses it. */
+internal object Microphone {
+    /**
+     * A recording [AudioRecord] routed to [input] (the system default when null), or null when the
+     * microphone cannot be opened. Requires RECORD_AUDIO. The caller releases [input] either way.
+     */
+    @SuppressLint("MissingPermission")
+    fun open(input: InputRoute? = null): AudioRecord? {
+        val minBuffer = AudioRecord.getMinBufferSize(
+            WavFormat.SAMPLE_RATE,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+        )
+        if (minBuffer <= 0) return null
+        val audio = try {
+            AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                WavFormat.SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                maxOf(minBuffer, WavFormat.BYTES_PER_SECOND / 5),
+            )
+        } catch (e: IllegalArgumentException) {
+            return null
+        } catch (e: SecurityException) {
+            return null
+        }
+        if (audio.state != AudioRecord.STATE_INITIALIZED) {
+            audio.release()
+            return null
+        }
+        input?.applyTo(audio)
+        try {
+            audio.startRecording()
+        } catch (e: IllegalStateException) {
+            audio.release()
+            return null
+        }
+        if (audio.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+            audio.release()
+            return null
+        }
+        return audio
+    }
+}
+
 /**
  * One capture block's loudness: [meter] on SpeechRecognizer's -2..10 scale for the level indicator,
  * [normalized] on SpeakCore's 0..1 silence scale (not a number while paused), and [atSeconds] of
@@ -134,42 +180,9 @@ class WavRecorder(
     private var record: AudioRecord? = null
 
     /** Returns false when the microphone cannot be opened. Requires RECORD_AUDIO. */
-    override fun start(): Boolean = open().also { opened -> if (!opened) input?.release() }
-
-    @SuppressLint("MissingPermission")
-    private fun open(): Boolean {
-        val minBuffer = AudioRecord.getMinBufferSize(
-            WavFormat.SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-        )
-        if (minBuffer <= 0) return false
-        val audio = try {
-            AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                WavFormat.SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                maxOf(minBuffer, WavFormat.BYTES_PER_SECOND / 5),
-            )
-        } catch (e: IllegalArgumentException) {
-            return false
-        } catch (e: SecurityException) {
-            return false
-        }
-        if (audio.state != AudioRecord.STATE_INITIALIZED) {
-            audio.release()
-            return false
-        }
-        input?.applyTo(audio)
-        try {
-            audio.startRecording()
-        } catch (e: IllegalStateException) {
-            audio.release()
-            return false
-        }
-        if (audio.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-            audio.release()
+    override fun start(): Boolean {
+        val audio = Microphone.open(input) ?: run {
+            input?.release()
             return false
         }
         record = audio

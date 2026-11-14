@@ -51,6 +51,9 @@ interface DictationPreferences {
 
     /** The `AudioInput.id` Cloud recordings use; null means the system default. */
     var audioInputId: String?
+
+    /** Whether the record button arms hands-free dictation for Cloud recordings. */
+    var handsFreeEnabled: Boolean
 }
 
 /** Non-secret choices. Secrets live in the Keystore-backed `SecretStore`, never here. */
@@ -174,6 +177,10 @@ class AppPreferences(context: Context) : DictationPreferences {
             putFloat(KEY_SILENCE_DURATION, value.durationSeconds.toFloat())
         }
 
+    override var handsFreeEnabled: Boolean
+        get() = prefs.getBoolean(KEY_HANDS_FREE, false)
+        set(value) = prefs.edit { putBoolean(KEY_HANDS_FREE, value) }
+
     /** Whether the first-run guide was finished or skipped; null on installs that never decided. */
     var hasCompletedOnboarding: Boolean?
         get() = if (prefs.contains(KEY_ONBOARDING)) prefs.getBoolean(KEY_ONBOARDING, false) else null
@@ -239,6 +246,9 @@ class AppPreferences(context: Context) : DictationPreferences {
         private const val KEY_SILENCE_ENABLED = "silenceDetectionEnabled"
         private const val KEY_SILENCE_THRESHOLD = "silenceThreshold"
         private const val KEY_SILENCE_DURATION = "silenceDuration"
+
+        /** The canonical cross-platform key (SpeakCore `SharedApplicationPreference.handsFreeDictationEnabled`). */
+        private const val KEY_HANDS_FREE = "handsFreeDictationEnabled"
 
         /** The Mac's onboarding key, so every platform records completion under one name. */
         private const val KEY_ONBOARDING = "hasCompletedOnboarding"

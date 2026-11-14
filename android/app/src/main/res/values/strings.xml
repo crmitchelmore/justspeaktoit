@@ -28,6 +28,12 @@
 
     <string name="action_start">Start dictation</string>
     <string name="action_stop">Stop dictation</string>
+    <string name="action_start_hands_free">Start hands-free listening</string>
+    <string name="action_turn_off_hands_free">Turn off hands-free</string>
+    <string name="hands_free_ready">Hands-free is on. Tap the microphone and speak whenever you are ready.</string>
+    <string name="hands_free_listening">Listening for speech. Recording starts when you speak.</string>
+    <string name="hands_free_recording">Recording. It stops when you go quiet, then listens again.</string>
+    <string name="hands_free_stopped">Hands-free stopped. Tap the microphone to listen again.</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_copy">Copy</string>
     <string name="action_copy_unfinished">Copy unfinished text</string>
@@ -64,6 +70,7 @@
     <string name="notification_dictation_recording">Recording. Tap Stop to transcribe.</string>
     <string name="notification_dictation_paused">Paused while another app uses audio.</string>
     <string name="notification_dictation_finishing">Finishing your dictation…</string>
+    <string name="notification_dictation_listening">Hands-free is listening for speech. Tap Stop to turn it off.</string>
     <string name="notification_action_stop">Stop</string>
     <string name="failure_unavailable">The selected recognition is not available.</string>
     <string name="failure_unknown">Dictation failed.</string>
@@ -269,6 +276,8 @@
     <string name="settings_silence_duration">Silence duration</string>
     <string name="settings_silence_duration_value">%1$s seconds</string>
     <string name="settings_silence_threshold">Silence threshold</string>
+    <string name="settings_hands_free_title">Hands-free dictation</string>
+    <string name="settings_hands_free_note">Cloud mode only. Tap the microphone once and the app listens: speaking starts a recording that keeps the half second before you spoke, and going quiet for the silence duration ends it. It keeps listening, even with the screen off, until you turn it off. On-device and speech-service recognition cannot keep the audio from before you spoke, so they record as usual.</string>
     <string name="settings_silence_threshold_note">Lower is more sensitive: raise it if background noise keeps recordings going.</string>
     <string name="settings_appearance_title">Appearance</string>
     <string name="settings_appearance_system">System</string>

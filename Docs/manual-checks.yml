@@ -1401,6 +1401,21 @@ sessions:
           - "Set the duration to 5 seconds and repeat the first dictation; then turn the setting off and stay quiet for 10 seconds."
         expected: "With the setting on, the recording stops about the set time after you go quiet and the sentence is transcribed. Saying nothing stops after the set time with no invented text. A pause shorter than the duration does not stop it. With the setting off, the recording keeps going until you stop it."
         final_gate: false
+      - id: "android-hands-free-dictation"
+        issues:
+          - 1632
+        title: "Hands-free starts a Cloud recording when you speak, including your first word"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1632 hands-free dictation change"
+        steps:
+          - "Settings: turn on Hands-free dictation and leave Silence duration at 2 seconds. Choose Cloud mode."
+          - "Tap the record button. Check the screen says it is listening, the microphone indicator is on and a Listening notification appears; stay quiet for 10 seconds."
+          - "Say a sentence that starts with a short word, such as \"So, the meeting is at three\", then stay quiet."
+          - "Say a second sentence. Then lock the screen, wait 5 seconds, say a third sentence, wait for it to finish and unlock."
+          - "Tap Turn off hands-free; then choose an on-device or speech-service mode and open Settings."
+        expected: "Nothing is recorded or sent while you stay quiet. Each sentence starts a recording on its own, keeps its first word, stops about 2 seconds after you go quiet, is transcribed and then listening resumes, including with the screen locked. TalkBack announces the listening and recording states. Turning hands-free off ends the notification and the microphone indicator. In other modes the button records at once and Settings says hands-free needs Cloud mode."
+        final_gate: false
       - id: "android-learned-corrections"
         issues:
           - 1651

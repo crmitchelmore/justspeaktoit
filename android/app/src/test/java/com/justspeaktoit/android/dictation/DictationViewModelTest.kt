@@ -625,6 +625,7 @@ class DictationViewModelTest {
             "cleanup_enabled" to true,
             "cleanup_model" to cleanup.selectionId,
             "keepAudioOnCancel" to false,
+            "handsFreeDictationEnabled" to true,
             "history_retention" to "Forever",
         )
         var applied = false
@@ -639,6 +640,7 @@ class DictationViewModelTest {
         assertTrue(h.prefs.cleanupEnabled)
         assertEquals(cleanup.selectionId, h.prefs.cleanupModelId)
         assertFalse(h.prefs.keepAudioOnCancel)
+        assertTrue(h.prefs.handsFreeEnabled)
         assertEquals(Retention.Forever, h.prefs.retention)
     }
 

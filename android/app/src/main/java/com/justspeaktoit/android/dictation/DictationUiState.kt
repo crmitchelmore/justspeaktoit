@@ -69,6 +69,9 @@ data class DictationUiState(
     val keepAudioOnCancel: Boolean = AppPreferences.DEFAULT_KEEP_AUDIO_ON_CANCEL,
     /** Whether a Cloud recording stops by itself after a pause. */
     val silence: SilenceSettings = SilenceSettings(),
+    /** Whether the record button arms hands-free dictation; Cloud mode only. */
+    val handsFreeEnabled: Boolean = false,
+    val handsFree: HandsFreeStatus = HandsFreeStatus.Off,
     /** Finished Cloud recordings stay in History to play back or transcribe again. */
     val keepRecordings: Boolean = false,
     /** The History entry whose kept audio is being transcribed, if any. */
@@ -129,6 +132,14 @@ data class DictationUiState(
     val canStart: Boolean
         get() = !dictation.isActive && !checkingAvailability && !releasingMicrophone &&
             cleanup != CleanupStatus.Running && options.firstOrNull { it.mode == activeMode }?.usable == true
+
+    /** True while hands-free holds the microphone, listening or recording. */
+    val handsFreeArmed: Boolean
+        get() = handsFree == HandsFreeStatus.Listening || handsFree == HandsFreeStatus.Recording
+
+    /** Tapping record arms hands-free rather than recording at once. */
+    val armsHandsFree: Boolean
+        get() = handsFreeEnabled && activeMode == RecognitionMode.Cloud
 
     /** Cleanup runs only when switched on (by the profile or the user) and its model's provider has a key. */
     val cleanupReady: Boolean

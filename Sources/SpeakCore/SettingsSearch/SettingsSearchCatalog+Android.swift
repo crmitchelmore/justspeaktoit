@@ -108,6 +108,16 @@ extension SettingsSearchCatalog {
             settingKeys: ["silenceDetectionEnabled", "silenceThreshold", "silenceDuration"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.handsFree", title: "Hands-free dictation", section: .general,
+            systemImage: "waveform.badge.mic",
+            summary: "Listen for speech in Cloud mode, record from just before you speak and stop when you go quiet.",
+            keywords: [
+                "hands-free", "hands free", "voice activation", "voice activated", "sound activated",
+                "automatic start", "pre-roll", "listen", "VAD"
+            ],
+            settingKeys: ["handsFreeDictationEnabled"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.appearance", title: "Appearance", section: .general, systemImage: "paintpalette",
             summary: "Light, dark or the phone's theme, and wallpaper colours on Android 12 and later.",
             keywords: [

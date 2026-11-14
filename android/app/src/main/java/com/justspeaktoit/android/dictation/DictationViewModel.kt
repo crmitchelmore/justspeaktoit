@@ -103,8 +103,27 @@ class DictationViewModel internal constructor(
     // provider_balances.json and Android's billing transports; empty shows no balance lines.
     balanceDirectory: BalanceDirectory = BalanceDirectory.EMPTY,
     balanceClients: List<ProviderBalanceClient> = emptyList(),
+    handsFreeMicrophone: HandsFreeMicrophone = NoHandsFreeMicrophone,
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
-    private val capture = CloudCapture(recorders, cacheDir, io, retirement, resources)
+    /** Hands-free dictation (#1632): its recordings take their audio from its microphone, pre-roll first. */
+    private val handsFree = HandsFreeDictation(
+        microphone = handsFreeMicrophone,
+        resources = resources,
+        scope = scope,
+        onSpeech = ::onHandsFreeSpeech,
+        onChanged = ::onHandsFreeChanged,
+    )
+
+    private val capture = CloudCapture(
+        { file, onLevel, onLimitReached, onCaptureFailed ->
+            handsFree.recorder(file, onLevel, onLimitReached, onCaptureFailed)
+                ?: recorders.create(file, onLevel, onLimitReached, onCaptureFailed)
+        },
+        cacheDir,
+        io,
+        retirement,
+        resources,
+    )
     private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
     private val historyRetry = HistoryRetry(cloud, secrets, capture, io, timings.transcribeMs)
 
@@ -128,6 +147,7 @@ class DictationViewModel internal constructor(
             retention = prefs.retention,
             keepAudioOnCancel = prefs.keepAudioOnCancel,
             silence = prefs.silence,
+            handsFreeEnabled = prefs.handsFreeEnabled,
             keepRecordings = prefs.keepRecordings,
             corrections = prefs.corrections,
             learnCorrections = prefs.learnCorrections,
@@ -203,11 +223,14 @@ class DictationViewModel internal constructor(
                 get() = _state.value.let { if (it.cleanupReady) it.sessionCleanupModel else null }
             override val cleanupPrompt: String? get() = _state.value.sessionCleanupPrompt
             override val corrections: List<CorrectionRule> get() = _state.value.corrections
-            override val silence: SilenceSettings get() = _state.value.silence
+            // A hands-free recording always ends on silence, after the user's silence duration.
+            override val silence: SilenceSettings
+                get() = _state.value.silence.let { if (handsFree.startingUtterance) it.copy(enabled = true) else it }
         },
         cues = { cue ->
             val choice = _state.value.recordingSounds
-            if (choice.enabled) sounds?.play(cue, choice.profile, choice.gain) ?: 0L else 0L
+            // Hands-free plays no cues, as on the desktop: they would be heard by the listening microphone.
+            if (choice.enabled && !handsFree.armed) sounds?.play(cue, choice.profile, choice.gain) ?: 0L else 0L
         },
         publish = { s ->
             // Before the screen sees the change, so the service and watching are in step with it.
@@ -235,6 +258,8 @@ class DictationViewModel internal constructor(
     private var autoStartPending = false
 
     private val inputWatch = audioInputs.watch { _state.update { it.copy(audioInputs = audioInputs.inputs()) } }
+    /** Speech started while availability was being checked; the recording starts once it settles. */
+    private var handsFreeStartPending = false
 
     private var appVisible = true
     private var watchingInterruptions = false
@@ -244,12 +269,16 @@ class DictationViewModel internal constructor(
     private var foregroundActive = false
 
     private val foregroundListener = object : ForegroundDictation.Listener {
-        override fun onStopRequested() = stop()
+        // Stop ends a hands-free recording and keeps listening; while only listening, it turns hands-free off.
+        override fun onStopRequested() = if (session.isCapturing || !handsFree.armed) stop() else turnOffHandsFree()
 
         override fun onForegroundRefused() {
             foregroundActive = false
             foreground.hide()
-            if (!appVisible) session.leaveApp()
+            if (!appVisible) {
+                session.leaveApp()
+                if (handsFree.armed) handsFree.disarm(failed = true)
+            }
         }
     }
 
@@ -281,6 +310,12 @@ class DictationViewModel internal constructor(
 
     private fun onSelection(selection: EngineSelection) {
         _state.update { it.withSelection(selection) }
+        if (!selection.checking && handsFree.armed && _state.value.activeMode != RecognitionMode.Cloud) {
+            // Only Cloud recordings can keep the pre-roll.
+            handsFree.disarm()
+        } else if (!selection.checking && handsFreeStartPending) {
+            startHandsFreeUtterance()
+        }
         // An auto-start waits only for an availability check, so any settled selection may start it.
         maybeAutoStart()
     }
@@ -441,6 +476,7 @@ class DictationViewModel internal constructor(
                 "cleanup_enabled" -> setCleanupEnabled(value as Boolean)
                 "cleanup_model" -> chooseCleanupModel(CloudCatalog.cleanupModel(value as String))
                 "keepAudioOnCancel" -> setKeepAudioOnCancel(value as Boolean)
+                "handsFreeDictationEnabled" -> setHandsFree(value as Boolean)
                 "history_retention" -> setRetention(Retention.valueOf(value as String))
                 else -> error("No raw-configuration binding for $key")
             }
@@ -459,6 +495,13 @@ class DictationViewModel internal constructor(
     fun setAudioInput(id: String?) {
         prefs.audioInputId = id
         _state.update { it.copy(audioInputId = id, audioInputs = audioInputs.inputs()) }
+    }
+
+    /** Turning hands-free off also stops it listening; turning it on takes effect from the next tap. */
+    fun setHandsFree(enabled: Boolean) {
+        prefs.handsFreeEnabled = enabled
+        _state.update { it.copy(handsFreeEnabled = enabled) }
+        if (!enabled) handsFree.disarm()
     }
 
     /** Applies from the next Cloud recording; recordings already in History stay until removed. */
@@ -505,11 +548,64 @@ class DictationViewModel internal constructor(
 
     fun downloadOnDeviceModel() = selector.downloadOnDeviceModel()
 
+    /** Records now or, with hands-free on in Cloud mode, starts listening for speech. */
     fun start() {
         val current = _state.value
         val mode = current.activeMode ?: return
-        if (!current.canStart) return
-        session.start(selector.plan(mode))
+        if (!current.canStart || handsFree.armed) return
+        if (current.armsHandsFree) {
+            session.clearResult()
+            handsFree.arm()
+        } else {
+            session.start(selector.plan(mode))
+        }
+    }
+
+    /** Stops listening; a hands-free recording under way stops and is transcribed. */
+    fun turnOffHandsFree() = handsFree.disarm()
+
+    private fun onHandsFreeSpeech() {
+        if (_state.value.checkingAvailability) handsFreeStartPending = true else startHandsFreeUtterance()
+    }
+
+    private fun startHandsFreeUtterance() {
+        handsFreeStartPending = false
+        if (!handsFree.startingUtterance) return
+        val current = _state.value
+        if (!current.canStart || current.activeMode != RecognitionMode.Cloud) {
+            handsFree.disarm(failed = true)
+            return
+        }
+        session.start(selector.plan(RecognitionMode.Cloud))
+        // A recording that could not start leaves the session failed, which turns hands-free off.
+        if (handsFree.recordingUtterance) handsFree.utteranceStarted() else handsFree.disarm(failed = true)
+    }
+
+    private fun onHandsFreeChanged(status: HandsFreeStatus) {
+        val wasRecording = _state.value.handsFree == HandsFreeStatus.Recording
+        _state.update { it.copy(handsFree = status) }
+        if (!handsFree.armed) {
+            handsFreeStartPending = false
+            // Its audio stopped with the microphone, so transcribe what it has.
+            if (wasRecording && session.isCapturing) session.stop()
+        }
+        syncForeground(session.state)
+    }
+
+    /** After a hands-free recording settles, listens again; a failure or cancel turns hands-free off. */
+    private fun followHandsFreeSession(s: SessionState) {
+        if (handsFree.status != HandsFreeStatus.Recording) return
+        when (val dictation = s.dictation) {
+            is DictationState.Done ->
+                if (s.cleanup != CleanupStatus.Running && !s.releasingMicrophone) handsFree.resumeListening()
+            // A recording too short to send is not an error: listen for the next one.
+            is DictationState.Failed -> when {
+                dictation.failure != DictationFailure.NoSpeech -> handsFree.disarm(failed = true)
+                !s.releasingMicrophone -> handsFree.resumeListening()
+            }
+            DictationState.Idle -> handsFree.disarm()
+            else -> Unit
+        }
     }
 
     fun stop() = session.stop()
@@ -560,6 +656,7 @@ class DictationViewModel internal constructor(
         autoStartPending = false
         if (foregroundActive) return
         session.leaveApp()
+        if (handsFree.armed) handsFree.disarm(failed = true)
     }
 
     fun clearResult() = session.clearResult()
@@ -726,7 +823,13 @@ class DictationViewModel internal constructor(
                 interruptions.stop()
             }
         }
-        val phase = foregroundPhase(s)
+        followHandsFreeSession(s)
+        syncForeground(s)
+    }
+
+    /** Shows the service while a session needs it and, between hands-free recordings, while listening. */
+    private fun syncForeground(s: SessionState) {
+        val phase = foregroundPhase(s) ?: ForegroundPhase.Listening.takeIf { handsFree.armed }
         if (phase == foregroundPhase) return
         foregroundPhase = phase
         if (phase == null) {
@@ -751,6 +854,7 @@ class DictationViewModel internal constructor(
     }
 
     override fun onCleared() {
+        handsFree.disarm()
         interruptions.stop()
         if (foregroundPhase != null) foreground.hide()
         if (ForegroundDictation.listener === foregroundListener) ForegroundDictation.listener = null
@@ -799,6 +903,7 @@ class DictationViewModel internal constructor(
                 audioInputs = inputs,
                 balanceDirectory = balanceDirectory,
                 balanceClients = ProviderBalanceClients.defaults(balanceDirectory),
+                handsFreeMicrophone = AudioRecordMicrophone(),
             )
         }
 

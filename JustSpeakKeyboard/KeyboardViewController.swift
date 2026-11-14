@@ -70,6 +70,9 @@ final class KeyboardViewController: UIInputViewController {
             contextAfterInput: { [weak self] in
                 self?.textDocumentProxy.documentContextAfterInput
             },
+            selectedText: { [weak self] in
+                self?.textDocumentProxy.selectedText
+            },
             // Provisional text, as Apple dictation and CJK input use (#1004).
             // The caret is placed at the end of the marked range so the user
             // can keep speaking; `unmarkText()` is what commits it, and

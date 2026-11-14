@@ -41,6 +41,10 @@ struct PostProcessingSettingsPage: View {
                 )
             }
         }
+
+        SearchableSettingsSection("Auto-Corrections") {
+            AutoCorrectionsSettingsRows()
+        }
     }
 
     private var postProcessingModelName: String {

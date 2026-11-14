@@ -31,6 +31,10 @@ final class KeyboardDeliveryCoordinator {
     /// as often as it used to set its own published value.
     var onOfferingChange: (@MainActor (KeyboardPickupPolicy.Offering) -> Void)?
 
+    /// Called with a delivered transcript once it is in the field and before
+    /// the keyboard hands itself back, so it can be watched for corrections.
+    var onDidDeliver: (@MainActor (String) -> Void)?
+
     private(set) var preferences: KeyboardDeliveryPreferences = .default
 
     private(set) var offering: KeyboardPickupPolicy.Offering = .none {
@@ -205,6 +209,7 @@ final class KeyboardDeliveryCoordinator {
         insertText(text)
         store.claimOffer(offerID)
         offering = .none
+        onDidDeliver?(text)
         handBackAfterInsertIfPermitted()
     }
 

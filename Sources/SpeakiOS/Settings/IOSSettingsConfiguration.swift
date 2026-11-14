@@ -294,6 +294,18 @@ extension IOSSettingsConfiguration {
         bool("cleanupModelDiscoveryEnabled", \.cleanupModelDiscoveryEnabled)
         bool("autoPostProcess", \.autoPostProcess)
 
+        // Learned corrections
+        bool("autoCorrectionsEnabled", \.autoCorrectionsEnabled)
+        bind("autoCorrectionsPromotionThreshold", \.settings, \.autoCorrectionsPromotionThreshold,
+             read: { .int($0) },
+             decode: { value -> Int? in
+                 switch value {
+                 case .int(let number): return number
+                 case .double(let number) where number.rounded() == number: return Int(number)
+                 default: return nil
+                 }
+             })
+
         // Read aloud
         choice("ttsProvider", \.voice, \.ttsProvider)
         string("ttsModel", \.voice, \.ttsModel)

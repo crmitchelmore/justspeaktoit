@@ -339,6 +339,7 @@ extension ContentView {
                 // foreground in case it returned while suspended (issue #999).
                 OfflineTranscriptUpgrader.shared.startObservingNetwork()
                 Task { await OfflineTranscriptUpgrader.shared.run() }
+                Task { await IOSLearnedCorrections.shared.ingestKeyboardObservations() }
             }
             .onChange(of: scenePhase) { _, phase in
                 // Scene intent is recorded synchronously so an owned utterance
@@ -348,6 +349,7 @@ extension ContentView {
                     refreshBackgroundState()
                     Task { await sharedImporter.drain() }
                     Task { await OfflineTranscriptUpgrader.shared.run() }
+                    Task { await IOSLearnedCorrections.shared.ingestKeyboardObservations() }
                 }
             }
             .onChange(of: coordinator.state) { _, state in

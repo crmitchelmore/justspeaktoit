@@ -66,7 +66,7 @@ enum IOSSettingsPage: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .general: return ["Appearance", "Language", "Edit raw configuration"]
         case .transcription: return ["Transcription"]
-        case .postProcessing: return ["Post-Processing"]
+        case .postProcessing: return ["Post-Processing", "Auto-Corrections"]
         case .apiKeys: return ["Subscription", "API Keys"]
         case .recording:
             return ["Hardware Trigger", "Microphone", "Behavior", "Just Speak Keyboard", "Focus Capture Overrides"]

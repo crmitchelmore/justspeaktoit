@@ -133,7 +133,7 @@ The flags live in `Project.swift`; release selection is in
 | F45 | Recording audio housekeeping | Yes | Yes | Yes | Yes | Partial | #1629 | |
 | F46 | Send transcripts from phone to desktop | Yes | Yes | No | No | No | #1640 | iOS: pair in Settings › Sync & Transfer › Send to Mac, then send from History; no auto-send. macOS: direct build only; the Mac App Store build has no receiver. |
 | F47 | Accessible names, IDs and recording announcements | Yes | Yes | Yes | Yes | Yes | | |
-| F48 | Learned auto-corrections | Yes | No | Yes | Yes | Limited | #1651 | Android learns only from edits made while its keyboard is in the field. |
+| F48 | Learned auto-corrections | Yes | Yes | Yes | Yes | Limited | | iOS learns from edits to text its keyboard inserted. Android learns only from edits made while its keyboard is in the field. |
 | F49 | Appearance settings | Yes | Yes | Yes | Yes | Yes | | |
 | F50 | Keyboard / IME surface | N/A | Yes | N/A | N/A | Yes | | |
 
@@ -243,7 +243,7 @@ The flags live in `Project.swift`; release selection is in
 - **Excluded:** none
 - **Gaps:** Android #1626 (corrections and vocabulary prompt only; no pronunciation).
 - **How:** Vocabulary biases recognition (sent as the provider's keyterms or prompt when its catalogue entry accepts one); corrections rewrite final text, and an automatic correction also restores the stored spelling's case when the recogniser already writes the word ("kubernetes" → "Kubernetes"). Limits come from `TranscriptionKeywordPolicy`.
-- **Refs:** `Sources/SpeakCore/Vocabulary/PersonalLexiconStore.swift`, `Sources/SpeakDesktop/Vocabulary/DesktopVocabulary.swift`, `Sources/SpeakDesktopHost/Transcription/DesktopHostVocabulary.swift`, `Sources/SpeakApp/PostProcessing/PersonalCorrectionsView.swift`, `android/app/src/main/java/com/justspeaktoit/android/corrections/PersonalCorrections.kt`
+- **Refs:** `Sources/SpeakCore/Vocabulary/PersonalLexiconStore.swift`, `Sources/SpeakDesktop/Vocabulary/DesktopVocabulary.swift`, `Sources/SpeakDesktopHost/Transcription/DesktopHostVocabulary.swift`, `Sources/SpeakApp/PostProcessing/PersonalCorrectionsView.swift`, `Sources/SpeakCore/Vocabulary/KeyboardCorrectionWatcher.swift`, `Sources/SpeakCore/Keyboard/Apple/KeyboardCorrectionObserver.swift`, `Sources/SpeakCore/Keyboard/Apple/KeyboardCorrectionStore.swift`, `Sources/SpeakiOS/Services/IOSLearnedCorrections.swift`, `Sources/SpeakiOS/Views/Settings/LearnedCorrectionsView.swift`, `android/app/src/main/java/com/justspeaktoit/android/corrections/PersonalCorrections.kt`
 - **Sunset:** none
 - **Nuances:** AssemblyAI keyterms are capped (50 characters each, 100 items). Corrections apply to every final path: app, keyboard, import and History retry.
 
@@ -563,13 +563,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** `make lint` enforces the Apple rules; suppress only with `// a11y-ignore: reason`. Owner passes are tracked in #1399.
 
 ### F48 Learned auto-corrections
-- **Platforms:** macOS Yes · iOS No · Windows Yes · Linux Yes · Android Limited
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Limited
 - **Excluded:** none
-- **Gaps:** iOS #1651.
+- **Gaps:** none
 - **How:** Watch the field after inserting; when the same edit recurs it is promoted to a correction rule (F12). Platforms supply only field monitoring.
 - **Refs:** `Sources/SpeakCore/Vocabulary/Apple/AutoCorrectionEngine.swift`, `Sources/SpeakApp/PostProcessing/AutoCorrectionTracker.swift`, `Sources/SpeakDesktopHost/Controller/DesktopHostController.swift`, `Sources/SpeakApp/PostProcessing/PersonalCorrectionsView.swift`, `android/app/src/main/java/com/justspeaktoit/android/corrections/AutoCorrectionLearning.kt`, `android/app/src/main/java/com/justspeaktoit/android/ime/KeyboardCorrectionObserver.kt`
 - **Sunset:** none
-- **Nuances:** iOS automatic polish is cleanup, not learned correction. Desktops share `DesktopHostCorrectionLearning`. Android mirrors `WordDiffer` and the learning policy in Kotlin (`WordDifferParityTest` pins shared cases; change both together). Its keyboard reads only the field it typed into, while it is still in that field, between the text remembered either side of the insertion; switching to another keyboard ends the watch. Password, no-suggestion and no-personalised-learning fields are never read. Promoted edits join Personal corrections; dismissed suggestions stay hidden.
+- **Nuances:** iOS learns through the Just Speak Keyboard (#1651): after it inserts a transcript it remembers the text either side, and when it next appears (iOS gives an extension no callbacks while another keyboard is up) it diffs the text now between that context with the shared `CorrectionSpan`/`WordDiffer`. Only the changed words cross the App Group (`KeyboardCorrectionStore`); the app records them through `AutoCorrectionDomain` and applies learned rules to every finished transcript. Edits made without the keyboard, in password fields or after 10 minutes are not learned. iOS has no Personal corrections page, so Settings › Post-Processing › Auto-Corrections lists learned rules and candidates for removal. iOS automatic polish is separate cleanup. Desktops share `DesktopHostCorrectionLearning`. Android mirrors `WordDiffer` and the learning policy in Kotlin (`WordDifferParityTest` pins shared cases; change both together). Its keyboard reads only the field it typed into, while it is still in that field, between the text remembered either side of the insertion; switching to another keyboard ends the watch. Password, no-suggestion and no-personalised-learning fields are never read. Promoted edits join Personal corrections; dismissed suggestions stay hidden.
 
 ### F49 Appearance settings
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

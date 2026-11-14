@@ -37,9 +37,10 @@ final class KeyboardHandoffController: ObservableObject {
     /// session is live, or when the last one was ended by the user.
     @Published private(set) var instantEndReason: InstantDictationReadinessEndReason?
 
-    /// Called immediately after a completed transcript reaches the document,
-    /// so the keyboard can hand itself back (issue #1005).
-    var onDidInsert: (() -> Void)?
+    /// Called with the transcript immediately after it reaches the document,
+    /// so the keyboard can watch it for corrections (#1651) and hand itself
+    /// back (issue #1005).
+    var onDidInsert: ((String) -> Void)?
 
     /// Whether a keyboard-owned dictation currently owns the caret. A pending
     /// pickup chip must not compete with words the user is saying right now.
@@ -381,6 +382,7 @@ final class KeyboardHandoffController: ObservableObject {
                 presentation = .error(.unknown)
                 return
             }
+            var insertedText = ""
             if consumer.insertReadyResult(
                 requestID: requestID,
                 documentIdentifier: currentDocumentIdentifier,
@@ -391,6 +393,7 @@ final class KeyboardHandoffController: ObservableObject {
                 // two happens, so the words can be neither doubled nor lost.
                 insert: { [weak self] text in
                     guard let self else { return }
+                    insertedText = text
                     switch self.markedText.finish(text) {
                     case let .finalise(final):
                         self.applyMarkedText(.finalise(final))
@@ -402,7 +405,7 @@ final class KeyboardHandoffController: ObservableObject {
                 self.requestID = nil
                 liveTranscript = ""
                 presentation = .inserted
-                onDidInsert?()
+                onDidInsert?(insertedText)
             }
         case .cancelled:
             applyMarkedText(markedText.abandon())

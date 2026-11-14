@@ -38,6 +38,27 @@
       "title" : "Cloud transcription model"
     },
     {
+      "id" : "android.cloudModel.openRouter",
+      "keywords" : [
+        "openrouter",
+        "browse openrouter models",
+        "openrouter transcription",
+        "audio models",
+        "speech to text models",
+        "transcription browser",
+        "model pricing",
+        "gemini",
+        "voxtral"
+      ],
+      "section" : "transcription",
+      "sectionTitle" : "Transcription",
+      "settingKeys" : [
+        "cloud_model"
+      ],
+      "summary" : "Browse OpenRouter's audio-input models for batch transcription, with prices and details.",
+      "title" : "Browse OpenRouter models…"
+    },
+    {
       "id" : "android.language",
       "keywords" : [
         "language",
@@ -121,13 +142,18 @@
         "openrouter models",
         "model browser",
         "model pricing",
-        "zero listed prices"
+        "zero listed prices",
+        "discover models",
+        "model discovery",
+        "live models",
+        "newest models"
       ],
       "section" : "postProcessing",
       "sectionTitle" : "Post-processing",
       "settingKeys" : [
         "cleanup_enabled",
-        "cleanup_model"
+        "cleanup_model",
+        "cleanupModelDiscoveryEnabled"
       ],
       "summary" : "Send the final transcript to the chosen cleanup model to fix punctuation and filler words.",
       "title" : "Clean up transcripts"

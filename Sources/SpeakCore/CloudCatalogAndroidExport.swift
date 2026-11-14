@@ -170,6 +170,14 @@ public enum CloudCatalogAndroidExport {
         let zeroPricesTitle, pricingCaveat, pricingUnlisted: String
         let useTitle, selectedTitle, routeNote: String
         let cleanupModels: [BrowserModel]
+        let transcriptionTitle, transcriptionIntro, transcriptionUseTitle, transcriptionSelectedTitle: String
+        let transcriptionRouteNote, streamingNote, emptyResults, unqualifiedWarning: String
+        /// Live discovery: the opt-in cleanup setting, its privacy note and both endpoints.
+        let discoverySettingTitle, discoveryNote, cleanupModelsURL, transcriptionModelsURL: String
+        /// `ModelPickerGrouping.vendorNames`: the provider a discovered OpenRouter slug's prefix is listed under.
+        let vendorNames: [String: String]
+        /// Bundled OpenRouter batch models; live speech-to-text models are merged after them at runtime.
+        let transcriptionModels: [BrowserModel]
     }
 
     private struct Document: Encodable {
@@ -287,16 +295,18 @@ public enum CloudCatalogAndroidExport {
 
     private static var openRouterBrowser: OpenRouterBrowser {
         typealias Browser = OpenRouterModelBrowserCatalog
-        let models = Browser.cleanupItems(options: cleanupModels).map { item in
-            let option = cleanupModels.first { $0.id == item.id }
-            return BrowserModel(
-                selectionId: item.id, slug: item.slug, name: item.name, provider: item.provider,
-                subtitle: item.subtitle, summary: item.summary,
-                speed: option?.latencyTier.displayName ?? "", pricing: item.pricing?.displayName,
-                contextLength: item.contextLength, strengths: option?.tags.map(\.displayName) ?? [],
-                hasZeroPrices: item.hasZeroPrices, searchText: item.searchText,
-                modelPageURL: item.modelPageURL?.absoluteString
-            )
+        func rows(_ items: [OpenRouterBrowserItem], _ options: [ModelCatalog.Option]) -> [BrowserModel] {
+            items.map { item in
+                let option = options.first { $0.id == item.id }
+                return BrowserModel(
+                    selectionId: item.id, slug: item.slug, name: item.name, provider: item.provider,
+                    subtitle: item.subtitle, summary: item.summary,
+                    speed: option?.latencyTier.displayName ?? "", pricing: item.pricing?.displayName,
+                    contextLength: item.contextLength, strengths: option?.tags.map(\.displayName) ?? [],
+                    hasZeroPrices: item.hasZeroPrices, searchText: item.searchText,
+                    modelPageURL: item.modelPageURL?.absoluteString
+                )
+            }
         }
         return OpenRouterBrowser(
             browseButtonTitle: Browser.browseButtonTitle, cleanupTitle: Browser.title(for: .cleanup),
@@ -306,7 +316,22 @@ public enum CloudCatalogAndroidExport {
             pricingUnlisted: Browser.pricingUnlisted,
             useTitle: Browser.actionTitle(for: .cleanup, selected: false),
             selectedTitle: Browser.actionTitle(for: .cleanup, selected: true),
-            routeNote: Browser.routeNote(for: .cleanup), cleanupModels: models
+            routeNote: Browser.routeNote(for: .cleanup),
+            cleanupModels: rows(Browser.cleanupItems(options: cleanupModels), cleanupModels),
+            transcriptionTitle: Browser.title(for: .transcription),
+            transcriptionIntro: Browser.intro(for: .transcription),
+            transcriptionUseTitle: Browser.actionTitle(for: .transcription, selected: false),
+            transcriptionSelectedTitle: Browser.actionTitle(for: .transcription, selected: true),
+            transcriptionRouteNote: Browser.routeNote(for: .transcription),
+            streamingNote: Browser.streamingNote, emptyResults: Browser.emptyResults,
+            unqualifiedWarning: Browser.unqualifiedWarning,
+            discoverySettingTitle: CleanupModelSelection.settingTitle, discoveryNote: Browser.discoveryNote,
+            cleanupModelsURL: Browser.cleanupModelsURL.absoluteString,
+            transcriptionModelsURL: Browser.transcriptionModelsURL.absoluteString,
+            vendorNames: ModelPickerGrouping.vendorNames,
+            transcriptionModels: rows(
+                Browser.transcriptionItems(bundled: transcriptionModels, discovered: []), transcriptionModels
+            )
         )
     }
 

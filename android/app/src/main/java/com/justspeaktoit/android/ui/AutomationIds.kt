@@ -216,20 +216,44 @@ object AutomationIds {
     /** One per learned suggestion, keyed by its position in the list, never by the user's own text. */
     fun learnedCorrectionAccept(index: Int) = "settings.learnedCorrections.accept.$index"
     fun learnedCorrectionDismiss(index: Int) = "settings.learnedCorrections.dismiss.$index"
-    const val CLEANUP_PICKER_BACK = "cleanupPicker.back"
-    const val CLEANUP_PICKER_SEARCH = "cleanupPicker.search"
+    /** The cleanup model picker and its OpenRouter browser (`cleanupPicker.*`). */
+    val CLEANUP_PICKER = ModelPickerIds("cleanupPicker")
+
+    /** The batch transcription model picker and its OpenRouter browser (`transcriptionPicker.*`). */
+    val TRANSCRIPTION_PICKER = ModelPickerIds("transcriptionPicker")
+
+    /** The settings row under the cloud transcription models that opens the OpenRouter browser. */
+    const val SETTINGS_CLOUD_MODEL_OPENROUTER = "settings.cloudModel.openRouter"
+}
+
+/**
+ * One model picker's controls. Both pickers share the OpenRouter browser, so each gets the same set
+ * under its own prefix.
+ */
+class ModelPickerIds(private val prefix: String) {
+    val back = "$prefix.back"
+    val search = "$prefix.search"
+
     /** The **Browse OpenRouter models…** row under the native models. */
-    const val CLEANUP_PICKER_OPENROUTER = "cleanupPicker.openRouter"
-    const val CLEANUP_PICKER_PROVIDER = "cleanupPicker.provider"
-    const val CLEANUP_PICKER_ALL_PROVIDERS = "cleanupPicker.provider.all"
-    const val CLEANUP_PICKER_ZERO_PRICES = "cleanupPicker.zeroPrices"
-    const val CLEANUP_PICKER_MODEL_PAGE = "cleanupPicker.detail.modelPage"
-    const val CLEANUP_PICKER_USE = "cleanupPicker.detail.use"
+    val openRouter = "$prefix.openRouter"
+    val provider = "$prefix.provider"
+    val allProviders = "$prefix.provider.all"
+    val zeroPrices = "$prefix.zeroPrices"
+    val modelPage = "$prefix.detail.modelPage"
+    val use = "$prefix.detail.use"
+
+    /** The live discovery switch (cleanup only), Refresh and the discovery status line. */
+    val discovery = "$prefix.discovery"
+    val refresh = "$prefix.refresh"
+    val status = "$prefix.status"
+
+    /** Profiles only: keep the user's own settings instead of a model. */
+    val useSettings = "$prefix.useSettings"
 
     /** One per OpenRouter vendor in the provider filter, keyed by its name (for example `meta-llama`). */
-    fun cleanupPickerProvider(name: String) =
-        "cleanupPicker.provider." + name.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]+"), "-").trim('-')
+    fun provider(name: String) =
+        "$prefix.provider." + name.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]+"), "-").trim('-')
 
-    /** One per cleanup model, keyed by its stable selection ID (for example `native/openai/gpt-6-luna`). */
-    fun cleanupPickerModel(selectionId: String) = "cleanupPicker.model.$selectionId"
+    /** One per model, keyed by its stable selection ID (for example `native/openai/gpt-6-luna`). */
+    fun model(selectionId: String) = "$prefix.model.$selectionId"
 }

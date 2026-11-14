@@ -143,6 +143,14 @@
       "type" : "enumeration"
     },
     {
+      "default" : false,
+      "description" : "List OpenAI cleanup models OpenRouter offers today, as well as the bundled ones.",
+      "key" : "cleanupModelDiscoveryEnabled",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "boolean"
+    },
+    {
       "default" : true,
       "description" : "Keep a cancelled cloud recording's audio in History.",
       "key" : "keepAudioOnCancel",
@@ -298,7 +306,6 @@
     "autoStopSilenceSeconds",
     "batchTranscriptionModel",
     "cancelRecordingOnEscape",
-    "cleanupModelDiscoveryEnabled",
     "clipboardInsertionTriggers",
     "compactStatusBarIcon",
     "connectionPreWarmingEnabled",

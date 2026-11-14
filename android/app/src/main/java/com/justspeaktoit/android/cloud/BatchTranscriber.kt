@@ -383,6 +383,9 @@ internal class BatchTranscriber(
         languageTag: String?,
         call: CallHandle,
     ): String {
+        OpenRouterTranscriptionSelection.modelId(model.catalogId)?.let { slug ->
+            return openRouterSpeechToText(slug, key, audio, format, languageTag, call)
+        }
         val audioFormat = BatchWire.openRouterFormat(format)
             ?: throw CloudException(DictationFailure.UnsupportedAudio, "OpenRouter cannot read ${format.extension}")
         requireAtMost(audio, BatchWire.OPENROUTER_MAX_AUDIO_BYTES, "OpenRouter takes at most 50 MiB inline")
@@ -393,6 +396,22 @@ internal class BatchTranscriber(
             audioFormat
         }
         return BatchWire.openRouterText(send(BatchWire.openRouter(model, key, audio, wireFormat, languageTag), call))
+    }
+
+    /** A discovered speech-to-text model goes to OpenRouter's dedicated endpoint, not chat completions. */
+    private fun openRouterSpeechToText(
+        slug: String,
+        key: String,
+        audio: File,
+        format: SharedAudio.Format,
+        languageTag: String?,
+        call: CallHandle,
+    ): String {
+        val audioFormat = BatchWire.openRouterSpeechToTextFormat(format)
+            ?: throw CloudException(DictationFailure.UnsupportedAudio, "OpenRouter cannot read ${format.extension}")
+        requireAtMost(audio, BatchWire.OPENROUTER_STT_MAX_AUDIO_BYTES, "OpenRouter takes at most 25 MiB")
+        val request = BatchWire.openRouterSpeechToText(slug, key, audio, audioFormat, languageTag)
+        return BatchWire.openRouterSpeechToTextText(send(request, call))
     }
 
     /** Runs [step] until it returns true; a NetworkTimeout once [attempts] are spent. */

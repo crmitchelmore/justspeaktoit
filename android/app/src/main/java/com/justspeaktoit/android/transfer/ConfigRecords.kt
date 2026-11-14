@@ -1,7 +1,6 @@
 package com.justspeaktoit.android.transfer
 
 import com.justspeaktoit.android.cloud.CloudCatalog
-import com.justspeaktoit.android.cloud.GeneratedCloudCatalog
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.dictation.DictationLanguages
@@ -54,13 +53,12 @@ internal object SharedSettings {
     /** A cleanup route Android offers, after the catalogue's successor mapping, or null. */
     fun cleanupModel(value: Any): String? {
         val id = value as? String ?: return null
-        val current = GeneratedCloudCatalog.cleanupModelSuccessors[id] ?: id
-        return CloudCatalog.cleanupModels.firstOrNull { it.selectionId == current }?.selectionId
+        return CloudCatalog.findCleanupModel(id)?.selectionId
     }
 
     /** A transcription model Android offers, or null. */
     fun cloudModel(value: Any): String? =
-        (value as? String)?.takeIf { id -> CloudCatalog.transcriptionModels.any { it.catalogId == id } }
+        (value as? String)?.let { id -> CloudCatalog.findTranscriptionModel(id)?.catalogId }
 }
 
 /**

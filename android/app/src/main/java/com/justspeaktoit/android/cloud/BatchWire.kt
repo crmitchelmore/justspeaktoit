@@ -1124,6 +1124,49 @@ object BatchWire {
 
     // endregion
 
+    // region OpenRouter speech-to-text models (`OpenRouterAudioClient`)
+
+    /** `OpenRouterAudioClient`'s input limit for the dedicated `/audio/transcriptions` endpoint. */
+    const val OPENROUTER_STT_MAX_AUDIO_BYTES = 25L * 1024 * 1024
+
+    /** The `input_audio.format` the dedicated endpoint takes; null for any other recording. */
+    fun openRouterSpeechToTextFormat(format: SharedAudio.Format): String? =
+        format.extension.lowercase(Locale.ROOT).let { if (it == "wave") "wav" else it }
+            .takeIf { it in setOf("wav", "mp3", "flac", "m4a", "ogg", "webm", "aac") }
+
+    /**
+     * One request to a discovered speech-to-text model ([OpenRouterTranscriptionSelection]): the raw
+     * `vendor/model` slug and the recording inline. Automatic sends no language hint.
+     */
+    fun openRouterSpeechToText(
+        slug: String,
+        apiKey: String,
+        audio: File,
+        audioFormat: String,
+        languageTag: String?,
+    ): Request {
+        val placeholder = audioPlaceholder()
+        val json = JSONObject()
+            .put("model", slug)
+            .put("input_audio", JSONObject().put("data", placeholder).put("format", audioFormat))
+            .put("response_format", "json")
+        languageTag?.trim()?.takeIf { languageCode(it) != null }?.let { json.put("language", it) }
+        return Request(
+            "POST",
+            "${CloudProvider.OpenRouter.baseUrl}/audio/transcriptions",
+            mapOf(
+                "Authorization" to "Bearer $apiKey",
+                "Content-Type" to "application/json",
+                "Cache-Control" to "no-store",
+            ),
+            base64Json(json, placeholder, audio),
+        )
+    }
+
+    fun openRouterSpeechToTextText(body: String): String = requiredString(body, "text").trim()
+
+    // endregion
+
     // region Azure Speech and MAI (`AzureBatchTranscriptionClient`)
 
     const val AZURE_FAST = "azure/fast-transcription"

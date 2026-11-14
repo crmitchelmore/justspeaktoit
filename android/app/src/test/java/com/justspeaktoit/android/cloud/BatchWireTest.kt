@@ -556,6 +556,28 @@ class BatchWireTest {
     }
 
     @Test
+    fun testOpenRouterSpeechToText_sendsALiveModelToTheDedicatedEndpoint() {
+        withFile(byteArrayOf(9, 8, 7)) { file ->
+            val request = BatchWire.openRouterSpeechToText("openai/whisper-large-v3", "k", file, "wav", " fr-FR ")
+            assertEquals("https://openrouter.ai/api/v1/audio/transcriptions", request.url)
+            assertEquals("Bearer k", request.headers["Authorization"])
+            val body = streamedJson(request)
+            assertEquals("openai/whisper-large-v3", body.getString("model"))
+            assertEquals("json", body.getString("response_format"))
+            assertEquals("fr-FR", body.getString("language"))
+            val inputAudio = body.getJSONObject("input_audio")
+            assertEquals("wav", inputAudio.getString("format"))
+            assertEquals("CQgH", inputAudio.getString("data"))
+            assertFalse(streamedJson(BatchWire.openRouterSpeechToText("a/b", "k", file, "wav", "auto")).has("language"))
+        }
+        assertEquals("webm", BatchWire.openRouterSpeechToTextFormat(SharedAudio.Format("webm", "audio/webm")))
+        assertEquals("wav", BatchWire.openRouterSpeechToTextFormat(SharedAudio.Format("wave", "audio/wav")))
+        assertNull(BatchWire.openRouterSpeechToTextFormat(SharedAudio.Format("3gp", "audio/3gpp")))
+        assertEquals("Hi", BatchWire.openRouterSpeechToTextText("""{"text":" Hi "}"""))
+        assertThrows(CloudException::class.java) { BatchWire.openRouterSpeechToTextText("""{"choices":[]}""") }
+    }
+
+    @Test
     fun testParsers_reportAMalformedResponseAsAServerFailure() {
         for (parse in listOf<(String) -> String>(BatchWire::deepgramText, BatchWire::revAIText, BatchWire::speechmaticsText)) {
             assertEquals(DictationFailure.Server, assertThrows(CloudException::class.java) { parse("not json") }.failure)

@@ -66,6 +66,8 @@ import com.justspeaktoit.android.cloud.CleanupModelPicker
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.OpenRouterBrowser
+import com.justspeaktoit.android.cloud.OpenRouterDiscovery
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.dictation.DictationUiState
 import com.justspeaktoit.android.dictation.SilenceSettings
@@ -92,6 +94,12 @@ class SettingsActions(
     val onKeepAudioOnCancelChanged: (Boolean) -> Unit,
     val onKeepRecordingsChanged: (Boolean) -> Unit = {},
     val onChooseCleanupModel: (CleanupModel) -> Unit,
+    /** Chooses a transcription model by ID, including one from the OpenRouter browser. */
+    val onChooseTranscriptionId: (String) -> Unit = {},
+    /** Live OpenRouter discovery; `true` is a Refresh press, which skips the fresh-cache check. */
+    val onRefreshTranscriptionModels: (Boolean) -> Unit = {},
+    val onRefreshCleanupModels: (Boolean) -> Unit = {},
+    val onCleanupDiscoveryChanged: (Boolean) -> Unit = {},
     val onReleaseResource: (String) -> Unit = {},
     val onReleaseEverything: () -> Unit = {},
     val onChooseLanguage: (String) -> Unit = {},
@@ -183,6 +191,13 @@ fun SettingsScreen(
     var highlighted by remember { mutableStateOf<String?>(null) }
     val anchors = remember { mutableStateMapOf<String, Int>() }
     val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+    val discovery = OpenRouterDiscoveryUi(
+        state = state.openRouterDiscovery,
+        cleanupEnabled = state.cleanupModelDiscoveryEnabled,
+        onCleanupEnabledChanged = actions.onCleanupDiscoveryChanged,
+        onRefreshCleanup = actions.onRefreshCleanupModels,
+        onRefreshTranscription = actions.onRefreshTranscriptionModels,
+    )
     LaunchedEffect(highlighted) {
         if (highlighted != null) {
             delay(2_500)
@@ -266,7 +281,7 @@ fun SettingsScreen(
 
             HorizontalDivider()
             SectionTitle(R.string.settings_cloud_model_title, anchor("android.cloudModel"))
-            CloudCatalog.transcriptionModels.forEach { model ->
+            CloudCatalog.transcriptionModels.filterNot(CloudCatalog::isOpenRouterTranscription).forEach { model ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
@@ -281,6 +296,7 @@ fun SettingsScreen(
                     Text(model.displayName, modifier = Modifier.padding(start = 8.dp))
                 }
             }
+            OpenRouterTranscriptionRow(state, actions, discovery, anchor("android.cloudModel.openRouter"))
 
             HorizontalDivider()
             Row(
@@ -301,7 +317,7 @@ fun SettingsScreen(
                 Switch(checked = state.cleanupEnabled, onCheckedChange = null)
             }
             Text(stringResource(R.string.settings_cleanup_note), style = MaterialTheme.typography.bodyMedium)
-            CleanupModelRow(state, actions)
+            CleanupModelRow(state, actions, discovery)
             if (state.cleanupEnabled && state.cleanupModel.provider !in state.savedKeys) {
                 Text(
                     stringResource(R.string.settings_cleanup_needs_key, state.cleanupModel.provider.displayName),
@@ -324,6 +340,7 @@ fun SettingsScreen(
                 savedKeys = state.savedKeys,
                 onSave = actions.onSaveProfile,
                 onDelete = actions.onDeleteProfile,
+                discovery = discovery,
             )
 
             HorizontalDivider()
@@ -564,7 +581,7 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions) {
+private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions, discovery: OpenRouterDiscoveryUi) {
     var picking by remember { mutableStateOf(false) }
     val title = stringResource(R.string.settings_cleanup_model)
     val label = CleanupModelPicker.selectionLabel(state.cleanupModel)
@@ -597,6 +614,49 @@ private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions) {
                 picking = false
             },
             onDismiss = { picking = false },
+            discovery = discovery,
+        )
+    }
+}
+
+/**
+ * **Browse OpenRouter models…** under the cloud transcription models: the chosen OpenRouter model as
+ * "OpenRouter › name", and a saved live model that OpenRouter no longer lists, which stays selected.
+ */
+@Composable
+private fun OpenRouterTranscriptionRow(
+    state: DictationUiState,
+    actions: SettingsActions,
+    discovery: OpenRouterDiscoveryUi,
+    modifier: Modifier,
+) {
+    var browsing by remember { mutableStateOf(false) }
+    val found = state.openRouterDiscovery
+    val count = remember(found.transcriptionModels) {
+        OpenRouterBrowser.transcriptionItems(found.transcriptionModels).size
+    }
+    val missing = OpenRouterDiscovery.missingTranscriptionSelection(
+        state.cloudModel.catalogId,
+        found.transcriptionModels,
+        found.transcriptionLoaded,
+    )
+    BrowseOpenRouterRow(
+        count = count,
+        selectedLabel = openRouterTranscriptionLabel(state.cloudModel, found),
+        onOpen = { browsing = true },
+        modifier = modifier.testTag(AutomationIds.SETTINGS_CLOUD_MODEL_OPENROUTER),
+        warning = missing?.let { stringResource(R.string.transcription_picker_missing, it) },
+    )
+    if (browsing) {
+        TranscriptionModelPickerDialog(
+            selectedId = state.cloudModel.catalogId,
+            savedKeys = state.savedKeys,
+            discovery = discovery,
+            onChoose = {
+                actions.onChooseTranscriptionId(it)
+                browsing = false
+            },
+            onDismiss = { browsing = false },
         )
     }
 }

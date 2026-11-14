@@ -39,7 +39,7 @@ data class DictationProfile(
         get() {
             val id = transcriptionModelId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
             if (transcriptionRouting != null && transcriptionRouting != REMOTE_BATCH) return null
-            return CloudCatalog.transcriptionModels.firstOrNull { it.catalogId == id }
+            return CloudCatalog.findTranscriptionModel(id)
         }
 
     /** The profile's language, or null to keep the user's own. */
@@ -50,8 +50,7 @@ data class DictationProfile(
     val cleanupModel: CleanupModel?
         get() {
             val id = cleanupModelId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-            val current = GeneratedCloudCatalog.cleanupModelSuccessors[id] ?: id
-            return CloudCatalog.cleanupModels.firstOrNull { it.selectionId == current }
+            return CloudCatalog.findCleanupModel(id)
         }
 
     /** The profile's base cleanup prompt, or null to keep the user's own. */

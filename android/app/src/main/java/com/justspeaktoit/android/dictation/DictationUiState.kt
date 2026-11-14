@@ -9,6 +9,7 @@ import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.OpenRouterDiscoveryState
 import com.justspeaktoit.android.corrections.AutoCorrectionCandidate
 import com.justspeaktoit.android.corrections.AutoCorrectionLearningPolicy
 import com.justspeaktoit.android.corrections.CorrectionRule
@@ -41,6 +42,10 @@ data class DictationUiState(
     val savedKeys: Set<CloudProvider> = emptySet(),
     val cleanupEnabled: Boolean = false,
     val cleanupModel: CleanupModel = CloudCatalog.cleanupModel(null),
+    /** Whether the cleanup browser also lists OpenAI models OpenRouter offers today. */
+    val cleanupModelDiscoveryEnabled: Boolean = false,
+    /** Live OpenRouter models for the transcription and cleanup browsers. */
+    val openRouterDiscovery: OpenRouterDiscoveryState = OpenRouterDiscoveryState(),
     val cleanup: CleanupStatus = CleanupStatus.None,
     val originalTranscript: String? = null,
     /** Set when a key could not be saved or removed securely. */

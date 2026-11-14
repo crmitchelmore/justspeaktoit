@@ -134,6 +134,16 @@ extension SettingsSearchCatalog {
             platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.sendToMac", title: "Send to Mac", section: .general,
+            systemImage: "desktopcomputer",
+            summary: "Pair with a Mac on the same network, then send a transcript from History to paste on it.",
+            keywords: [
+                "send to mac", "pair", "pairing code", "six-digit code", "forget mac", "paste on mac",
+                "bonjour", "local network", "desktop", "transfer"
+            ],
+            platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.resourcesInUse", title: "System resources in use", section: .general,
             systemImage: "gauge.with.dots.needle.33percent",
             summary: "See what the app holds now, such as the microphone or a cloud request, and release it.",

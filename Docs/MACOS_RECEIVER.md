@@ -5,7 +5,9 @@ The iPhone and iPad app can send a finished transcript straight to a paired Mac
 network over Bonjour, pairs with the six-digit code the Mac shows, and remembers
 the Mac until the user forgets it. A History item's context menu then offers
 **Send to Mac**, which delivers the text to the Mac and pastes it at the Mac's
-cursor. Android, Windows and Linux senders remain open on #1640. Platform History
+cursor. Android does the same from Settings → **Send to Mac** and a History item's
+**Send to Mac** button (see [Android sender](#android-sender)). Windows and Linux
+senders remain open on #1640. Platform History
 sync can use iCloud when enabled and CloudKit is available; it is separate from
 insertion at a Mac's cursor.
 Mac and iPhone now share one iCloud container; Mac/iPhone History sync stays
@@ -121,6 +123,39 @@ consecutive wrong codes (counted across all connections) every attempt is refuse
 for a lockout that starts at 30 seconds and doubles per further failure up to an
 hour. A correct code or regenerating the code clears it.
 
+## Android sender
+
+The Android app (`com.justspeaktoit.android.sendtomac`) is a Kotlin port of the
+phone side, because Android cannot run SpeakCore's Swift sender:
+
+- `MacDiscovery` browses the Stable service with `NsdManager` and resolves the
+  chosen Mac's addresses when it connects; `WebSocketConnection` is a minimal
+  RFC 6455 client for the Mac's `NWProtocolWebSocket` listener.
+- `TransportCrypto` and `X25519` run the same v2 handshake, key schedule and
+  ChaCha20-Poly1305 framing as `TransportSecureSession`; `SendToMacClient` runs
+  hello, authentication and the one-chunk send as `MacConnection` does.
+- `SendToMacPairingStore` keeps the paired Mac and its device credential in the
+  app's Keystore-encrypted `SecretStore` (the store that holds API keys), which
+  is never backed up and never exported by configuration transfer. The pairing
+  code is never stored; a revoked credential fails until the user forgets the
+  Mac and pairs again.
+
+The constants (service types, labels, sizes, frame limits) come from
+`android/app/src/main/assets/send_to_mac_protocol.json`, which
+[`TransportProtocolConstants`](../Sources/SpeakCore/Sync/Apple/TransportProtocolConstants.swift)
+and [`SendToMacProtocolAndroidExport`](../Sources/SpeakCore/Sync/Apple/SendToMacProtocolAndroidExport.swift)
+generate with handshake and message test vectors from the real
+`TransportSecureSession`. `SendToMacProtocolAndroidExportTests` fails when the
+asset is stale; regenerate it with `scripts/update-android-assets`. On Android,
+`SendToMacProtocolVectorTest` checks the key exchange, transcript hash, key
+derivation, sealed frames and every message's JSON byte for byte, and
+`SendToMacClientTest` replays the Mac's recorded side of a pairing and a send.
+
+Android has no Alpha build of its own, so it sends `releaseTrain: stable` and
+browses only `_speaktransport._tcp`: it pairs with the Stable Mac from
+justspeaktoit.com, and an Alpha Mac refuses it. At target SDK 36 it needs only
+the `INTERNET` permission; targeting SDK 37 will add `ACCESS_LOCAL_NETWORK`.
+
 ## Existing coverage and remaining qualification
 
 `TransportLoopbackTests` connects the actual `MacConnection` and `TransportServer`
@@ -136,12 +171,12 @@ the credential, sending uses it and waits for the acknowledgement, a revoked
 credential fails without re-pairing, and forgetting clears it.
 `KeychainSendToMacPairingStoreTests` covers persistence. These are protocol
 fixtures, not physical phone-to-Mac delivery or cursor-insertion evidence; that
-is the `ios-send-to-mac` manual check. No fresh
+is the `ios-send-to-mac` and `android-send-to-mac` manual checks. No fresh
 build or test execution is claimed by this documentation correction.
 
 For a manual receiver check, enable **Send to Mac** on the Mac and inspect its
 listener status and pairing code, then pair from iOS Settings → Sync & Transfer →
-Send to Mac and send a History item. Use the independent
+Send to Mac (or Android Settings → Send to Mac) and send a History item. Use the independent
 Automation settings for CLI/MCP checks; enabling the Bonjour receiver does not
 enable automation.
 

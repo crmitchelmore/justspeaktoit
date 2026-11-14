@@ -94,14 +94,18 @@ final class TransportReceiverSessionTests: XCTestCase {
         let v1Hello = try encoder.encode(TransportMessage.hello(HelloMessage(
             protocolVersion: 1, deviceName: "Old", deviceId: "old", releaseTrain: nil
         )))
-        let v1 = TransportReceiverSession(pairing: TransportReceiverPairingStore())
-        guard case .error(let mismatch) = try plaintextReply(v1.receive(v1Hello)) else { return XCTFail() }
+        let legacy = TransportReceiverSession(pairing: TransportReceiverPairingStore())
+        guard case .error(let mismatch) = try plaintextReply(legacy.receive(v1Hello)) else {
+            return XCTFail("expected a version error")
+        }
         XCTAssertEqual(mismatch.code, 400)
-        XCTAssertTrue(v1.isClosed)
+        XCTAssertTrue(legacy.isClosed)
 
         let v2Hello = try encoder.encode(hello())
-        let v2 = TransportReceiverSession(pairing: TransportReceiverPairingStore())
-        guard case .error(let upgrade) = try plaintextReply(v2.receive(v2Hello)) else { return XCTFail() }
+        let plaintextV2 = TransportReceiverSession(pairing: TransportReceiverPairingStore())
+        guard case .error(let upgrade) = try plaintextReply(plaintextV2.receive(v2Hello)) else {
+            return XCTFail("expected an upgrade-required error")
+        }
         XCTAssertEqual(upgrade.code, 426)
 
         let garbage = TransportReceiverSession(pairing: TransportReceiverPairingStore())
@@ -114,7 +118,8 @@ final class TransportReceiverSessionTests: XCTestCase {
         let store = TransportReceiverPairingStore()
         let session = TransportReceiverSession(pairing: store)
         var phone = try handshake(session, secret: .code(store.pairingCode))
-        let actions = session.receive(try phone.keys.outbound.seal(try encoder.encode(chunk(1, "sneaky", isFinal: true))))
+        let sealed = try phone.keys.outbound.seal(try encoder.encode(chunk(1, "sneaky", isFinal: true)))
+        let actions = session.receive(sealed)
         XCTAssertEqual(actions, [.close])
         XCTAssertTrue(store.pairedDevices.isEmpty)
     }
@@ -249,7 +254,9 @@ final class TransportReceiverSessionTests: XCTestCase {
     }
 
     private func chunk(_ sequence: Int, _ text: String, isFinal: Bool) -> TransportMessage {
-        .transcriptChunk(TranscriptChunkMessage(sessionId: "s1", sequenceNumber: sequence, text: text, isFinal: isFinal))
+        .transcriptChunk(
+            TranscriptChunkMessage(sessionId: "s1", sequenceNumber: sequence, text: text, isFinal: isFinal)
+        )
     }
 }
 

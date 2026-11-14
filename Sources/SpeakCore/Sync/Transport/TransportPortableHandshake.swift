@@ -96,7 +96,8 @@ struct TransportPortableKeySchedule: Sendable {
     private let transcriptHash: [UInt8]
 
     init(privateKey: [UInt8], peerShare: TransportKeyShare, clientFrame: Data, serverFrame: Data) throws {
-        guard let secret = PortableX25519.sharedSecret(privateKey: privateKey, peerPublicKey: Array(peerShare.keyShare)),
+        let peerKey = Array(peerShare.keyShare)
+        guard let secret = PortableX25519.sharedSecret(privateKey: privateKey, peerPublicKey: peerKey),
               secret.contains(where: { $0 != 0 }) else { throw TransportSecurityError.malformedHandshake }
         self.sharedSecret = secret
         self.transcriptHash = PortableSHA256.hash(

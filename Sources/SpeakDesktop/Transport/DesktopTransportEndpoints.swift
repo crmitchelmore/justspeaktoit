@@ -34,7 +34,9 @@ package protocol DesktopTransportListener: AnyObject {
 
 /// Publishes the receiver as a DNS-SD service so the phone can find it.
 package protocol DesktopTransportAdvertiser: AnyObject {
-    func start(name: String, type: String, port: UInt16) throws
+    /// Returns the name actually announced, which differs from `name` when
+    /// another service on the network already uses it.
+    func start(name: String, type: String, port: UInt16) throws -> String
     func stop()
 }
 

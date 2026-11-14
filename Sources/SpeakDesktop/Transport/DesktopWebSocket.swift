@@ -26,30 +26,24 @@ enum DesktopWebSocketSHA1 {
             }
             var work = state
             for index in 0..<80 {
-                let (b, c, d) = (work[1], work[2], work[3])
-                var mixed: UInt32
-                var constant: UInt32
-                switch index {
-                case 0..<20:
-                    mixed = (b & c) | (~b & d)
-                    constant = 0x5A82_7999
-                case 20..<40:
-                    mixed = b ^ c ^ d
-                    constant = 0x6ED9_EBA1
-                case 40..<60:
-                    mixed = (b & c) | (b & d) | (c & d)
-                    constant = 0x8F1B_BCDC
-                default:
-                    mixed = b ^ c ^ d
-                    constant = 0xCA62_C1D6
-                }
+                let mixed = mix(index, work[1], work[2], work[3])
                 let rotated = work[0] << 5 | work[0] >> 27
-                let temp = rotated &+ mixed &+ work[4] &+ constant &+ words[index]
-                work = [temp, work[0], b << 30 | b >> 2, c, d]
+                let temp = rotated &+ mixed &+ work[4] &+ words[index]
+                work = [temp, work[0], work[1] << 30 | work[1] >> 2, work[2], work[3]]
             }
             for index in 0..<5 { state[index] &+= work[index] }
         }
         return state.flatMap { word in (0..<4).map { UInt8(truncatingIfNeeded: word >> UInt32(24 - $0 * 8)) } }
+    }
+
+    /// FIPS 180-4's f(t) of words B, C and D plus the round constant K(t).
+    private static func mix(_ index: Int, _ second: UInt32, _ third: UInt32, _ fourth: UInt32) -> UInt32 {
+        switch index {
+        case 0..<20: return ((second & third) | (~second & fourth)) &+ 0x5A82_7999
+        case 20..<40: return (second ^ third ^ fourth) &+ 0x6ED9_EBA1
+        case 40..<60: return ((second & third) | (second & fourth) | (third & fourth)) &+ 0x8F1B_BCDC
+        default: return (second ^ third ^ fourth) &+ 0xCA62_C1D6
+        }
     }
 }
 

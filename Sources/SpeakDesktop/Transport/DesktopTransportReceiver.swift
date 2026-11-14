@@ -99,6 +99,7 @@ package final class DesktopTransportReceiver: @unchecked Sendable {
     private var pairing: TransportReceiverPairingStore?
     private var state = DesktopTransportReceiverStatus.State.off
     private var run: Run?
+    private var advertisedName: String?
     private var links: [ObjectIdentifier: Link] = [:]
     private var changeHandler: (@Sendable (DesktopTransportReceiverStatus) -> Void)?
 
@@ -137,7 +138,7 @@ package final class DesktopTransportReceiver: @unchecked Sendable {
         return DesktopTransportReceiverStatus(
             enabled: storage.current.enabled, state: state,
             pairingCode: pairing?.pairingCode ?? "", devices: pairing?.pairedDevices ?? [],
-            connected: connected, serviceName: serviceName
+            connected: connected, serviceName: lock.withLock { advertisedName } ?? serviceName
         )
     }
 
@@ -147,7 +148,8 @@ package final class DesktopTransportReceiver: @unchecked Sendable {
         do {
             loaded = try storage.load()
         } catch {
-            lock.withLock { state = .unavailable("the system keyring could not be read (\(error.localizedDescription)).") }
+            let reason = "the system keyring could not be read (\(error.localizedDescription))."
+            lock.withLock { state = .unavailable(reason) }
             notify()
             return
         }
@@ -197,8 +199,9 @@ package final class DesktopTransportReceiver: @unchecked Sendable {
             return notify()
         }
         let advertiser = endpoints.makeAdvertiser()
+        let announced: String
         do {
-            try advertiser.start(name: serviceName, type: serviceType, port: listener.port)
+            announced = try advertiser.start(name: serviceName, type: serviceType, port: listener.port)
         } catch {
             listener.close()
             lock.withLock { state = .unavailable("phones cannot find this computer (\(error.localizedDescription)).") }
@@ -207,6 +210,7 @@ package final class DesktopTransportReceiver: @unchecked Sendable {
         let started = Run(listener: listener, advertiser: advertiser)
         lock.withLock {
             run = started
+            advertisedName = announced
             state = .listening
         }
         started.threads.enter()
@@ -221,6 +225,7 @@ package final class DesktopTransportReceiver: @unchecked Sendable {
         let stopping = lock.withLock { () -> Run? in
             let current = run
             run = nil
+            advertisedName = nil
             state = .off
             return current
         }
@@ -271,15 +276,7 @@ package final class DesktopTransportReceiver: @unchecked Sendable {
         var decoder = DesktopWebSocketDecoder()
         decoder.append(leftover)
         while true {
-            do {
-                while let event = try decoder.next(maxMessageBytes: session.frameLimit.maximumBytes) {
-                    guard handle(event, session: session, connection: connection, link: link) else { return }
-                }
-            } catch {
-                let code: UInt16 = error as? DesktopWebSocketDecoder.Failure == .messageTooLarge ? 1009 : 1002
-                _ = connection.write(DesktopWebSocketEncoder.close(code: code))
-                return
-            }
+            guard drain(&decoder, session: session, connection: connection, link: link) else { return }
             if run.isStopped {
                 _ = connection.write(DesktopWebSocketEncoder.close(code: 1001))
                 return
@@ -290,6 +287,32 @@ package final class DesktopTransportReceiver: @unchecked Sendable {
             case .timedOut: continue
             case .closed: return
             }
+        }
+    }
+
+    private func notify() {
+        guard let handler = lock.withLock({ changeHandler }) else { return }
+        handler(status)
+    }
+}
+
+// MARK: - One connection
+
+extension DesktopTransportReceiver {
+    /// Handles every complete WebSocket event buffered; `false` ends the connection.
+    private func drain(
+        _ decoder: inout DesktopWebSocketDecoder, session: TransportReceiverSession,
+        connection: any DesktopTransportConnection, link: Link
+    ) -> Bool {
+        do {
+            while let event = try decoder.next(maxMessageBytes: session.frameLimit.maximumBytes) {
+                guard handle(event, session: session, connection: connection, link: link) else { return false }
+            }
+            return true
+        } catch {
+            let code: UInt16 = error as? DesktopWebSocketDecoder.Failure == .messageTooLarge ? 1009 : 1002
+            _ = connection.write(DesktopWebSocketEncoder.close(code: code))
+            return false
         }
     }
 
@@ -354,10 +377,5 @@ package final class DesktopTransportReceiver: @unchecked Sendable {
             _ = connection.write(DesktopWebSocketEncoder.close())
             return false
         }
-    }
-
-    private func notify() {
-        guard let handler = lock.withLock({ changeHandler }) else { return }
-        handler(status)
     }
 }

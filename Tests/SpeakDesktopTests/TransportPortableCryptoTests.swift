@@ -103,7 +103,8 @@ final class TransportPortableCryptoTests: XCTestCase {
             let plaintext = (0..<length).map { UInt8(truncatingIfNeeded: $0 &* 31) }
             let sealed = PortableChaChaPoly.seal(plaintext, key: key, nonce: nonce, authenticating: [1, 2, 3])
             XCTAssertEqual(sealed.count, length + 16)
-            XCTAssertEqual(PortableChaChaPoly.open(sealed, key: key, nonce: nonce, authenticating: [1, 2, 3]), plaintext)
+            let opened = PortableChaChaPoly.open(sealed, key: key, nonce: nonce, authenticating: [1, 2, 3])
+            XCTAssertEqual(opened, plaintext)
         }
     }
 
@@ -121,7 +122,9 @@ final class TransportPortableCryptoTests: XCTestCase {
                 inputKeyMaterial: SymmetricKey(data: message), salt: key, info: Data("info".utf8), outputByteCount: 32
             )
             XCTAssertEqual(
-                PortableHKDF.deriveKey(inputKeyMaterial: message, salt: key, info: Array("info".utf8), outputByteCount: 32),
+                PortableHKDF.deriveKey(
+                    inputKeyMaterial: message, salt: key, info: Array("info".utf8), outputByteCount: 32
+                ),
                 okm.withUnsafeBytes { Array($0) }
             )
 

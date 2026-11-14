@@ -95,7 +95,7 @@ enum PortableChaCha20 {
         (value << count) | (value >> (32 - count))
     }
 
-    // swiftlint:disable:next identifier_name
+    // swiftlint:disable:next identifier_name - RFC 8439 names the state and its indices s, a, b, c, d.
     private static func quarterRound(_ s: inout [UInt32], _ a: Int, _ b: Int, _ c: Int, _ d: Int) {
         s[a] = s[a] &+ s[b]; s[d] = rotateLeft(s[d] ^ s[a], 16)
         s[c] = s[c] &+ s[d]; s[b] = rotateLeft(s[b] ^ s[c], 12)
@@ -108,68 +108,75 @@ enum PortableChaCha20 {
 enum PortablePoly1305 {
     private static let mask: UInt32 = 0x3ff_ffff
 
-    /// `blocks` must be a whole number of 16-byte blocks.
+    /// `blocks` must be a whole number of 16-byte blocks. Names follow
+    /// poly1305-donna: `rLimbs` is r, `rTimes5` is s and `acc` is h.
     static func authenticate(blocks: [UInt8], key: [UInt8]) -> [UInt8] {
         precondition(blocks.count % 16 == 0 && key.count == 32)
-        let r0 = word(key, 0) & 0x3ff_ffff
-        let r1 = (word(key, 3) >> 2) & 0x3ff_ff03
-        let r2 = (word(key, 6) >> 4) & 0x3ff_c0ff
-        let r3 = (word(key, 9) >> 6) & 0x3f0_3fff
-        let r4 = (word(key, 12) >> 8) & 0x00f_ffff
-        let s1 = UInt64(r1 * 5), s2 = UInt64(r2 * 5), s3 = UInt64(r3 * 5), s4 = UInt64(r4 * 5)
-        let r = [UInt64(r0), UInt64(r1), UInt64(r2), UInt64(r3), UInt64(r4)]
-        var h: [UInt32] = [0, 0, 0, 0, 0]
+        let clamped: [UInt32] = [
+            word(key, 0) & 0x3ff_ffff,
+            (word(key, 3) >> 2) & 0x3ff_ff03,
+            (word(key, 6) >> 4) & 0x3ff_c0ff,
+            (word(key, 9) >> 6) & 0x3f0_3fff,
+            (word(key, 12) >> 8) & 0x00f_ffff
+        ]
+        let rLimbs = clamped.map { UInt64($0) }
+        let rTimes5 = clamped.map { UInt64($0 * 5) }
+        var acc: [UInt32] = [0, 0, 0, 0, 0]
         var offset = 0
         while offset < blocks.count {
-            h[0] &+= word(blocks, offset) & mask
-            h[1] &+= (word(blocks, offset + 3) >> 2) & mask
-            h[2] &+= (word(blocks, offset + 6) >> 4) & mask
-            h[3] &+= (word(blocks, offset + 9) >> 6) & mask
-            h[4] &+= (word(blocks, offset + 12) >> 8) | (1 << 24)
-            let h64 = h.map { UInt64($0) }
-            let d0 = h64[0] * r[0] + h64[1] * s4 + h64[2] * s3 + h64[3] * s2 + h64[4] * s1
-            var d1 = h64[0] * r[1] + h64[1] * r[0] + h64[2] * s4 + h64[3] * s3 + h64[4] * s2
-            var d2 = h64[0] * r[2] + h64[1] * r[1] + h64[2] * r[0] + h64[3] * s4 + h64[4] * s3
-            var d3 = h64[0] * r[3] + h64[1] * r[2] + h64[2] * r[1] + h64[3] * r[0] + h64[4] * s4
-            var d4 = h64[0] * r[4] + h64[1] * r[3] + h64[2] * r[2] + h64[3] * r[1] + h64[4] * r[0]
-            var carry = d0 >> 26; h[0] = UInt32(d0 & UInt64(mask))
-            d1 += carry; carry = d1 >> 26; h[1] = UInt32(d1 & UInt64(mask))
-            d2 += carry; carry = d2 >> 26; h[2] = UInt32(d2 & UInt64(mask))
-            d3 += carry; carry = d3 >> 26; h[3] = UInt32(d3 & UInt64(mask))
-            d4 += carry; carry = d4 >> 26; h[4] = UInt32(d4 & UInt64(mask))
-            h[0] &+= UInt32(carry) &* 5
-            let carry0 = h[0] >> 26
-            h[0] &= mask
-            h[1] &+= carry0
+            acc[0] &+= word(blocks, offset) & mask
+            acc[1] &+= (word(blocks, offset + 3) >> 2) & mask
+            acc[2] &+= (word(blocks, offset + 6) >> 4) & mask
+            acc[3] &+= (word(blocks, offset + 9) >> 6) & mask
+            acc[4] &+= (word(blocks, offset + 12) >> 8) | (1 << 24)
+            let wide = acc.map { UInt64($0) }
+            var product: [UInt64] = (0..<5).map { limb in
+                var total: UInt64 = 0
+                for index in 0..<5 {
+                    let other = limb - index
+                    total += wide[index] * (other >= 0 ? rLimbs[other] : rTimes5[other + 5])
+                }
+                return total
+            }
+            var carry: UInt64 = 0
+            for index in 0..<5 {
+                product[index] += carry
+                carry = product[index] >> 26
+                acc[index] = UInt32(product[index] & UInt64(mask))
+            }
+            acc[0] &+= UInt32(carry) &* 5
+            let carry0 = acc[0] >> 26
+            acc[0] &= mask
+            acc[1] &+= carry0
             offset += 16
         }
-        return finish(h, key: key)
+        return finish(acc, key: key)
     }
 
     private static func finish(_ input: [UInt32], key: [UInt8]) -> [UInt8] {
-        var h = input
-        var carry = h[1] >> 26; h[1] &= mask
-        h[2] &+= carry; carry = h[2] >> 26; h[2] &= mask
-        h[3] &+= carry; carry = h[3] >> 26; h[3] &= mask
-        h[4] &+= carry; carry = h[4] >> 26; h[4] &= mask
-        h[0] &+= carry &* 5; carry = h[0] >> 26; h[0] &= mask
-        h[1] &+= carry
+        var acc = input
+        var carry = acc[1] >> 26; acc[1] &= mask
+        acc[2] &+= carry; carry = acc[2] >> 26; acc[2] &= mask
+        acc[3] &+= carry; carry = acc[3] >> 26; acc[3] &= mask
+        acc[4] &+= carry; carry = acc[4] >> 26; acc[4] &= mask
+        acc[0] &+= carry &* 5; carry = acc[0] >> 26; acc[0] &= mask
+        acc[1] &+= carry
 
-        // h + -p, kept only when h >= p, chosen without branching on secrets.
-        var g: [UInt32] = [0, 0, 0, 0, 0]
-        g[0] = h[0] &+ 5; carry = g[0] >> 26; g[0] &= mask
-        g[1] = h[1] &+ carry; carry = g[1] >> 26; g[1] &= mask
-        g[2] = h[2] &+ carry; carry = g[2] >> 26; g[2] &= mask
-        g[3] = h[3] &+ carry; carry = g[3] >> 26; g[3] &= mask
-        g[4] = h[4] &+ carry &- (1 << 26)
-        let select = (g[4] >> 31) &- 1
-        for index in 0..<5 { h[index] = (h[index] & ~select) | (g[index] & select) }
+        // acc + -p, kept only when acc >= p, chosen without branching on secrets.
+        var minusP: [UInt32] = [0, 0, 0, 0, 0]
+        minusP[0] = acc[0] &+ 5; carry = minusP[0] >> 26; minusP[0] &= mask
+        minusP[1] = acc[1] &+ carry; carry = minusP[1] >> 26; minusP[1] &= mask
+        minusP[2] = acc[2] &+ carry; carry = minusP[2] >> 26; minusP[2] &= mask
+        minusP[3] = acc[3] &+ carry; carry = minusP[3] >> 26; minusP[3] &= mask
+        minusP[4] = acc[4] &+ carry &- (1 << 26)
+        let select = (minusP[4] >> 31) &- 1
+        for index in 0..<5 { acc[index] = (acc[index] & ~select) | (minusP[index] & select) }
 
         let words: [UInt32] = [
-            h[0] | (h[1] << 26),
-            (h[1] >> 6) | (h[2] << 20),
-            (h[2] >> 12) | (h[3] << 14),
-            (h[3] >> 18) | (h[4] << 8)
+            acc[0] | (acc[1] << 26),
+            (acc[1] >> 6) | (acc[2] << 20),
+            (acc[2] >> 12) | (acc[3] << 14),
+            (acc[3] >> 18) | (acc[4] << 8)
         ]
         var tag: [UInt8] = []
         var sum: UInt64 = 0

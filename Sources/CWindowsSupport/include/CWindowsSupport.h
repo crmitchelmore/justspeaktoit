@@ -22,6 +22,7 @@
 #include "WindowsTextOutput.h"
 #include "WindowsPrivateStorage.h"
 #include "WindowsNetwork.h"
+#include "WindowsPhoneReceiver.h"
 #include "WindowsAudioPlayback.h"
 #include "WindowsDiagnostics.h"
 #include "WindowsLocalTranscription.h"

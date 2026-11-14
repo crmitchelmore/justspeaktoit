@@ -47,6 +47,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
             "alibaba", "azure", "cartesia", "gladia", "google", "meta", "openai", "xai"
         ]
         expectedProviders.formUnion(FileSpeechProvider.allCases.map(\.rawValue))
+        expectedProviders.formUnion(IOSSharedBatchProvider.allCases.map(\.rawValue))
         expectedProviders.formUnion(OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs.map {
             String($0.prefix { $0 != "/" })
         })
@@ -178,31 +179,25 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
             .apiKey(identifier: AppSettings.gladiaKeyID, providerName: "Gladia"))
     }
 
-    /// Documented platform restriction: Speechmatics batch stays macOS-only.
-    ///
-    /// This app now stores `speechmatics.apiKey` for the live provider, so the
-    /// original reason for hiding the batch entry (no credential field) no
-    /// longer holds. The remaining one does: `IOSBatchTranscriptionRoute` has
-    /// no Speechmatics case, so a selectable entry would fall through to the
-    /// OpenRouter route and upload to the wrong service. It is hidden until an
-    /// iOS upload path exists — the same treatment every other provider
-    /// without one gets.
-    /// See Docs/batch-transcription-providers.md.
-    func testSpeechmaticsBatchIsHiddenOnIOSBecauseThereIsNoUploadRoute() {
-        XCTAssertTrue(ModelCatalog.batchTranscription.contains {
-            SpeechmaticsBatchClient.catalogIDs.contains($0.id)
-        })
-        XCTAssertFalse(AppSettings.supportedBatchModels.contains {
-            SpeechmaticsBatchClient.catalogIDs.contains($0.id)
-        })
+    /// Every catalogue batch model a shared-client provider owns is listed and
+    /// routed to that provider's own client and key, never to OpenRouter
+    /// (issue #1636).
+    func testSharedClientBatchProvidersAreListedAndRoutedToTheirOwnClient() {
         XCTAssertEqual(
-            ModelCredentialResolver.requirement(
-                for: SpeechmaticsBatchClient.enhancedCatalogID, purpose: .batchTranscription),
-            .apiKey(identifier: "speechmatics.apiKey", providerName: "Speechmatics"))
-        // No dedicated route exists, which is exactly why the entry stays
-        // hidden: routing it would send Speechmatics audio to OpenRouter.
-        for id in SpeechmaticsBatchClient.catalogIDs {
-            XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: id), .openRouter)
+            Set(IOSSharedBatchProvider.allCases.map(\.rawValue)),
+            BatchTranscriptionRouting.iosSharedClientProviderIDs
+        )
+        for provider in IOSSharedBatchProvider.allCases {
+            let models = ModelCatalog.batchTranscription.filter { $0.id.hasPrefix(provider.rawValue + "/") }
+            XCTAssertFalse(models.isEmpty, provider.rawValue)
+            for model in models {
+                XCTAssertTrue(AppSettings.supportedBatchModels.contains { $0.id == model.id }, model.id)
+                XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: model.id), .shared(provider), model.id)
+                guard case .apiKey(let identifier, _) = ModelCredentialResolver.requirement(
+                    for: model.id, purpose: .batchTranscription
+                ) else { return XCTFail(model.id) }
+                XCTAssertEqual(identifier, ProviderCredentialCatalogue.apiKeyIdentifier(for: provider.rawValue))
+            }
         }
     }
 

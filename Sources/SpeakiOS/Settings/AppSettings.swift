@@ -109,6 +109,9 @@ public final class AppSettings: ObservableObject {
     @Published public var stepfunAPIKey: String = "" {
         didSet { secrets.persist(stepfunAPIKey, identifier: Self.stepfunKeyID) }
     }
+    @Published public var groqAPIKey: String = "" {
+        didSet { secrets.persist(groqAPIKey, identifier: Self.groqKeyID) }
+    }
     @Published public var speechmaticsAPIKey: String = "" {
         didSet { secrets.persist(speechmaticsAPIKey, identifier: Self.speechmaticsKeyID) }
     }

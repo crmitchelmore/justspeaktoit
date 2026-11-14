@@ -653,6 +653,22 @@ sessions:
           - "Repeat the Recommended setup and Live Activity checks on an iPhone."
         expected: "On iPad, copy says \"this iPad\" or \"your iPad\", the setup card suggests Control Center rather than the Action Button, and nothing mentions the Dynamic Island. On iPhone, copy says \"this iPhone\" and the Live Activity text says \"on supported iPhones, in the Dynamic Island\"."
         final_gate: false
+      - id: "iphone-batch-provider-catalogue"
+        issues:
+          - 1636
+        title: "Recorded transcription: Deepgram, AssemblyAI, ElevenLabs, Groq and other providers"
+        minutes: 6
+        core: false
+        build: "TestFlight Just Speak to It Alpha, a build that includes the #1636 batch provider catalogue"
+        prerequisites:
+          - "A working API key for at least two of Deepgram, AssemblyAI, ElevenLabs, Groq, Mistral, Modulate, Rev.ai, Soniox or Speechmatics. Use made-up sentences only."
+        steps:
+          - "Open Settings, API Keys and save the keys. Groq now has its own card."
+          - "Open Settings, Transcription, choose Batch and open the model list."
+          - "Choose one of the providers you have a key for, record \"batch provider check one two three\" and stop."
+          - "Repeat with a second provider, then open History."
+        expected: "The batch list shows Deepgram, AssemblyAI, ElevenLabs, Groq, Mistral, Modulate, Rev.ai, Soniox and Speechmatics sections. Each recording returns the spoken words, History names the chosen provider and model, and no recording needs or uses the OpenRouter key."
+        final_gate: false
       - id: "iphone-clipboard-e2e"
         issues:
           - 934

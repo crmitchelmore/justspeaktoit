@@ -236,6 +236,8 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     /// batch identifier alone.
     case xai
     case fileSpeech(FileSpeechProvider)
+    /// A provider whose shared SpeakCore batch client iOS calls with its own key.
+    case shared(IOSSharedBatchProvider)
     case openRouter
 
     // One mapping per native backend; capability policy is owned by SpeakCore.
@@ -247,6 +249,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
         case .openRouter: return .openRouter
         case .directProvider:
             if let provider = FileSpeechProvider(rawValue: route.providerID) { return .fileSpeech(provider) }
+            if let provider = IOSSharedBatchProvider(rawValue: route.providerID) { return .shared(provider) }
             switch route.providerID {
             case "openai": return .openAI
             case "cartesia": return .cartesia

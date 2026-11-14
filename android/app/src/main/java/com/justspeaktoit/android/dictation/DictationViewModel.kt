@@ -179,8 +179,17 @@ class DictationViewModel internal constructor(
     private val session: DictationSessionController = DictationSessionController(
         engine = engine,
         capture = capture,
-        requests = SessionRequests(cloud, secrets, capture, io, timings, onKeyFailure = { provider, _ ->
-            _state.update { it.copy(keyErrors = it.keyErrors + provider) }
+        requests = SessionRequests(cloud, secrets, capture, io, timings, onKeyFailure = { provider, failure ->
+            _state.update {
+                it.copy(
+                    keyErrors = it.keyErrors + provider,
+                    rejectedKeys = if (failure == DictationFailure.InvalidKey) {
+                        it.rejectedKeys + provider
+                    } else {
+                        it.rejectedKeys
+                    },
+                )
+            }
         }),
         history = historyOwner,
         resources = resources,
@@ -484,7 +493,11 @@ class DictationViewModel internal constructor(
             false
         }
         _state.update {
-            it.copy(keyStoreError = !ok, keyErrors = if (ok) it.keyErrors - provider else it.keyErrors + provider)
+            it.copy(
+                keyStoreError = !ok,
+                keyErrors = if (ok) it.keyErrors - provider else it.keyErrors + provider,
+                rejectedKeys = if (ok) it.rejectedKeys - provider else it.rejectedKeys,
+            )
         }
         refreshAvailability()
         return ok

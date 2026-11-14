@@ -114,8 +114,9 @@ Shared catalogues are generated from `Sources/SpeakCore`, never parsed from Swif
 `assets/settings_search.json` (settings search), `assets/settings_schema.json` (the raw configuration
 editor's fields), `assets/cloud_catalog.json` (cloud providers,
 credential IDs, the models Android offers with their wire fields, the cleanup model and prompt, the
-dictation languages and the vocabulary prompt limits) and `assets/tip_catalog.json` (tip product IDs,
-names and emoji). Regenerate them with `scripts/update-android-assets`; the Swift export tests fail when an asset is
+dictation languages and the vocabulary prompt limits), `assets/tip_catalog.json` (tip product IDs,
+names and emoji) and `assets/troubleshooting.json` (the phone Troubleshooting findings and fixes for each
+state, from `MobileTroubleshooting`). Regenerate them with `scripts/update-android-assets`; the Swift export tests fail when an asset is
 stale. The build's `generateCloudCatalog` task writes `GeneratedCloudCatalog.kt` from the cloud asset,
 so `CloudCatalog` and `CleanupPolicy` hold no hand-typed copy; only each provider's base URL and
 display name (Android transport) are authored, and `CloudCatalogParityTest` checks the generated

@@ -225,13 +225,24 @@ export function parseResults(body, catalogue) {
   } catch {
     throw new Error('The results block is not valid JSON');
   }
-  expectKeys(data, 'results block', ['format', 'catalogue', 'results']);
+  expectKeys(data, 'results block', ['format', 'catalogue', 'results'], ['pass', 'skip']);
   if (data.format !== RESULTS_FORMAT) throw new Error(`Unsupported results format ${JSON.stringify(data.format)}`);
   if (typeof data.catalogue !== 'string' || !/^[a-f0-9]{12}$/.test(data.catalogue)) throw new Error('Invalid catalogue hash');
-  if (!Array.isArray(data.results) || !data.results.length) throw new Error('No results were submitted');
+  if (!Array.isArray(data.results)) throw new Error('No results were submitted');
+  // Compact links list passes and skips as bare ids; expand them to ordinary entries.
+  const listed = ['pass', 'skip'].flatMap(kind => {
+    if (data[kind] === undefined) return [];
+    if (!Array.isArray(data[kind]) || !data[kind].length) fail(kind, 'expected a non-empty list of ids');
+    return data[kind].map((id, index) => {
+      if (typeof id !== 'string') fail(`${kind}[${index}]`, 'expected an id');
+      return { id, result: kind };
+    });
+  });
+  const submitted = [...data.results, ...listed];
+  if (!submitted.length) throw new Error('No results were submitted');
   const items = catalogueItems(catalogue);
   const seen = new Set();
-  const results = data.results.map((entry, index) => {
+  const results = submitted.map((entry, index) => {
     const path = `results[${index}]`;
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) fail(path, 'expected an object');
     const item = items[entry.id];

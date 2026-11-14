@@ -140,6 +140,20 @@ test('results round-trip through the issue body, including hostile notes', () =>
   assert.equal(parsed.results[2].option.id, 'no');
 });
 
+test('a compact block lists passes and skips by id and parses to the same results', () => {
+  const results = [
+    { id: 'iphone-a', result: 'pass' },
+    { id: 'iphone-b', result: 'fail', note: 'x' },
+    { id: 'iphone-c', result: 'skip' },
+    { id: 'decision-x', choice: 'no' },
+  ];
+  const compact = encodeResultsBlock(catalogue.hash, results, true);
+  assert.match(compact, /"pass":\["iphone-a"\],"skip":\["iphone-c"\]/);
+  const simplify = parsed => parsed.results.map(entry => [entry.item.id, entry.result || entry.option.id, entry.note || '']);
+  assert.deepEqual(simplify(parseResults(compact, catalogue)).sort(),
+    simplify(parseResults(encodeResultsBlock(catalogue.hash, results), catalogue)).sort());
+});
+
 test('results parsing is strict', () => {
   const block = results => encodeResultsBlock(catalogue.hash, results);
   for (const [text, message] of [
@@ -154,6 +168,11 @@ test('results parsing is strict', () => {
     [block([{ id: 'decision-x', result: 'pass' }]), /missing "choice"/],
     [block([{ id: 'iphone-a', result: 'pass', extra: 1 }]), /unknown key/],
     [block([]), /No results/],
+    [block([]).replace('"results":[]', '"results":[],"pass":[]'), /non-empty list/],
+    [block([]).replace('"results":[]', '"results":[],"pass":[1]'), /expected an id/],
+    [block([]).replace('"results":[]', '"results":[],"pass":["decision-x"]'), /missing "choice"/],
+    [block([{ id: 'iphone-a', result: 'fail' }]).replace(']}', '],"skip":["iphone-a"]}'), /duplicate id/],
+    [block([]).replace('"results":[]', '"results":[],"fail":["iphone-a"]'), /unknown key/],
     ['```manual-qa-results\n{not json}\n```', /not valid JSON/],
   ]) assert.throws(() => parseResults(text, catalogue), message, text);
 });

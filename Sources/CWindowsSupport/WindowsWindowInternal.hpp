@@ -222,7 +222,7 @@ constexpr int settingsSearchLabelID = 494, settingsSearchID = 495, settingsResul
 // Results from jsti_window_set_settings_search_results, a field reveal from
 // jsti_window_reveal_configuration_field, and a deferred focus-loss check.
 constexpr UINT settingsSearchMessage = WM_APP + 120, revealFieldMessage = WM_APP + 121,
-    settingsLeaveMessage = WM_APP + 122;
+    settingsLeaveMessage = WM_APP + 122, actionRunMessage = WM_APP + 123;
 constexpr size_t maximumSettingsResults = 50;
 struct SidebarBindings {
     int digits[pageCount];
@@ -456,7 +456,7 @@ void emitSettingsSearch(HWND window);
 void closeSettingsSearch(HWND window, bool clear);
 void leaveSettingsSearch(HWND window);
 void applySettingsResults(HWND window);
-// What a screen reader hears after a settings search: the result count or "No settings match".
+// What a screen reader hears after a settings search: the result count or "No results".
 std::wstring settingsSearchSummary(size_t count);
 bool settingsSearchKeyMessage(HWND window, const MSG &message);
 bool settingsSearchMouseMessage(HWND window, MSG &message);

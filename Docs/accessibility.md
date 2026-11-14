@@ -207,10 +207,10 @@ Mac; UI tests run on hosted CI.
 - A scrolled area with nothing focusable inside is
   `gtk_widget_set_can_focus(scroller, FALSE)`, because an empty
   `GtkScrolledWindow` takes focus itself and Orca reads an unnamed "scroll
-  pane" (settings search with no match, Troubleshooting before its findings
-  arrive; once they do, Troubleshooting focuses Check again if nothing has
-  focus). Down from the settings search with no match stays in the entry and
-  repeats "No settings match".
+  pane" ("Search for anything" with no match, Troubleshooting before its
+  findings arrive; once they do, Troubleshooting focuses Check again if nothing
+  has focus). Down from the search with no match stays in the entry and
+  repeats "No results".
 - Guard: `scripts/accessibility/check-linux-accessibility.py` runs in the Linux workflow and
   fails on unnamed icon buttons, on drop-downs named only by property and on
   raw `gtk_accessible_announce` calls. The window self-test checks the status
@@ -221,7 +221,7 @@ Mac; UI tests run on hosted CI.
   announced as described above and that the Record buttons hand focus to Cancel
   and back. It also checks that the wide sidebar is one Tab stop, that the
   About and Troubleshooting labels are not, that keyboard activation keeps the
-  focus ring visible and that empty settings search results and an empty
+  focus ring visible and that empty "Search for anything" results and an empty
   Troubleshooting window keep focus out of their scrolled areas.
 
 ### Android (TalkBack and accessibility services)

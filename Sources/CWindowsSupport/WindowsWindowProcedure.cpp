@@ -197,6 +197,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case settingsLeaveMessage:
         leaveSettingsSearch(window);
         return 0;
+    case actionRunMessage: {
+        std::unique_ptr<std::string> page(reinterpret_cast<std::string *>(lparam));
+        jsti_window_action_command(window, static_cast<int>(wparam), page ? page->c_str() : "");
+        return 0;
+    }
     case revealFieldMessage:
         // Search reveals a preference only where the Preferences button would open.
         if (idleControl(window, configurationID) && IsWindowEnabled(window))

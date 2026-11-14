@@ -104,7 +104,7 @@ The flags live in `Project.swift`; release selection is in
 | F16 | History retry and audio playback | Yes | Yes | Yes | Yes | Yes | | Android keeps recordings only when "Keep recordings in History" is on. |
 | F17 | History sync | Yes | Yes | Yes | Yes | No | #1630 | Desktops use CloudKit Web Services. |
 | F18 | Settings search | Yes | Yes | Yes | Yes | Yes | | |
-| F19 | Command palette | Yes | N/A | No | No | N/A | #1619 | |
+| F19 | Command palette | Yes | N/A | Yes | Yes | N/A | | Windows and Linux also list recent History. |
 | F20 | Compare models | Yes | N/A | Yes | Yes | N/A | #1622 | Desktop-only by owner decision. |
 | F21 | Voice output / read aloud | Yes | Yes | Yes | Yes | Partial | #1631 | Android: system TTS only. |
 | F22 | Voice edit of selected text | Yes | Yes | Yes | No | No | #1620 | |
@@ -302,13 +302,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Coverage tests fail on unindexed settings (`Tests/SpeakAppTests/SettingsSearchCoverageTests.swift`). Regenerate `android/app/src/main/assets/settings_search.json` after changing Android entries ([settings search](settings-search.md)).
 
 ### F19 Command palette
-- **Platforms:** macOS Yes · iOS N/A · Windows No · Linux No · Android N/A
+- **Platforms:** macOS Yes · iOS N/A · Windows Yes · Linux Yes · Android N/A
 - **Excluded:** iOS, Android (OS: no keyboard-first desktop shell; mobile uses settings search and system Shortcuts).
-- **Gaps:** Windows, Linux #1619.
-- **How:** One searchable palette over app commands and settings entries, opened by keyboard.
-- **Refs:** `Sources/SpeakApp/Views/CommandPalette/CommandPaletteSearch.swift`, `Sources/SpeakApp/Views/Settings/SettingsSearchPalette.swift`, `Sources/SpeakCore/SettingsSearch/SettingsSearchCatalog.swift`
+- **Gaps:** none
+- **How:** One keyboard-first "Search for anything" palette (⌘K on the Mac, Ctrl+K or Ctrl+F on Windows and Linux) over the actions the host can run, then matching History, then settings; an empty query lists every action, recent History and recent then suggested settings. Ranking lives once in SpeakCore's `CommandPaletteSearch` (actions in `CommandPaletteAction.catalogue`); Windows and Linux use `DesktopCommandPaletteSession` over a `CommandPaletteHistorySnapshot` that the host's History refresh fills. Choosing an action runs it as its shortcut does; choosing a History record selects it on the History page.
+- **Refs:** `Sources/SpeakCore/CommandPalette/CommandPaletteSearch.swift`, `Sources/SpeakCore/CommandPalette/CommandPaletteAction.swift`, `Sources/SpeakCore/CommandPalette/DesktopCommandPaletteSession.swift`, `Sources/SpeakApp/Views/CommandPalette/CommandPaletteCommand.swift`, `Sources/SpeakApp/Views/Settings/SettingsSearchPalette.swift`, `Sources/SpeakWindows/WindowsCommandPalette.swift`, `Sources/SpeakLinux/LinuxSettingsSearch.swift`
 - **Sunset:** none
-- **Nuances:** `Sources/CLinuxSupport/LinuxDesktopPalette.c` is a colour palette for theming, not a command palette.
+- **Nuances:** The Mac passes no History to the shared search, so its palette lists actions and settings only. Desktop palettes offer only shortcut actions their host can run, so Copy Last Transcript is Mac-only; no palette lists actions on another app's selection, since the palette has focus. On Windows and Linux the palette reuses the sidebar's settings search box and native events (`JSTI_EVENT_SETTINGS_SEARCH*`); rows keep stable `commandPaletteResult.*` and `settingsSearchResult.*` automation IDs. `Sources/CLinuxSupport/LinuxDesktopPalette.c` is a colour palette for theming, not a command palette.
 
 ### F20 Compare models
 - **Platforms:** macOS Yes · iOS N/A · Windows Yes · Linux Yes · Android N/A

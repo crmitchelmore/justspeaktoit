@@ -354,6 +354,34 @@ gboolean action_shortcut_run(gint run, const char *page, gint slot) {
     }
 }
 
+typedef struct ActionRun {
+    gint run, slot;
+    gchar *page;
+} ActionRun;
+
+static void action_run_free(gpointer data) {
+    ActionRun *action = data;
+    g_free(action->page);
+    g_free(action);
+}
+
+static void action_run_apply(gpointer data) {
+    ActionRun *action = data;
+    if (!action_shortcut_run(action->run, action->page, action->slot)) {
+        (void)jsti_window_update("That action is not available right now.", NULL, -1);
+    }
+}
+
+/* The command palette runs an action through the same path as its shortcut. */
+int32_t jsti_window_run_action(int32_t run, const char *page, int32_t slot) {
+    if (run < 1 || run > 12 || slot < 0 || (page != NULL && !g_utf8_validate(page, -1, NULL))) return -1;
+    ActionRun *action = g_new0(ActionRun, 1);
+    action->run = run;
+    action->slot = slot;
+    action->page = g_strdup(page != NULL ? page : "");
+    return jsti_window_post(action_run_apply, action, action_run_free);
+}
+
 GtkWidget *build_about(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
     GtkWidget *body;

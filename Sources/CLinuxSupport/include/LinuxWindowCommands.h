@@ -1,6 +1,7 @@
 #ifndef JSTI_LINUX_WINDOW_COMMANDS_H
 #define JSTI_LINUX_WINDOW_COMMANDS_H
-/* Settings search results, configuration reveal and single-instance action commands. Part of CLinuxSupport.h. */
+/* "Search for anything" results, configuration reveal, palette actions and single-instance action commands.
+ * Part of CLinuxSupport.h. */
 #include <stddef.h>
 #include <stdint.h>
 
@@ -8,11 +9,12 @@
 extern "C" {
 #endif
 
-/* One settings search result: the shared DesktopSettingsSearchSession row. */
+/* One "Search for anything" result: a shared DesktopCommandPaletteSession row. */
 typedef struct JSTISettingsSearchResult {
     const char *title;
     const char *detail;
-    /* SettingsSearchEntry.resultAccessibilityIdentifier; the row's widget name. */
+    /* The row's stable automation identifier (commandPaletteResult.* or
+     * settingsSearchResult.*); the row's widget name. */
     const char *identifier;
 } JSTISettingsSearchResult;
 /* Replaces the settings search results, in order: UTF-8, at most 50 rows of at
@@ -24,6 +26,12 @@ int32_t jsti_window_set_settings_search_results(const JSTISettingsSearchResult *
  * call jsti_window_show_page first. Rows hidden on this session (overlay-only
  * preferences on Wayland) stay hidden. Thread safe; -1 when out of range. */
 int32_t jsti_window_reveal_configuration_field(size_t index);
+/* Runs one action as its window shortcut would, for the command palette: `run`
+ * and `slot` are the LinuxActionShortcutRun code (1-12) and Quick Voice slot,
+ * `page` the sidebar page name for page actions (NULL otherwise). Applied in
+ * call order on the main loop; an action unavailable then reports so on the
+ * status line. Thread safe; -1 for invalid input. */
+int32_t jsti_window_run_action(int32_t run, const char *page, int32_t slot);
 
 /* The argument the login item starts the app with (the shared
  * DesktopLoginItem.launchArgument): the window starts minimised. */

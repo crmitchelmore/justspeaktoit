@@ -36,6 +36,8 @@ struct MainView: View {
           environment.settingsSearchTarget = entry.id
         case .command(let command):
           environment.runPaletteCommand(command)
+        case .history:
+          break
         }
       }
     }

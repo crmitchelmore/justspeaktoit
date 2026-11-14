@@ -1,7 +1,7 @@
 # Owner manual QA
 
 Some issues can close only after the owner checks them on a physical iPhone,
-Apple Watch, Mac or Android phone, or makes a product decision. They are collected in one
+Apple Watch, Mac, Windows PC, Linux desktop or Android phone, or makes a product decision. They are collected in one
 checklist so the owner can work through them in a few device sessions and
 submit every result with one click.
 

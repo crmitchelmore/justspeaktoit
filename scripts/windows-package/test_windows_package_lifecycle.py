@@ -208,10 +208,12 @@ class LifecycleSupportTests(unittest.TestCase):
         self.assertEqual(lifecycle_support.check_data(self.data, self.expectations, "seeded")["failures"], [])
         self.assertTrue(lifecycle_support.check_data(self.data, self.expectations, "recovered")["failures"])
         self.recover_like_the_app()
-        (self.data / "OpenRouterAudioCatalog.json").write_text("{}", encoding="utf-8")
+        for name in ("OpenRouterAudioCatalog.json", "session-running.json", "telemetry.json"):
+            (self.data / name).write_text("{}", encoding="utf-8")
         report = lifecycle_support.check_data(self.data, self.expectations, "recovered")
         self.assertEqual(report["failures"], [])
-        self.assertEqual(report["appCreatedFiles"], ["OpenRouterAudioCatalog.json", "onboarding.json"])
+        self.assertEqual(report["appCreatedFiles"], ["OpenRouterAudioCatalog.json", "onboarding.json",
+                                                     "session-running.json", "telemetry.json"])
         self.assertTrue(lifecycle_support.check_data(self.data, self.expectations, "seeded")["failures"])
 
     def test_legacy_onboarding_completion_is_required_and_validated(self):

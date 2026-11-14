@@ -62,6 +62,8 @@ final class RecordingFeedbackCatalogueTests: XCTestCase {
         let raw = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("android/app/src/main/res/raw")
+        // The Mac-built Windows run executes this bundle without the source checkout.
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: raw.path), "The Android sources are not shipped here.")
         let shipped = try FileManager.default.contentsOfDirectory(atPath: raw.path).filter { $0.hasSuffix(".m4a") }
         XCTAssertEqual(Set(shipped), Set(RecordingFeedbackDefaults.filenames))
         for profile in RecordingFeedbackProfile.allCases {

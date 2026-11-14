@@ -143,6 +143,8 @@ final class OpenRouterModelBrowserCatalogTests: XCTestCase {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Fixtures/openrouter-browser/\(name)")
+        // The Mac-built Windows run executes this bundle without the source checkout.
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: url.path), "The shared fixtures are not shipped here.")
         return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
     }
 

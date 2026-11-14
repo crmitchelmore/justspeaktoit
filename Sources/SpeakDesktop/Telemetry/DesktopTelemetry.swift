@@ -22,13 +22,13 @@ public struct DesktopTelemetryConfiguration: Sendable {
         self.postHogProjectKey = postHogProjectKey
     }
 
-    /// The PostHog project key is a public client key the Mac and Android
-    /// release workflows stamp from a secret. Desktop packages do not carry it
-    /// yet (#1624), so it is read from `JSTI_POSTHOG_PROJECT_KEY`; without one,
-    /// analytics stays a no-op even after opting in.
+    /// The PostHog project key is a public client key the release workflows
+    /// stamp from a secret (`DesktopAnalyticsBuildConfiguration`), as the Mac
+    /// and Android releases do. See `postHogProjectKey(environment:stamped:release:)`.
     public static func current(
         platform: AnalyticsPlatform, about: DesktopAboutInformation = .current(),
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        stampedPostHogProjectKey: String? = DesktopAnalyticsBuildConfiguration.postHogProjectKey
     ) -> Self {
         let osVersion = ProcessInfo.processInfo.operatingSystemVersion
         let release = about.configuration == "Release"
@@ -47,8 +47,34 @@ public struct DesktopTelemetryConfiguration: Sendable {
         return Self(
             context: context, release: "just-speak-to-it-\(platform.rawValue)@\(identity)",
             environment: release ? "production" : "development", reportsCrashes: release,
-            postHogProjectKey: environment["JSTI_POSTHOG_PROJECT_KEY"] ?? ""
+            postHogProjectKey: postHogProjectKey(
+                environment: environment, stamped: stampedPostHogProjectKey, release: release
+            )
         )
+    }
+
+    /// A set `JSTI_POSTHOG_PROJECT_KEY` always wins, so a developer can point
+    /// any build at a key (or, with a malformed value, at none). Otherwise only
+    /// a release build uses the stamped key. Anything that is not a PostHog
+    /// project key is no key, and an empty key keeps analytics a no-op.
+    public static func postHogProjectKey(environment: [String: String], stamped: String?, release: Bool) -> String {
+        if let override = environment["JSTI_POSTHOG_PROJECT_KEY"] { return validPostHogProjectKey(override) ?? "" }
+        guard release, let stamped else { return "" }
+        return validPostHogProjectKey(stamped) ?? ""
+    }
+
+    /// `phc_` then 8 to 128 ASCII letters, digits, `_` or `-`; surrounding
+    /// whitespace is ignored. The same rule as `configure-posthog-key.py`.
+    public static func validPostHogProjectKey(_ value: String) -> String? {
+        let key = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = "phc_"
+        guard key.hasPrefix(prefix) else { return nil }
+        let body = key.utf8.dropFirst(prefix.utf8.count)
+        guard (8...128).contains(body.count), body.allSatisfy({ byte in
+            (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte)
+                || byte == UInt8(ascii: "_") || byte == UInt8(ascii: "-")
+        }) else { return nil }
+        return key
     }
 }
 

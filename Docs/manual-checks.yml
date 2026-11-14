@@ -396,6 +396,20 @@ sessions:
           - "Update the Data safety form and the purchase digital goods answer from the guide."
         expected: "The three products are active and the Data safety form matches the guide."
         final_gate: false
+      - id: "owner-desktop-posthog-key-workflows"
+        issues:
+          - 1624
+          - 1744
+        title: "Windows and Linux: stamp the PostHog project key in the release workflows"
+        minutes: 10
+        core: false
+        build: "GitHub repository settings and workflows"
+        steps:
+          - "Check the POSTHOG_PROJECT_KEY repository secret holds the public PostHog Production project key."
+          - "Apply the workflow patch and guard test from #1744 to windows-cross-proof.yml, windows-arm64.yml and linux-flatpak.yml."
+          - "Install the next Windows or Linux Alpha, turn on Share anonymous usage analytics in Settings \u203a General and look in PostHog Production for its analytics_opt_in event."
+        expected: "One analytics_opt_in event arrives from the Alpha, with the app version but no transcript text, file path or user name."
+        final_gate: false
       - id: "owner-android-cloudkit-token"
         issues:
           - 1630

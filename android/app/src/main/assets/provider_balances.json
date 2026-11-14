@@ -120,6 +120,72 @@
       "support" : "billingLinkOnly"
     },
     {
+      "billingUrl" : "https://play.cartesia.ai/subscription",
+      "credentialIds" : [
+        "cartesia.apiKey"
+      ],
+      "displayName" : "Cartesia",
+      "id" : "cartesia",
+      "primaryCredentialId" : "cartesia.apiKey",
+      "reason" : "Cartesia's credits endpoint reports admin usage rather than a spendable wallet, so it is not shown here as a balance.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://app.gladia.io",
+      "credentialIds" : [
+        "gladia.apiKey"
+      ],
+      "displayName" : "Gladia",
+      "id" : "gladia",
+      "primaryCredentialId" : "gladia.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://aistudio.google.com/app/plan_information",
+      "credentialIds" : [
+        "google.apiKey"
+      ],
+      "displayName" : "Google Gemini",
+      "id" : "google",
+      "primaryCredentialId" : "google.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://llama.developer.meta.com",
+      "credentialIds" : [
+        "meta.apiKey"
+      ],
+      "displayName" : "Meta",
+      "id" : "meta",
+      "primaryCredentialId" : "meta.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://app.smallest.ai/dashboard/api-keys",
+      "credentialIds" : [
+        "smallest.apiKey"
+      ],
+      "displayName" : "Smallest AI",
+      "id" : "smallest",
+      "primaryCredentialId" : "smallest.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://console.x.ai",
+      "credentialIds" : [
+        "xai.apiKey"
+      ],
+      "displayName" : "xAI",
+      "id" : "xai",
+      "primaryCredentialId" : "xai.apiKey",
+      "reason" : "xAI's management billing API needs a separate management key, which an inference key does not provide.",
+      "support" : "billingLinkOnly"
+    },
+    {
       "billingUrl" : "https://openrouter.ai/credits",
       "credentialIds" : [
         "openrouter.apiKey"
@@ -137,17 +203,6 @@
       "displayName" : "Anthropic",
       "id" : "anthropic",
       "primaryCredentialId" : "anthropic.apiKey",
-      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
-      "support" : "billingLinkOnly"
-    },
-    {
-      "billingUrl" : "https://aistudio.google.com/app/plan_information",
-      "credentialIds" : [
-        "google.apiKey"
-      ],
-      "displayName" : "Google Gemini",
-      "id" : "google",
-      "primaryCredentialId" : "google.apiKey",
       "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
       "support" : "billingLinkOnly"
     }

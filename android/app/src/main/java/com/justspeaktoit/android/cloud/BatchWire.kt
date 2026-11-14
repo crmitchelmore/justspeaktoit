@@ -5,7 +5,11 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
+import java.io.OutputStream
+import java.net.URI
+import java.net.URISyntaxException
 import java.net.URLEncoder
+import java.util.Base64
 import java.util.Locale
 import java.util.UUID
 
@@ -21,6 +25,9 @@ object BatchWire {
     /** `FileSpeechBatchClient.maximumAudioBytes`: Reson8 takes the recording in one request. */
     const val RESON8_MAX_AUDIO_BYTES = 25L * 1024 * 1024
 
+    /** Smallest shares `FileSpeechBatchClient` and its limit with Reson8. */
+    const val SMALLEST_MAX_AUDIO_BYTES = RESON8_MAX_AUDIO_BYTES
+
     sealed interface Body {
         data object None : Body
 
@@ -31,6 +38,28 @@ object BatchWire {
 
         /** The recording streamed between [Multipart.head] and [Multipart.tail]. */
         class Form(val multipart: CloudWire.Multipart, val file: File) : Body
+
+        /** JSON whose one string value is the recording, base64-encoded as it streams from disk. */
+        class Base64Json(val head: ByteArray, val file: File, val tail: ByteArray) : Body {
+            fun contentLength(): Long = head.size + (file.length() + 2) / 3 * 4 + tail.size
+
+            fun writeTo(out: OutputStream) {
+                out.write(head)
+                val encoder = Base64.getEncoder().wrap(KeepOpen(out))
+                file.inputStream().use { it.copyTo(encoder) }
+                // Closing the encoder writes the final padded group; KeepOpen leaves [out] open.
+                encoder.close()
+                out.write(tail)
+            }
+        }
+    }
+
+    private class KeepOpen(private val out: OutputStream) : OutputStream() {
+        override fun write(b: Int) = out.write(b)
+
+        override fun write(b: ByteArray, off: Int, len: Int) = out.write(b, off, len)
+
+        override fun close() = out.flush()
     }
 
     class Request(
@@ -40,7 +69,8 @@ object BatchWire {
         val body: Body = Body.None,
     )
 
-    class Response(val status: Int, val body: String) {
+    /** [headers] are keyed by lower-case name. */
+    class Response(val status: Int, val body: String, val headers: Map<String, String> = emptyMap()) {
         val ok: Boolean get() = status in 200..299
     }
 
@@ -103,6 +133,74 @@ object BatchWire {
     ): Request {
         val multipart = CloudWire.multipart(fields, fileField, fileName, mimeType, boundary(), trailingFields)
         return Request("POST", url, auth + ("Content-Type" to multipart.contentType), Body.Form(multipart, audio))
+    }
+
+    /** [json] with the string value [placeholder] replaced by the recording, base64-encoded. */
+    private fun base64Json(json: JSONObject, placeholder: String, audio: File): Body.Base64Json {
+        val text = json.toString()
+        val at = text.indexOf("\"$placeholder\"")
+        check(at >= 0) { "Missing audio placeholder" }
+        return Body.Base64Json(
+            text.substring(0, at + 1).toByteArray(),
+            audio,
+            text.substring(at + placeholder.length + 1).toByteArray(),
+        )
+    }
+
+    private fun audioPlaceholder(): String = "jsti-audio-" + UUID.randomUUID()
+
+    /**
+     * `NativePCM16WAVReader.prepare`, as the portable hosts run it: the recording must be the
+     * canonical 16 kHz mono 16-bit WAV Android records, smaller than [maxBytes] and at most
+     * [maxSeconds] long.
+     * @throws CloudException [DictationFailure.AudioTooLarge] past a limit,
+     *   [DictationFailure.UnsupportedAudio] for any other file and [DictationFailure.NoSpeech] when empty.
+     */
+    fun requirePcm16Wav(audio: File, maxSeconds: Long, maxBytes: Long) {
+        val size = audio.length()
+        if (size < WavFormat.HEADER_BYTES) throw CloudException(DictationFailure.UnsupportedAudio, "Not a WAV recording")
+        if (size >= maxBytes) throw CloudException(DictationFailure.AudioTooLarge, "Recording too large")
+        val payload = size - WavFormat.HEADER_BYTES
+        if (payload > maxSeconds * WavFormat.BYTES_PER_SECOND) {
+            throw CloudException(DictationFailure.AudioTooLarge, "Recording too long")
+        }
+        val header = ByteArray(WavFormat.HEADER_BYTES)
+        val read = audio.inputStream().use { input ->
+            var total = 0
+            while (total < header.size) {
+                val count = input.read(header, total, header.size - total)
+                if (count < 0) break
+                total += count
+            }
+            total
+        }
+        if (read < header.size || payload % 2 != 0L || !header.contentEquals(WavFormat.header(payload))) {
+            throw CloudException(DictationFailure.UnsupportedAudio, "Needs a 16 kHz mono 16-bit WAV recording")
+        }
+        if (payload == 0L) throw CloudException(DictationFailure.NoSpeech, "Empty recording")
+    }
+
+    /** The hint for the recording language, or null for Automatic and for a language the model lacks. */
+    fun languageHint(model: CloudModel, languageTag: String?): String? =
+        languageCode(languageTag)?.let { model.languageHints?.get(it) }
+
+    /** `BatchTranscriptionJob.isSameOrigin`: same scheme, host and port, ignoring case and default ports. */
+    fun isSameOrigin(url: String, origin: String): Boolean = try {
+        val a = URI(url)
+        val b = URI(origin)
+        val scheme = a.scheme?.lowercase(Locale.ROOT)
+        val host = a.host?.lowercase(Locale.ROOT)
+        scheme != null && host != null &&
+            scheme == b.scheme?.lowercase(Locale.ROOT) && host == b.host?.lowercase(Locale.ROOT) &&
+            port(a) == port(b)
+    } catch (e: URISyntaxException) {
+        false
+    }
+
+    private fun port(uri: URI): Int? = if (uri.port >= 0) {
+        uri.port
+    } else {
+        mapOf("https" to 443, "http" to 80)[uri.scheme?.lowercase(Locale.ROOT)]
     }
 
     // endregion
@@ -585,6 +683,431 @@ object BatchWire {
             ),
             Body.Audio(audio),
         )
+    }
+
+    // endregion
+
+    // region Smallest (`FileSpeechBatchClient`)
+
+    /** Pulse Pro is English only: [reson8Language] rejects any other language before the upload. */
+    fun smallest(model: CloudModel, apiKey: String, audio: File, languageTag: String?): Request {
+        reson8Language(model, languageTag)
+        return Request(
+            "POST",
+            query(
+                "${model.provider.baseUrl}/stt/",
+                listOf("model" to modelName(model.catalogId), "language" to "en", "word_timestamps" to "true"),
+            ),
+            mapOf(
+                "Authorization" to "Bearer $apiKey",
+                "Content-Type" to "application/octet-stream",
+                "Accept" to "application/json",
+            ),
+            Body.Audio(audio),
+        )
+    }
+
+    /** `transcription` when `status` is `success`. */
+    fun smallestText(body: String): String = parse {
+        val json = JSONObject(body)
+        if (json.string("status") != "success") throw CloudException(DictationFailure.Server, "Unexpected response")
+        json.requireString("transcription")
+    }
+
+    // endregion
+
+    // region Cartesia (`CartesiaBatchClient`)
+
+    const val CARTESIA_VERSION = "2026-08-14"
+
+    /** Cartesia takes the first language subtag; only Automatic is left out. */
+    fun cartesiaLanguage(languageTag: String?): String? {
+        val normalized = languageTag?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        if (normalized.isEmpty() || normalized == "automatic") return null
+        return normalized.split('-', '_').first().takeIf { it.isNotEmpty() }
+    }
+
+    fun cartesia(model: CloudModel, apiKey: String, audio: File, format: SharedAudio.Format, languageTag: String?): Request {
+        val fields = mutableListOf("model" to modelName(model.catalogId))
+        cartesiaLanguage(languageTag)?.let { fields += "language" to it }
+        fields += "timestamp_granularities[]" to "word"
+        return form(
+            fields, "file", "recording.${format.extension}", format.mimeType, audio,
+            mapOf("Authorization" to "Bearer $apiKey", "Cartesia-Version" to CARTESIA_VERSION),
+            "${model.provider.baseUrl}/stt",
+        )
+    }
+
+    /** `text` of a `transcript` response. */
+    fun cartesiaText(body: String): String = parse {
+        val json = JSONObject(body)
+        if (json.string("type") != "transcript") throw CloudException(DictationFailure.Server, "Unexpected response")
+        json.requireString("text")
+    }
+
+    // endregion
+
+    // region xAI speech-to-text (`XAIBatchTranscriptionClient`)
+
+    /** `XAISpeechToText.maximumUploadBytes`. */
+    const val XAI_MAX_AUDIO_BYTES = 500_000_000L
+    private const val XAI_MODEL = "grok-voice-transcribe-2.0"
+
+    /** `XAISpeechToText.boundedKeyterms`: trimmed, non-empty, at most 50 characters, the first 100. */
+    fun xaiKeyterms(vocabulary: List<String>): List<String> = vocabulary.asSequence()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && it.codePointCount(0, it.length) <= 50 }
+        .take(100)
+        .toList()
+
+    /**
+     * `format=true` is rejected without a language, so the two go together or not at all.
+     * @throws CloudException ([DictationFailure.UnsupportedAudio]) for WebM, which xAI does not read.
+     */
+    fun xai(
+        model: CloudModel,
+        apiKey: String,
+        audio: File,
+        format: SharedAudio.Format,
+        languageTag: String?,
+        vocabulary: List<String>,
+    ): Request {
+        if (format.extension == "webm") throw CloudException(DictationFailure.UnsupportedAudio, "xAI cannot read WebM")
+        val fields = mutableListOf("model" to XAI_MODEL)
+        languageHint(model, languageTag)?.let {
+            fields += "language" to it
+            fields += "format" to "true"
+        }
+        fields += xaiKeyterms(vocabulary).map { "keyterm" to it }
+        return form(
+            fields, "file", "recording.${format.extension}", format.mimeType, audio,
+            mapOf("Authorization" to "Bearer $apiKey"), "${model.provider.baseUrl}/stt",
+        )
+    }
+
+    /** `text`, else each channel's text on its own line, else the words. */
+    fun xaiText(body: String): String = parse {
+        val json = JSONObject(body)
+        val channels = json.optJSONArray("channels").objects()
+        val words = json.optJSONArray("words")?.objects() ?: channels.flatMap { it.optJSONArray("words").objects() }
+        listOf(
+            json.string("text"),
+            channels.mapNotNull { it.string("text")?.trim()?.takeIf(String::isNotEmpty) }.joinToString("\n"),
+            words.mapNotNull { it.string("text") }.joinToString(" "),
+        ).firstNotNullOfOrNull { it?.trim()?.takeIf(String::isNotEmpty) }.orEmpty()
+    }
+
+    // endregion
+
+    // region Gladia (`GladiaBatchClient`)
+
+    const val GLADIA_POLL_MS = 2_000L
+    const val GLADIA_TIMEOUT_MS = 900_000L
+
+    class GladiaJob(val id: String?, val resultUrl: String)
+
+    fun gladiaUpload(baseUrl: String, apiKey: String, audio: File, format: SharedAudio.Format): Request = form(
+        emptyList(), "audio", "recording.${format.extension}", format.mimeType, audio,
+        mapOf("x-gladia-key" to apiKey), "$baseUrl/v2/upload",
+    )
+
+    /** One language pins the transcription; none, or one Gladia does not list, detects it per utterance. */
+    fun gladiaSubmit(model: CloudModel, apiKey: String, audioUrl: String, languageTag: String?): Request {
+        val languages = listOfNotNull(languageHint(model, languageTag))
+        val json = JSONObject()
+            .put("audio_url", audioUrl)
+            .put("model", modelName(model.catalogId))
+            .put(
+                "language_config",
+                JSONObject().put("languages", JSONArray(languages)).put("code_switching", languages.isEmpty()),
+            )
+        return Request(
+            "POST",
+            "${model.provider.baseUrl}/v2/pre-recorded",
+            mapOf("x-gladia-key" to apiKey, "Content-Type" to "application/json"),
+            Body.Json(json.toString()),
+        )
+    }
+
+    fun gladiaAudioUrl(body: String): String {
+        val url = requiredString(body, "audio_url")
+        if (url.isEmpty()) throw CloudException(DictationFailure.Server, "Missing audio_url")
+        return url
+    }
+
+    /** `result_url` only while it stays on Gladia's own origin, which holds the key; else the job's ID path. */
+    fun gladiaJob(body: String, baseUrl: String): GladiaJob {
+        val json = try {
+            JSONObject(body)
+        } catch (e: JSONException) {
+            throw CloudException(DictationFailure.Server, "Unexpected response", e)
+        }
+        val id = json.string("id")
+        val resultUrl = json.string("result_url")
+        if (resultUrl != null && isSameOrigin(resultUrl, baseUrl)) return GladiaJob(id, resultUrl)
+        id ?: throw CloudException(DictationFailure.Server, "Missing id")
+        return GladiaJob(id, "$baseUrl/v2/pre-recorded/${pathSegment(id)}")
+    }
+
+    fun gladiaPoll(apiKey: String, job: GladiaJob): Request =
+        Request("GET", job.resultUrl, mapOf("x-gladia-key" to apiKey))
+
+    fun gladiaDelete(baseUrl: String, apiKey: String, id: String): Request =
+        Request("DELETE", "$baseUrl/v2/pre-recorded/${pathSegment(id)}", mapOf("x-gladia-key" to apiKey))
+
+    /**
+     * The transcript once `status` is `done`, else null; throws when the job failed. The transcript
+     * is `full_transcript`, or the utterances' text when Gladia left it out.
+     */
+    fun gladiaResult(body: String): String? {
+        val json = try {
+            JSONObject(body)
+        } catch (e: JSONException) {
+            throw CloudException(DictationFailure.Server, "Unexpected response", e)
+        }
+        return when (json.string("status")) {
+            "done" -> parse {
+                val transcription = json.getJSONObject("result").getJSONObject("transcription")
+                transcription.string("full_transcript")
+                    ?: transcription.optJSONArray("utterances").objects().joinToString(" ") { it.requireString("text") }
+            }
+            "error" -> throw CloudException(
+                DictationFailure.Server,
+                "Gladia transcription failed" + json.optInt("error_code", 0).let { if (it == 0) "" else ": HTTP $it" },
+            )
+            null -> throw CloudException(DictationFailure.Server, "Missing status")
+            else -> null
+        }
+    }
+
+    // endregion
+
+    // region Meta Muse Voice (`MetaMuseBatchClient`)
+
+    /** `MetaMuseVoiceTranscribe.maximumRequestBytes` and `maximumAudioDuration`. */
+    const val META_MAX_AUDIO_BYTES = 32L * 1024 * 1024
+    const val META_MAX_SECONDS = 600L
+
+    /**
+     * A `request` JSON part, then the WAV as `audio.wav`. The caller checks the recording with
+     * [requirePcm16Wav] first: Meta takes only that format.
+     */
+    fun meta(model: CloudModel, apiKey: String, audio: File, languageTag: String?, vocabulary: List<String>): Request {
+        val settings = JSONObject()
+            .put("audioEncoding", "WAV")
+            .put("mode", "ENDPOINTING")
+            .put("model", modelName(model.catalogId).removeSuffix("-streaming"))
+        val keywords = bounded(vocabulary, count = 100, length = 100)
+        if (keywords.isNotEmpty()) settings.put("keywords", JSONArray(keywords))
+        languageHint(model, languageTag)?.let { settings.put("languageBias", JSONArray(listOf(it))) }
+        val boundary = boundary()
+        val head = "--$boundary\r\n" +
+            "Content-Disposition: form-data; name=\"request\"\r\n" +
+            "Content-Type: application/json\r\n\r\n" +
+            settings + "\r\n" +
+            "--$boundary\r\n" +
+            "Content-Disposition: form-data; name=\"audio\"; filename=\"audio.wav\"\r\n" +
+            "Content-Type: audio/wav\r\n\r\n"
+        val multipart = CloudWire.Multipart(boundary, head.toByteArray(), "\r\n--$boundary--\r\n".toByteArray())
+        return Request(
+            "POST",
+            "${model.provider.baseUrl}/asr/transcribe",
+            mapOf(
+                "Authorization" to "Bearer $apiKey",
+                "Accept" to "application/json",
+                "Content-Type" to multipart.contentType,
+            ),
+            Body.Form(multipart, audio),
+        )
+    }
+
+    /** `MetaMuseError.fromHTTPStatus`: Meta reports unreadable audio and oversized requests by status. */
+    fun metaFailure(status: Int): DictationFailure = when (status) {
+        400, 406, 415, 422 -> DictationFailure.UnsupportedAudio
+        413 -> DictationFailure.AudioTooLarge
+        else -> CloudWire.failureForStatus(status)
+    }
+
+    fun metaText(body: String): String = requiredString(body, "transcript")
+
+    // endregion
+
+    // region Google Gemini (`GeminiInteractionsClient`)
+
+    const val GEMINI_URL = "https://generativelanguage.googleapis.com"
+    private const val GEMINI_MODEL = "gemini-3.5-transcribe"
+
+    /** `GeminiTranscribeModels.inlineAudioByteLimit`: larger recordings go through the Files API. */
+    const val GEMINI_INLINE_BYTES = 13_000_000L
+    const val GEMINI_FILE_POLL_MS = 1_500L
+
+    /** The polls that start before the shared client's 60-second processing deadline. */
+    const val GEMINI_FILE_POLL_ATTEMPTS = 39
+
+    /** `GeminiAudioMIMEType.forFile`. */
+    fun geminiMimeType(format: SharedAudio.Format): String = when (format.extension) {
+        "m4a" -> "audio/m4a"
+        "mp3" -> "audio/mp3"
+        "wav", "ogg", "webm", "flac" -> "audio/${format.extension}"
+        else -> "audio/m4a"
+    }
+
+    /** `GeminiTranscribeModels.languageCodes`: the BCP-47 tag, or none for automatic detection. */
+    fun geminiLanguageCodes(languageTag: String?): List<String> {
+        val tag = languageTag?.trim()?.replace('_', '-').orEmpty()
+        return if (tag.isEmpty() || languageCode(tag) == null) emptyList() else listOf(tag)
+    }
+
+    private fun geminiInteraction(audio: JSONObject, languageTag: String?): JSONObject {
+        val mode = JSONObject()
+            .put("type", "verbatim")
+            .put("timestamp_granularities", JSONArray(listOf("word")))
+            .put("diarization_mode", "speaker")
+        val config = JSONObject()
+            .put("language_codes", JSONArray(geminiLanguageCodes(languageTag)))
+            .put("mode", mode)
+        return JSONObject()
+            .put("model", GEMINI_MODEL)
+            .put("input", JSONArray().put(audio.put("type", "audio")))
+            .put("generation_config", JSONObject().put("transcription_config", config))
+    }
+
+    private fun geminiHeaders(apiKey: String) = mapOf("x-goog-api-key" to apiKey, "Content-Type" to "application/json")
+
+    /** The recording inline, base64-encoded; for recordings up to [GEMINI_INLINE_BYTES]. */
+    fun geminiInline(apiKey: String, audio: File, format: SharedAudio.Format, languageTag: String?): Request {
+        val placeholder = audioPlaceholder()
+        val input = JSONObject().put("data", placeholder).put("mime_type", geminiMimeType(format))
+        return Request(
+            "POST", "$GEMINI_URL/v1beta/interactions", geminiHeaders(apiKey),
+            base64Json(geminiInteraction(input, languageTag), placeholder, audio),
+        )
+    }
+
+    /** A recording already uploaded through the Files API. */
+    fun geminiFromFile(apiKey: String, uri: String, format: SharedAudio.Format, languageTag: String?): Request {
+        val input = JSONObject().put("uri", uri).put("mime_type", geminiMimeType(format))
+        return Request(
+            "POST", "$GEMINI_URL/v1beta/interactions", geminiHeaders(apiKey),
+            Body.Json(geminiInteraction(input, languageTag).toString()),
+        )
+    }
+
+    /** Opens a resumable upload; the session URL comes back in `x-goog-upload-url`. */
+    fun geminiUploadStart(apiKey: String, audio: File, format: SharedAudio.Format): Request = Request(
+        "POST",
+        "$GEMINI_URL/upload/v1beta/files",
+        geminiHeaders(apiKey) + mapOf(
+            "X-Goog-Upload-Protocol" to "resumable",
+            "X-Goog-Upload-Command" to "start",
+            "X-Goog-Upload-Header-Content-Length" to audio.length().toString(),
+            "X-Goog-Upload-Header-Content-Type" to geminiMimeType(format),
+        ),
+        Body.Json(JSONObject().put("file", JSONObject().put("display_name", audio.name)).toString()),
+    )
+
+    /** The session URL already authorises the upload, so the key is not sent again. */
+    fun geminiUpload(uploadUrl: String, audio: File, format: SharedAudio.Format): Request = Request(
+        "POST",
+        uploadUrl,
+        mapOf(
+            "Content-Type" to geminiMimeType(format),
+            "X-Goog-Upload-Offset" to "0",
+            "X-Goog-Upload-Command" to "upload, finalize",
+        ),
+        Body.Audio(audio),
+    )
+
+    class GeminiFile(val name: String?, val uri: String, val state: String?)
+
+    fun geminiUploadedFile(body: String): GeminiFile = try {
+        val file = JSONObject(body).getJSONObject("file")
+        GeminiFile(file.string("name"), file.requireString("uri"), file.string("state"))
+    } catch (e: JSONException) {
+        throw CloudException(DictationFailure.Server, "The upload response did not contain a file URI", e)
+    }
+
+    /** `GeminiTranscribeModels.fileStatusURL`: `files/<name>`, each segment percent-encoded. */
+    fun geminiFileStatus(apiKey: String, name: String): Request {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) throw CloudException(DictationFailure.Server, "The upload response did not name the file")
+        val path = if (trimmed.startsWith("files/")) trimmed else "files/$trimmed"
+        return Request(
+            "GET",
+            "$GEMINI_URL/v1beta/" + path.split('/').joinToString("/") { pathSegment(it) },
+            mapOf("x-goog-api-key" to apiKey),
+        )
+    }
+
+    /** `state`, or `file.state`. */
+    fun geminiFileState(body: String): String? = try {
+        val json = JSONObject(body)
+        json.string("state") ?: json.optJSONObject("file")?.string("state")
+    } catch (e: JSONException) {
+        throw CloudException(DictationFailure.Server, "Unexpected response", e)
+    }
+
+    /** `output_text`, else the steps' content text joined with spaces. */
+    fun geminiText(body: String): String = parse {
+        val json = JSONObject(body)
+        json.string("output_text")?.trim()?.takeIf { it.isNotEmpty() }
+            ?: json.optJSONArray("steps").objects()
+                .flatMap { it.optJSONArray("content").objects() }
+                .mapNotNull { it.string("text")?.trim()?.takeIf(String::isNotEmpty) }
+                .joinToString(" ")
+    }
+
+    // endregion
+
+    // region OpenRouter audio models (`OpenRouterInlineAudioTranscriptionClient`)
+
+    /** `OpenRouterInlineAudioTranscriptionClient.defaultMaximumInlineAudioBytes`. */
+    const val OPENROUTER_MAX_AUDIO_BYTES = 50L * 1024 * 1024
+
+    /** Inkling takes canonical 16-bit WAV of up to 20 minutes. */
+    const val INKLING_MAX_SECONDS = 20L * 60
+
+    /** The `input_audio.format` for a recording; null for WebM, which the portable hosts also refuse. */
+    fun openRouterFormat(format: SharedAudio.Format): String? =
+        format.extension.takeIf { it in setOf("wav", "mp3", "aac", "ogg", "flac", "m4a") }
+
+    fun openRouterPrompt(languageTag: String?): String {
+        val language = languageTag?.trim().orEmpty()
+        return if (language.isEmpty() || languageCode(language) == null) {
+            "Transcribe this audio file. Return only the transcript text, with no commentary."
+        } else {
+            "Transcribe this audio file using locale $language. Return only the transcript text, with no commentary."
+        }
+    }
+
+    /** One chat completion with the recording inline; [audioFormat] comes from [openRouterFormat]. */
+    fun openRouter(model: CloudModel, apiKey: String, audio: File, audioFormat: String, languageTag: String?): Request {
+        val placeholder = audioPlaceholder()
+        val content = JSONArray()
+            .put(JSONObject().put("type", "text").put("text", openRouterPrompt(languageTag)))
+            .put(
+                JSONObject().put("type", "input_audio")
+                    .put("input_audio", JSONObject().put("data", placeholder).put("format", audioFormat)),
+            )
+        val json = JSONObject()
+            .put("model", model.apiName)
+            .put("temperature", 0)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
+            .put("stream", false)
+        return Request(
+            "POST",
+            "${model.provider.baseUrl}/chat/completions",
+            mapOf("Authorization" to "Bearer $apiKey", "Content-Type" to "application/json"),
+            base64Json(json, placeholder, audio),
+        )
+    }
+
+    /** The first choice whose message has text. */
+    fun openRouterText(body: String): String = parse {
+        JSONObject(body).optJSONArray("choices").objects()
+            .mapNotNull { it.optJSONObject("message")?.string("content")?.trim() }
+            .firstOrNull { it.isNotEmpty() }
+            ?: throw CloudException(DictationFailure.Server, "Unexpected response")
     }
 
     // endregion

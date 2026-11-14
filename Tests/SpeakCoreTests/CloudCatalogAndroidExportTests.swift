@@ -27,40 +27,50 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         )
     }
 
-    func testExportedModelsAreCurrentDirectBatchModelsOfAndroidProviders() {
+    func testExportedModelsAreCurrentDirectBatchModelsOfAndroidProviders() throws {
         let models = CloudCatalogAndroidExport.transcriptionModels
         XCTAssertFalse(models.isEmpty)
         let batchIDs = Set(ModelCatalog.batchTranscription.map(\.id))
         for model in models {
             XCTAssertTrue(batchIDs.contains(model.id), model.id)
             XCTAssertNil(ModelRetirements.retirement(for: model.id), model.id)
-            if model.id.hasPrefix("openai/") {
-                XCTAssertTrue(OpenAITranscriptionModels.directBatchModelIDs.contains(model.id), model.id)
-            } else {
-                let provider = String(model.id.prefix { $0 != "/" })
-                XCTAssertTrue(CloudCatalogAndroidExport.transcriptionProviderIDs.contains(provider), model.id)
+            let provider = try XCTUnwrap(CloudCatalogAndroidExport.transcriptionProviderID(of: model.id), model.id)
+            XCTAssertTrue(CloudCatalogAndroidExport.transcriptionProviderIDs.contains(provider), model.id)
+            switch provider {
+            case "openai": XCTAssertTrue(OpenAITranscriptionModels.directBatchModelIDs.contains(model.id), model.id)
+            case "google": XCTAssertTrue(GeminiTranscribeModels.directBatchModelIDs.contains(model.id), model.id)
+            case OpenRouterService.providerID:
+                XCTAssertTrue(OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs.contains(model.id), model.id)
+            default: XCTAssertTrue(model.id.hasPrefix("\(provider)/"), model.id)
             }
         }
         XCTAssertEqual(models.first?.id, OpenAITranscriptionModels.gptTranscribeCatalogID)
     }
 
-    /// Android offers every provider whose shared batch client iOS calls, plus OpenAI and Reson8.
+    /// Android offers every provider whose shared batch client iOS calls, plus OpenAI, Reson8, the
+    /// direct routes the desktop hosts run and OpenRouter. Only region-bound keys stay off Android.
     func testAndroidTranscriptionProvidersCoverEverySharedBatchClientProvider() {
         XCTAssertEqual(
             Set(CloudCatalogAndroidExport.transcriptionProviderIDs),
-            BatchTranscriptionRouting.iosSharedClientProviderIDs.union(["openai", "reson8"])
+            BatchTranscriptionRouting.iosSharedClientProviderIDs.union([
+                "openai", "reson8", "cartesia", "gladia", "google", "meta", "smallest", "xai",
+                OpenRouterService.providerID
+            ])
         )
         let offered = Set(CloudCatalogAndroidExport.transcriptionModels.map(\.id))
+        var missing: Set<String> = []
         for option in ModelCatalog.batchTranscription where ModelRetirements.retirement(for: option.id) == nil {
-            let provider = String(option.id.prefix { $0 != "/" })
-            guard provider != "openai", CloudCatalogAndroidExport.transcriptionProviderIDs.contains(provider) else {
+            guard let provider = CloudCatalogAndroidExport.transcriptionProviderID(of: option.id),
+                  CloudCatalogAndroidExport.transcriptionProviderIDs.contains(provider) else {
+                missing.insert(String(option.id.prefix { $0 != "/" }))
                 continue
             }
             XCTAssertTrue(offered.contains(option.id), option.id)
         }
+        XCTAssertEqual(missing, ["alibaba", "azure", "stepfun"])
     }
 
-    func testOnlyOpenAICompatibleModelsTakeAPromptAndOnlyReson8NamesItsLanguages() throws {
+    func testOnlyOpenAICompatibleModelsTakeAPromptAndLanguageRulesMatchSpeakCore() throws {
         let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
         let models = try XCTUnwrap(object?["transcriptionModels"] as? [[String: Any]])
         for model in models {
@@ -69,13 +79,29 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
             if model["supportsPrompt"] as? Bool == true {
                 XCTAssertTrue(CloudCatalogAndroidExport.openAICompatibleProviderIDs.contains(provider), id)
             }
-            let codes = model["languageCodes"] as? [String]
-            if let reson8 = Reson8Model(modelID: id) {
-                XCTAssertEqual(codes, reson8.languageCodes.sorted(), id)
-            } else {
-                XCTAssertNil(codes, id)
+            XCTAssertEqual(model["languageCodes"] as? [String], CloudCatalogAndroidExport.languageCodes(for: id), id)
+            XCTAssertEqual(
+                model["languageHints"] as? [String: String], CloudCatalogAndroidExport.languageHints(for: id), id
+            )
+            XCTAssertEqual(
+                model["requiresPCM16WAV"] as? Bool,
+                id == MetaMuseVoiceTranscribe.batchCatalogID
+                    || OpenRouterInlineAudioTranscriptionClient.requiresCanonicalPCM16WAV(model: id),
+                id
+            )
+            if provider == OpenRouterService.providerID {
+                XCTAssertEqual(model["apiName"] as? String, id)
             }
         }
+        let languageCoded = models.filter { $0["languageCodes"] != nil }.compactMap { $0["catalogId"] as? String }
+        XCTAssertEqual(
+            Set(languageCoded), Set(Reson8Model.allCases.map(\.batchID) + FileSpeechProvider.smallest.modelIDs)
+        )
+        let hinted = models.filter { $0["languageHints"] != nil }.compactMap { $0["catalogId"] as? String }
+        XCTAssertEqual(
+            Set(hinted),
+            [GladiaBatchClient.catalogID, XAISpeechToText.batchCatalogID, MetaMuseVoiceTranscribe.batchCatalogID]
+        )
         XCTAssertEqual(Set(models.compactMap { $0["catalogId"] as? String }.filter { $0.hasPrefix("reson8/") }),
                        Set(Reson8Model.allCases.map(\.batchID)))
     }
@@ -87,7 +113,7 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         XCTAssertEqual(
             providers?.map { $0["credentialId"] },
             CloudCatalogAndroidExport.transcriptionProviderIDs.map(ProviderCredentialCatalogue.apiKeyIdentifier(for:))
-                + ["openrouter.apiKey", "anthropic.apiKey", "google.apiKey"]
+                + ["anthropic.apiKey"]
         )
         XCTAssertEqual(providers?.first?["credentialId"], "openai.apiKey")
         let cleanup = object?["cleanup"] as? [String: String]

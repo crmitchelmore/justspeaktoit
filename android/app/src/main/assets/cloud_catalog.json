@@ -563,6 +563,31 @@
       "id" : "speechmatics"
     },
     {
+      "credentialId" : "cartesia.apiKey",
+      "id" : "cartesia"
+    },
+    {
+      "credentialId" : "gladia.apiKey",
+      "id" : "gladia"
+    },
+    {
+      "chatCompletionsURL" : "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "credentialId" : "google.apiKey",
+      "id" : "google"
+    },
+    {
+      "credentialId" : "meta.apiKey",
+      "id" : "meta"
+    },
+    {
+      "credentialId" : "smallest.apiKey",
+      "id" : "smallest"
+    },
+    {
+      "credentialId" : "xai.apiKey",
+      "id" : "xai"
+    },
+    {
       "credentialId" : "openrouter.apiKey",
       "id" : "openrouter"
     },
@@ -570,11 +595,6 @@
       "chatCompletionsURL" : "https://api.anthropic.com/v1/chat/completions",
       "credentialId" : "anthropic.apiKey",
       "id" : "anthropic"
-    },
-    {
-      "chatCompletionsURL" : "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-      "credentialId" : "google.apiKey",
-      "id" : "google"
     }
   ],
   "transcriptionModels" : [
@@ -584,6 +604,7 @@
       "displayName" : "GPT Transcribe (OpenAI)",
       "languageField" : "languages[]",
       "provider" : "openai",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : true
     },
     {
@@ -592,6 +613,7 @@
       "displayName" : "Whisper Large v3 Turbo (Groq)",
       "languageField" : "language",
       "provider" : "groq",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : true
     },
     {
@@ -600,6 +622,7 @@
       "displayName" : "AssemblyAI Universal-3.5 Pro",
       "languageField" : "language",
       "provider" : "assemblyai",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -608,6 +631,7 @@
       "displayName" : "AssemblyAI Universal-2",
       "languageField" : "language",
       "provider" : "assemblyai",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -616,6 +640,7 @@
       "displayName" : "Deepgram Nova-3",
       "languageField" : "language",
       "provider" : "deepgram",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -624,6 +649,7 @@
       "displayName" : "Deepgram Nova",
       "languageField" : "language",
       "provider" : "deepgram",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -632,6 +658,7 @@
       "displayName" : "Deepgram Enhanced",
       "languageField" : "language",
       "provider" : "deepgram",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -640,6 +667,7 @@
       "displayName" : "Deepgram Base",
       "languageField" : "language",
       "provider" : "deepgram",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -648,6 +676,7 @@
       "displayName" : "ElevenLabs Scribe v3",
       "languageField" : "language",
       "provider" : "elevenlabs",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -656,6 +685,7 @@
       "displayName" : "ElevenLabs Scribe v2",
       "languageField" : "language",
       "provider" : "elevenlabs",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -664,6 +694,7 @@
       "displayName" : "ElevenLabs Scribe v2 Medical",
       "languageField" : "language",
       "provider" : "elevenlabs",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -672,6 +703,7 @@
       "displayName" : "Voxtral Mini Transcribe 3 (Mistral, Preview)",
       "languageField" : "language",
       "provider" : "mistral",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -680,6 +712,7 @@
       "displayName" : "Voxtral Small Transcribe 3 (Mistral, Preview)",
       "languageField" : "language",
       "provider" : "mistral",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -688,6 +721,7 @@
       "displayName" : "Modulate Velma-2 Batch",
       "languageField" : "language",
       "provider" : "modulate",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -696,6 +730,7 @@
       "displayName" : "Modulate Velma-2 Batch (English Fast)",
       "languageField" : "language",
       "provider" : "modulate",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -762,6 +797,7 @@
       ],
       "languageField" : "language",
       "provider" : "reson8",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -782,6 +818,7 @@
       ],
       "languageField" : "language",
       "provider" : "reson8",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -790,6 +827,7 @@
       "displayName" : "Rev.ai",
       "languageField" : "language",
       "provider" : "revai",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -798,6 +836,7 @@
       "displayName" : "Soniox Async v6",
       "languageField" : "language",
       "provider" : "soniox",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -806,6 +845,7 @@
       "displayName" : "Speechmatics Enhanced (Batch)",
       "languageField" : "language",
       "provider" : "speechmatics",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     },
     {
@@ -814,6 +854,292 @@
       "displayName" : "Speechmatics Standard (Batch)",
       "languageField" : "language",
       "provider" : "speechmatics",
+      "requiresPCM16WAV" : false,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "ink-whisper",
+      "catalogId" : "cartesia/ink-whisper",
+      "displayName" : "Cartesia Ink Whisper (Batch)",
+      "languageField" : "language",
+      "provider" : "cartesia",
+      "requiresPCM16WAV" : false,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "solaria-1",
+      "catalogId" : "gladia/solaria-1",
+      "displayName" : "Gladia Solaria-1 (Batch)",
+      "languageField" : "language",
+      "languageHints" : {
+        "af" : "af",
+        "am" : "am",
+        "ar" : "ar",
+        "as" : "as",
+        "az" : "az",
+        "ba" : "ba",
+        "be" : "be",
+        "bg" : "bg",
+        "bn" : "bn",
+        "bo" : "bo",
+        "br" : "br",
+        "bs" : "bs",
+        "ca" : "ca",
+        "cs" : "cs",
+        "cy" : "cy",
+        "da" : "da",
+        "de" : "de",
+        "el" : "el",
+        "en" : "en",
+        "es" : "es",
+        "et" : "et",
+        "eu" : "eu",
+        "fa" : "fa",
+        "fi" : "fi",
+        "fo" : "fo",
+        "fr" : "fr",
+        "gl" : "gl",
+        "gu" : "gu",
+        "ha" : "ha",
+        "haw" : "haw",
+        "he" : "he",
+        "hi" : "hi",
+        "hr" : "hr",
+        "ht" : "ht",
+        "hu" : "hu",
+        "hy" : "hy",
+        "id" : "id",
+        "is" : "is",
+        "it" : "it",
+        "ja" : "ja",
+        "jw" : "jw",
+        "ka" : "ka",
+        "kk" : "kk",
+        "km" : "km",
+        "kn" : "kn",
+        "ko" : "ko",
+        "la" : "la",
+        "lb" : "lb",
+        "ln" : "ln",
+        "lo" : "lo",
+        "lt" : "lt",
+        "lv" : "lv",
+        "mg" : "mg",
+        "mi" : "mi",
+        "mk" : "mk",
+        "ml" : "ml",
+        "mn" : "mn",
+        "mr" : "mr",
+        "ms" : "ms",
+        "mt" : "mt",
+        "my" : "my",
+        "ne" : "ne",
+        "nl" : "nl",
+        "nn" : "nn",
+        "no" : "no",
+        "oc" : "oc",
+        "pa" : "pa",
+        "pl" : "pl",
+        "ps" : "ps",
+        "pt" : "pt",
+        "ro" : "ro",
+        "ru" : "ru",
+        "sa" : "sa",
+        "sd" : "sd",
+        "si" : "si",
+        "sk" : "sk",
+        "sl" : "sl",
+        "sn" : "sn",
+        "so" : "so",
+        "sq" : "sq",
+        "sr" : "sr",
+        "su" : "su",
+        "sv" : "sv",
+        "sw" : "sw",
+        "ta" : "ta",
+        "te" : "te",
+        "tg" : "tg",
+        "th" : "th",
+        "tk" : "tk",
+        "tl" : "tl",
+        "tr" : "tr",
+        "tt" : "tt",
+        "uk" : "uk",
+        "ur" : "ur",
+        "uz" : "uz",
+        "vi" : "vi",
+        "yi" : "yi",
+        "yo" : "yo",
+        "zh" : "zh"
+      },
+      "provider" : "gladia",
+      "requiresPCM16WAV" : false,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "gemini-3.5-transcribe",
+      "catalogId" : "google/gemini-3.5-transcribe",
+      "displayName" : "Gemini 3.5 Transcribe (Google)",
+      "languageField" : "language",
+      "provider" : "google",
+      "requiresPCM16WAV" : false,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "muse-voice-transcribe-1.0",
+      "catalogId" : "meta/muse-voice-transcribe-1.0",
+      "displayName" : "Meta Muse Voice Transcribe",
+      "languageField" : "language",
+      "languageHints" : {
+        "ar" : "Arabic",
+        "bn" : "Bengali",
+        "de" : "German",
+        "en" : "English",
+        "es" : "Spanish",
+        "fil" : "Tagalog",
+        "fr" : "French",
+        "he" : "Hebrew",
+        "hi" : "Hindi",
+        "id" : "Indonesian",
+        "it" : "Italian",
+        "ja" : "Japanese",
+        "kn" : "Kannada",
+        "ko" : "Korean",
+        "mr" : "Marathi",
+        "ms" : "Malay",
+        "nl" : "Dutch",
+        "pl" : "Polish",
+        "pt" : "Portuguese",
+        "ta" : "Tamil",
+        "te" : "Telugu",
+        "th" : "Thai",
+        "tl" : "Tagalog",
+        "tr" : "Turkish",
+        "vi" : "Vietnamese",
+        "zh" : "Mandarin Chinese"
+      },
+      "provider" : "meta",
+      "requiresPCM16WAV" : true,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "pulse-pro",
+      "catalogId" : "smallest/pulse-pro",
+      "displayName" : "Smallest AI Pulse Pro",
+      "languageCodes" : [
+        "en"
+      ],
+      "languageField" : "language",
+      "provider" : "smallest",
+      "requiresPCM16WAV" : false,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "speech-to-text",
+      "catalogId" : "xai/speech-to-text",
+      "displayName" : "Grok Voice Transcribe 2.0",
+      "languageField" : "language",
+      "languageHints" : {
+        "ar" : "ar",
+        "cs" : "cs",
+        "da" : "da",
+        "de" : "de",
+        "en" : "en",
+        "es" : "es",
+        "fa" : "fa",
+        "fil" : "fil",
+        "fr" : "fr",
+        "hi" : "hi",
+        "id" : "id",
+        "it" : "it",
+        "ja" : "ja",
+        "ko" : "ko",
+        "mk" : "mk",
+        "ms" : "ms",
+        "nl" : "nl",
+        "pl" : "pl",
+        "pt" : "pt",
+        "ro" : "ro",
+        "ru" : "ru",
+        "sv" : "sv",
+        "th" : "th",
+        "tr" : "tr",
+        "vi" : "vi"
+      },
+      "provider" : "xai",
+      "requiresPCM16WAV" : false,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "thinkingmachines/inkling",
+      "catalogId" : "thinkingmachines/inkling",
+      "displayName" : "Inkling (OpenRouter)",
+      "languageField" : "language",
+      "provider" : "openrouter",
+      "requiresPCM16WAV" : true,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "thinkingmachines/inkling-small",
+      "catalogId" : "thinkingmachines/inkling-small",
+      "displayName" : "Inkling Small (OpenRouter)",
+      "languageField" : "language",
+      "provider" : "openrouter",
+      "requiresPCM16WAV" : true,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "google/gemini-3.1-pro-preview",
+      "catalogId" : "google/gemini-3.1-pro-preview",
+      "displayName" : "Gemini 3.1 Pro Preview (OpenRouter)",
+      "languageField" : "language",
+      "provider" : "openrouter",
+      "requiresPCM16WAV" : false,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "mistralai/voxtral-small-24b-2507",
+      "catalogId" : "mistralai/voxtral-small-24b-2507",
+      "displayName" : "Voxtral Small 24B (OpenRouter)",
+      "languageField" : "language",
+      "provider" : "openrouter",
+      "requiresPCM16WAV" : false,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "google/gemini-3.8-flash",
+      "catalogId" : "google/gemini-3.8-flash",
+      "displayName" : "Gemini 3.8 Flash (OpenRouter)",
+      "languageField" : "language",
+      "provider" : "openrouter",
+      "requiresPCM16WAV" : false,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "google/gemini-3.5-flash-lite",
+      "catalogId" : "google/gemini-3.5-flash-lite",
+      "displayName" : "Gemini 3.5 Flash Lite (OpenRouter)",
+      "languageField" : "language",
+      "provider" : "openrouter",
+      "requiresPCM16WAV" : false,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "google/gemini-3.1-flash-lite",
+      "catalogId" : "google/gemini-3.1-flash-lite",
+      "displayName" : "Gemini 3.1 Flash Lite (OpenRouter)",
+      "languageField" : "language",
+      "provider" : "openrouter",
+      "requiresPCM16WAV" : false,
+      "supportsPrompt" : false
+    },
+    {
+      "apiName" : "google/gemini-2.5-flash",
+      "catalogId" : "google/gemini-2.5-flash",
+      "displayName" : "Gemini 2.5 Flash (OpenRouter)",
+      "languageField" : "language",
+      "provider" : "openrouter",
+      "requiresPCM16WAV" : false,
       "supportsPrompt" : false
     }
   ],

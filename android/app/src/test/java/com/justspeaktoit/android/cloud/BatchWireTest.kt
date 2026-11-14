@@ -4,10 +4,12 @@ import com.justspeaktoit.android.dictation.DictationFailure
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.URLDecoder
 
@@ -296,6 +298,261 @@ class BatchWireTest {
         assertTrue(queryItems(BatchWire.reson8(model, "k", audio, wav, null).url).none { it.first in setOf("language", "encoding") })
         val error = assertThrows(CloudException::class.java) { BatchWire.reson8(model, "k", audio, wav, "ja-JP") }
         assertEquals(DictationFailure.LanguageNotSupported, error.failure)
+    }
+
+    private fun catalogue(id: String): CloudModel = CloudCatalog.transcriptionModels.first { it.catalogId == id }
+
+    /** A [BatchWire.Body.Base64Json] body as it goes on the wire, parsed. */
+    private fun streamedJson(request: BatchWire.Request): JSONObject {
+        val body = request.body as BatchWire.Body.Base64Json
+        val out = ByteArrayOutputStream()
+        body.writeTo(out)
+        assertEquals(body.contentLength(), out.size().toLong())
+        return JSONObject(out.toString("UTF-8"))
+    }
+
+    private fun withFile(bytes: ByteArray, block: (File) -> Unit) {
+        val file = File.createTempFile("batch", ".wav")
+        try {
+            file.writeBytes(bytes)
+            block(file)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun testBase64Json_streamsTheRecordingInPlaceOfThePlaceholder() {
+        for (size in 0..4) {
+            val bytes = ByteArray(size) { (it * 37).toByte() }
+            withFile(bytes) { file ->
+                val request = BatchWire.geminiInline("k", file, wav, null)
+                val data = streamedJson(request).getJSONArray("input").getJSONObject(0).getString("data")
+                assertEquals(java.util.Base64.getEncoder().encodeToString(bytes), data)
+            }
+        }
+    }
+
+    @Test
+    fun testRequirePcm16Wav_acceptsOnlyTheCanonicalRecordingWithinItsLimits() {
+        withFile(WavFormat.header(4) + ByteArray(4)) { BatchWire.requirePcm16Wav(it, maxSeconds = 1, maxBytes = 1_000) }
+        val cases = listOf(
+            ByteArray(10) to DictationFailure.UnsupportedAudio,
+            WavFormat.header(0) to DictationFailure.NoSpeech,
+            WavFormat.header(3) + ByteArray(3) to DictationFailure.UnsupportedAudio,
+            WavFormat.header(8) + ByteArray(4) to DictationFailure.UnsupportedAudio,
+            WavFormat.header(64_002) + ByteArray(64_002) to DictationFailure.AudioTooLarge,
+        )
+        for ((bytes, failure) in cases) {
+            withFile(bytes) { file ->
+                val error = assertThrows(CloudException::class.java) {
+                    BatchWire.requirePcm16Wav(file, maxSeconds = 2, maxBytes = 1_000_000)
+                }
+                assertEquals(failure, error.failure)
+            }
+        }
+        withFile(WavFormat.header(4) + ByteArray(4)) { file ->
+            val error = assertThrows(CloudException::class.java) { BatchWire.requirePcm16Wav(file, 1, maxBytes = 48) }
+            assertEquals(DictationFailure.AudioTooLarge, error.failure)
+        }
+    }
+
+    @Test
+    fun testIsSameOrigin_matchesSchemeHostAndDefaultPorts() {
+        assertTrue(BatchWire.isSameOrigin("https://API.gladia.io:443/v2/x", "https://api.gladia.io"))
+        assertFalse(BatchWire.isSameOrigin("http://api.gladia.io/v2/x", "https://api.gladia.io"))
+        assertFalse(BatchWire.isSameOrigin("https://api.gladia.io:8443/v2/x", "https://api.gladia.io"))
+        assertFalse(BatchWire.isSameOrigin("https://evil.example/v2/x", "https://api.gladia.io"))
+        assertFalse(BatchWire.isSameOrigin("not a url", "https://api.gladia.io"))
+    }
+
+    @Test
+    fun testCartesia_sendsTheVersionedFormAndReadsATranscript() {
+        val request = BatchWire.cartesia(catalogue("cartesia/ink-whisper"), "k", audio, m4a, "pt-BR")
+        assertEquals("https://api.cartesia.ai/stt", request.url)
+        assertEquals("Bearer k", request.headers["Authorization"])
+        assertEquals(BatchWire.CARTESIA_VERSION, request.headers["Cartesia-Version"])
+        assertEquals(
+            listOf("model" to "ink-whisper", "language" to "pt", "timestamp_granularities[]" to "word", "<file:file>" to "recording.m4a"),
+            formFields(request),
+        )
+        assertTrue(formFields(BatchWire.cartesia(catalogue("cartesia/ink-whisper"), "k", audio, m4a, null)).none { it.first == "language" })
+        assertEquals("Hi", BatchWire.cartesiaText("""{"type":"transcript","text":" Hi "}"""))
+        assertThrows(CloudException::class.java) { BatchWire.cartesiaText("""{"type":"error","text":"Hi"}""") }
+    }
+
+    @Test
+    fun testSmallest_postsEnglishRawAudioAndRejectsOtherLanguages() {
+        val model = catalogue("smallest/pulse-pro")
+        val request = BatchWire.smallest(model, "k", audio, "en-GB")
+        assertTrue(request.url.startsWith("https://api.smallest.ai/waves/v1/stt/?"))
+        assertEquals(
+            listOf("model" to "pulse-pro", "language" to "en", "word_timestamps" to "true"),
+            queryItems(request.url),
+        )
+        assertEquals("Bearer k", request.headers["Authorization"])
+        assertEquals("application/octet-stream", request.headers["Content-Type"])
+        assertTrue(request.body is BatchWire.Body.Audio)
+        assertEquals(queryItems(request.url), queryItems(BatchWire.smallest(model, "k", audio, null).url))
+        val error = assertThrows(CloudException::class.java) { BatchWire.smallest(model, "k", audio, "fr-FR") }
+        assertEquals(DictationFailure.LanguageNotSupported, error.failure)
+        assertEquals("Hello", BatchWire.smallestText("""{"status":"success","transcription":"Hello"}"""))
+        assertThrows(CloudException::class.java) { BatchWire.smallestText("""{"status":"failed","transcription":"x"}""") }
+    }
+
+    @Test
+    fun testXAI_formatsOnlyAListedLanguageAndSendsKeyterms() {
+        val model = catalogue("xai/speech-to-text")
+        val request = BatchWire.xai(model, "k", audio, m4a, "de-DE", listOf(" Kubernetes ", "", "x".repeat(51)))
+        assertEquals("https://api.x.ai/v1/stt", request.url)
+        assertEquals("Bearer k", request.headers["Authorization"])
+        assertEquals(
+            listOf(
+                "model" to "grok-voice-transcribe-2.0", "language" to "de", "format" to "true",
+                "keyterm" to "Kubernetes", "<file:file>" to "recording.m4a",
+            ),
+            formFields(request),
+        )
+        val automatic = formFields(BatchWire.xai(model, "k", audio, m4a, "zz-ZZ", emptyList()))
+        assertTrue(automatic.none { it.first == "language" || it.first == "format" })
+        val webm = SharedAudio.Format("webm", "audio/webm")
+        val error = assertThrows(CloudException::class.java) { BatchWire.xai(model, "k", audio, webm, null, emptyList()) }
+        assertEquals(DictationFailure.UnsupportedAudio, error.failure)
+        assertEquals(100, BatchWire.xaiKeyterms(List(120) { "t$it" }).size)
+    }
+
+    @Test
+    fun testXAIText_fallsBackFromTextToChannelsToWords() {
+        assertEquals("Hi", BatchWire.xaiText("""{"text":" Hi "}"""))
+        assertEquals("a\nb", BatchWire.xaiText("""{"text":"","channels":[{"text":"a"},{"text":"b"}]}"""))
+        assertEquals("one two", BatchWire.xaiText("""{"words":[{"text":"one"},{"text":"two"}]}"""))
+        assertEquals("", BatchWire.xaiText("{}"))
+    }
+
+    @Test
+    fun testGladia_uploadsSubmitsAndPinsOnlyAListedLanguage() {
+        val model = catalogue("gladia/solaria-1")
+        val upload = BatchWire.gladiaUpload(model.provider.baseUrl, "k", audio, m4a)
+        assertEquals("https://api.gladia.io/v2/upload", upload.url)
+        assertEquals("k", upload.headers["x-gladia-key"])
+        assertEquals(listOf("<file:audio>" to "recording.m4a"), formFields(upload))
+
+        val submit = BatchWire.gladiaSubmit(model, "k", "https://cdn/a", "fr-CA")
+        assertEquals("https://api.gladia.io/v2/pre-recorded", submit.url)
+        val body = json(submit)
+        assertEquals("https://cdn/a", body.getString("audio_url"))
+        assertEquals("solaria-1", body.getString("model"))
+        assertEquals("fr", body.getJSONObject("language_config").getJSONArray("languages").getString(0))
+        assertFalse(body.getJSONObject("language_config").getBoolean("code_switching"))
+        val detect = json(BatchWire.gladiaSubmit(model, "k", "https://cdn/a", null)).getJSONObject("language_config")
+        assertEquals(0, detect.getJSONArray("languages").length())
+        assertTrue(detect.getBoolean("code_switching"))
+    }
+
+    @Test
+    fun testGladiaJob_pollsTheResultUrlOnlyOnGladiasOrigin() {
+        val base = CloudProvider.Gladia.baseUrl
+        assertEquals("$base/v2/pre-recorded/j1?x=1", BatchWire.gladiaJob("""{"id":"j1","result_url":"$base/v2/pre-recorded/j1?x=1"}""", base).resultUrl)
+        assertEquals("$base/v2/pre-recorded/j%201", BatchWire.gladiaJob("""{"id":"j 1","result_url":"https://elsewhere/j"}""", base).resultUrl)
+        assertThrows(CloudException::class.java) { BatchWire.gladiaJob("""{"result_url":"https://elsewhere/j"}""", base) }
+        assertThrows(CloudException::class.java) { BatchWire.gladiaAudioUrl("""{"audio_url":""}""") }
+    }
+
+    @Test
+    fun testGladiaResult_readsTheTranscriptOnceDone() {
+        assertNull(BatchWire.gladiaResult("""{"status":"processing"}"""))
+        assertEquals("Hi", BatchWire.gladiaResult("""{"status":"done","result":{"transcription":{"full_transcript":"Hi"}}}"""))
+        assertEquals(
+            "a b",
+            BatchWire.gladiaResult("""{"status":"done","result":{"transcription":{"utterances":[{"text":"a"},{"text":"b"}]}}}"""),
+        )
+        assertThrows(CloudException::class.java) { BatchWire.gladiaResult("""{"status":"error","error_code":500}""") }
+    }
+
+    @Test
+    fun testMeta_sendsTheRequestPartBeforeTheWav() {
+        val model = catalogue("meta/muse-voice-transcribe-1.0")
+        val request = BatchWire.meta(model, "k", audio, "de-DE", listOf("Kubernetes", "kubernetes"))
+        assertEquals("https://api.meta.ai/v1/asr/transcribe", request.url)
+        assertEquals("Bearer k", request.headers["Authorization"])
+        val multipart = form(request).multipart
+        val head = String(multipart.head)
+        assertTrue(head.contains("name=\"audio\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav"))
+        val settings = JSONObject(head.substringAfter("application/json\r\n\r\n").substringBefore("\r\n"))
+        assertEquals("WAV", settings.getString("audioEncoding"))
+        assertEquals("ENDPOINTING", settings.getString("mode"))
+        assertEquals("muse-voice-transcribe-1.0", settings.getString("model"))
+        assertEquals(1, settings.getJSONArray("keywords").length())
+        assertEquals("German", settings.getJSONArray("languageBias").getString(0))
+        val plain = BatchWire.meta(model, "k", audio, null, emptyList())
+        assertFalse(String(form(plain).multipart.head).contains("keywords"))
+        assertFalse(String(form(plain).multipart.head).contains("languageBias"))
+        assertEquals(DictationFailure.UnsupportedAudio, BatchWire.metaFailure(415))
+        assertEquals(DictationFailure.AudioTooLarge, BatchWire.metaFailure(413))
+        assertEquals(DictationFailure.InvalidKey, BatchWire.metaFailure(401))
+        assertEquals("Hi", BatchWire.metaText("""{"transcript":"Hi"}"""))
+    }
+
+    @Test
+    fun testGemini_sendsAVerbatimInteractionWithTheLanguage() {
+        withFile(byteArrayOf(1, 2, 3)) { file ->
+            val request = BatchWire.geminiInline("k", file, m4a, "en_GB")
+            assertEquals("${BatchWire.GEMINI_URL}/v1beta/interactions", request.url)
+            assertEquals("k", request.headers["x-goog-api-key"])
+            val body = streamedJson(request)
+            assertEquals("gemini-3.5-transcribe", body.getString("model"))
+            val input = body.getJSONArray("input").getJSONObject(0)
+            assertEquals("audio", input.getString("type"))
+            assertEquals("audio/m4a", input.getString("mime_type"))
+            val config = body.getJSONObject("generation_config").getJSONObject("transcription_config")
+            assertEquals("en-GB", config.getJSONArray("language_codes").getString(0))
+            assertEquals("verbatim", config.getJSONObject("mode").getString("type"))
+            assertEquals("speaker", config.getJSONObject("mode").getString("diarization_mode"))
+        }
+        val fromFile = json(BatchWire.geminiFromFile("k", "https://files/a", wav, null))
+        assertEquals("https://files/a", fromFile.getJSONArray("input").getJSONObject(0).getString("uri"))
+        assertEquals(0, fromFile.getJSONObject("generation_config").getJSONObject("transcription_config").getJSONArray("language_codes").length())
+    }
+
+    @Test
+    fun testGeminiFiles_startTheUploadAndReadTheFileState() {
+        val start = BatchWire.geminiUploadStart("k", audio, m4a)
+        assertEquals("${BatchWire.GEMINI_URL}/upload/v1beta/files", start.url)
+        assertEquals("resumable", start.headers["X-Goog-Upload-Protocol"])
+        assertEquals("start", start.headers["X-Goog-Upload-Command"])
+        assertEquals("audio/m4a", start.headers["X-Goog-Upload-Header-Content-Type"])
+        val upload = BatchWire.geminiUpload("https://upload/session", audio, m4a)
+        assertNull(upload.headers["x-goog-api-key"])
+        assertEquals("upload, finalize", upload.headers["X-Goog-Upload-Command"])
+        val file = BatchWire.geminiUploadedFile("""{"file":{"name":"files/a","uri":"https://files/a","state":"PROCESSING"}}""")
+        assertEquals("https://files/a", file.uri)
+        assertEquals("${BatchWire.GEMINI_URL}/v1beta/files/a%20b", BatchWire.geminiFileStatus("k", "a b").url)
+        assertEquals("ACTIVE", BatchWire.geminiFileState("""{"file":{"state":"ACTIVE"}}"""))
+        assertEquals("Hello world", BatchWire.geminiText("""{"steps":[{"content":[{"text":"Hello"},{"text":"world"}]}]}"""))
+        assertEquals("Hi", BatchWire.geminiText("""{"output_text":" Hi "}"""))
+    }
+
+    @Test
+    fun testOpenRouter_sendsTheRecordingInlineToTheFullModelSlug() {
+        val model = catalogue("google/gemini-2.5-flash")
+        assertEquals(CloudProvider.OpenRouter, model.provider)
+        withFile(byteArrayOf(9, 8, 7)) { file ->
+            val request = BatchWire.openRouter(model, "k", file, "m4a", "fr-FR")
+            assertEquals("https://openrouter.ai/api/v1/chat/completions", request.url)
+            assertEquals("Bearer k", request.headers["Authorization"])
+            val body = streamedJson(request)
+            assertEquals("google/gemini-2.5-flash", body.getString("model"))
+            assertFalse(body.getBoolean("stream"))
+            val content = body.getJSONArray("messages").getJSONObject(0).getJSONArray("content")
+            assertTrue(content.getJSONObject(0).getString("text").contains("locale fr-FR"))
+            val inputAudio = content.getJSONObject(1).getJSONObject("input_audio")
+            assertEquals("m4a", inputAudio.getString("format"))
+            assertEquals("CQgH", inputAudio.getString("data"))
+        }
+        assertNull(BatchWire.openRouterFormat(SharedAudio.Format("webm", "audio/webm")))
+        assertNotNull(BatchWire.openRouterFormat(wav))
+        assertEquals("Hi", BatchWire.openRouterText("""{"choices":[{"message":{"content":" Hi "}}]}"""))
+        assertThrows(CloudException::class.java) { BatchWire.openRouterText("""{"choices":[]}""") }
     }
 
     @Test

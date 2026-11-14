@@ -60,8 +60,9 @@ through `ProviderBalanceTransport`, a `URLSession` that the desktop injects
   `android/app/src/main/assets/provider_balances.json` (regenerate with
   `scripts/update-android-assets`), the directory account for each Android key.
   `ProviderBalanceStore.kt` reads balances with the Kotlin clients in
-  `ProviderBalances.kt`; only OpenRouter is readable among Android's providers,
-  and the others show the stated reason and an **Open billing page** link.
+  `ProviderBalances.kt`: Deepgram, ElevenLabs, OpenRouter and Rev AI are
+  readable among Android's providers, and the others show the stated reason and
+  an **Open billing page** link.
   `ProviderBalancesTest` checks that every readable account in the asset has a
   Kotlin client and that its wording matches SpeakCore.
 

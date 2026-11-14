@@ -51,6 +51,10 @@ class CloudCatalogParityTest {
                 it.getString("languageField"),
                 it.getBoolean("supportsPrompt").toString(),
                 it.optJSONArray("languageCodes")?.let { codes -> (0 until codes.length()).map(codes::getString) }.toString(),
+                it.optJSONObject("languageHints")?.let { hints ->
+                    hints.keys().asSequence().toSortedSet().associateWith(hints::getString)
+                }.toString(),
+                it.getBoolean("requiresPCM16WAV").toString(),
             )
         }
         val actual = CloudCatalog.transcriptionModels.map {
@@ -62,6 +66,8 @@ class CloudCatalogParityTest {
                 it.languageField,
                 it.supportsPrompt.toString(),
                 it.languageCodes.toString(),
+                it.languageHints?.toSortedMap().toString(),
+                it.requiresPCM16WAV.toString(),
             )
         }
         assertEquals(expected, actual)

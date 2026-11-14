@@ -211,14 +211,26 @@ OpenRouter fallback.
 ## Android upload paths
 
 Android offers the providers in `CloudCatalogAndroidExport.transcriptionProviderIDs`
-(issue #1636): OpenAI and Groq through the OpenAI-compatible form, and AssemblyAI,
-Deepgram, ElevenLabs, Mistral, Modulate, Reson8, Rev AI, Soniox and Speechmatics
-through Kotlin clients in `android/app/src/main/java/com/justspeaktoit/android/cloud/BatchWire.kt`
+(issues #1636 and #1724): OpenAI and Groq through the OpenAI-compatible form, and
+AssemblyAI, Cartesia, Deepgram, ElevenLabs, Gemini (Google), Gladia, Meta Muse
+Voice, Mistral, Modulate, OpenRouter audio models, Reson8, Rev AI, Smallest,
+Soniox, Speechmatics and xAI speech-to-text through Kotlin clients in
+`android/app/src/main/java/com/justspeaktoit/android/cloud/BatchWire.kt`
 (requests and parsers) and `BatchTranscriber.kt` (upload, polling and cleanup).
 They mirror the shared clients above field for field; `BatchWireTest` and
-`BatchTranscriberTest` pin them. Each model's Reson8 language list is exported
-as `languageCodes`. Android always sends a concrete language, so Automatic
-means the phone's language. The remaining catalogue routes are tracked in #1724.
+`BatchTranscriberTest` pin them. The export carries what each Kotlin client
+needs from SpeakCore: a model's fixed language list as `languageCodes` (Reson8,
+Smallest), the hint each language sends as `languageHints` (Gladia, Meta, xAI;
+any other language auto-detects), and `requiresPCM16WAV` for routes that take
+only the canonical WAV Android records (Meta, Inkling). OpenRouter models keep
+their vendor prefix (`google/...`), so the route comes from the export, never
+from the ID. Android always sends a concrete language, so Automatic means the
+phone's language.
+
+Azure Speech and MAI, Alibaba and StepFun stay off Android (#1724): each key is
+bound to a region, resource endpoint or workspace that Android has no setting
+for. OpenAI models that are not sent directly are all scheduled for retirement,
+so Android never starts offering them.
 
 ## Verification status
 

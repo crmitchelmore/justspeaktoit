@@ -4,14 +4,16 @@
 #include <string.h>
 
 /*
- * Settings search, at the top of the sidebar. The entry reports each query
+ * "Search for anything", at the top of the sidebar: the command palette over
+ * actions, recent History and settings. The entry reports each query
  * (debounced by GtkSearchEntry's search-changed) as JSTI_EVENT_SETTINGS_SEARCH;
- * Swift ranks it with the shared DesktopSettingsSearchSession and hands the
+ * Swift ranks it with the shared DesktopCommandPaletteSession and hands the
  * rows back through jsti_window_set_settings_search_results, applied in call
  * order with the window's other setters. Choosing a row reports
- * JSTI_EVENT_SETTINGS_SEARCH_OPEN with its index; Swift opens the page and
- * reveals the field. While a search is active its results replace the page
- * list; Escape or choosing a result brings the page list back.
+ * JSTI_EVENT_SETTINGS_SEARCH_OPEN with its index; Swift opens the setting's
+ * page and reveals its field, runs the action or selects the History record.
+ * While a search is active its results replace the page list; Escape or
+ * choosing a result brings the page list back.
  */
 
 enum { SEARCH_MAXIMUM_RESULTS = 50, SEARCH_MAXIMUM_TEXT = 4096 };
@@ -153,7 +155,7 @@ static gboolean on_search_key(GtkEventControllerKey *controller, guint keyval, g
     if ((keyval != GDK_KEY_Down && keyval != GDK_KEY_KP_Down) || !search_active()) return FALSE;
     if (search.count == 0) {
         if (!gtk_widget_get_visible(search.empty)) return FALSE;
-        jsti_accessible_announce(GTK_WIDGET(search.entry), "No settings match",
+        jsti_accessible_announce(GTK_WIDGET(search.entry), "No results",
                                  GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
         return TRUE;
     }
@@ -223,8 +225,8 @@ static void search_results_apply(gpointer data) {
     search.count = (guint)results->count;
     search_refresh();
     if (!search_has_query() || search.dismissed) return;
-    gchar *announcement = search.count == 0 ? g_strdup("No settings match")
-        : g_strdup_printf(g_dngettext(NULL, "%u setting found", "%u settings found", search.count), search.count);
+    gchar *announcement = search.count == 0 ? g_strdup("No results")
+        : g_strdup_printf(g_dngettext(NULL, "%u result found", "%u results found", search.count), search.count);
     jsti_accessible_announce(GTK_WIDGET(search.list), announcement, GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
     g_free(announcement);
 }
@@ -287,9 +289,9 @@ void jsti_settings_search_focus(void) {
 struct _GtkWidget *jsti_settings_search_new(struct _GtkWidget *navigation) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     search.entry = GTK_SEARCH_ENTRY(gtk_search_entry_new());
-    gtk_search_entry_set_placeholder_text(search.entry, "Search settings");
-    gtk_accessible_update_property(GTK_ACCESSIBLE(search.entry), GTK_ACCESSIBLE_PROPERTY_LABEL, "Search settings", -1);
-    gtk_widget_set_tooltip_text(GTK_WIDGET(search.entry), "Search settings (Ctrl+F or Ctrl+K)");
+    gtk_search_entry_set_placeholder_text(search.entry, "Search for anything");
+    gtk_accessible_update_property(GTK_ACCESSIBLE(search.entry), GTK_ACCESSIBLE_PROPERTY_LABEL, "Search for anything", -1);
+    gtk_widget_set_tooltip_text(GTK_WIDGET(search.entry), "Search for anything: actions, History and settings (Ctrl+K or Ctrl+F)");
     gtk_widget_add_css_class(GTK_WIDGET(search.entry), "jsti-settings-search");
     gtk_widget_set_margin_start(GTK_WIDGET(search.entry), 8);
     gtk_widget_set_margin_end(GTK_WIDGET(search.entry), 8);
@@ -313,7 +315,7 @@ struct _GtkWidget *jsti_settings_search_new(struct _GtkWidget *navigation) {
     gtk_widget_add_css_class(GTK_WIDGET(search.list), "navigation-sidebar");
     gtk_widget_add_css_class(GTK_WIDGET(search.list), "jsti-search-results");
     gtk_accessible_update_property(GTK_ACCESSIBLE(search.list), GTK_ACCESSIBLE_PROPERTY_LABEL,
-                                   "Settings search results", -1);
+                                   "Search results", -1);
     g_signal_connect(search.list, "row-activated", G_CALLBACK(on_result_activated), NULL);
     GtkEventController *result_keys = gtk_event_controller_key_new();
     g_signal_connect(result_keys, "key-pressed", G_CALLBACK(on_results_key), NULL);
@@ -321,7 +323,7 @@ struct _GtkWidget *jsti_settings_search_new(struct _GtkWidget *navigation) {
     GtkEventController *result_focus = gtk_event_controller_focus_new();
     g_signal_connect(result_focus, "leave", G_CALLBACK(on_search_focus_leave), NULL);
     gtk_widget_add_controller(GTK_WIDGET(search.list), result_focus);
-    search.empty = gtk_label_new("No settings match");
+    search.empty = gtk_label_new("No results");
     gtk_label_set_wrap(GTK_LABEL(search.empty), TRUE);
     gtk_widget_add_css_class(search.empty, "dim-label");
     gtk_widget_add_css_class(search.empty, "jsti-empty");
@@ -390,7 +392,7 @@ static const char *check_search(void) {
     if (recorded.searches == 0 || g_strcmp0(recorded.query, "zz") != 0) return "a settings query was not reported";
     apply_rows(rows, 0);
     if (!search_active() || !gtk_widget_get_visible(search.empty) || gtk_widget_get_visible(GTK_WIDGET(search.list))) {
-        return "an unmatched settings query did not say no settings match";
+        return "an unmatched search query did not say no results";
     }
     if (gtk_widget_get_can_focus(search.scroller) || gtk_widget_child_focus(search.scroller, GTK_DIR_TAB_FORWARD) ||
         !on_search_key(NULL, GDK_KEY_Down, 0, 0, NULL)) {

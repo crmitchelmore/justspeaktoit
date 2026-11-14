@@ -18,7 +18,7 @@ final class WindowsEventContext: DesktopNativeEventHolder {
     private let copies: DesktopTranscriptCopyDispatcher
     private let settings = DesktopSettingsQueue()
     let historyPaste = DesktopHistoryPasteAdmission()
-    let settingsSearch = WindowsSettingsSearch()
+    lazy var commandPalette = WindowsCommandPalette(history: controller.paletteHistory)
     let postProcessingPicker = DesktopPostProcessingPicker()
     lazy var hotKeys = WindowsHotKeyGestures { [controller] request in await controller.hotKey(request) }
     lazy var automation = WindowsAutomationSwitch(controller: controller)

@@ -135,6 +135,9 @@ struct SettingsSearchPalette: View {
       commandRow(command, row: row, isSelected: isSelected)
     case .setting(let entry):
       settingRow(entry, row: row, isSelected: isSelected)
+    case .history:
+      // The Mac palette passes no History to the shared search.
+      EmptyView()
     }
   }
 

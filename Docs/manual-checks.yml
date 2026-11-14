@@ -1608,6 +1608,48 @@ sessions:
           - "Search settings for \"dark mode\" and open the result."
         expected: "Each choice applies at once across Dictation, Settings and History, the bar icons stay readable, and the choice survives a restart. Wallpaper colours follow the wallpaper and turning them off restores the orange theme. The search opens Appearance."
         final_gate: false
+  - id: "windows"
+    device: "Windows"
+    title: "Windows"
+    setup:
+      - "Windows with Just Speak to It installed from an Alpha build that includes #1619, and at least two recordings in History."
+    items:
+      - id: "windows-command-palette"
+        issues:
+          - 1619
+        title: "Search for anything: actions, History and settings from the keyboard"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Windows, an Alpha build that includes #1619"
+        steps:
+          - "With the main window focused, press Ctrl+K and check focus lands in the Search for anything box, and that Narrator reads it as Search for anything."
+          - "Without typing, press Down and check the list starts with actions such as Start or Stop Transcribing, then recent History, then suggested settings."
+          - "Type history and press Enter on Show History; check the History page opens."
+          - "Press Ctrl+K again, type a word from an older recording and choose its History result; check that recording is selected on the History page."
+          - "Press Ctrl+K, type silence, choose the setting and check its page opens with that preference highlighted. Press Ctrl+K, type zzqx and check No results is shown and announced, then press Escape."
+        expected: "Ctrl+K always focuses the search box. Results list actions first, then History, then settings, each read as its title then its kind (Action, History or the settings page). Choosing an action runs it, a History result selects that recording, and a setting opens and highlights its field. Escape restores the sidebar pages."
+        final_gate: true
+  - id: "linux"
+    device: "Linux"
+    title: "Linux"
+    setup:
+      - "Linux with Just Speak to It installed from an Alpha build that includes #1619, and at least two recordings in History."
+    items:
+      - id: "linux-command-palette"
+        issues:
+          - 1619
+        title: "Search for anything: actions, History and settings from the keyboard"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Linux, an Alpha build that includes #1619"
+        steps:
+          - "With the main window focused, press Ctrl+K and check focus lands in the Search for anything box, and that Orca reads it as Search for anything."
+          - "Without typing, press Down and check the list starts with actions such as Start or Stop Transcribing, then recent History, then suggested settings."
+          - "Type history and press Enter on Show History; check the History page opens."
+          - "Press Ctrl+K again, type a word from an older recording and choose its History result; check that recording is selected on the History page."
+          - "Press Ctrl+K, type silence, choose the setting and check its page opens with that preference highlighted. Press Ctrl+K, type zzqx and check No results is shown and announced, then press Escape."
+        expected: "Ctrl+K always focuses the search box. Results list actions first, then History, then settings, each read as its title then its kind (Action, History or the settings page). Choosing an action runs it, a History result selects that recording, and a setting opens and highlights its field. Escape restores the sidebar pages."
+        final_gate: true
   - id: "decisions"
     device: "Decision"
     title: "Decisions"

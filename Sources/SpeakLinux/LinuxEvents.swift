@@ -38,8 +38,10 @@ final class LinuxEventContext: DesktopNativeEventHolder, @unchecked Sendable {
     lazy var systemResources = LinuxSystemResources.makeMonitor()
     /// Set before the window opens, when iCloud sync is configured.
     var cloudSync: LinuxCloudSync?
-    /// Sidebar settings search; read and written on the GTK main thread only.
-    lazy var settingsSearch = DesktopSettingsSearchSession(platform: .linux)
+    /// The sidebar's "Search for anything" palette; read and written on the GTK main thread only.
+    lazy var commandPalette = DesktopCommandPaletteSession(
+        platform: .linux, runnable: LinuxSettingsSearch.runnable, history: controller.paletteHistory
+    )
     /// The context every native window callback receives. It retains this
     /// holder until shutdown unregisters it; later callbacks then do nothing.
     private(set) var callbacks: NativeCallbackContext<LinuxEventContext>!

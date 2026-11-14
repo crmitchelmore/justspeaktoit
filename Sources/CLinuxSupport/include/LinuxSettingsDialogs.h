@@ -15,6 +15,9 @@ typedef struct JSTIAboutLink {
 /* Copies metadata and up to eight HTTPS links onto the GTK queue. No update
  * check, download or installation is implied. */
 int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count);
+/* Copies About's Support development links (one to four HTTPS web tip pages)
+ * onto the GTK queue and shows that card. Tips unlock nothing. */
+int32_t jsti_window_configure_tip_links(const JSTIAboutLink *links, size_t count);
 enum {
     JSTI_LINUX_TROUBLESHOOTING_API_KEYS = -1,
     JSTI_LINUX_TROUBLESHOOTING_PERMISSIONS = -2,

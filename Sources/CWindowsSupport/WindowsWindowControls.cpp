@@ -216,6 +216,10 @@ bool createControls(HWND window) {
     for (size_t i = 0; i < aboutState().aboutLinks.size() && okay; ++i)
         okay = add(L"BUTTON", aboutState().aboutLinks[i].title.c_str(), BS_PUSHBUTTON | WS_TABSTOP,
             aboutLinkBaseID + static_cast<int>(i));
+    if (!aboutState().tipLinks.empty()) okay = okay && add(L"STATIC", L"Support development", 0, tipJarLabelID);
+    for (size_t i = 0; i < aboutState().tipLinks.size() && okay; ++i)
+        okay = add(L"BUTTON", aboutState().tipLinks[i].title.c_str(), BS_PUSHBUTTON | WS_TABSTOP,
+            tipLinkBaseID + static_cast<int>(i));
     SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_CHECKED, 0);
     for (int identifier : {chipSessionsID, chipTimeID, chipSpendID, insightSessionsID, insightTimeID, insightAverageID,
                            insightSpendID, historySessionsID, historyErrorsID, historyAverageID, historySpendID,

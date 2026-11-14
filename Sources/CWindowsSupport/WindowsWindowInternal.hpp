@@ -209,6 +209,8 @@ constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, a
     shortcutValueID = 445, loginItemID = 449,
     configurationID = 450;
 constexpr int aboutLinkBaseID = 480, aboutDetailsID = 490;
+// About's Support development row: its label and up to four web tip links.
+constexpr int tipJarLabelID = 454, tipLinkBaseID = 455, maximumTipLinks = 4;
 constexpr int setupGuideID = 451, permissionsID = 452, troubleshootingID = 453;
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
 constexpr UINT hudMessage = WM_APP + 21;

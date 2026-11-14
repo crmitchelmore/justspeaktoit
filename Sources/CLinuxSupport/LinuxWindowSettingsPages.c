@@ -386,6 +386,8 @@ int32_t jsti_window_run_action(int32_t run, const char *page, int32_t slot) {
     return jsti_window_post(action_run_apply, action, action_run_free);
 }
 
+#define TIP_JAR_NOTE "Tips are optional and don't unlock any features. Links open in your browser."
+
 GtkWidget *build_about(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
     GtkWidget *body;
@@ -442,6 +444,21 @@ GtkWidget *build_about(void) {
     gtk_box_append(GTK_BOX(body), setup);
     gtk_box_append(GTK_BOX(body), permissions);
     gtk_box_append(GTK_BOX(column), card);
+    GtkWidget *tip_body;
+    about_page()->tip_jar = jsti_card_new("emblem-favorite-symbolic", "Support development", &tip_body);
+    GtkWidget *tip_note = gtk_label_new(TIP_JAR_NOTE);
+    gtk_label_set_wrap(GTK_LABEL(tip_note), TRUE);
+    gtk_label_set_xalign(GTK_LABEL(tip_note), 0);
+    gtk_box_append(GTK_BOX(tip_body), tip_note);
+    about_page()->tip_links = GTK_FLOW_BOX(gtk_flow_box_new());
+    gtk_flow_box_set_selection_mode(about_page()->tip_links, GTK_SELECTION_NONE);
+    gtk_flow_box_set_min_children_per_line(about_page()->tip_links, 1);
+    gtk_flow_box_set_max_children_per_line(about_page()->tip_links, 3);
+    gtk_flow_box_set_row_spacing(about_page()->tip_links, 8);
+    gtk_flow_box_set_column_spacing(about_page()->tip_links, 8);
+    gtk_box_append(GTK_BOX(tip_body), GTK_WIDGET(about_page()->tip_links));
+    gtk_widget_set_visible(about_page()->tip_jar, FALSE);
+    gtk_box_append(GTK_BOX(column), about_page()->tip_jar);
     return page;
 }
 
@@ -473,16 +490,34 @@ static void about_information_apply(gpointer pointer) {
     }
 }
 
-int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count) {
-    if (details == NULL || links == NULL || count == 0 || count > 8 || strlen(details) > 4096 ||
-        !g_utf8_validate(details, -1, NULL) || details[0] == '\0') return -1;
+static void tip_links_apply(gpointer pointer) {
+    AboutInformation *information = pointer;
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child(GTK_WIDGET(about_page()->tip_links))) != NULL)
+        gtk_flow_box_remove(about_page()->tip_links, child);
+    for (guint i = 0; information->titles[i] != NULL; ++i) {
+        GtkWidget *link = link_button(information->titles[i], information->urls[i]);
+        /* The card's note is not focusable, so Orca hears it with each button. */
+        gtk_accessible_update_property(GTK_ACCESSIBLE(link), GTK_ACCESSIBLE_PROPERTY_DESCRIPTION, TIP_JAR_NOTE, -1);
+        gtk_flow_box_insert(about_page()->tip_links, link, -1);
+        gtk_widget_set_focusable(gtk_widget_get_parent(link), FALSE);
+    }
+    gtk_widget_set_visible(about_page()->tip_jar, TRUE);
+}
+
+/* HTTPS links with a one-line UTF-8 title. */
+static gboolean about_links_valid(const JSTIAboutLink *links, size_t count) {
     for (size_t i = 0; i < count; ++i) {
         if (links[i].title == NULL || links[i].url == NULL || strlen(links[i].title) > 128 ||
             strlen(links[i].url) > 2048 || !g_utf8_validate(links[i].title, -1, NULL) ||
             !g_utf8_validate(links[i].url, -1, NULL) || links[i].title[0] == '\0' ||
             strpbrk(links[i].title, "\r\n\t") != NULL || !g_str_has_prefix(links[i].url, "https://") ||
-            strlen(links[i].url) <= 8 || strpbrk(links[i].url, " \r\n\t") != NULL) return -1;
+            strlen(links[i].url) <= 8 || strpbrk(links[i].url, " \r\n\t") != NULL) return FALSE;
     }
+    return TRUE;
+}
+
+static AboutInformation *about_information_new(const char *details, const JSTIAboutLink *links, size_t count) {
     AboutInformation *information = g_new0(AboutInformation, 1);
     information->details = g_strdup(details);
     information->titles = g_new0(gchar *, count + 1);
@@ -491,5 +526,16 @@ int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *li
         information->titles[i] = g_strdup(links[i].title);
         information->urls[i] = g_strdup(links[i].url);
     }
-    return post(about_information_apply, information, about_information_free);
+    return information;
+}
+
+int32_t jsti_window_configure_about(const char *details, const JSTIAboutLink *links, size_t count) {
+    if (details == NULL || links == NULL || count == 0 || count > 8 || strlen(details) > 4096 ||
+        !g_utf8_validate(details, -1, NULL) || details[0] == '\0' || !about_links_valid(links, count)) return -1;
+    return post(about_information_apply, about_information_new(details, links, count), about_information_free);
+}
+
+int32_t jsti_window_configure_tip_links(const JSTIAboutLink *links, size_t count) {
+    if (links == NULL || count == 0 || count > 4 || !about_links_valid(links, count)) return -1;
+    return post(tip_links_apply, about_information_new(NULL, links, count), about_information_free);
 }

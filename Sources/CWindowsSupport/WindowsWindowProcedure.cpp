@@ -238,11 +238,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         trayCommand(window, static_cast<UINT>(wparam));
         return 0;
     case WM_COMMAND:
-        if (LOWORD(wparam) >= aboutLinkBaseID && LOWORD(wparam) < aboutLinkBaseID + 8) {
-            const size_t index = LOWORD(wparam) - aboutLinkBaseID;
-            if (HIWORD(wparam) == BN_CLICKED && state.page == aboutPage && index < aboutState().aboutLinks.size()) {
+        if (const int command = LOWORD(wparam); (command >= aboutLinkBaseID && command < aboutLinkBaseID + 8) ||
+                                                 (command >= tipLinkBaseID && command < tipLinkBaseID + maximumTipLinks)) {
+            const bool tip = command >= tipLinkBaseID && command < tipLinkBaseID + maximumTipLinks;
+            const auto &links = tip ? aboutState().tipLinks : aboutState().aboutLinks;
+            const size_t index = static_cast<size_t>(command - (tip ? tipLinkBaseID : aboutLinkBaseID));
+            if (HIWORD(wparam) == BN_CLICKED && state.page == aboutPage && index < links.size()) {
                 const auto result = reinterpret_cast<INT_PTR>(
-                    ShellExecuteW(window, L"open", aboutState().aboutLinks[index].url.c_str(), nullptr, nullptr, SW_SHOWNORMAL)
+                    ShellExecuteW(window, L"open", links[index].url.c_str(), nullptr, nullptr, SW_SHOWNORMAL)
                 );
                 if (result <= 32) showFailure(window, "Could not open your browser. Check your default browser settings.");
             }

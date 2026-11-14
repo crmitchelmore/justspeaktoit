@@ -167,15 +167,12 @@ extension SettingsView {
           // links are only shown where cross-channel messaging is permitted.
           if DistributionChannel.current.allowsCrossChannelMessaging {
             HStack(spacing: 12) {
-              Link(destination: URL(string: "https://github.com/sponsors/crmitchelmore")!) {
-                Label("GitHub Sponsors", systemImage: "heart")
+              ForEach(TipWebLink.allCases, id: \.self) { link in
+                Link(destination: link.url) {
+                  Label(link.title, systemImage: link == .koFi ? "cup.and.saucer" : "heart")
+                }
+                .buttonStyle(.bordered)
               }
-              .buttonStyle(.bordered)
-
-              Link(destination: URL(string: "https://ko-fi.com/crmitchelmore")!) {
-                Label("Ko-fi", systemImage: "cup.and.saucer")
-              }
-              .buttonStyle(.bordered)
             }
           }
         }

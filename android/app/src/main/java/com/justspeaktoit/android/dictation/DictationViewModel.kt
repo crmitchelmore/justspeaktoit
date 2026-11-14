@@ -25,6 +25,7 @@ import com.justspeaktoit.android.cloud.WavRecorder
 import com.justspeaktoit.android.corrections.AutoCorrectionLearner
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.AtomicHistoryFile
+import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceRegistry
@@ -38,6 +39,11 @@ import com.justspeaktoit.android.settings.RawConfigurationValues
 import com.justspeaktoit.android.settings.RecordingCue
 import com.justspeaktoit.android.settings.RecordingSoundProfile
 import com.justspeaktoit.android.settings.RecordingSoundSettings
+import com.justspeaktoit.android.sync.AndroidHistorySync
+import com.justspeaktoit.android.sync.HistorySyncAvailability
+import com.justspeaktoit.android.sync.HistorySyncService
+import com.justspeaktoit.android.sync.HistorySyncStatus
+import com.justspeaktoit.android.sync.SyncHistoryEntries
 import com.justspeaktoit.android.transfer.ConfigArchiveException
 import com.justspeaktoit.android.transfer.ConfigExporter
 import com.justspeaktoit.android.transfer.ConfigImportApplier
@@ -50,8 +56,10 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -106,6 +114,8 @@ class DictationViewModel internal constructor(
     balanceDirectory: BalanceDirectory = BalanceDirectory.EMPTY,
     balanceClients: List<ProviderBalanceClient> = emptyList(),
     handsFreeMicrophone: HandsFreeMicrophone = NoHandsFreeMicrophone,
+    // Builds opt-in History sync over this ViewModel's History; null leaves sync out of the app.
+    historySync: (SyncHistoryEntries) -> HistorySyncService? = { null },
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     /** Hands-free dictation (#1632): its recordings take their audio from its microphone, pre-roll first. */
     private val handsFree = HandsFreeDictation(
@@ -185,7 +195,13 @@ class DictationViewModel internal constructor(
         }
     }
 
-    private val historyOwner = DictationHistory(history, recordingsDir, scope, io) { entries, failed ->
+    private val historyOwner = DictationHistory(
+        history,
+        recordingsDir,
+        scope,
+        io,
+        onLocalChange = { requestHistorySync() },
+    ) { entries, failed ->
         _state.update { it.copy(history = entries, historyError = failed) }
     }
 
@@ -199,6 +215,22 @@ class DictationViewModel internal constructor(
 
     /** The import the preview describes, applied only when the user confirms it. */
     private var pendingImport: ImportPlan? = null
+
+    private val sync: HistorySyncService? = historySync(
+        object : SyncHistoryEntries {
+            override suspend fun snapshot(): List<HistoryEntry> = historyOwner.syncSnapshot(_state.value.retention)
+
+            override suspend fun <T> update(transform: (List<HistoryEntry>) -> Pair<List<HistoryEntry>, T>): T =
+                historyOwner.syncUpdate(_state.value.retention, transform)
+        },
+    )
+
+    /** History sync's sign-in and progress, for Settings. */
+    val historySyncStatus: StateFlow<HistorySyncStatus> =
+        sync?.status ?: MutableStateFlow(HistorySyncStatus(HistorySyncAvailability.MissingToken)).asStateFlow()
+
+    private var historySignIn: Job? = null
+    private var pendingHistorySync: Job? = null
 
     private val session: DictationSessionController = DictationSessionController(
         engine = engine,
@@ -291,6 +323,12 @@ class DictationViewModel internal constructor(
             resources.holds.collect { holds -> _state.update { it.copy(resourcesInUse = holds) } }
         }
         historyOwner.load(prefs.retention, capture::recoverable)
+        sync?.let { service ->
+            scope.launch {
+                service.prepare()
+                service.sync()
+            }
+        }
     }
 
     /** Called whenever the screen starts, so newly installed models, services or keys are noticed. */
@@ -654,12 +692,67 @@ class DictationViewModel internal constructor(
     }
 
     fun deleteHistoryEntry(id: String) {
-        historyOwner.remove(id, _state.value.retention)
+        val retention = _state.value.retention
+        val service = sync
+        if (service == null) {
+            historyOwner.remove(id, retention)
+            return
+        }
+        // Recorded first, so iCloud deletes the entry even if the app stops straight after.
+        scope.launch {
+            service.recordDeletions(listOf(id))
+            historyOwner.remove(id, retention)
+        }
     }
 
     /** Clears History; [keepRecordings] keeps the entries that hold a recording. */
     fun clearHistory(keepRecordings: Boolean = false) {
-        historyOwner.clear(keepRecordings, _state.value.retention)
+        val retention = _state.value.retention
+        val service = sync
+        if (service == null) {
+            historyOwner.clear(keepRecordings, retention)
+            return
+        }
+        // Only the entries this clears are deleted from iCloud.
+        val ids = _state.value.history.filter { !keepRecordings || it.audioPath == null }.map { it.id }
+        scope.launch {
+            service.recordDeletions(ids)
+            historyOwner.clear(keepRecordings, retention)
+        }
+    }
+
+    /** Opens Apple's sign-in page with [openBrowser], then syncs History with iCloud. */
+    fun signInToHistorySync(openBrowser: (String) -> Boolean) {
+        val service = sync ?: return
+        if (historySignIn?.isActive == true) return
+        historySignIn = scope.launch { service.signIn(openBrowser) }
+    }
+
+    fun signOutOfHistorySync() {
+        val service = sync ?: return
+        historySignIn?.cancel()
+        historySignIn = null
+        pendingHistorySync?.cancel()
+        scope.launch { service.signOut() }
+    }
+
+    /** Syncs now, for Sync now and when the app comes to the foreground. */
+    fun syncHistory() {
+        val service = sync ?: return
+        pendingHistorySync?.cancel()
+        pendingHistorySync = null
+        scope.launch { service.sync() }
+    }
+
+    /** A local History change; waits briefly so a burst of changes is sent in one pass. */
+    private fun requestHistorySync() {
+        val service = sync ?: return
+        if (!service.status.value.signedIn) return
+        pendingHistorySync?.cancel()
+        pendingHistorySync = scope.launch {
+            delay(HISTORY_SYNC_DELAY_MS)
+            service.sync()
+        }
     }
 
     /** Re-reads and prunes history so the retention cutoff holds while the app stays open. */
@@ -890,6 +983,8 @@ class DictationViewModel internal constructor(
     }
 
     companion object {
+        private const val HISTORY_SYNC_DELAY_MS = 2_000L
+
         /** Wires the production collaborators. */
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
@@ -929,6 +1024,9 @@ class DictationViewModel internal constructor(
                 balanceDirectory = balanceDirectory,
                 balanceClients = ProviderBalanceClients.defaults(balanceDirectory),
                 handsFreeMicrophone = AudioRecordMicrophone(),
+                historySync = { entries ->
+                    AndroidHistorySync.create(application, KeystoreSecretStore.create(application), entries, Dispatchers.IO)
+                },
             )
         }
 

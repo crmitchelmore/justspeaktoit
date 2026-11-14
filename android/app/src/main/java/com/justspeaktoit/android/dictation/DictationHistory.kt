@@ -6,6 +6,7 @@ import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -20,7 +21,8 @@ import java.util.UUID
  * Owns History for a dictation screen: the ordered writes, the entry of the latest session (so a
  * cleanup or "Show original" replaces it rather than adding another) and cancelled recordings kept
  * for a later transcription. Call from the main thread of [scope]; every change is applied on one
- * IO thread, in call order, and each result is handed to [publish] on [scope].
+ * IO thread, in call order, and each result is handed to [publish] on [scope]. [onLocalChange] runs
+ * after each change made on this device, but not after one received through History sync.
  */
 internal class DictationHistory(
     private val store: HistoryStore,
@@ -29,6 +31,7 @@ internal class DictationHistory(
     io: CoroutineDispatcher,
     private val now: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { UUID.randomUUID().toString() },
+    private val onLocalChange: () -> Unit = {},
     private val publish: (entries: List<HistoryEntry>, failed: Boolean) -> Unit,
 ) {
     // One thread owns the history file, so writes are ordered without locks.
@@ -48,7 +51,7 @@ internal class DictationHistory(
      * Loads History, saves the [recoverable] recordings no session finished, and deletes audio no
      * entry refers to (for example after a crash mid-save). [recoverable] runs on the History thread.
      */
-    fun load(retention: Retention, recoverable: () -> List<File> = { emptyList() }): Job = update {
+    fun load(retention: Retention, recoverable: () -> List<File> = { emptyList() }): Job = update(local = false) {
         store.load(retention)
         recover(recoverable(), retention).also { entries ->
             val stored = recordingsDir.listFiles().orEmpty().map { it.absolutePath }
@@ -57,7 +60,7 @@ internal class DictationHistory(
     }
 
     /** Re-reads and prunes, so the retention cutoff holds while the app stays open. */
-    fun refresh(retention: Retention, recoverable: () -> List<File> = { emptyList() }): Job = update {
+    fun refresh(retention: Retention, recoverable: () -> List<File> = { emptyList() }): Job = update(local = false) {
         store.load(retention)
         recover(recoverable(), retention)
     }
@@ -100,7 +103,14 @@ internal class DictationHistory(
 
     /** Replaces the latest session's text, after a cleanup or when the user restores the original. */
     fun replaceSessionText(text: String, cleanedUp: Boolean, retention: Retention): Job? {
-        val entry = sessionEntry?.copy(text = text, cleanedUp = cleanedUp) ?: return null
+        val prior = sessionEntry ?: return null
+        // Keeps the transcript a cleanup replaced, so History sync can send it as the raw text.
+        val rawText = when {
+            !cleanedUp -> null
+            prior.cleanedUp -> prior.rawText
+            else -> prior.text
+        }
+        val entry = prior.copy(text = text, cleanedUp = cleanedUp, rawText = rawText)
         sessionEntry = entry
         return update {
             // The stored entry knows whether its recording was really kept or attached later.
@@ -169,11 +179,46 @@ internal class DictationHistory(
     ): List<HistoryEntry> {
         val entries = withContext(writer) { store.replaceAll(retention, change) }
         publish(entries, false)
+        // An imported History is this device's change, so History sync uploads it.
+        onLocalChange()
         return entries
     }
 
     /** The current entries, read on the History thread so no write is in progress. */
     suspend fun snapshot(retention: Retention): List<HistoryEntry> = withContext(writer) { store.snapshot(retention) }
+
+    /** The current entries, read on the History thread. */
+    suspend fun syncSnapshot(retention: Retention): List<HistoryEntry> = withContext(writer) { store.entries(retention) }
+
+    /**
+     * Applies changes received through History sync in one write and publishes the result, without
+     * running [onLocalChange]. Queued behind earlier changes like any other, so results publish in
+     * order. Throws [IOException] when the write fails. Callable from any thread.
+     */
+    suspend fun <T> syncUpdate(
+        retention: Retention,
+        transform: (List<HistoryEntry>) -> Pair<List<HistoryEntry>, T>,
+    ): T {
+        var outcome: Result<T>? = null
+        // [update] reads and sets [last], which only the scope's thread may touch.
+        scope.launch {
+            update(local = false) {
+                val (next, result) = try {
+                    transform(store.entries(retention))
+                } catch (e: Exception) {
+                    outcome = Result.failure(e)
+                    return@update store.cached
+                }
+                try {
+                    store.replaceAll(next, retention).also { outcome = Result.success(result) }
+                } catch (e: IOException) {
+                    outcome = Result.failure(e)
+                    throw e
+                }
+            }.join()
+        }.join()
+        return (outcome ?: throw CancellationException("History closed")).getOrThrow()
+    }
 
     /** Saves each recording as a failed Cloud entry with its audio, ready to transcribe. */
     private fun recover(files: List<File>, retention: Retention): List<HistoryEntry> {
@@ -212,15 +257,15 @@ internal class DictationHistory(
      * write finishes before its caller suspends, `withContext` returns at once and that change can
      * publish ahead of an earlier one whose resumption is still queued on [scope].
      */
-    private fun update(change: () -> List<HistoryEntry>): Job {
+    private fun update(local: Boolean = true, change: () -> List<HistoryEntry>): Job {
         val previous = last
         return scope.launch {
             previous?.join()
-            apply(change)
+            apply(local, change)
         }.also { last = it }
     }
 
-    private suspend fun apply(change: () -> List<HistoryEntry>) {
+    private suspend fun apply(local: Boolean, change: () -> List<HistoryEntry>) {
         val (entries, failed) = withContext(writer) {
             try {
                 change() to false
@@ -229,6 +274,7 @@ internal class DictationHistory(
             }
         }
         publish(entries, failed)
+        if (local) onLocalChange()
     }
 
     private fun sessionEntry(

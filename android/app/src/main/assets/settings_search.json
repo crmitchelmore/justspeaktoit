@@ -314,6 +314,25 @@
       "title" : "Appearance"
     },
     {
+      "id" : "android.historySync",
+      "keywords" : [
+        "icloud",
+        "cloudkit",
+        "sync history",
+        "apple account",
+        "apple id",
+        "sign in",
+        "sign out"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+
+      ],
+      "summary" : "Sign in to iCloud to sync History with your Mac, iPhone, iPad, Windows and Linux devices.",
+      "title" : "History sync"
+    },
+    {
       "id" : "android.resourcesInUse",
       "keywords" : [
         "status",

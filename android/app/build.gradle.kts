@@ -10,6 +10,15 @@ val ciVersionCode = providers.environmentVariable("JSTI_ANDROID_VERSION_CODE").o
 val postHogProjectKey = providers.environmentVariable("POSTHOG_PROJECT_KEY").orNull?.trim()
     ?.takeIf { Regex("[A-Za-z0-9_]+").matches(it) }
     .orEmpty()
+// CloudKit Web Services API token for History sync, from the CLOUDKIT_WEB_API_TOKEN secret that the
+// Windows and Linux builds use too (Docs/windows-cloudkit-sync.md). Without it the build reports that
+// iCloud sync is unavailable. JSTI_CLOUDKIT_WEB_ENVIRONMENT selects development for testing.
+val cloudKitWebApiToken = providers.environmentVariable("CLOUDKIT_WEB_API_TOKEN").orNull?.trim()
+    ?.takeIf { Regex("[A-Za-z0-9_-]+").matches(it) }
+    .orEmpty()
+val cloudKitWebEnvironment = providers.environmentVariable("JSTI_CLOUDKIT_WEB_ENVIRONMENT").orNull?.trim()
+    ?.takeIf { it == "development" || it == "production" }
+    ?: "production"
 
 plugins {
     // AGP 9 compiles Kotlin itself, so the separate Kotlin Android plugin is no longer applied.
@@ -29,6 +38,8 @@ android {
         versionCode = ciVersionCode ?: 1
         versionName = "0.1.0"
         buildConfigField("String", "POSTHOG_PROJECT_KEY", "\"$postHogProjectKey\"")
+        buildConfigField("String", "CLOUDKIT_WEB_API_TOKEN", "\"$cloudKitWebApiToken\"")
+        buildConfigField("String", "CLOUDKIT_WEB_ENVIRONMENT", "\"$cloudKitWebEnvironment\"")
     }
 
     signingConfigs {

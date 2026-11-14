@@ -127,6 +127,13 @@ extension SettingsSearchCatalog {
             settingKeys: ["appearance", "dynamicColor"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.historySync", title: "History sync", section: .general,
+            systemImage: "icloud",
+            summary: "Sign in to iCloud to sync History with your Mac, iPhone, iPad, Windows and Linux devices.",
+            keywords: ["icloud", "cloudkit", "sync history", "apple account", "apple id", "sign in", "sign out"],
+            platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.resourcesInUse", title: "System resources in use", section: .general,
             systemImage: "gauge.with.dots.needle.33percent",
             summary: "See what the app holds now, such as the microphone or a cloud request, and release it.",

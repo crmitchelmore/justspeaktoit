@@ -26,6 +26,12 @@ data class HistoryEntry(
     val cleanedUp: Boolean = false,
     /** App-private audio kept for a later transcription; null when there is none. */
     val audioPath: String? = null,
+    /** The transcript before cleanup, when [cleanedUp] replaced it; null when unknown. */
+    val rawText: String? = null,
+    /** The recording's length in seconds, when known (History sync carries it between devices). */
+    val durationSeconds: Double? = null,
+    /** The platform a synced copy came from (for example "macos"); null for an entry made here. */
+    val originPlatform: String? = null,
 )
 
 /** How long history is kept. [Off] stores nothing and deletes existing entries. */
@@ -67,7 +73,10 @@ object HistoryCodec {
                     .put("text", e.text)
                     .put("failure", e.failure ?: JSONObject.NULL)
                     .put("cleanedUp", e.cleanedUp)
-                    .put("audioPath", e.audioPath ?: JSONObject.NULL),
+                    .put("audioPath", e.audioPath ?: JSONObject.NULL)
+                    .put("rawText", e.rawText ?: JSONObject.NULL)
+                    .put("durationSeconds", e.durationSeconds?.takeIf { it.isFinite() } ?: JSONObject.NULL)
+                    .put("originPlatform", e.originPlatform ?: JSONObject.NULL),
             )
         }
         return JSONObject().put("version", VERSION).put("entries", items).toString()
@@ -99,6 +108,9 @@ object HistoryCodec {
             failure = o.opt("failure") as? String,
             cleanedUp = o.opt("cleanedUp") == true,
             audioPath = o.opt("audioPath") as? String,
+            rawText = o.opt("rawText") as? String,
+            durationSeconds = (o.opt("durationSeconds") as? Number)?.toDouble()?.takeIf { it.isFinite() },
+            originPlatform = o.opt("originPlatform") as? String,
         )
     }
 }
@@ -185,6 +197,15 @@ class HistoryStore(
         current(retention)
     } catch (_: IOException) {
         cached
+    }
+
+    /** The current entries, loading them first if needed. */
+    fun entries(retention: Retention): List<HistoryEntry> = current(retention)
+
+    /** Replaces every entry at once, for example with changes received from iCloud. */
+    fun replaceAll(next: List<HistoryEntry>, retention: Retention): List<HistoryEntry> {
+        val considered = current(retention)
+        return save(HistoryPolicy.prune(next, now(), retention), considered = considered + next)
     }
 
     private fun current(retention: Retention) = entries ?: load(retention)

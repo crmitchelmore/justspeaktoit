@@ -396,6 +396,22 @@ sessions:
           - "Update the Data safety form and the purchase digital goods answer from the guide."
         expected: "The three products are active and the Data safety form matches the guide."
         final_gate: false
+      - id: "owner-android-cloudkit-token"
+        issues:
+          - 1630
+          - 1741
+        title: "Android: give Android builds the CloudKit web API token"
+        minutes: 5
+        core: false
+        build: "GitHub repository settings and CloudKit Console"
+        prerequisites:
+          - "Steps: Docs/windows-cloudkit-sync.md (Android)"
+        steps:
+          - "Check the CloudKit Console API token for iCloud.com.justspeaktoit that the desktop builds use still lists http://127.0.0.1:47823/cloudkit-sign-in as its sign-in callback."
+          - "Save the token as the CLOUDKIT_WEB_API_TOKEN repository secret, add it to the Android build step in android.yml and alpha-release.yml as #1741 shows, and make sure the Production schema has the TranscriptionHistory record type."
+          - "Run the Android workflow on main, install the Alpha APK and open Settings \u203a History sync."
+        expected: "The next Android Alpha shows Sign in to iCloud under Settings \u203a History sync instead of saying sync is not set up for this build."
+        final_gate: false
       - id: "android-play-tip-jar"
         issues:
           - 1594
@@ -1626,6 +1642,22 @@ sessions:
           - "Import a Mac or iPhone export (Settings \u203a Data & Migration on the Mac) and read the preview's notices."
         expected: "Nothing changes until Apply import. Applying restores settings, profiles, corrections, History and recordings in one step; API keys travel only when chosen on both export and import. A Mac or iPhone export imports what Android supports and lists what it skipped, without changing anything else."
         final_gate: true
+      - id: "android-history-sync"
+        issues:
+          - 1630
+        title: "Android: History sync with your Mac through iCloud"
+        minutes: 12
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1630, and a Mac or Windows PC with History sync on, signed in to the same Apple Account"
+        steps:
+          - "Settings \u203a History sync: check the note, then tap Sign in to iCloud and finish signing in to Apple in the browser."
+          - "Return to Just Speak to It and wait for the status to say when it last synced."
+          - "Open History and check entries dictated on the Mac appear, marked Synced from Mac, with no audio."
+          - "Dictate a made-up sentence on the phone, tap Sync now, then check it reaches the Mac's History within a minute or two."
+          - "Delete one synced entry on the phone and one on the Mac, sync both, and check each disappears on the other device."
+          - "Tap Sign out, dictate again and check nothing more reaches the Mac. Search Settings for iCloud and check it opens History sync."
+        expected: "Sign-in completes and the status shows a sync time. Mac entries appear on the phone without audio and phone entries appear on the Mac without audio. Deletions on either side stay deleted and never come back. After signing out nothing more is sent, and TalkBack reads the status as it changes."
+        final_gate: false
       - id: "android-battery-latency"
         issues:
           - 1328

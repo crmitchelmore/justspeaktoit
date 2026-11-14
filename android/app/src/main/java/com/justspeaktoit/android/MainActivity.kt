@@ -36,6 +36,7 @@ import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justspeaktoit.android.dictation.DictationViewModel
+import com.justspeaktoit.android.sync.AndroidHistorySync
 import com.justspeaktoit.android.telemetry.OptInSurface
 import com.justspeaktoit.android.telemetry.Telemetry
 import com.justspeaktoit.android.tips.PlayBillingTipStore
@@ -144,6 +145,7 @@ class MainActivity : ComponentActivity() {
             val privacyChoices by privacy
             val askConsent by consentPending
             val tips by tipStore.state.collectAsStateWithLifecycle()
+            val historySync by viewModel.historySyncStatus.collectAsStateWithLifecycle()
             LaunchedEffect(screen) {
                 if (screen == Screen.Settings) {
                     tipStore.connect()
@@ -226,10 +228,18 @@ class MainActivity : ComponentActivity() {
                                 onOpenAppSettings = ::openAppSettings,
                                 onOpenKeyboardSettings = { startActivity(SetupSystem.keyboardSettingsIntent()) },
                                 onChooseMode = { screen = Screen.Dictation },
+                                onSignInToHistorySync = {
+                                    viewModel.signInToHistorySync { url ->
+                                        AndroidHistorySync.openInBrowser(applicationContext, url)
+                                    }
+                                },
+                                onSignOutOfHistorySync = viewModel::signOutOfHistorySync,
+                                onSyncHistoryNow = viewModel::syncHistory,
                             ),
                             privacy = privacyChoices,
                             tips = tips,
                             troubleshooting = TroubleshootingFacts(mic, setupStatus.value.keyboardEnabled),
+                            historySync = historySync,
                         )
                         Screen.Onboarding -> OnboardingScreen(
                             state = state,
@@ -325,6 +335,7 @@ class MainActivity : ComponentActivity() {
         viewModel.refreshAvailability()
         viewModel.refreshHistory()
         viewModel.refreshLearnedCorrections()
+        viewModel.syncHistory()
         telemetry.analytics.appBecameActive()
     }
 

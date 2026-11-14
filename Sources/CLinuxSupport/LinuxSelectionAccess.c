@@ -25,7 +25,7 @@ static void selection_response(AdwMessageDialog *dialog, const char *response, g
     if (row != NULL) {
         adw_action_row_set_subtitle(row, allowed && applied
             ? "Session access allowed. Refocus an external editable field, select text, then use your desktop shortcut."
-            : "Selection access is off. Nothing was read.");
+            : "Selection access is off. Nothing was read or edited.");
         g_object_unref(row);
     }
 }
@@ -42,12 +42,14 @@ static void selection_allow(GtkButton *button, gpointer data) {
         return;
     }
     GtkWidget *dialog = adw_message_dialog_new(GTK_WINDOW(root),
-        "Allow selected-text speech for this session?",
-        "Only an explicit selected-text speech command reads one selection, up to 8,192 characters, from a supported "
-        "ordinary editable AT-SPI field. That text is sent to your saved Voice Output provider, which may be remote. "
-        "Passwords and ambiguous fields are excluded. There is no clipboard or PRIMARY-selection fallback, "
-        "automatic text sampling, editing or correction learning. Accessibility must already be enabled. "
-        "Access is not saved or imported. Stop access revokes pending reads.");
+        "Allow selected-text access for this session?",
+        "Only an explicit selected-text speech or voice edit command reads one selection, up to 8,192 characters, "
+        "from a supported ordinary editable AT-SPI field. Speech sends that text to your saved Voice Output "
+        "provider. Voice edit sends it with your spoken instruction to your cleanup model, then replaces only "
+        "that same selection, and only if the field, selection and text are unchanged. Either provider may be "
+        "remote. Passwords and ambiguous fields are excluded. There is no clipboard or PRIMARY-selection read "
+        "fallback, automatic text sampling or correction learning. Accessibility must already be enabled. "
+        "Access is not saved or imported. Stop access revokes pending reads and edits.");
     adw_message_dialog_add_responses(ADW_MESSAGE_DIALOG(dialog),
         "cancel", "Keep off", "allow", "Allow for this session", NULL);
     adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
@@ -62,7 +64,8 @@ static void selection_allow(GtkButton *button, gpointer data) {
 static void selection_stop(GtkButton *button, gpointer data) {
     (void)button;
     jsti_atspi_selection_consent(0, 0);
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(data), "Selection access is off. Pending reads were revoked.");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(data),
+        "Selection access is off. Pending reads and edits were revoked.");
     jsti_window_emit(JSTI_EVENT_PLAYBACK_STOP, "", 0);
 }
 
@@ -76,8 +79,8 @@ GtkWidget *jsti_selection_access_group_new(void) {
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group), "Selected-text speech");
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(group),
         "Allow access here, then refocus the external field and use a desktop keyboard binding for "
-        "'justspeaktoit --speak-selected-text' while the app is running. "
-        "Only ordinary editable AT-SPI controls are supported; read-only documents are not.");
+        "'justspeaktoit --speak-selected-text' or 'justspeaktoit --edit-selection-by-voice' while the app is "
+        "running. Only ordinary editable AT-SPI controls are supported; read-only documents are not.");
     GtkWidget *row = adw_action_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), "Selection access");
     adw_action_row_set_subtitle(ADW_ACTION_ROW(row), "Off for this session. No external text is sampled.");

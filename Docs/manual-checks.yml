@@ -1905,6 +1905,21 @@ sessions:
           - "Ask the owner to look in Sentry for a desktop.unclean_exit event from this build."
         expected: "Exactly one unclean-exit report arrives, with the app version and OS but no transcript text, file path, user name or installation ID. A normal quit and relaunch sends nothing more."
         final_gate: false
+      - id: "linux-voice-edit-selection"
+        issues:
+          - 1620
+        title: "Edit Selection by Voice rewrites only the captured selection"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Linux, an Alpha build that includes the #1620 Linux voice edit change, with a cleanup model and its key set up"
+        steps:
+          - "Bind justspeaktoit --edit-selection-by-voice to a key in your desktop's keyboard settings (on X11 you can instead turn on Global for Edit Selection by Voice in Keyboard › Action shortcuts)."
+          - "Open Voice Output › Selection access, choose Allow and accept. In gedit or GNOME Text Editor, type a made-up sentence and select one word of it."
+          - "Press the binding, say make this uppercase, then press the binding again. Check only the selected word changes and the rest of the line is untouched."
+          - "Select another word and press the binding, then click elsewhere in the same document before pressing the binding again."
+          - "Press the binding with nothing selected, and once more after choosing Stop access in Voice Output."
+        expected: "The first edit replaces exactly the selected word once and the app reports the captured selection was replaced. Moving the caret or focus during dictation leaves the document unchanged and says the rewrite was copied instead; pasting shows the rewrite. With nothing selected or access stopped the app explains that it needs selected text it can read, then stops without listening or typing anywhere."
+        final_gate: false
   - id: "decisions"
     device: "Decision"
     title: "Decisions"

@@ -148,19 +148,24 @@ gboolean action_execution_self_test(void) {
     gtk_widget_set_sensitive(history, history_sensitive);
     okay = okay && action_shortcut_run(12, "", 0) && capture.event == JSTI_EVENT_SPEAK_SELECTED_TEXT &&
         capture.slot == 0 && capture.calls == 11;
+    okay = okay && action_shortcut_run(13, "", 0) && capture.event == JSTI_EVENT_VOICE_EDIT &&
+        capture.slot == 0 && capture.calls == 12;
     ui.state = JSTI_STATE_WORKING;
     okay = okay && !action_shortcut_run(6, "", 1) && !action_shortcut_run(5, "", 0) &&
         !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) &&
         !action_shortcut_run(9, "", 0) && !action_shortcut_run(11, "", 0) &&
-        !action_shortcut_run(12, "", 0) && capture.calls == 11;
+        !action_shortcut_run(12, "", 0) && capture.calls == 12;
     ui.state = JSTI_STATE_RECORDING;
-    okay = okay && !action_shortcut_run(11, "", 0) && !action_shortcut_run(12, "", 0) && capture.calls == 11;
+    /* Voice edit toggles, so its second run must reach the host while listening. */
+    okay = okay && !action_shortcut_run(11, "", 0) && !action_shortcut_run(12, "", 0) && capture.calls == 12 &&
+        action_shortcut_run(13, "", 0) && capture.event == JSTI_EVENT_VOICE_EDIT && capture.calls == 13;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), FALSE);
     ui.state = JSTI_STATE_IDLE;
     okay = okay && !action_shortcut_run(4, "", 0) && !action_shortcut_run(2, "about", 0) &&
         !action_shortcut_run(7, "", 0) && !action_shortcut_run(8, "", 0) &&
         !action_shortcut_run(9, "", 0) && !action_shortcut_run(10, "", 0) &&
-        !action_shortcut_run(11, "", 0) && !action_shortcut_run(12, "", 0) && capture.calls == 11;
+        !action_shortcut_run(11, "", 0) && !action_shortcut_run(12, "", 0) &&
+        !action_shortcut_run(13, "", 0) && capture.calls == 13;
     gtk_widget_set_sensitive(GTK_WIDGET(ui.window), window_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->record), record_sensitive);
     gtk_widget_set_sensitive(GTK_WIDGET(voice_page()->voice_stop), stop_sensitive);
@@ -254,6 +259,7 @@ gboolean command_forwarding_self_test(void) {
     const gchar *unknown[] = { "justspeaktoit", JSTI_SPEAK_CLIPBOARD_ARGUMENT, "--gapplication-service" };
     const struct { const gchar *argument; gint run, slot, event; } controls[] = {
         { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, 12, 0, JSTI_EVENT_SPEAK_SELECTED_TEXT },
+        { JSTI_EDIT_SELECTION_BY_VOICE_ARGUMENT, 13, 0, JSTI_EVENT_VOICE_EDIT },
         { JSTI_STOP_SPEECH_ARGUMENT, 3, 0, JSTI_EVENT_PLAYBACK_STOP },
         { JSTI_PAUSE_SPEECH_ARGUMENT, 8, 0, JSTI_EVENT_SPEECH_PAUSE },
         { JSTI_QUICK_VOICE_1_ARGUMENT, 6, 1, JSTI_EVENT_QUICK_VOICE },
@@ -486,6 +492,11 @@ gboolean command_process_self_test(char *error, size_t capacity) {
             JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
         { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, JSTI_SPEAK_CLIPBOARD_ARGUMENT,
             JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_EDIT_SELECTION_BY_VOICE_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_VOICE_EDIT, 0, TRUE, FALSE, NULL },
+        { JSTI_EDIT_SELECTION_BY_VOICE_ARGUMENT, NULL, JSTI_STATE_RECORDING, JSTI_EVENT_VOICE_EDIT, 0, TRUE, FALSE, NULL },
+        { JSTI_EDIT_SELECTION_BY_VOICE_ARGUMENT, JSTI_SPEAK_SELECTED_TEXT_ARGUMENT,
+            JSTI_STATE_IDLE, 0, 0, TRUE, FALSE, "Choose exactly one supported desktop action command" },
+        { JSTI_EDIT_SELECTION_BY_VOICE_ARGUMENT, NULL, JSTI_STATE_IDLE, 0, 0, FALSE, FALSE, "Finish the current operation" },
         { JSTI_SPEAK_CLIPBOARD_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_SPEAK_CLIPBOARD, 0, TRUE, FALSE, NULL },
         { JSTI_PASTE_LAST_HISTORY_ARGUMENT, NULL, JSTI_STATE_IDLE, JSTI_EVENT_PASTE_LAST_HISTORY, 0, TRUE, FALSE, NULL },
         { JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT,
@@ -540,7 +551,7 @@ gboolean command_process_self_test(char *error, size_t capacity) {
     }
     g_clear_object(&primary);
     const gchar *cold[] = {
-        JSTI_SPEAK_SELECTED_TEXT_ARGUMENT,
+        JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, JSTI_EDIT_SELECTION_BY_VOICE_ARGUMENT,
         JSTI_SPEAK_CLIPBOARD_ARGUMENT, JSTI_PASTE_LAST_HISTORY_ARGUMENT, JSTI_STOP_SPEECH_ARGUMENT,
         JSTI_PAUSE_SPEECH_ARGUMENT, JSTI_QUICK_VOICE_1_ARGUMENT, JSTI_QUICK_VOICE_2_ARGUMENT, JSTI_QUICK_VOICE_3_ARGUMENT
     };

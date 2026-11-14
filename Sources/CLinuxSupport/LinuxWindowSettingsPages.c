@@ -350,6 +350,10 @@ gboolean action_shortcut_run(gint run, const char *page, gint slot) {
         if (ui.state != JSTI_STATE_IDLE) return FALSE;
         emit(JSTI_EVENT_SPEAK_SELECTED_TEXT, "", 0);
         return TRUE;
+    case 13:
+        /* Toggles: a second run while listening finishes the edit. */
+        emit(JSTI_EVENT_VOICE_EDIT, "", 0);
+        return TRUE;
     default: return FALSE;
     }
 }
@@ -374,7 +378,7 @@ static void action_run_apply(gpointer data) {
 
 /* The command palette runs an action through the same path as its shortcut. */
 int32_t jsti_window_run_action(int32_t run, const char *page, int32_t slot) {
-    if (run < 1 || run > 12 || slot < 0 || (page != NULL && !g_utf8_validate(page, -1, NULL))) return -1;
+    if (run < 1 || run > 13 || slot < 0 || (page != NULL && !g_utf8_validate(page, -1, NULL))) return -1;
     ActionRun *action = g_new0(ActionRun, 1);
     action->run = run;
     action->slot = slot;

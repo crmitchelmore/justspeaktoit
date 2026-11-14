@@ -61,6 +61,7 @@ final class LinuxWindowEventABITests: XCTestCase {
             (.cloudSyncSignIn, Int(JSTI_EVENT_CLOUD_SYNC_SIGN_IN)),
             (.cloudSyncSignOut, Int(JSTI_EVENT_CLOUD_SYNC_SIGN_OUT)), (.cloudSyncNow, Int(JSTI_EVENT_CLOUD_SYNC_NOW)),
             (.recordingsLocation, Int(JSTI_EVENT_RECORDINGS_LOCATION)),
+            (.voiceEdit, Int(JSTI_EVENT_VOICE_EDIT)),
             (.actionShortcutEdit, Int(JSTI_EVENT_ACTION_SHORTCUT_EDIT)), (.apiKeys, Int(JSTI_EVENT_API_KEYS)),
             (.permissions, Int(JSTI_EVENT_PERMISSIONS)), (.speakSelectedText, Int(JSTI_EVENT_SPEAK_SELECTED_TEXT)),
             (.profiles, Int(JSTI_EVENT_PROFILES))

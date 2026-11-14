@@ -59,8 +59,9 @@ X11/GTK, keyboard lock/repeat/layout, failure and shutdown qualification remain
 outstanding. Physical keys held across re-registration and Xlib server-loss
 behavior also need native acceptance; no stronger guarantee is inferred from
 the synthetic fixture. See [Linux desktop support](linux-development.md#desktop-support).
-This is not full feature parity: Linux voice editing, Wayland automatic global
-actions and system-wide Escape remain open.
+This is not full feature parity: Wayland automatic global actions and
+system-wide Escape remain open, and Linux voice editing is limited to external
+editable AT-SPI fields.
 
 ## Core Journey qualification cache (source only)
 
@@ -243,8 +244,9 @@ X11/Wayland target guarantees or change ordinary Copy or recording output. Porta
 burst/expiry/concurrent-admission tests and Host queued-expiry/cancellation tests
 are authored but NOT_RUN locally, pending automatic native/portable qualification.
 
-Linux now has **26 of 27 source-wired action destinations**; voice editing and
-Wayland automatic global action registration remain open. X11 has the
+Linux now has **27 of 27 source-wired action destinations**; Wayland automatic
+global action registration remains open. Voice editing shares selected-text
+speech's session access and external AT-SPI field requirement. X11 has the
 source-only action group described above. Selected-text speech needs
 separate session access and an external focused control, not this app's window.
 Its saved window-local binding remains disabled with desktop-command guidance;
@@ -254,7 +256,8 @@ validation and busy/recording/parent/page-independent dispatch fixtures are
 authored but NOT_RUN locally. They need automatic qualification. Clipboard
 delivery alone is not evidence of external-field paste or global-shortcut parity.
 
-Linux also exposes `--speak-clipboard`, `--speak-selected-text`, `--paste-last-history`, `--stop-speech`,
+Linux also exposes `--speak-clipboard`, `--speak-selected-text`, `--edit-selection-by-voice`,
+`--paste-last-history`, `--stop-speech`,
 `--pause-resume-speech` and `--quick-voice-1` / `--quick-voice-2` /
 `--quick-voice-3` through the existing GApplication command-forwarding path.
 Quick Voice selects a saved favorite without reading text or starting speech.
@@ -2761,7 +2764,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Partial native source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 26 action destinations and edits saved bindings with presets/reset; eligible X11 global actions use a separate native group with per-row refusals. Selected-text speech needs session access and an external editable AT-SPI field. Linux voice editing and Wayland automatic action registration remain open. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial native source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects all 27 action destinations and edits saved bindings with presets/reset; eligible X11 global actions use a separate native group with per-row refusals. Selected-text speech and voice editing need session access and an external editable AT-SPI field. Wayland automatic action registration remains open. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
@@ -3156,7 +3159,9 @@ not run local actions. An imported duplicate retains its value and shows a
 conflict note; the first listed action owns that combination. Sidebar
 Ctrl+digit chords retain precedence and corresponding action notes disclose it.
 
-Linux voice editing remains unavailable. Paste Last History now uses its
+Linux voice editing (`--edit-selection-by-voice`) uses the same consented
+external AT-SPI path and replaces only the unchanged captured selection.
+Paste Last History now uses its
 existing bounded admission/target path, and selected-text speech uses the
 consented external AT-SPI path described above. The Permissions action
 opens its own Linux-specific recovery guidance, not an unrelated page.

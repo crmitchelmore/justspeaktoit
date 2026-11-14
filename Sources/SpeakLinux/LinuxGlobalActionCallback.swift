@@ -36,6 +36,7 @@ final class LinuxGlobalActionCallback: @unchecked Sendable {
             }
         case .pasteLastHistory: holder.pasteLastHistory(lifetime: lifetime)
         case .selectedText: holder.speakSelectedText(lifetime: lifetime)
+        case .voiceEdit: holder.toggleVoiceEdit(lifetime: lifetime)
         default:
             LinuxHostPlatform.update("The X11 action shortcut has no supported execution route.")
         }

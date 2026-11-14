@@ -124,6 +124,11 @@ object AutomationIds {
 
     /** One per sound profile, keyed by its shared ID (for example `classic`). */
     fun soundProfile(id: String) = "settings.recordingSounds.profile.$id"
+    const val SETTINGS_MICROPHONE_UNAVAILABLE = "settings.microphone.unavailable"
+    const val DICTATION_MICROPHONE_FALLBACK = "dictation.microphone.fallback"
+
+    /** One per microphone choice, keyed by its `AudioInput.id`; `default` is the system default. */
+    fun microphone(id: String?) = "settings.microphone.${id ?: "default"}"
     const val SETTINGS_LANGUAGE = "settings.language"
     const val SETTINGS_DYNAMIC_COLOR = "settings.appearance.dynamicColor"
 

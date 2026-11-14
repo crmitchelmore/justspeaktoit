@@ -48,6 +48,9 @@ interface DictationPreferences {
 
     /** Whether, and after how long, a Cloud recording stops on silence. */
     var silence: SilenceSettings
+
+    /** The `AudioInput.id` Cloud recordings use; null means the system default. */
+    var audioInputId: String?
 }
 
 /** Non-secret choices. Secrets live in the Keystore-backed `SecretStore`, never here. */
@@ -92,6 +95,10 @@ class AppPreferences(context: Context) : DictationPreferences {
     override var keepRecordings: Boolean
         get() = prefs.getBoolean(KEY_KEEP_RECORDINGS, false)
         set(value) = prefs.edit { putBoolean(KEY_KEEP_RECORDINGS, value) }
+
+    override var audioInputId: String?
+        get() = prefs.getString(KEY_AUDIO_INPUT, null)
+        set(value) = prefs.edit { putString(KEY_AUDIO_INPUT, value) }
 
     override var languageId: String?
         get() = prefs.getString(KEY_LANGUAGE, null)
@@ -200,6 +207,9 @@ class AppPreferences(context: Context) : DictationPreferences {
 
         /** Android only: the Mac and iOS always keep recordings, in a folder the user can open. */
         private const val KEY_KEEP_RECORDINGS = "keepRecordingsInHistory"
+
+        /** The canonical cross-platform key; each platform stores its own kind of device id in it. */
+        const val KEY_AUDIO_INPUT = "preferredAudioInputUID"
         private const val KEY_RETENTION = "history_retention"
         private const val KEY_MODE = "chosen_mode"
         private const val KEY_CLOUD_MODEL = "cloud_model"

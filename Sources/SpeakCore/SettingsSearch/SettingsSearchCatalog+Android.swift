@@ -93,6 +93,13 @@ extension SettingsSearchCatalog {
             platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.microphone", title: "Microphone", section: .general,
+            systemImage: "mic",
+            summary: "Choose the microphone Cloud recordings use: built-in, wired, USB or Bluetooth.",
+            keywords: ["input device", "microphone", "mic", "headset", "bluetooth", "usb", "external microphone"],
+            settingKeys: ["preferredAudioInputUID"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.silenceDetection", title: "Stop recording after silence", section: .general,
             systemImage: "waveform.slash",
             summary: "Stop a Cloud recording and transcribe it once you have been quiet for a set time.",

@@ -120,6 +120,8 @@ class WavRecorder(
     /** Called on the capture thread when the microphone or disk fails mid-recording. */
     private val onCaptureFailed: () -> Unit,
     private val maxSeconds: Int = 600,
+    /** The microphone the user chose, or null for the system default. */
+    private val input: InputRoute? = null,
 ) : AudioRecorder {
     @Volatile private var running = false
 
@@ -132,8 +134,10 @@ class WavRecorder(
     private var record: AudioRecord? = null
 
     /** Returns false when the microphone cannot be opened. Requires RECORD_AUDIO. */
+    override fun start(): Boolean = open().also { opened -> if (!opened) input?.release() }
+
     @SuppressLint("MissingPermission")
-    override fun start(): Boolean {
+    private fun open(): Boolean {
         val minBuffer = AudioRecord.getMinBufferSize(
             WavFormat.SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
@@ -157,6 +161,7 @@ class WavRecorder(
             audio.release()
             return false
         }
+        input?.applyTo(audio)
         try {
             audio.startRecording()
         } catch (e: IllegalStateException) {
@@ -244,6 +249,7 @@ class WavRecorder(
         record?.release()
         record = null
         thread = null
+        input?.release()
         if (failed) return -1
         return (file.length() - WavFormat.HEADER_BYTES).coerceAtLeast(0)
     }

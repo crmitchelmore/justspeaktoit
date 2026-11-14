@@ -1,6 +1,8 @@
 package com.justspeaktoit.android.dictation
 
 import android.net.Uri
+import com.justspeaktoit.android.cloud.AudioInput
+import com.justspeaktoit.android.cloud.AudioInputChoice
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
@@ -77,7 +79,12 @@ data class DictationUiState(
     /** The active profile; its choices override the user's own for new sessions. */
     val profile: DictationProfile? = null,
     val recordingSounds: RecordingSoundSettings = RecordingSoundSettings(),
+    /** The microphone Cloud recordings use; null is the system default. */
+    val audioInputId: String? = null,
+    val audioInputs: List<AudioInput> = emptyList(),
 ) {
+    val audioInputChoice: AudioInputChoice get() = AudioInputChoice.resolve(audioInputId, audioInputs)
+
     /** The cloud model a new Cloud session uses: the profile's, else the user's. */
     val sessionCloudModel: CloudModel get() = profile?.cloudModel ?: cloudModel
 

@@ -1,5 +1,8 @@
 package com.justspeaktoit.android.dictation
 
+import com.justspeaktoit.android.cloud.AudioInput
+import com.justspeaktoit.android.cloud.AudioInputChoice
+import com.justspeaktoit.android.cloud.AudioInputKind
 import com.justspeaktoit.android.cloud.CaptureLevel
 import com.justspeaktoit.android.cloud.CleanupPolicy
 import com.justspeaktoit.android.cloud.CloudCatalog
@@ -69,6 +72,34 @@ class DictationViewModelTest {
         h.onMain { h.viewModel.clearResult() }
         assertEquals(DictationState.Idle, h.viewModel.state.value.dictation)
         assertEquals(1, h.viewModel.state.value.history.size)
+    }
+
+    @Test
+    fun testAudioInput_isSavedAndFallsBackVisiblyWhileDisconnected() {
+        val builtIn = AudioInput(AudioInput.id(15, "bottom", "Pixel"), AudioInputKind.BuiltIn, "bottom")
+        val usb = AudioInput(AudioInput.id(22, "card=1", "Yeti"), AudioInputKind.Usb, "Yeti")
+        h.audioInputs.connected = listOf(builtIn, usb)
+        val vm = h.ready()
+        assertTrue(h.audioInputs.watching)
+        assertEquals(AudioInputChoice.SystemDefault, vm.state.value.audioInputChoice)
+
+        h.onMain { vm.setAudioInput(usb.id) }
+        assertEquals(usb.id, h.prefs.audioInputId)
+        assertEquals(AudioInputChoice.Selected(usb), vm.state.value.audioInputChoice)
+
+        h.onMain { h.audioInputs.change(listOf(builtIn)) }
+        assertEquals(AudioInputChoice.Unavailable(usb.id), vm.state.value.audioInputChoice)
+        assertEquals("the saved choice survives a disconnect", usb.id, h.prefs.audioInputId)
+
+        h.onMain { h.audioInputs.change(listOf(builtIn, usb)) }
+        assertEquals(AudioInputChoice.Selected(usb), vm.state.value.audioInputChoice)
+
+        h.onMain { vm.setAudioInput(null) }
+        assertNull(h.prefs.audioInputId)
+        assertEquals(AudioInputChoice.SystemDefault, vm.state.value.audioInputChoice)
+
+        h.clear()
+        assertFalse("the device watch ends with the ViewModel", h.audioInputs.watching)
     }
 
     @Test

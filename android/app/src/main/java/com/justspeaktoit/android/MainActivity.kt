@@ -190,6 +190,7 @@ class MainActivity : ComponentActivity() {
                                 onTip = { productId -> tipStore.purchase(this@MainActivity, productId) },
                                 onApplyConfiguration = viewModel::applyConfiguration,
                                 onRecordingSoundsChanged = viewModel::setRecordingSounds,
+                                onAudioInputChanged = viewModel::setAudioInput,
                                 onPreviewRecordingSound = viewModel::previewRecordingSound,
                                 onRunSetup = { screen = Screen.Onboarding },
                                 onAppearanceChanged = { choice ->

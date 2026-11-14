@@ -7,12 +7,15 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.justspeaktoit.android.JustSpeakApplication
+import com.justspeaktoit.android.cloud.AndroidAudioInputs
+import com.justspeaktoit.android.cloud.AudioInputSource
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudClient
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.CloudService
+import com.justspeaktoit.android.cloud.NoAudioInputs
 import com.justspeaktoit.android.cloud.RecorderFactory
 import com.justspeaktoit.android.cloud.WavRecorder
 import com.justspeaktoit.android.corrections.AutoCorrectionLearner
@@ -78,6 +81,8 @@ class DictationViewModel internal constructor(
     // Told when a dictation produces a transcript; only its mode and model are passed, never the text.
     private val onTranscriptionSucceeded: (RecognitionMode, CloudModel) -> Unit = { _, _ -> },
     private val sounds: RecordingSoundOutput? = null,
+    // The microphones Settings offers; the recorder factory routes to the chosen one itself.
+    private val audioInputs: AudioInputSource = NoAudioInputs,
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     private val capture = CloudCapture(recorders, cacheDir, io, retirement, resources)
     private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
@@ -111,6 +116,8 @@ class DictationViewModel internal constructor(
             cleanupPrompt = prefs.cleanupPrompt,
             profiles = prefs.profiles,
             recordingSounds = prefs.recordingSounds,
+            audioInputId = prefs.audioInputId,
+            audioInputs = audioInputs.inputs(),
         ).withSelection(selector.selection),
     )
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
@@ -167,6 +174,8 @@ class DictationViewModel internal constructor(
     val level: StateFlow<Float> = session.level
 
     private var autoStartPending = false
+
+    private val inputWatch = audioInputs.watch { _state.update { it.copy(audioInputs = audioInputs.inputs()) } }
 
     private var appVisible = true
     private var watchingInterruptions = false
@@ -387,6 +396,12 @@ class DictationViewModel internal constructor(
         _state.update { it.copy(silence = clamped) }
     }
 
+    /** The `AudioInput.id` the next Cloud recording uses, or null for the system default. */
+    fun setAudioInput(id: String?) {
+        prefs.audioInputId = id
+        _state.update { it.copy(audioInputId = id, audioInputs = audioInputs.inputs()) }
+    }
+
     /** Applies from the next Cloud recording; recordings already in History stay until removed. */
     fun setKeepRecordings(enabled: Boolean) {
         prefs.keepRecordings = enabled
@@ -542,6 +557,7 @@ class DictationViewModel internal constructor(
         engine.close()
         session.close()
         sounds?.close()
+        inputWatch.close()
     }
 
     companion object {
@@ -553,28 +569,35 @@ class DictationViewModel internal constructor(
             }
         }
 
-        private fun create(application: Application) = DictationViewModel(
-            engine = AndroidSpeechEngine(application),
-            recorders = { file, onLevel, onLimitReached, onCaptureFailed ->
-                WavRecorder(file, onLevel, onLimitReached, onCaptureFailed)
-            },
-            cloud = CloudClient(),
-            secrets = KeystoreSecretStore.create(application),
-            prefs = AppPreferences(application),
-            history = HistoryStore(
-                AtomicHistoryFile(File(application.filesDir, "history.json")),
-                deleteAudio = { File(it).delete() },
-            ),
-            sharedAudioSource = ContentSharedAudioSource(application),
-            cacheDir = application.cacheDir,
-            recordingsDir = File(application.filesDir, "recordings"),
-            interruptions = AndroidAudioInterruptions(application),
-            foreground = AndroidForegroundSession(application),
-            onTranscriptionSucceeded = { mode, model ->
-                (application as? JustSpeakApplication)?.telemetry?.transcriptionSucceeded(mode, model)
-            },
-            sounds = RecordingSoundPlayer(application),
-        )
+        private fun create(application: Application): DictationViewModel {
+            val prefs = AppPreferences(application)
+            val inputs = AndroidAudioInputs(application)
+            return DictationViewModel(
+                engine = AndroidSpeechEngine(application),
+                recorders = { file, onLevel, onLimitReached, onCaptureFailed ->
+                    // A saved microphone that is not connected records from the system default, as Settings says.
+                    val input = prefs.audioInputId?.let(inputs::route)
+                    WavRecorder(file, onLevel, onLimitReached, onCaptureFailed, input = input)
+                },
+                cloud = CloudClient(),
+                secrets = KeystoreSecretStore.create(application),
+                prefs = prefs,
+                history = HistoryStore(
+                    AtomicHistoryFile(File(application.filesDir, "history.json")),
+                    deleteAudio = { File(it).delete() },
+                ),
+                sharedAudioSource = ContentSharedAudioSource(application),
+                cacheDir = application.cacheDir,
+                recordingsDir = File(application.filesDir, "recordings"),
+                interruptions = AndroidAudioInterruptions(application),
+                foreground = AndroidForegroundSession(application),
+                onTranscriptionSucceeded = { mode, model ->
+                    (application as? JustSpeakApplication)?.telemetry?.transcriptionSucceeded(mode, model)
+                },
+                sounds = RecordingSoundPlayer(application),
+                audioInputs = inputs,
+            )
+        }
     }
 }
 

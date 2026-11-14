@@ -43,14 +43,6 @@ extension DesktopHostPhoneReceiver where Platform == WindowsHostPlatform {
         let link = WindowsPhoneReceiverLink(context: holder.callbackContext)
         holder.phoneReceiverLink = link
         let controller = holder.controller
-        do {
-            try WindowsHostPlatform.preparePrivateDirectory(
-                WindowsPhoneReceiver.stateURL(in: controller.directory).deletingLastPathComponent()
-            )
-        } catch {
-            present(unavailable: "Receiving from a phone could not start: \(error.localizedDescription)", link: link)
-            return
-        }
         let receiver = WindowsPhoneReceiver(
             controller: controller,
             vault: WindowsCredentialVault(),
@@ -61,7 +53,8 @@ extension DesktopHostPhoneReceiver where Platform == WindowsHostPlatform {
                 ),
                 // The paste goes where the focus is when the transcript arrives.
                 captureTarget: { try? WindowsInsertionTarget.capture() },
-                present: { status in WindowsPhoneReceiver.present(status, link: link) }
+                present: { status in WindowsPhoneReceiver.present(status, link: link) },
+                prepareDirectory: { try WindowsHostPlatform.preparePrivateDirectory($0) }
             )
         )
         holder.phoneReceiver = receiver
@@ -100,20 +93,6 @@ extension DesktopHostPhoneReceiver where Platform == WindowsHostPlatform {
                             _ = jsti_window_set_phone_receiver(&view, phoneReceiverEvent, context)
                         }
                     }
-                }
-            }
-        }
-    }
-
-    private static func present(unavailable reason: String, link: WindowsPhoneReceiverLink) {
-        link.whileAttached { context in
-            reason.withCString { text in
-                "".withCString { empty in
-                    var view = JSTIPhoneReceiverView(
-                        status: text, pairing_code: empty, available: 0, enabled: 0,
-                        device_count: 0, device_ids: nil, device_names: nil
-                    )
-                    _ = jsti_window_set_phone_receiver(&view, phoneReceiverEvent, context)
                 }
             }
         }

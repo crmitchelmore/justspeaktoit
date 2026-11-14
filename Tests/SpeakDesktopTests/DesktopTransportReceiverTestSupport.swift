@@ -28,6 +28,8 @@ final class TransportTestVault: @unchecked Sendable {
     private let lock = NSLock()
     private var key: Data?
 
+    var storedKey: Data? { lock.withLock { key } }
+
     func storage(at url: URL) -> DesktopTransportReceiverStorage {
         DesktopTransportReceiverStorage(
             fileURL: url,

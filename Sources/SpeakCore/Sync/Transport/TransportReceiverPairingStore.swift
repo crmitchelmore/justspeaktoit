@@ -58,6 +58,11 @@ package final class TransportReceiverPairingStore: @unchecked Sendable {
         lock.withLock { changeHandler = handler }
     }
 
+    /// The current code without creating one, for a receiver that is off.
+    package var storedPairingCode: String? {
+        lock.withLock { state.pairingCode }
+    }
+
     package var pairingCode: String {
         let (code, changed) = lock.withLock { () -> (String, Bool) in
             if let code = state.pairingCode { return (code, false) }

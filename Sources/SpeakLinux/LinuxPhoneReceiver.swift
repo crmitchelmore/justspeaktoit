@@ -17,14 +17,6 @@ extension DesktopHostPhoneReceiver where Platform == LinuxHostPlatform {
     static func configure(_ holder: LinuxEventContext) {
         guard !holder.smokeTest else { return }
         let controller = holder.controller
-        do {
-            try LinuxFiles.preparePrivateDirectory(
-                LinuxPhoneReceiver.stateURL(in: controller.directory).deletingLastPathComponent()
-            )
-        } catch {
-            present(unavailable: "Receiving from a phone could not start: \(error.localizedDescription)")
-            return
-        }
         holder.phoneReceiver = LinuxPhoneReceiver(
             controller: controller,
             vault: LinuxCredentialVault(),
@@ -35,7 +27,8 @@ extension DesktopHostPhoneReceiver where Platform == LinuxHostPlatform {
                 ),
                 // The paste goes where the focus is when the transcript arrives.
                 captureTarget: { LinuxEventContext.captureTarget(includeObservation: false) },
-                present: { status in LinuxPhoneReceiver.present(status) }
+                present: { status in LinuxPhoneReceiver.present(status) },
+                prepareDirectory: { try LinuxFiles.preparePrivateDirectory($0) }
             )
         )
     }
@@ -80,18 +73,6 @@ extension DesktopHostPhoneReceiver where Platform == LinuxHostPlatform {
                         _ = jsti_window_set_phone_receiver(&view)
                     }
                 }
-            }
-        }
-    }
-
-    private static func present(unavailable reason: String) {
-        reason.withCString { text in
-            "".withCString { empty in
-                var view = JSTIPhoneReceiverView(
-                    status: text, pairing_code: empty, available: 0, enabled: 0,
-                    device_count: 0, device_ids: nil, device_names: nil
-                )
-                _ = jsti_window_set_phone_receiver(&view)
             }
         }
     }

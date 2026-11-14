@@ -11,15 +11,19 @@ package struct DesktopHostPhoneReceiverNative<Platform: DesktopHostPlatform>: Se
     package var captureTarget: @Sendable () -> Platform.InsertionTarget?
     /// Hands the Settings card its state, on any thread.
     package var present: @Sendable (DesktopTransportReceiverStatus) -> Void
+    /// Creates the private state folder, only when there is something to save.
+    package var prepareDirectory: @Sendable (URL) throws -> Void
 
     package init(
         endpoints: DesktopTransportEndpoints,
         captureTarget: @escaping @Sendable () -> Platform.InsertionTarget?,
-        present: @escaping @Sendable (DesktopTransportReceiverStatus) -> Void
+        present: @escaping @Sendable (DesktopTransportReceiverStatus) -> Void,
+        prepareDirectory: @escaping @Sendable (URL) throws -> Void
     ) {
         self.endpoints = endpoints
         self.captureTarget = captureTarget
         self.present = present
+        self.prepareDirectory = prepareDirectory
     }
 }
 
@@ -75,7 +79,8 @@ package final class DesktopHostPhoneReceiver<Platform: DesktopHostDefaultTextOut
                 try vault.writeCredential(
                     key.base64EncodedString(), name: DesktopTransportReceiverStorage.credentialName
                 )
-            }
+            },
+            prepareDirectory: native.prepareDirectory
         )
         let (stream, continuation) = AsyncStream<Arrival>.makeStream()
         arrivals = continuation

@@ -79,6 +79,26 @@ final class DesktopTransportReceiverTests: XCTestCase {
         guard case .unavailable = receiver.status.state else { return XCTFail("expected unavailable") }
     }
 
+    /// The packaged-app lifecycle check requires a launch to leave user data
+    /// untouched, so a receiver that is off must not save a key, code or file.
+    func testStartWhileOff_writesNothingUntilTurnedOn() {
+        let vault = TransportTestVault()
+        let url = temporaryFile()
+        let receiver = DesktopTransportReceiver(
+            storage: vault.storage(at: url), endpoints: TransportFakeEndpoints().endpoints, deliver: { _ in }
+        )
+        defer { receiver.shutDown() }
+        receiver.start()
+        XCTAssertEqual(receiver.status.pairingCode, "")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path))
+        XCTAssertNil(vault.storedKey)
+
+        receiver.setEnabled(true)
+        XCTAssertEqual(receiver.status.pairingCode.count, 6)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertNotNil(vault.storedKey)
+    }
+
     #if canImport(Glibc) || canImport(Darwin)
     func testLoopbackPhone_pairsDeliversFinalTextAndReturnsWithCredential() throws {
         let vault = TransportTestVault()

@@ -135,9 +135,12 @@ package final class DesktopTransportReceiver: @unchecked Sendable {
         let (pairing, state, connected) = lock.withLock {
             (self.pairing, self.state, links.values.compactMap(\.deviceName).sorted())
         }
+        let enabled = storage.current.enabled
+        // A receiver that is off shows no code, so it never creates (and saves) one.
+        let code = enabled ? pairing?.pairingCode : pairing?.storedPairingCode
         return DesktopTransportReceiverStatus(
-            enabled: storage.current.enabled, state: state,
-            pairingCode: pairing?.pairingCode ?? "", devices: pairing?.pairedDevices ?? [],
+            enabled: enabled, state: state,
+            pairingCode: code ?? "", devices: pairing?.pairedDevices ?? [],
             connected: connected, serviceName: lock.withLock { advertisedName } ?? serviceName
         )
     }

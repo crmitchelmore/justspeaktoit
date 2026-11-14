@@ -209,7 +209,11 @@ struct TranscribeAudioFileIntent: AppIntent {
         // Only models with an iOS upload client may run. A retained direct-
         // provider identifier (for example a Soniox model configured on Mac)
         // would otherwise fall through to OpenRouter with the wrong credential.
-        guard AppSettings.supportedBatchModels.contains(where: { $0.id == modelID }) else {
+        if IOSLocalTranscriptionModels.isDownloadedModelID(modelID) {
+            // Says which download is missing rather than "unsupported".
+            _ = try IOSLocalTranscriptionModels.requireReady(modelID)
+        }
+        guard AppSettings.canRunBatchModel(modelID) else {
             throw AutomationIntentError.unsupportedBatchModel(modelID)
         }
         let temporaryURL = try await Self.stageAudioForTranscription(

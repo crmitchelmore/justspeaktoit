@@ -28,15 +28,7 @@ struct LocalTranscriptionSourceStore {
   /// resolve to one identifier, the later import wins.
   func loadImportedModels() throws -> [LocalTranscriptionModel] {
     guard let records = try importedModelsFile.load() else { return [] }
-    var didMigrate = false
-    let migratedModels = records.map { record in
-      let migrated = WhisperKitHuggingFaceModels.normalizedImportedModel(record.model)
-      if migrated != record.model {
-        didMigrate = true
-      }
-      return migrated
-    }
-    let models = Self.deduplicateModels(migratedModels)
+    let (models, didMigrate) = WhisperKitHuggingFaceModels.loadImportedModels(from: records)
     if didMigrate {
       try? saveImportedModels(models)
     }
@@ -95,14 +87,5 @@ struct LocalTranscriptionSourceStore {
       throw LocalModelError.invalidHuggingFaceModel
     }
     return (repoID, modelName)
-  }
-
-  static func deduplicateModels(_ models: [LocalTranscriptionModel]) -> [LocalTranscriptionModel] {
-    var seenIDs = Set<String>()
-    return models.reversed().compactMap { model in
-      guard !seenIDs.contains(model.id) else { return nil }
-      seenIDs.insert(model.id)
-      return model
-    }.reversed()
   }
 }

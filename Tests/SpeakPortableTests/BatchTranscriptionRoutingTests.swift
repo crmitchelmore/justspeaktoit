@@ -91,11 +91,16 @@ final class BatchTranscriptionRoutingTests: XCTestCase {
 
     func testUnknownCaseAndMalformedInputsRetainCompatibilityWithoutClaimingSupport() throws {
         for model in ["", "OpenAI/whisper-1", "unknown/model", "openai/not-a-model",
-                      "local/downloaded/model", "openai/gpt-live-transcribe-streaming"] {
+                      "openai/gpt-live-transcribe-streaming"] {
             XCTAssertNil(BatchTranscriptionRouting.route(for: model, platform: .macOS), model)
             let ios = try XCTUnwrap(BatchTranscriptionRouting.route(for: model, platform: .iOS))
             XCTAssertEqual(ios.transport, .openRouter, model)
             XCTAssertEqual(ios.modelID, model)
+        }
+        for model in ["local/downloaded/model", "local/whisperkit/tiny", "Local/WhisperKit/huggingface/a/b/c"] {
+            XCTAssertNil(BatchTranscriptionRouting.route(for: model, platform: .macOS), model)
+            XCTAssertNil(BatchTranscriptionRouting.route(for: model, platform: .iOS),
+                         "Downloaded models never fall back to an upload route: \(model)")
         }
         let invalidWrapped = "openrouter/transcription/openai/"
         for platform in [BatchTranscriptionPlatform.macOS, .iOS] {

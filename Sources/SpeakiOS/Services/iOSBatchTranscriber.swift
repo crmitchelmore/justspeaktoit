@@ -238,11 +238,15 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     case fileSpeech(FileSpeechProvider)
     /// A provider whose shared SpeakCore batch client iOS calls with its own key.
     case shared(IOSSharedBatchProvider)
+    /// A downloaded `local/...` model, run in process by the registered
+    /// `IOSLocalTranscriptionEngine`. Never uploads, even when unavailable.
+    case downloadedLocal
     case openRouter
 
     // One mapping per native backend; capability policy is owned by SpeakCore.
     // swiftlint:disable:next cyclomatic_complexity
     static func route(for model: String) -> IOSBatchTranscriptionRoute {
+        if IOSLocalTranscriptionModels.isDownloadedModelID(model) { return .downloadedLocal }
         guard let route = BatchTranscriptionRouting.route(for: model, platform: .iOS) else { return .openRouter }
         switch route.transport {
         case .appleLocal: return .appleSpeechAnalyzer

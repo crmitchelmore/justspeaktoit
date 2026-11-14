@@ -27,7 +27,8 @@ public struct BatchTranscriptionRoute: Equatable, Sendable {
 
 /// Shared ownership; endpoint, authentication, payload and validation remain in
 /// provider clients. iOS deliberately retains its legacy unknown-ID OpenRouter
-/// fallback. Mac unknown/non-batch ownership stays with the registered instance.
+/// fallback, except for downloaded `local/...` models, which never leave the
+/// device. Mac unknown/non-batch ownership stays with the registered instance.
 public enum BatchTranscriptionRouting {
     /// Providers whose shared SpeakCore batch client the iOS app calls with the
     /// provider's own key. Every catalogue batch model they own is listed on iOS.
@@ -43,7 +44,8 @@ public enum BatchTranscriptionRouting {
         }
         switch platform {
         case .iOS:
-            return iosRoute(model)
+            // Downloaded models run in process; the iOS adapter owns them.
+            return model.lowercased().hasPrefix("local/") ? nil : iosRoute(model)
         case .macOS:
             return macRoute(model)
         }

@@ -154,7 +154,8 @@ final class IOSSettingsConfiguration {
             issues.append(.init(path: "settings.selectedModel", message: "\"\(model)\" cannot stream on this device."))
         }
         if case .string(let model)? = changes["batchTranscriptionModel"],
-           !AppSettings.supportedBatchModels.contains(where: { $0.id == model }) {
+           !AppSettings.supportedBatchModels.contains(where: { $0.id == model }),
+           IOSLocalTranscriptionModels.model(for: model) == nil {
             issues.append(.init(
                 path: "settings.batchTranscriptionModel", message: "\"\(model)\" cannot transcribe on this device."))
         }

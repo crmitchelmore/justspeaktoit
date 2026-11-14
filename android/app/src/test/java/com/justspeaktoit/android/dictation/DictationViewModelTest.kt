@@ -627,6 +627,7 @@ class DictationViewModelTest {
             "personal_corrections" to mapOf("Ada" to "ada, adder"),
             "cleanup_enabled" to true,
             "cleanup_model" to cleanup.selectionId,
+            "cleanupModelDiscoveryEnabled" to true,
             "keepAudioOnCancel" to false,
             "handsFreeDictationEnabled" to true,
             "history_retention" to "Forever",
@@ -653,6 +654,7 @@ class DictationViewModelTest {
         assertEquals(listOf(CorrectionRule("Ada", listOf("ada", "adder"))), h.prefs.corrections)
         assertTrue(h.prefs.cleanupEnabled)
         assertEquals(cleanup.selectionId, h.prefs.cleanupModelId)
+        assertTrue(h.prefs.cleanupModelDiscoveryEnabled)
         assertFalse(h.prefs.keepAudioOnCancel)
         assertTrue(h.prefs.handsFreeEnabled)
         assertEquals(Retention.Forever, h.prefs.retention)

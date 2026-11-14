@@ -148,12 +148,5 @@ public final class IOSLocalModelManager: ObservableObject {
     public func isImported(_ model: LocalTranscriptionModel) -> Bool {
         importedModels.contains { $0.id == model.id }
     }
-
-    public nonisolated static func availableCapacity() -> Int64? {
-        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let directory = FileManager.default.fileExists(atPath: url.path) ? url : url.deletingLastPathComponent()
-        let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return values?.volumeAvailableCapacityForImportantUsage
-    }
 }
 #endif

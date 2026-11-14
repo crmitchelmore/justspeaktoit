@@ -9,7 +9,7 @@ import Foundation
 /// A high-entropy key the Mac issues to one phone after it proves the pairing
 /// code. Later sessions authenticate with it instead of the code.
 public struct TransportDeviceCredential: Codable, Equatable, Sendable {
-    static let secretByteCount = 32
+    static let secretByteCount = TransportProtocolConstants.credentialSecretByteCount
 
     /// Names the credential in the phone's key share. Not secret.
     public let id: UUID
@@ -32,13 +32,15 @@ public struct TransportDeviceCredential: Codable, Equatable, Sendable {
     }
 
     init?(wireBytes: Data) {
-        guard wireBytes.count == 16 + Self.secretByteCount else { return nil }
+        guard wireBytes.count == TransportProtocolConstants.credentialIDByteCount + Self.secretByteCount else {
+            return nil
+        }
         let bytes = Array(wireBytes)
         let id = UUID(uuid: (
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
             bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
         ))
-        self.init(id: id, secret: Data(bytes[16...]))
+        self.init(id: id, secret: Data(bytes[TransportProtocolConstants.credentialIDByteCount...]))
     }
 }
 
@@ -74,9 +76,9 @@ extension TransportKeySchedule {
     static func credentialKey(for secret: Data) -> SymmetricKey {
         HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: secret),
-            salt: Data("justspeaktoit.send-to-mac.device-credential".utf8),
-            info: Data("v2".utf8),
-            outputByteCount: 32
+            salt: Data(TransportProtocolConstants.credentialKeySalt.utf8),
+            info: Data(TransportProtocolConstants.preSharedKeyInfo.utf8),
+            outputByteCount: TransportProtocolConstants.keyByteCount
         )
     }
 

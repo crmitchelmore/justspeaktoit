@@ -142,6 +142,26 @@ object AutomationIds {
     const val SETTINGS_HISTORY_SYNC_SIGN_OUT = "settings.historySync.signOut"
     const val SETTINGS_HISTORY_SYNC_NOW = "settings.historySync.syncNow"
 
+    const val SETTINGS_SEND_TO_MAC_PAIRED_MAC = "settings.sendToMac.pairedMac"
+    const val SETTINGS_SEND_TO_MAC_FORGET = "settings.sendToMac.forget"
+    const val SETTINGS_SEND_TO_MAC_FORGET_CONFIRM = "settings.sendToMac.forget.confirm"
+    const val SETTINGS_SEND_TO_MAC_FORGET_CANCEL = "settings.sendToMac.forget.cancel"
+    const val SETTINGS_SEND_TO_MAC_SEARCHING = "settings.sendToMac.searching"
+    const val SETTINGS_SEND_TO_MAC_DISCOVERY_ERROR = "settings.sendToMac.discoveryError"
+    const val SETTINGS_SEND_TO_MAC_ACTIVITY = "settings.sendToMac.activity"
+    const val SEND_TO_MAC_PAIRING_CODE = "sendToMacPairing.code"
+    const val SEND_TO_MAC_PAIRING_STATUS = "sendToMacPairing.status"
+    const val SEND_TO_MAC_PAIRING_CONFIRM = "sendToMacPairing.confirm"
+    const val SEND_TO_MAC_PAIRING_CANCEL = "sendToMacPairing.cancel"
+
+    /** One per Mac found nearby, keyed by its position in the list, never by the Mac's name. */
+    fun sendToMacPair(index: Int) = "settings.sendToMac.pair.$index"
+    const val HISTORY_SEND_TO_MAC_STATUS = "history.sendToMac.status"
+    const val HISTORY_SEND_TO_MAC_DISMISS = "history.sendToMac.dismiss"
+
+    /** One per History entry, keyed by its generated ID, never by its text. */
+    fun historySendToMac(entryId: String) = "history.sendToMac.$entryId"
+
     const val SETTINGS_CLEANUP_MODEL = "settings.cleanupModel"
     const val SETTINGS_CLEANUP_PROMPT = "settings.cleanupPrompt"
     const val SETTINGS_CLEANUP_PROMPT_RESET = "settings.cleanupPrompt.reset"

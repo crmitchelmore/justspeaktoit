@@ -69,6 +69,7 @@ import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.dictation.DictationUiState
 import com.justspeaktoit.android.dictation.SilenceSettings
+import com.justspeaktoit.android.sendtomac.SendToMacState
 import com.justspeaktoit.android.settings.ApiKeyStatusFilter
 import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.DictationProfile
@@ -132,6 +133,12 @@ class SettingsActions(
     val onSignInToHistorySync: () -> Unit = {},
     val onSignOutOfHistorySync: () -> Unit = {},
     val onSyncHistoryNow: () -> Unit = {},
+    /** Pairs with the named Mac using the six-digit code it shows. */
+    val onPairWithMac: (String, String) -> Unit = { _, _ -> },
+    val onForgetMac: () -> Unit = {},
+    val onStartMacDiscovery: () -> Unit = {},
+    val onStopMacDiscovery: () -> Unit = {},
+    val onClearSendToMacActivity: () -> Unit = {},
 )
 
 /** The app-wide theme choice: light, dark or the phone's, and wallpaper colours where supported. */
@@ -156,6 +163,7 @@ fun SettingsScreen(
     tips: TipJarUiState = TipJarUiState(),
     troubleshooting: TroubleshootingFacts = TroubleshootingFacts(),
     historySync: HistorySyncStatus = HistorySyncStatus(HistorySyncAvailability.MissingToken),
+    sendToMac: SendToMacState = SendToMacState(),
 ) {
     val context = LocalContext.current
     val searchIndex = remember {
@@ -422,6 +430,10 @@ fun SettingsScreen(
             HorizontalDivider()
             SectionTitle(R.string.settings_history_sync_title, anchor("android.historySync"))
             HistorySyncSection(historySync, actions)
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_send_to_mac_title, anchor("android.sendToMac"))
+            SendToMacSection(sendToMac, actions)
 
             HorizontalDivider()
             SectionTitle(R.string.settings_corrections_title, anchor("android.personalCorrections"))

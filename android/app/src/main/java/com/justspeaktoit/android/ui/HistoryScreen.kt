@@ -55,7 +55,10 @@ import com.justspeaktoit.android.history.HistoryInsights
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.output.TranscriptOutput
+import com.justspeaktoit.android.sendtomac.SendToMacActivity
+import com.justspeaktoit.android.sendtomac.SendToMacState
 import java.time.LocalDate
+import kotlinx.coroutines.delay
 
 class HistoryActions(
     val onBack: () -> Unit,
@@ -64,6 +67,9 @@ class HistoryActions(
     /** Clears History; true keeps the entries that hold a recording. */
     val onClear: (keepRecordings: Boolean) -> Unit,
     val onTranscribe: (String) -> Unit,
+    /** Sends the entry's transcript to the paired Mac. */
+    val onSendToMac: (HistoryEntry) -> Unit = {},
+    val onDismissSendToMac: () -> Unit = {},
 )
 
 /** Whether kept audio can be transcribed now, and which entry is being transcribed. */
@@ -78,6 +84,7 @@ fun HistoryScreen(
     saveFailed: Boolean,
     transcribe: HistoryTranscription,
     actions: HistoryActions,
+    sendToMac: SendToMacState = SendToMacState(),
 ) {
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     // Filters are view state only: they never change the stored entries.
@@ -133,6 +140,9 @@ fun HistoryScreen(
                     }
                 }
             }
+            if (sendToMac.activity.isSendStatus()) {
+                item(key = "sendToMacStatus") { SendToMacStatus(sendToMac.activity, actions.onDismissSendToMac) }
+            }
             val insights = HistoryInsights.of(entries, System.currentTimeMillis())
             if (insights.dictations > 0) item { InsightsCard(insights) }
             item { RetentionPicker(retention, actions.onRetention) }
@@ -169,7 +179,7 @@ fun HistoryScreen(
                 }
                 if (filter.isActive) item(key = "historyFilterSummary") { FilterSummary(visible.size, entries.size) }
             }
-            items(visible, key = { it.id }) { entry -> HistoryCard(entry, transcribe, player, actions) }
+            items(visible, key = { it.id }) { entry -> HistoryCard(entry, transcribe, player, sendToMac, actions) }
         }
     }
     if (confirmClear) {
@@ -245,6 +255,7 @@ private fun HistoryCard(
     entry: HistoryEntry,
     transcribe: HistoryTranscription,
     player: HistoryAudioPlayer,
+    sendToMac: SendToMacState,
     actions: HistoryActions,
 ) {
     val context = LocalContext.current
@@ -321,6 +332,13 @@ private fun HistoryCard(
                         }
                     }
                 }
+                if (!failed && entry.text.isNotBlank() && sendToMac.isPaired) {
+                    TextButton(
+                        onClick = { actions.onSendToMac(entry) },
+                        enabled = !sendToMac.isBusy,
+                        modifier = Modifier.testTag(AutomationIds.historySendToMac(entry.id)),
+                    ) { Text(stringResource(R.string.action_send_to_mac)) }
+                }
                 TextButton(
                     onClick = { reporting = true },
                     modifier = Modifier.testTag(AutomationIds.HISTORY_REPORT_ISSUE),
@@ -334,6 +352,41 @@ private fun HistoryCard(
         IssueReportDialog(facts) { reporting = false }
     }
 }
+
+private fun SendToMacActivity.isSendStatus(): Boolean =
+    this is SendToMacActivity.Sending || this is SendToMacActivity.Sent || this is SendToMacActivity.SendFailed
+
+/** The last Send to Mac from History, announced as it changes; a success clears itself, as on iOS. */
+@Composable
+private fun SendToMacStatus(activity: SendToMacActivity, onDismiss: () -> Unit) {
+    LaunchedEffect(activity) {
+        if (activity is SendToMacActivity.Sent) {
+            delay(SENT_STATUS_MS)
+            onDismiss()
+        }
+    }
+    val (text, failed) = sendToMacActivityText(activity) ?: return
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag(AutomationIds.HISTORY_SEND_TO_MAC_STATUS)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            if (activity !is SendToMacActivity.Sending) {
+                IconButton(onClick = onDismiss, modifier = Modifier.testTag(AutomationIds.HISTORY_SEND_TO_MAC_DISMISS)) {
+                    Icon(painterResource(R.drawable.ic_close), stringResource(R.string.send_to_mac_dismiss))
+                }
+            }
+        }
+    }
+}
+
+private const val SENT_STATUS_MS = 4_000L
 
 /** How many entries the search and filters leave, announced as it changes. */
 @Composable

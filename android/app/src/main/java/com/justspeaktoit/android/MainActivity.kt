@@ -36,6 +36,7 @@ import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justspeaktoit.android.dictation.DictationViewModel
+import com.justspeaktoit.android.sendtomac.SendToMacViewModel
 import com.justspeaktoit.android.sync.AndroidHistorySync
 import com.justspeaktoit.android.telemetry.OptInSurface
 import com.justspeaktoit.android.telemetry.Telemetry
@@ -66,6 +67,7 @@ private enum class Screen { Dictation, Settings, History, Onboarding }
 
 class MainActivity : ComponentActivity() {
     private val viewModel: DictationViewModel by viewModels { DictationViewModel.Factory }
+    private val sendToMac: SendToMacViewModel by viewModels { SendToMacViewModel.Factory }
     private val permission = mutableStateOf(MicPermission.NotRequested)
     private val screenState = mutableStateOf(Screen.Dictation)
     private val telemetry: Telemetry get() = (application as JustSpeakApplication).telemetry
@@ -146,6 +148,7 @@ class MainActivity : ComponentActivity() {
             val askConsent by consentPending
             val tips by tipStore.state.collectAsStateWithLifecycle()
             val historySync by viewModel.historySyncStatus.collectAsStateWithLifecycle()
+            val sendToMacState by sendToMac.state.collectAsStateWithLifecycle()
             LaunchedEffect(screen) {
                 if (screen == Screen.Settings) {
                     tipStore.connect()
@@ -237,11 +240,17 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onSignOutOfHistorySync = viewModel::signOutOfHistorySync,
                                 onSyncHistoryNow = viewModel::syncHistory,
+                                onPairWithMac = sendToMac::pair,
+                                onForgetMac = sendToMac::forget,
+                                onStartMacDiscovery = sendToMac::startDiscovery,
+                                onStopMacDiscovery = sendToMac::stopDiscovery,
+                                onClearSendToMacActivity = sendToMac::clearActivity,
                             ),
                             privacy = privacyChoices,
                             tips = tips,
                             troubleshooting = TroubleshootingFacts(mic, setupStatus.value.keyboardEnabled),
                             historySync = historySync,
+                            sendToMac = sendToMacState,
                         )
                         Screen.Onboarding -> OnboardingScreen(
                             state = state,
@@ -263,7 +272,10 @@ class MainActivity : ComponentActivity() {
                                 onDelete = viewModel::deleteHistoryEntry,
                                 onClear = viewModel::clearHistory,
                                 onTranscribe = viewModel::transcribeHistoryEntry,
+                                onSendToMac = sendToMac::send,
+                                onDismissSendToMac = sendToMac::clearActivity,
                             ),
+                            sendToMac = sendToMacState,
                         )
                         Screen.Dictation -> DictationScreen(
                             state = state,

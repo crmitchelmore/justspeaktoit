@@ -1878,6 +1878,22 @@ sessions:
           - "Save a StepFun key under the other region, or an Alibaba key with Fun-ASR in a region other than Beijing or Singapore, and record once more."
         expected: "Each recording returns the spoken words and History names the chosen model. Azure works with the region alone and with the saved endpoint. A key saved under the wrong region, or Fun-ASR outside Beijing or Singapore, fails with a key error for that provider and never succeeds silently."
         final_gate: false
+      - id: "android-send-to-mac"
+        issues:
+          - 1640
+        title: "Send to Mac: pair the Android phone, send a History item, forget the Mac"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes the Android Send to Mac sender, and the Stable Mac app from justspeaktoit.com on the same Wi-Fi"
+        steps:
+          - "On the Mac open Settings \u203a General \u203a Send to Mac, turn it on and note the pairing code. Click into a scratch note on the Mac."
+          - "On the phone open Settings \u203a Send to Mac. Wait for Pair with <your Mac>, tap it, enter the code and tap Pair."
+          - "Open History and tap Send to Mac on an entry. Then close and reopen the app and send another entry."
+          - "On the Mac tap Regenerate Code, then send another History item from the phone."
+          - "In Settings tap Forget This Mac and confirm, then open History. Search Settings for \"send to mac\"."
+          - "With TalkBack on, pair again and repeat one send, listening to the code field, the Pair button and the result."
+        expected: "The Mac appears under Send to Mac within a few seconds and pairing shows Paired Mac with its name. Each send shows Sent to <your Mac> and the text is pasted once at the Mac's cursor, including after reopening the app. After regenerating the code the send fails with the Mac's message asking you to pair again, and the phone never re-pairs on its own. After forgetting, History no longer offers Send to Mac. Search finds Send to Mac and opens its section. TalkBack names the code field and buttons and announces pairing, sent and failed results."
+        final_gate: false
   - id: "windows"
     device: "Windows"
     title: "Windows"

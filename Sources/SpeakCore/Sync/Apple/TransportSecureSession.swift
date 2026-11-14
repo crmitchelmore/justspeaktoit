@@ -91,7 +91,7 @@ struct TransportKeyShare: Codable, Equatable {
 
     static func decode(_ frame: Data) -> TransportKeyShare? {
         guard let share = try? JSONDecoder().decode(TransportKeyShare.self, from: frame),
-              share.keyShare.count == 32 else { return nil }
+              share.keyShare.count == TransportProtocolConstants.keyByteCount else { return nil }
         return share
     }
 
@@ -103,8 +103,8 @@ struct TransportKeyShare: Codable, Equatable {
 /// One direction of the sealed channel. The nonce is the frame counter, so
 /// frames must be opened in the order they were sealed, exactly once.
 struct TransportFrameCipher: Sendable {
-    private static let associatedData = Data("justspeaktoit.send-to-mac.v2.frame".utf8)
-    static let overhead = 16
+    private static let associatedData = Data(TransportProtocolConstants.frameAssociatedData.utf8)
+    static let overhead = TransportProtocolConstants.tagByteCount
 
     private let key: SymmetricKey
     private(set) var counter: UInt64 = 0
@@ -146,7 +146,7 @@ struct TransportFrameCipher: Sendable {
 
     private static func nonce(_ counter: UInt64) throws -> ChaChaPoly.Nonce {
         guard counter < UInt64.max else { throw TransportSecurityError.unauthenticatedFrame }
-        var bytes = Data(count: 4)
+        var bytes = Data(count: TransportProtocolConstants.nonceByteCount - MemoryLayout<UInt64>.size)
         withUnsafeBytes(of: counter.bigEndian) { bytes.append(contentsOf: $0) }
         return try ChaChaPoly.Nonce(data: bytes)
     }
@@ -165,11 +165,13 @@ struct TransportKeySchedule: Sendable {
         case server
     }
 
-    static let clientFinished = Data("justspeaktoit.send-to-mac.v2 client finished".utf8)
-    static let serverFinished = Data("justspeaktoit.send-to-mac.v2 server finished".utf8)
+    static let clientFinished = Data(TransportProtocolConstants.clientFinished.utf8)
+    static let serverFinished = Data(TransportProtocolConstants.serverFinished.utf8)
 
-    private let sharedSecret: Data
-    private let transcriptHash: Data
+    /// The X25519 secret. Internal only so the Android test vectors can publish it.
+    let sharedSecret: Data
+    /// SHA-256 over both key-share frames. Internal for the same reason.
+    let transcriptHash: Data
 
     init(
         localKey: Curve25519.KeyAgreement.PrivateKey,
@@ -185,7 +187,7 @@ struct TransportKeySchedule: Sendable {
         self.sharedSecret = secretBytes
 
         var transcript = SHA256()
-        transcript.update(data: Data("justspeaktoit.send-to-mac.v2".utf8))
+        transcript.update(data: Data(TransportProtocolConstants.transcriptLabel.utf8))
         for frame in [clientFrame, serverFrame] {
             withUnsafeBytes(of: UInt32(frame.count).bigEndian) { transcript.update(bufferPointer: $0) }
             transcript.update(data: frame)
@@ -197,9 +199,9 @@ struct TransportKeySchedule: Sendable {
     static func pairingKey(for pairingCode: String) -> SymmetricKey {
         HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: Data(pairingCode.utf8)),
-            salt: Data("justspeaktoit.send-to-mac.pairing-key".utf8),
-            info: Data("v2".utf8),
-            outputByteCount: 32
+            salt: Data(TransportProtocolConstants.pairingKeySalt.utf8),
+            info: Data(TransportProtocolConstants.preSharedKeyInfo.utf8),
+            outputByteCount: TransportProtocolConstants.keyByteCount
         )
     }
 
@@ -208,24 +210,33 @@ struct TransportKeySchedule: Sendable {
     }
 
     func sessionKeys(preSharedKey: SymmetricKey, role: Role) -> TransportSessionKeys {
-        let pairingKey = preSharedKey.withUnsafeBytes { Data($0) }
-        let inputKeyMaterial = SymmetricKey(data: self.sharedSecret + pairingKey)
-        func key(_ label: String) -> SymmetricKey {
-            HKDF<SHA256>.deriveKey(
-                inputKeyMaterial: inputKeyMaterial,
-                salt: self.transcriptHash,
-                info: Data("justspeaktoit.send-to-mac.v2 \(label)".utf8),
-                outputByteCount: 32
-            )
-        }
-        let clientToServer = TransportFrameCipher(key: key("client to server"))
-        let serverToClient = TransportFrameCipher(key: key("server to client"))
+        let keys = self.directionKeys(preSharedKey: preSharedKey)
+        let clientToServer = TransportFrameCipher(key: keys.clientToServer)
+        let serverToClient = TransportFrameCipher(key: keys.serverToClient)
         switch role {
         case .client:
             return TransportSessionKeys(outbound: clientToServer, inbound: serverToClient)
         case .server:
             return TransportSessionKeys(outbound: serverToClient, inbound: clientToServer)
         }
+    }
+
+    /// The raw key for each direction, before either has sealed a frame.
+    func directionKeys(preSharedKey: SymmetricKey) -> (clientToServer: SymmetricKey, serverToClient: SymmetricKey) {
+        let pairingKey = preSharedKey.withUnsafeBytes { Data($0) }
+        let inputKeyMaterial = SymmetricKey(data: self.sharedSecret + pairingKey)
+        func key(_ info: String) -> SymmetricKey {
+            HKDF<SHA256>.deriveKey(
+                inputKeyMaterial: inputKeyMaterial,
+                salt: self.transcriptHash,
+                info: Data(info.utf8),
+                outputByteCount: TransportProtocolConstants.keyByteCount
+            )
+        }
+        return (
+            key(TransportProtocolConstants.clientToServerInfo),
+            key(TransportProtocolConstants.serverToClientInfo)
+        )
     }
 }
 

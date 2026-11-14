@@ -297,8 +297,8 @@ void jsti_openrouter_browser_open(GtkWindow *owner, int32_t purpose, int32_t sel
     gtk_box_append(GTK_BOX(column), details);
 
     GtkWidget *footer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    browser.status = GTK_LABEL(gtk_label_new(""));
-    gtk_accessible_update_role(GTK_ACCESSIBLE(browser.status), GTK_ACCESSIBLE_ROLE_STATUS);
+    browser.status = GTK_LABEL(g_object_new(GTK_TYPE_LABEL, "label", "", "accessible-role", GTK_ACCESSIBLE_ROLE_STATUS,
+                                            NULL));
     gtk_label_set_wrap(browser.status, TRUE);
     gtk_label_set_xalign(browser.status, 0);
     gtk_widget_set_hexpand(GTK_WIDGET(browser.status), TRUE);

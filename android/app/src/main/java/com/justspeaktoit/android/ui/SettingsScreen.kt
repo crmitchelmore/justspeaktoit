@@ -110,6 +110,12 @@ class SettingsActions(
     val onRunSetup: () -> Unit = {},
     val onAppearanceChanged: (AppearanceChoice) -> Unit = {},
     val onCheckBalance: (CloudProvider) -> Unit = {},
+    val onExportConfiguration: () -> Unit = {},
+    val onImportConfiguration: () -> Unit = {},
+    val onExportCredentialsChanged: (Boolean) -> Unit = {},
+    val onImportCredentialsChanged: (Boolean) -> Unit = {},
+    val onApplyConfigurationImport: () -> Unit = {},
+    val onDismissConfiguration: () -> Unit = {},
 )
 
 /** The app-wide theme choice: light, dark or the phone's, and wallpaper colours where supported. */
@@ -259,6 +265,7 @@ fun SettingsScreen(
             CleanupPromptField(
                 stringResource(R.string.settings_cleanup_prompt_title),
                 state.cleanupPrompt,
+                state.transfer.generation,
                 actions.onCleanupPromptChanged,
                 anchor("android.cleanupPrompt"),
             )
@@ -408,6 +415,10 @@ fun SettingsScreen(
             }
 
             HorizontalDivider()
+            SectionTitle(R.string.settings_transfer_title, anchor("android.configTransfer"))
+            ConfigTransferSection(state.transfer, dictating = state.dictation.isActive, actions)
+
+            HorizontalDivider()
             Text(
                 stringResource(R.string.settings_privacy_title),
                 style = MaterialTheme.typography.titleLarge,
@@ -504,8 +515,15 @@ private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions) {
 
 /** The user's base cleanup prompt; every edit is saved, and empty means the built-in prompt. */
 @Composable
-private fun CleanupPromptField(title: String, saved: String?, onChange: (String) -> Unit, modifier: Modifier) {
-    var text by rememberSaveable { mutableStateOf(saved.orEmpty()) }
+private fun CleanupPromptField(
+    title: String,
+    saved: String?,
+    // Changes when an import replaces the saved prompt, so the field shows the new one.
+    generation: Int,
+    onChange: (String) -> Unit,
+    modifier: Modifier,
+) {
+    var text by rememberSaveable(generation) { mutableStateOf(saved.orEmpty()) }
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         OutlinedTextField(
             value = text,

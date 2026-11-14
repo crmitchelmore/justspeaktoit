@@ -1594,6 +1594,22 @@ sessions:
           - "Tap Copy draft and paste it into a note; then turn airplane mode off and tap Open in GitHub, and close the browser without submitting."
           - "Settings \u203a Report an issue: open the draft and repeat Copy draft with TalkBack on."
         expected: "The draft never contains the transcript, audio or keys. Turning off diagnostics leaves only the description and a userRemoved state. Copy puts the title and body on the clipboard, Open shows a prefilled GitHub draft labelled bug without submitting, and TalkBack announces the switch state and each status message."
+        final_gate: false
+      - id: "android-config-transfer"
+        issues:
+          - 1635
+        title: "Export and import the full configuration, with a preview and API keys only on request"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1635 configuration export and import"
+        steps:
+          - "Settings \u203a Export and import: leave Include API keys off, tap Export and save the file to Downloads."
+          - "Change the cleanup prompt, delete a correction and a History entry, then tap Import and choose the saved file."
+          - "Read the preview: counts for each category and no Import API keys switch. Tap Cancel and confirm nothing changed."
+          - "Import the file again and tap Apply import; check the prompt, correction and History entry (with its recording) are back."
+          - "Turn on Include API keys, read the warning and export again, then import that file on a second phone (or after clearing app data) with Import API keys on."
+          - "Import a Mac or iPhone export (Settings \u203a Data & Migration on the Mac) and read the preview's notices."
+        expected: "Nothing changes until Apply import. Applying restores settings, profiles, corrections, History and recordings in one step; API keys travel only when chosen on both export and import. A Mac or iPhone export imports what Android supports and lists what it skipped, without changing anything else."
         final_gate: true
       - id: "android-battery-latency"
         issues:

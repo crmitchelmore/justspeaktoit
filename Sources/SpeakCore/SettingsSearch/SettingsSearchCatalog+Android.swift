@@ -136,6 +136,16 @@ extension SettingsSearchCatalog {
             platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.configTransfer", title: "Export and import", section: .dataMigration,
+            systemImage: "archivebox",
+            summary: "Save settings, profiles, corrections and History to a file, or import one from another device.",
+            keywords: [
+                "backup", "export", "import", "restore", "zip", "migrate", "transfer settings",
+                "move to new phone"
+            ],
+            platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.privacy", title: "Privacy", section: .about, systemImage: "hand.raised",
             summary: "Choose whether to share anonymous analytics and crash reports. Both start off.",
             keywords: ["privacy", "telemetry", "analytics", "crash reports", "diagnostics", "consent", "opt out"],

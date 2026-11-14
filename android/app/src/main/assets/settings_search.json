@@ -335,6 +335,26 @@
       "title" : "API keys"
     },
     {
+      "id" : "android.configTransfer",
+      "keywords" : [
+        "backup",
+        "export",
+        "import",
+        "restore",
+        "zip",
+        "migrate",
+        "transfer settings",
+        "move to new phone"
+      ],
+      "section" : "dataMigration",
+      "sectionTitle" : "Data & Migration",
+      "settingKeys" : [
+
+      ],
+      "summary" : "Save settings, profiles, corrections and History to a file, or import one from another device.",
+      "title" : "Export and import"
+    },
+    {
       "id" : "android.privacy",
       "keywords" : [
         "privacy",

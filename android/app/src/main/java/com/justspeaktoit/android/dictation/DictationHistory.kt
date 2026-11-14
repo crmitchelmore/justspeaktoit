@@ -159,6 +159,22 @@ internal class DictationHistory(
     /** Replaces an entry and returns once the change is written and published. */
     suspend fun replace(entry: HistoryEntry, retention: Retention) = update { store.replace(entry, retention) }.join()
 
+    /**
+     * Applies an imported History in one write and publishes it. Throws [IOException], leaving
+     * History unchanged, when it cannot be written.
+     */
+    suspend fun importEntries(
+        retention: Retention,
+        change: (List<HistoryEntry>) -> List<HistoryEntry>,
+    ): List<HistoryEntry> {
+        val entries = withContext(writer) { store.replaceAll(retention, change) }
+        publish(entries, false)
+        return entries
+    }
+
+    /** The current entries, read on the History thread so no write is in progress. */
+    suspend fun snapshot(retention: Retention): List<HistoryEntry> = withContext(writer) { store.snapshot(retention) }
+
     /** Saves each recording as a failed Cloud entry with its audio, ready to transcribe. */
     private fun recover(files: List<File>, retention: Retention): List<HistoryEntry> {
         var entries = store.cached

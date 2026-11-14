@@ -172,6 +172,18 @@ fail on any non-enum string property, exactly as issue #591 specifies.
   envelope, the same first-rollout events and coarse context with
   `platform=android`, one random ID deleted on opt-out, and no SDK. Release
   builds get the key from `POSTHOG_PROJECT_KEY`; other builds send nothing.
+- Windows and Linux (#1624) use `DesktopPostHogSink`
+  (`Sources/SpeakDesktop/Telemetry/`) over the host's existing HTTPS transport
+  (WinHTTP on Windows, URLSession on Linux): the same envelope and shared
+  `ProductAnalyticsController`, `platform=windows`/`linux`, `$geoip_disable`,
+  and today only `analytics_opt_in`, `app_active_daily` and
+  `first_transcription_succeeded`. Its queue is in memory, capped at 50 events,
+  one request at a time; a failure drops the event and is never retried, and
+  opting out or quitting discards the queue. Consent and the random ID live in
+  the app data folder's `telemetry.json`, never in settings, so imports and
+  `speak config` cannot opt a desktop in. Release packages do not stamp the
+  project key yet, so the key is read only from `JSTI_POSTHOG_PROJECT_KEY` and
+  an unstamped build sends nothing even after opting in (#1624).
 
 ### Consent: opt-IN, three states, with a real preview
 
@@ -221,6 +233,7 @@ fail on any non-enum string property, exactly as issue #591 specifies.
 | Concern | Owner | Notes |
 | --- | --- | --- |
 | Crashes, hangs, HTTP client errors, performance traces | **Sentry** (macOS production only, as today — `Sources/SpeakApp/Analytics/SentryManager.swift`) | PostHog crash capture stays disabled |
+| Windows and Linux crash reports | **Sentry**, release builds only, with its own opt-in (`DesktopTelemetry`) | One envelope per fatal top-level error or unclean previous exit; type and scrubbed message only (`DesktopTelemetryScrubber`), no user, device name, stack locals or install ID |
 | Deliberate product events | **PostHog** | Typed catalogue only |
 | Shared identity between the two | **None** | Different IDs, never joined; `SentryManager.setUser` must not receive the analytics install ID |
 

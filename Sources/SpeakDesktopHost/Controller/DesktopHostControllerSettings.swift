@@ -60,17 +60,17 @@ extension DesktopHostController {
             var configuration = values.configuration?.values ?? [:]
             let warmKey = DesktopConnectionPreWarming.preferenceKey
             if configuration[warmKey] == nil { configuration[warmKey] = all[warmKey] }
-            configuration.removeValue(forKey: DesktopConnectionPreWarming.approvalProjectionKey)
+            configuration = configuration.filter { !DesktopConfiguration.editorProjectionKeys.contains($0.key) }
             if values.configuration != nil || configuration[warmKey] != nil {
                 values.configuration = try DesktopConfiguration(values: configuration)
             }
-            let known: Set<String> = [
+            let known: Set<String> = DesktopConfiguration.editorProjectionKeys.union([
                 "model", "postProcessing", "microphoneDeviceID", "batchModel", "liveModel", "textOutput",
                 "hotKey", "voiceOutput", "automationEnabled", "automationLocalConsent", "localModel", "localUseGPU",
                 "azureSpeechResourceEndpoint", "appearance", "runAtLogin", "configuration", "livePolishApproved",
                 "localLiveModel",
-                DesktopConnectionPreWarming.preferenceKey, DesktopConnectionPreWarming.approvalProjectionKey
-            ]
+                DesktopConnectionPreWarming.preferenceKey
+            ])
             preserved = all.filter { !known.contains($0.key) }
             try adoptStoredPreferences(DesktopConfiguration.pronunciationPreferenceKeys)
             try adoptStoredPreferences(DesktopConfiguration.modulatePreferenceKeys)

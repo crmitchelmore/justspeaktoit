@@ -1186,14 +1186,14 @@ does not establish runtime, multi-DPI or installed-product acceptance.
 ## App shell, recordings folder and analytics (source only)
 
 `ShellPreference.fields` (`Sources/SpeakCore/Desktop/DesktopShellPreference.swift`)
-adds `appVisibility`, `compactStatusBarIcon` and `analyticsEnabled` to General
+adds `appVisibility` and `compactStatusBarIcon` to General
 with the Mac keys, defaults and strict values, so save, restart and portable
 JSON import/export round-trip them. `appVisibility` reuses the Mac's stored
 cases with native labels: `both` is **Taskbar and notification area**,
 `menuBarOnly` **Notification area only** and `dockOnly` **Taskbar only**.
-`showStatusBarIconInDockOnly`, `paidAccessRoutingEnabled` and
-`recordingsDirectory` stay opaque Apple-only keys: imports retain them for the
-Mac and never execute them.
+`showStatusBarIconInDockOnly`, `paidAccessRoutingEnabled`,
+`recordingsDirectory` and `analyticsEnabled` stay opaque Apple-only keys:
+imports retain them for the Mac and never execute them.
 
 - **Windows app visibility** applies before the window opens and live on save
   or import. Notification area only gives the window a hidden tool-window owner
@@ -1208,9 +1208,15 @@ Mac and never execute them.
 - **Linux** stores, shows and transfers both shell choices but does not apply
   them: GTK 4 has no portable tray or taskbar-hiding API, so the capability rule
   is persistence only until a StatusNotifier host exists.
-- **Analytics**: Windows and Linux send no analytics or crash reports, so the
-  switch has nothing to gate. It is stored and transferred so a Mac import keeps
-  its choice; absent is never treated as consent.
+- **Analytics and crash reports** (#1624): General shows two separate switches,
+  **Share anonymous usage analytics** and **Send crash reports and
+  diagnostics**, both off. They are native editor projections
+  (`DesktopTelemetryConsent`, keys `desktopAnalyticsConsent` and
+  `desktopDiagnosticsConsent`) of the device-local `telemetry.json`: only an
+  explicit Apply in Settings changes them, and they are never persisted in
+  settings, exported, imported or exposed to `speak config`/MCP. The Mac's
+  `analyticsEnabled` is retained opaque, so a Mac import keeps its choice but
+  never opts a desktop in.
 - **Paid-access routing and Dock-only icon** have no desktop journey (desktop
   providers are bring-your-own-key and there is no Dock); both are preserved
   only.
@@ -2760,7 +2766,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
 | rememberedRemoteTranscriptionMode | Equivalent / Equivalent | Models; native source/mode preferences |
-| analyticsEnabled | Wired; nothing to gate / Same | General switch, Mac default and strict transfer. Desktop sends no analytics or crash reports; absent is never consent |
+| analyticsEnabled | Apple-specific / Apple-specific | Retained opaque through import/export. Desktop consent is the device-local `desktopAnalyticsConsent`/`desktopDiagnosticsConsent` editor projection (#1624); an imported value is never consent |
 
 ## Beyond the enum and destinations
 

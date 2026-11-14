@@ -13,7 +13,7 @@ public enum AnalyticsPrivacyClass: String, Codable, Sendable {
     case pseudonymous
 }
 
-public enum AnalyticsPlatform: String, Codable, Sendable { case macOS, iOS, android }
+public enum AnalyticsPlatform: String, Codable, Sendable { case macOS, iOS, android, windows, linux }
 
 public enum AnalyticsDistributionChannel: String, Codable, Sendable {
     case direct, homebrew

@@ -76,6 +76,20 @@ ordinary diagnostic events should not contain user speech. New Sentry context an
 breadcrumbs must still be reviewed so free-form user content cannot be added by
 another path.
 
+### Windows and Linux crash reports
+
+The desktop apps send Sentry envelopes without the SDK
+(`Sources/SpeakDesktop/Telemetry/DesktopTelemetryTransport.swift`), only after the
+user turns on **Send crash reports and diagnostics** and only from release builds.
+An event holds the error type and a message passed through
+`DesktopTelemetryScrubber`, which replaces quoted text (where transcripts and
+prompts appear), URL paths and queries, bearer tokens, `key=value` secrets,
+provider keys and other long tokens, e-mail addresses, UUIDs, home folders
+(`C:\Users\<name>`, `/home/<name>`, `/Users/<name>`) and network shares, then caps
+the message at 300 characters. Events carry no user, server name, request,
+breadcrumbs, stack locals or analytics install ID. `DesktopTelemetryScrubberTests`
+covers each rule.
+
 ## Verification
 
 ### No Sensitive Data in Logs

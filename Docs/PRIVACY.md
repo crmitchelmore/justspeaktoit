@@ -222,6 +222,31 @@ The Mac App Store build and all iOS/keyboard targets compile this transport out.
 Apple may separately provide aggregated App Store and crash diagnostics under
 Apple's own privacy terms. That is distinct from the app's Sentry collection.
 
+### Windows and Linux
+
+The Windows and Linux apps have two switches in Settings › General, both off
+until you turn them on: **Share anonymous usage analytics** and **Send crash
+reports and diagnostics**. The choices are kept on that computer in the app's
+`telemetry.json`; they are never part of exported or imported settings, so a
+Mac or phone preference never opts a desktop in, and automation (`speak config`,
+MCP) cannot change them. No SDK is used: the apps send small HTTPS requests over
+the same native networking they use for cloud sync.
+
+- **Crash reports** go to Sentry's EU service from release builds only, when the
+  app stops on an error it cannot recover from or finds on launch that the
+  previous session did not shut down cleanly. A report holds the error type and
+  a message with quoted text, web addresses, credentials, long tokens, email
+  addresses, identifiers and home-folder names removed (capped at 300
+  characters), plus the app version, OS version and processor type. It has no
+  installation ID, user, device name, transcript, audio, prompt, API key or file
+  path. A report that cannot be sent is dropped, never stored or retried.
+- **Product analytics** use the same PostHog EU project, envelope, catalogue and
+  `$geoip_disable` request as the Mac, with `platform` set to `windows` or
+  `linux`. Opting in creates one random ID in `telemetry.json`; opting out
+  deletes it and drops queued events. Events wait in memory only (at most 50),
+  and a failed request drops its event. Release packages do not include the
+  PostHog project key yet, so they send no analytics even after opting in.
+
 ### Identifiability
 
 When you have agreed to send diagnostics, the Sentry installation ID is random

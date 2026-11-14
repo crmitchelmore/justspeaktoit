@@ -211,7 +211,7 @@ final class SettingsConfigurationTests: XCTestCase {
         XCTAssertEqual(keys.count, SettingsSchema.keys(for: .windows).count)
         XCTAssertEqual(
             keys.subtracting([ApplicationPreferenceKey.enableAutomationServer.rawValue]),
-            Set(DesktopConfiguration.fields.map(\.key)).subtracting([DesktopConnectionPreWarming.approvalProjectionKey])
+            Set(DesktopConfiguration.fields.map(\.key)).subtracting(DesktopConfiguration.editorProjectionKeys)
         )
         let context = self.desktopContext()
         let report = SettingsValidator.validate(settings: context.currentValues, context: context)
@@ -223,7 +223,7 @@ final class SettingsConfigurationTests: XCTestCase {
     }
 
     func testDesktopSchema_grantAndConsentAreReadOnlyAndRangesMatchTheDesktopCatalogue() throws {
-        for key in ["allowAutomationConfigurationChanges", "enableAutomationServer", "analyticsEnabled"] {
+        for key in ["allowAutomationConfigurationChanges", "enableAutomationServer"] {
             XCTAssertEqual(SettingsSchema.field(forKey: key, platform: .linux)?.isReadOnly, true, key)
         }
         let report = SettingsValidator.validate(

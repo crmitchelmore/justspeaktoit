@@ -122,7 +122,7 @@ The flags live in `Project.swift`; release selection is in
 | F34 | Raw settings editor and config tools | Yes | Partial | Partial | Partial | Partial | #1608 | iOS and Android have the raw JSON editor but no automation server, so no config tools. Windows and Linux have `speak config` and MCP `get_configuration`/`set_configuration`; no raw JSON editor window yet (#1670). |
 | F35 | Automation (CLI, MCP, App Intents) | Yes | Yes | Yes | Yes | Limited | | |
 | F36 | Usage insights dashboard | Yes | No | Yes | Yes | Partial | #1623 | Android: 7-day card on History. |
-| F37 | Opt-in analytics and crash reporting | Yes | Yes | No | No | Yes | #1624 | |
+| F37 | Opt-in analytics and crash reporting | Yes | Yes | Partial | Partial | Yes | #1624 | Windows, Linux: crash reports ship; release packages do not carry the PostHog project key yet, so analytics stays off. |
 | F38 | Tip jar / paid access | Yes | Yes | No | No | Partial | #1625 | Paid access is compiled dark. Android: tip jar only. |
 | F39 | Audio file import | Yes | Yes | Yes | Yes | Yes | | |
 | F40 | Launch at login | Yes | N/A | Yes | Yes | N/A | | |
@@ -464,13 +464,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Count only completed entries with text, as `HistoryInsights` does.
 
 ### F37 Opt-in analytics and crash reporting
-- **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android Yes
+- **Platforms:** macOS Yes · iOS Yes · Windows Partial · Linux Partial · Android Yes
 - **Excluded:** none
-- **Gaps:** Windows, Linux #1624.
-- **How:** Nothing is sent until the user opts in; crash events are scrubbed before upload. Withdrawing consent drops queued analytics events (cancelling one in flight) and deletes queued crash reports without sending them.
-- **Refs:** `Sources/SpeakApp/Analytics/AnalyticsLocalPolicy.swift`, `Sources/SpeakApp/Analytics/PostHogAnalytics.swift`, `Sources/SpeakApp/Analytics/SentryManager.swift`, `Sources/SpeakApp/Analytics/SentryEventScrubber.swift`, `android/app/src/main/java/com/justspeaktoit/android/telemetry/ProductAnalytics.kt`, `android/app/src/main/java/com/justspeaktoit/android/telemetry/SentryCrashReporter.kt`
+- **Gaps:** Windows, Linux #1624 (release packages do not stamp the PostHog project key yet, so opted-in analytics sends nothing; crash reports work).
+- **How:** Nothing is sent until the user opts in; crash events are scrubbed before upload. Withdrawing consent drops queued analytics events (cancelling one in flight) and deletes queued crash reports without sending them. Windows and Linux show two separate General settings, both off, and keep the choice in the device-local `telemetry.json`, never in exported, imported or automation-written preferences. They send over the host's existing HTTPS transport (WinHTTP, URLSession) with a bounded in-memory queue and drop failures; crash reports cover fatal top-level errors and a previous session that did not shut down cleanly, from release builds only.
+- **Refs:** `Sources/SpeakCore/Analytics/ProductAnalytics.swift`, `Sources/SpeakApp/Analytics/AnalyticsLocalPolicy.swift`, `Sources/SpeakApp/Analytics/PostHogAnalytics.swift`, `Sources/SpeakApp/Analytics/SentryManager.swift`, `Sources/SpeakApp/Analytics/SentryEventScrubber.swift`, `android/app/src/main/java/com/justspeaktoit/android/telemetry/ProductAnalytics.kt`, `android/app/src/main/java/com/justspeaktoit/android/telemetry/SentryCrashReporter.kt`, `Sources/SpeakCore/Desktop/DesktopTelemetryConsent.swift`, `Sources/SpeakDesktop/Telemetry/DesktopTelemetry.swift`, `Sources/SpeakDesktop/Telemetry/DesktopTelemetryScrubber.swift`, `Sources/SpeakDesktopHost/Telemetry/DesktopHostTelemetryHTTP.swift`
 - **Sunset:** none
-- **Nuances:** Sentry is EU-hosted; PostHog covers product events only ([analytics plan](analytics-plan.md), [PostHog maintenance](posthog-maintenance.md)).
+- **Nuances:** Sentry is EU-hosted; PostHog covers product events only ([analytics plan](analytics-plan.md), [PostHog maintenance](posthog-maintenance.md)). The desktop consent keys are `desktopAnalyticsConsent` and `desktopDiagnosticsConsent`, distinct from the Mac's `analyticsEnabled` and the Apple/Android string `analyticsConsent`/`diagnosticsConsent`, so a transferred Mac or phone preference never opts a desktop in.
 
 ### F38 Tip jar / paid access
 - **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android Partial

@@ -97,3 +97,6 @@ API breakage: enumelement AutomationToolArguments.CodingKeys.dryRun has been add
 # apps never emit these and AnalyticsTaxonomyParityTest pins Android to them.
 API breakage: enumelement AnalyticsPlatform.android has been added as a new enum case
 API breakage: enumelement AnalyticsDistributionChannel.googlePlay has been added as a new enum case
+# Windows and Linux report product analytics with the shared taxonomy (#1624).
+API breakage: enumelement AnalyticsPlatform.windows has been added as a new enum case
+API breakage: enumelement AnalyticsPlatform.linux has been added as a new enum case

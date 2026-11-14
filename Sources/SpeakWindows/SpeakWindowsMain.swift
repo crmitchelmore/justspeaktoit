@@ -1,6 +1,7 @@
 import Foundation
 import CWindowsSelfTest
 import CWindowsSupport
+import SpeakCore
 import SpeakDesktop
 import SpeakDesktopHost
 import SpeakWindowsPlatform
@@ -120,6 +121,9 @@ enum SpeakWindowsMain {
         let commandLine = CommandLine.arguments.dropFirst().contains(where: { $0 != "--background" })
         _ = jsti_console_prepare(commandLine ? 1 : 0)
         WindowsModels.configureForWindows()
+        // Set once a real session's telemetry is active, so a fatal error can be
+        // reported (only with crash-report consent) before the process exits.
+        var sessionTelemetry: DesktopTelemetry?
         do {
             if try await WindowsCommandLineSelfTests.handle(CommandLine.arguments) { return }
             let screenshots = WindowsPresentation.screenshotDirectory(CommandLine.arguments)
@@ -141,11 +145,20 @@ enum SpeakWindowsMain {
             let controller = try await Task.detached {
                 try WindowsAppController(directory: directory)
             }.value
+            if !smokeTest {
+                let http = DesktopHostTelemetryHTTP(
+                    transport: WinHTTPCloudKitTransport(timeout: DesktopHostTelemetryHTTP.timeout)
+                )
+                await controller.telemetry.activate(.current(platform: .windows), http: http)
+                sessionTelemetry = controller.telemetry
+            }
             let holder = WindowsEventContext(controller: controller, smokeTest: smokeTest)
             holder.screenshotDirectory = screenshots
             try await runWindow(controller: controller, holder: holder)
+            await sessionTelemetry?.finishCleanly()
             if smokeTest { print("Native window creation and shutdown passed.") }
         } catch {
+            await sessionTelemetry?.reportFatal(error)
             FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8))
             exit(1)
         }

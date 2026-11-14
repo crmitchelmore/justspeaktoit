@@ -54,7 +54,7 @@ results issue it has already processed.
 - Every item must close or materially unblock an issue. Mark it `core: true`
   when it should be done in the owner's next session, or `core: false` to
   collapse it under Optional. Keep core time within about 40 minutes for the
-  iPhone and Android, 15 each for the Watch and Mac, and 10 for decisions. The page shows
+  iPhone and Android, 15 each for the Watch, Mac, Windows and Linux, and 10 for decisions. The page shows
   core minutes by device at the top.
 - Prefer one end-to-end scenario that verifies several issues (`issues:` takes
   up to 8 numbers) over separate checks. Drop checks for behaviour already

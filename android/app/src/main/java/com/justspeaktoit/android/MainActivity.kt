@@ -182,6 +182,8 @@ class MainActivity : ComponentActivity() {
                                 onSaveKey = viewModel::saveKey,
                                 onRemoveKey = viewModel::removeKey,
                                 onCheckBalance = viewModel::checkBalance,
+                                onSaveAzureEndpoint = viewModel::saveAzureEndpoint,
+                                onClearAzureEndpoint = viewModel::clearAzureEndpoint,
                                 onChooseModel = viewModel::chooseCloudModel,
                                 onCleanupChanged = viewModel::setCleanupEnabled,
                                 onKeepAudioOnCancelChanged = viewModel::setKeepAudioOnCancel,

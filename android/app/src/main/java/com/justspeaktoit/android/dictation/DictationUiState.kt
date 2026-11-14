@@ -45,6 +45,8 @@ data class DictationUiState(
     val originalTranscript: String? = null,
     /** Set when a key could not be saved or removed securely. */
     val keyStoreError: Boolean = false,
+    /** The saved Azure Speech resource endpoint, or empty to use the key's region. */
+    val azureEndpoint: String = "",
     /** Providers whose key last failed to save, be read or be accepted, for the Errors filter. */
     val keyErrors: Set<CloudProvider> = emptySet(),
     /** Balance accounts keyed by the credential whose card shows the balance. */

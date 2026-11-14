@@ -16,8 +16,8 @@ internal fun interface BatchPause {
 }
 
 /**
- * Runs the batch providers that are not OpenAI-compatible: one upload for Cartesia, Deepgram,
- * ElevenLabs, Meta, Mistral, Modulate, OpenRouter, Reson8, Smallest and xAI; upload, then poll, for
+ * Runs the batch providers that are not OpenAI-compatible: one upload for Alibaba, Azure, Cartesia,
+ * Deepgram, ElevenLabs, Meta, Mistral, Modulate, OpenRouter, Reson8, Smallest, StepFun and xAI; upload, then poll, for
  * AssemblyAI, Gladia, Rev AI, Soniox and Speechmatics; inline audio, or a Files API upload for a large
  * recording, for Gemini. Polling stops as soon as [CallHandle.cancel] runs. Soniox's uploads are always
  * deleted, and an abandoned Gladia or Speechmatics job is cancelled, on a background thread so a cancel
@@ -29,6 +29,8 @@ internal class BatchTranscriber(
     private val background: (() -> Unit) -> Unit = { task ->
         thread(isDaemon = true, name = "jsti-batch-cleanup") { runCatching(task) }
     },
+    /** The saved Azure Speech resource endpoint, or blank for the key's regional origin. */
+    private val azureEndpoint: () -> String = { "" },
 ) {
     fun transcribe(
         model: CloudModel,
@@ -77,6 +79,9 @@ internal class BatchTranscriber(
             CloudProvider.Gladia -> gladia(model, key, audio, format, languageTag, call)
             CloudProvider.Google -> gemini(key, audio, format, languageTag, call)
             CloudProvider.OpenRouter -> openRouter(model, key, audio, format, languageTag, call)
+            CloudProvider.Azure -> azure(model, key, audio, languageTag, vocabulary, call)
+            CloudProvider.Alibaba -> alibaba(model, key, audio, languageTag, call)
+            CloudProvider.StepFun -> stepFun(key, audio, format, languageTag, call)
             else -> throw CloudException(DictationFailure.Unavailable, "No batch route for ${model.provider.id}")
         }
     }
@@ -239,6 +244,78 @@ internal class BatchTranscriber(
         val response = transport.exchange(BatchWire.meta(model, key, audio, languageTag, vocabulary), call)
         if (!response.ok) throw CloudException(BatchWire.metaFailure(response.status), "HTTP ${response.status}")
         return BatchWire.metaText(response.body)
+    }
+
+    private fun azure(
+        model: CloudModel,
+        key: String,
+        audio: File,
+        languageTag: String?,
+        vocabulary: List<String>,
+        call: CallHandle,
+    ): String {
+        val connection = AzureSpeechCredential.connection(key, azureEndpoint())
+        BatchWire.requirePcm16Wav(audio, BatchWire.META_MAX_SECONDS, BatchWire.META_MAX_AUDIO_BYTES)
+        val response = exchangeOk(BatchWire.azure(connection, model, audio, languageTag, vocabulary), call)
+        // As on the Mac, only 200 carries a transcript.
+        if (response.status != 200) throw CloudException(DictationFailure.Server, "HTTP ${response.status}")
+        return BatchWire.azureText(response.body)
+    }
+
+    private fun alibaba(model: CloudModel, key: String, audio: File, languageTag: String?, call: CallHandle): String {
+        val credential = AlibabaCredential.parse(key) ?: throw CloudException(
+            DictationFailure.InvalidKey,
+            "Set the Alibaba region and workspace ID, then save the API key from that same region.",
+        )
+        if (!BatchWire.alibabaSupportsRegion(model.catalogId, credential.region)) {
+            throw CloudException(
+                DictationFailure.InvalidKey,
+                "Fun-ASR and Qwen3.5-Omni-Plus require a Beijing or Singapore workspace and regional key.",
+            )
+        }
+        BatchWire.requirePcm16Wav(
+            audio,
+            BatchWire.alibabaMaxSeconds(model.catalogId),
+            BatchWire.ALIBABA_MAX_AUDIO_BYTES + 1,
+        )
+        // A general audio model can describe silence, so a silent recording is never sent.
+        if (WavFormat.isSilent(audio)) return ""
+        val body = send(BatchWire.alibaba(credential, model, audio, languageTag), call)
+        return if (model.catalogId == BatchWire.ALIBABA_FUN_FLASH) {
+            BatchWire.alibabaFunText(body)
+        } else {
+            BatchWire.alibabaOmniText(body)
+        }
+    }
+
+    private fun stepFun(
+        key: String,
+        audio: File,
+        format: SharedAudio.Format,
+        languageTag: String?,
+        call: CallHandle,
+    ): String {
+        val credential = StepFunCredential.parse(key) ?: throw CloudException(
+            DictationFailure.InvalidKey,
+            "Enter a StepFun API key. Choose its region in Settings > API keys before saving.",
+        )
+        val audioFormat = BatchWire.stepFunFormat(format)
+            ?: throw CloudException(DictationFailure.UnsupportedAudio, "StepFun cannot read ${format.extension}")
+        requireAtMost(audio, BatchWire.STEPFUN_MAX_AUDIO_BYTES, "StepFun takes at most 25 MiB")
+        val response = transport.exchange(BatchWire.stepFun(credential, audio, audioFormat, languageTag), call)
+        if (!response.ok) {
+            // Keys are region-bound: report the region rather than trying the other one.
+            if (response.status == 401 || response.status == 403) {
+                throw CloudException(
+                    DictationFailure.InvalidKey,
+                    "StepFun rejected this key for the ${credential.region.displayName} region " +
+                        "(HTTP ${response.status}). Keys only work in the region that issued them.",
+                )
+            }
+            throw CloudException(CloudWire.failureForStatus(response.status), "HTTP ${response.status}")
+        }
+        if (!BatchWire.isEventStream(response)) throw CloudException(DictationFailure.Server, "Unexpected response")
+        return BatchWire.stepFunText(response.body)
     }
 
     private fun gladia(

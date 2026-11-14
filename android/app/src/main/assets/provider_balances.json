@@ -186,6 +186,39 @@
       "support" : "billingLinkOnly"
     },
     {
+      "billingUrl" : "https://portal.azure.com/#view/Microsoft_Azure_GTM/ModernBillingMenuBlade",
+      "credentialIds" : [
+        "azure.speech.apiKey"
+      ],
+      "displayName" : "Azure",
+      "id" : "azure",
+      "primaryCredentialId" : "azure.speech.apiKey",
+      "reason" : "Azure balances need a separate billing sign-in and an offer eligibility check, which a Speech resource key cannot perform.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://bailian.console.aliyun.com",
+      "credentialIds" : [
+        "alibaba.apiKey"
+      ],
+      "displayName" : "Alibaba Model Studio",
+      "id" : "alibaba",
+      "primaryCredentialId" : "alibaba.apiKey",
+      "reason" : "Speak cannot read an Alibaba balance with this Model Studio key. Check billing in your account's console.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://platform.stepfun.ai",
+      "credentialIds" : [
+        "stepfun.apiKey"
+      ],
+      "displayName" : "StepFun",
+      "id" : "stepfun",
+      "primaryCredentialId" : "stepfun.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
       "billingUrl" : "https://openrouter.ai/credits",
       "credentialIds" : [
         "openrouter.apiKey"

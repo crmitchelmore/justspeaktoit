@@ -42,6 +42,22 @@ object WavFormat {
         }.array()
     }
 
+    /** Whether every sample after the header is zero, as `AlibabaAppleBatchTranscription.hasAudio` reads it. */
+    fun isSilent(file: File): Boolean = file.inputStream().buffered().use { input ->
+        val buffer = ByteArray(8192)
+        var offset = 0L
+        var count = input.read(buffer)
+        var silent = true
+        while (count >= 0 && silent) {
+            for (i in 0 until count) {
+                if (offset + i >= HEADER_BYTES && buffer[i] != 0.toByte()) silent = false
+            }
+            offset += count
+            count = input.read(buffer)
+        }
+        silent
+    }
+
     /** Maps PCM loudness onto the -2..10 range SpeechRecognizer reports, so one meter fits both. */
     fun level(samples: ShortArray, count: Int): Float {
         if (count <= 0) return -2f

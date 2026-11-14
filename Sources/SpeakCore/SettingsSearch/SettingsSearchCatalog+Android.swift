@@ -148,7 +148,8 @@ extension SettingsSearchCatalog {
             summary: "Add or remove provider keys, encrypted with the Android Keystore, and check account balances.",
             keywords: [
                 "credentials", "token", "keystore", "openrouter key", "openai key", "deepgram key", "balance",
-                "credit", "billing"
+                "credit", "billing", "azure region", "azure endpoint", "resource endpoint", "alibaba workspace",
+                "alibaba region", "stepfun region"
             ],
             platforms: .android
         ),

@@ -6,13 +6,13 @@ import Foundation
 ///
 /// Android uploads finished recordings over plain HTTPS to OpenAI, Reson8, every provider whose
 /// shared batch client iOS calls (`BatchTranscriptionRouting.iosSharedClientProviderIDs`), the
-/// direct Cartesia, Gladia, Gemini, Meta, Smallest and xAI routes, and OpenRouter's audio models,
-/// with Kotlin clients that match those shared clients' wire formats. It uses OpenAI-compatible chat
+/// direct Cartesia, Gladia, Gemini, Meta, Smallest and xAI routes, the region-bound Azure Speech,
+/// Alibaba and StepFun routes, and OpenRouter's audio models, with Kotlin clients that match those
+/// shared clients' wire formats and credential encodings. It uses OpenAI-compatible chat
 /// for cleanup through every native text provider and OpenRouter. It offers every current batch
 /// model of those transcription providers (only the models OpenAI's and Gemini's clients send
 /// directly), except models with an announced retirement: Android has no saved-selection migration,
-/// so it never starts offering a model that is about to shut down. Azure, Alibaba and StepFun stay
-/// off Android: each key is bound to a region or resource Android has no setting for.
+/// so it never starts offering a model that is about to shut down.
 ///
 /// `CloudCatalogAndroidExportTests` fails when the committed asset is stale; regenerate it with
 /// `UPDATE_CLOUD_CATALOG_ANDROID=1 swift test --filter CloudCatalogAndroidExportTests`.
@@ -20,8 +20,8 @@ public enum CloudCatalogAndroidExport {
     /// Providers whose batch transcription API Android implements, in settings order.
     static let transcriptionProviderIDs = [
         "openai", "groq", "assemblyai", "deepgram", "elevenlabs", "mistral", "modulate", "reson8", "revai",
-        "soniox", "speechmatics", "cartesia", "gladia", "google", "meta", "smallest", "xai",
-        OpenRouterService.providerID
+        "soniox", "speechmatics", "cartesia", "gladia", "google", "meta", "smallest", "xai", "azure",
+        "alibaba", "stepfun", OpenRouterService.providerID
     ]
 
     /// Providers Android reaches through OpenAI's `/audio/transcriptions` upload.
@@ -258,9 +258,18 @@ public enum CloudCatalogAndroidExport {
                 && OpenAITranscriptionModels.supportsBatchPrompt(apiName),
             languageCodes: languageCodes(for: option.id),
             languageHints: languageHints(for: option.id),
-            requiresPCM16WAV: option.id == MetaMuseVoiceTranscribe.batchCatalogID
-                || OpenRouterInlineAudioTranscriptionClient.requiresCanonicalPCM16WAV(model: option.id)
+            requiresPCM16WAV: requiresPCM16WAV(option.id)
         )
+    }
+
+    /// Models whose Android client reads the recording as canonical 16 kHz PCM16 WAV: Meta, Azure
+    /// (sent as Meta's WAV, as on the desktop hosts), Alibaba (whose duration and silence checks read
+    /// the samples) and OpenRouter's WAV-only audio models.
+    static func requiresPCM16WAV(_ catalogID: String) -> Bool {
+        catalogID == MetaMuseVoiceTranscribe.batchCatalogID
+            || AzureTranscriptionModels.batchIDs.contains(catalogID)
+            || AlibabaSpeechModels.batchIDs.contains(catalogID)
+            || OpenRouterInlineAudioTranscriptionClient.requiresCanonicalPCM16WAV(model: catalogID)
     }
 
     private static func exportedCleanup(_ option: ModelCatalog.Option) -> CleanupModel {

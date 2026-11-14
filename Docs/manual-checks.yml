@@ -1835,6 +1835,23 @@ sessions:
           - "Repeat with a second provider, then open History."
         expected: "The model list shows Cartesia, Gladia, Gemini 3.5 Transcribe, Meta Muse Voice, Smallest AI Pulse Pro, Grok Voice Transcribe and the OpenRouter audio models. Each recording returns the spoken words, History names the chosen model, and a missing or wrong key names that provider's key."
         final_gate: false
+      - id: "android-batch-regional-providers"
+        issues:
+          - 1724
+        title: "Cloud transcription: Azure, Alibaba and StepFun with their region settings"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, an Alpha APK that includes the Azure, Alibaba and StepFun change for #1724"
+        prerequisites:
+          - "A key for at least one of an Azure Speech resource (with its region), an Alibaba Model Studio workspace (with its region and workspace ID) or StepFun (knowing which platform issued it). Use made-up sentences only."
+        steps:
+          - "Settings: open API keys. For Azure enter the resource's region, then save the key; for Alibaba choose the region and enter the workspace ID, then save the key; for StepFun choose International or China, then save the key."
+          - "With TalkBack on, move through the new region, endpoint and workspace fields and check each is read with its name."
+          - "Choose Cloud, pick Azure Fast Transcription (or an Azure MAI model), an Alibaba model or StepFun StepAudio 3 ASR Max, record \"regional providers check one two three\" for about ten seconds and stop."
+          - "For Azure, paste the HTTPS endpoint from the resource's Keys and Endpoint page, tap Save endpoint and record again; then clear it."
+          - "Save a StepFun key under the other region, or an Alibaba key with Fun-ASR in a region other than Beijing or Singapore, and record once more."
+        expected: "Each recording returns the spoken words and History names the chosen model. Azure works with the region alone and with the saved endpoint. A key saved under the wrong region, or Fun-ASR outside Beijing or Singapore, fails with a key error for that provider and never succeeds silently."
+        final_gate: false
   - id: "windows"
     device: "Windows"
     title: "Windows"

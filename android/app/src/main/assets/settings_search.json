@@ -227,6 +227,25 @@
       "title" : "Recording sounds"
     },
     {
+      "id" : "android.microphone",
+      "keywords" : [
+        "input device",
+        "microphone",
+        "mic",
+        "headset",
+        "bluetooth",
+        "usb",
+        "external microphone"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+        "preferredAudioInputUID"
+      ],
+      "summary" : "Choose the microphone Cloud recordings use: built-in, wired, USB or Bluetooth.",
+      "title" : "Microphone"
+    },
+    {
       "id" : "android.silenceDetection",
       "keywords" : [
         "silence",

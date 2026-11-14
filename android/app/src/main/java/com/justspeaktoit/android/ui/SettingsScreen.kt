@@ -104,6 +104,7 @@ class SettingsActions(
     /** Applies validated raw-configuration changes all or none; false when they cannot apply now. */
     val onApplyConfiguration: (Map<String, Any?>) -> Boolean = { false },
     val onRecordingSoundsChanged: (RecordingSoundSettings) -> Unit = {},
+    val onAudioInputChanged: (String?) -> Unit = {},
     val onPreviewRecordingSound: () -> Unit = {},
     val onSilenceChanged: (SilenceSettings) -> Unit = {},
     val onRunSetup: () -> Unit = {},
@@ -318,6 +319,14 @@ fun SettingsScreen(
                 onChange = actions.onRecordingSoundsChanged,
                 onPreview = actions.onPreviewRecordingSound,
                 modifier = anchor("android.recordingSounds"),
+            )
+
+            HorizontalDivider()
+            MicrophoneSection(
+                choice = state.audioInputChoice,
+                inputs = state.audioInputs,
+                onChoose = actions.onAudioInputChanged,
+                modifier = anchor("android.microphone"),
             )
 
             HorizontalDivider()

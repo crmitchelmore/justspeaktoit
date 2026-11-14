@@ -5,11 +5,14 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.justspeaktoit.android.cloud.AudioInput
+import com.justspeaktoit.android.cloud.AudioInputSource
 import com.justspeaktoit.android.cloud.AudioRecorder
 import com.justspeaktoit.android.cloud.CallHandle
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudService
+import com.justspeaktoit.android.cloud.InputRoute
 import com.justspeaktoit.android.cloud.CaptureLevel
 import com.justspeaktoit.android.cloud.RecorderFactory
 import com.justspeaktoit.android.cloud.SharedAudio
@@ -281,6 +284,7 @@ internal class MemoryPrefs(
     override var profiles: List<DictationProfile> = emptyList(),
     override var activeProfileId: String? = null,
     override var recordingSounds: RecordingSoundSettings = RecordingSoundSettings(),
+    override var audioInputId: String? = null,
     override var silence: SilenceSettings = SilenceSettings(),
 ) : DictationPreferences
 
@@ -295,6 +299,32 @@ internal class MemoryHistoryFile : HistoryFile {
 
     override fun delete() {
         text = null
+    }
+}
+
+/** Microphones a test connects and disconnects; changes reach the ViewModel through its watch. */
+internal class FakeAudioInputs : AudioInputSource {
+    @Volatile var connected: List<AudioInput> = emptyList()
+
+    @Volatile private var onChange: (() -> Unit)? = null
+
+    @Volatile var watching = false
+        private set
+
+    override fun inputs(): List<AudioInput> = connected
+
+    override fun route(id: String): InputRoute? = null
+
+    override fun watch(onChange: () -> Unit): AutoCloseable {
+        this.onChange = onChange
+        watching = true
+        return AutoCloseable { watching = false }
+    }
+
+    /** Call on the ViewModel's main thread, as Android's device callback is. */
+    fun change(inputs: List<AudioInput>) {
+        connected = inputs
+        onChange?.invoke()
     }
 }
 
@@ -328,6 +358,7 @@ internal class ViewModelHarness(
     val resources = SystemResourceRegistry()
     val interruptions = FakeInterruptions()
     val foreground = FakeForeground()
+    val audioInputs = FakeAudioInputs()
     /** The (mode, model) pairs the ViewModel reported as successful transcriptions. */
     val successes = CopyOnWriteArrayList<Pair<RecognitionMode, CloudModel>>()
 
@@ -356,6 +387,7 @@ internal class ViewModelHarness(
                     interruptions = interruptions,
                     foreground = foreground,
                     onTranscriptionSucceeded = { mode, model -> successes += mode to model },
+                    audioInputs = audioInputs,
                 )
             }
         }

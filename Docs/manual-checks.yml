@@ -1404,6 +1404,21 @@ sessions:
           - "With TalkBack on, move through the search field, filter buttons and the summary line."
         expected: "Search matches transcript text and model names, ignoring case. Each filter narrows the list, and the summary reads \"Showing N of M dictations\" or that nothing matches. A one-day range includes entries from early morning to late evening of that day only. Any day removes that end of the range and Clear filters shows every entry again. Rotating keeps the filters, and every entry is still there after reopening. TalkBack names every control and announces the summary as it changes."
         final_gate: false
+      - id: "android-microphone-selection"
+        issues:
+          - 1637
+        title: "Android: Cloud recordings use the chosen microphone and fall back visibly"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes microphone selection"
+        steps:
+          - "Connect a wired, USB or Bluetooth headset (Bluetooth needs Android 12 or later) and pick Cloud mode."
+          - "Settings > Microphone: choose the headset, then make a Cloud dictation speaking only into the headset with the phone held away."
+          - "Choose Built-in microphone and dictate again speaking only into the phone."
+          - "Choose the headset again, disconnect it, and open the dictation screen; dictate once."
+          - "Reconnect the headset and reopen Settings > Microphone."
+        expected: "Each dictation transcribes the voice from the chosen microphone. While the headset is disconnected, Settings and the dictation screen say the chosen microphone isn't connected and the dictation still records from the phone. After reconnecting, the headset is selected again with no warning. Ending a Bluetooth dictation returns call and media audio to normal."
+        final_gate: false
       - id: "android-foreground-long-dictation"
         issues:
           - 1592

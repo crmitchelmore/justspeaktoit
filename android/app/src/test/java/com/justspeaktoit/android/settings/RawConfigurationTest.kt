@@ -46,6 +46,7 @@ class RawConfigurationTest {
         "autoCorrectionsEnabled" to "Learned corrections are edited in Settings only for now.",
         "autoCorrectionsPromotionThreshold" to "Learned corrections are edited in Settings only for now.",
         "keepRecordingsInHistory" to "Keeping recordings is edited in Settings only for now.",
+        "preferredAudioInputUID" to "A device ID only means something on the phone that saved it.",
     )
 
     private fun validate(settings: String, current: Map<String, Any?> = fresh) =

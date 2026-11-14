@@ -204,6 +204,14 @@
     <string name="settings_sounds_volume">Volume</string>
     <string name="settings_sounds_volume_value">%1$d%%</string>
     <string name="settings_sounds_preview">Play sample</string>
+    <string name="settings_microphone_title">Microphone</string>
+    <string name="settings_microphone_note">Cloud recordings use this microphone. On-device and speech service dictation always use the system microphone.</string>
+    <string name="settings_microphone_default">System default</string>
+    <string name="microphone_built_in">Built-in microphone</string>
+    <string name="microphone_wired">Wired headset</string>
+    <string name="microphone_usb">USB microphone</string>
+    <string name="microphone_bluetooth">Bluetooth headset</string>
+    <string name="microphone_unavailable">Your chosen microphone isn\'t connected, so recordings use the system default until it\'s back.</string>
     <string name="settings_silence_title">Stop recording after silence</string>
     <string name="settings_silence_note">Cloud mode only: the recording stops and is transcribed once you have been quiet this long. On-device and speech-service recognition already stop when you pause.</string>
     <string name="settings_silence_duration">Silence duration</string>

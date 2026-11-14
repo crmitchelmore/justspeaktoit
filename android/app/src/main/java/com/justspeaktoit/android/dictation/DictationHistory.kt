@@ -38,6 +38,9 @@ internal class DictationHistory(
     /** The latest session's entry, so a later cleanup updates it rather than adding another. */
     private var sessionEntry: HistoryEntry? = null
 
+    /** The latest change; the next one waits for it, so changes publish in call order. */
+    private var last: Job? = null
+
     /** The entry [recordSession] wrote last, so an interrupted recording can be attached to it. */
     val latestSession: HistoryEntry? get() = sessionEntry
 
@@ -154,7 +157,7 @@ internal class DictationHistory(
         }
 
     /** Replaces an entry and returns once the change is written and published. */
-    suspend fun replace(entry: HistoryEntry, retention: Retention) = apply { store.replace(entry, retention) }
+    suspend fun replace(entry: HistoryEntry, retention: Retention) = update { store.replace(entry, retention) }.join()
 
     /** Saves each recording as a failed Cloud entry with its audio, ready to transcribe. */
     private fun recover(files: List<File>, retention: Retention): List<HistoryEntry> {
@@ -188,7 +191,18 @@ internal class DictationHistory(
         return entries
     }
 
-    private fun update(change: () -> List<HistoryEntry>): Job = scope.launch { apply(change) }
+    /**
+     * Chains each change after the previous one. Writes alone are ordered by [writer], but when a
+     * write finishes before its caller suspends, `withContext` returns at once and that change can
+     * publish ahead of an earlier one whose resumption is still queued on [scope].
+     */
+    private fun update(change: () -> List<HistoryEntry>): Job {
+        val previous = last
+        return scope.launch {
+            previous?.join()
+            apply(change)
+        }.also { last = it }
+    }
 
     private suspend fun apply(change: () -> List<HistoryEntry>) {
         val (entries, failed) = withContext(writer) {

@@ -22,6 +22,8 @@ struct IOSBatchTranscriptionClient {
         let model = ModelRetirements.successor(for: trimmed, mode: .batch) ?? trimmed
         try ModelRetirements.ensureAvailable(model)
         switch IOSBatchTranscriptionRoute.route(for: model) {
+        case .downloadedLocal:
+            return try await IOSLocalTranscriptionModels.transcribe(at: url, modelID: model, language: language)
         case .fileSpeech(let provider):
             return try await FileSpeechBatchClient(
                 provider: provider, session: session,

@@ -60,6 +60,7 @@ final class BatchProviderRoutingTests: XCTestCase {
     private static func providerID(for route: IOSBatchTranscriptionRoute) -> String {
         switch route {
         case .appleSpeechAnalyzer: return "apple"
+        case .downloadedLocal: return "local"
         case .openAI: return "openai"
         case .metaMuse: return "meta"
         case .azure: return "azure"

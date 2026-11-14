@@ -133,6 +133,15 @@ public struct LocalModelHostSupport: Equatable, Sendable {
     /// present is a separate runtime check.
     public static let linux = LocalModelHostSupport(backends: [.whisperCppGGML])
 
+    /// iOS and iPadOS run WhisperKit's Core ML models in process, for batch
+    /// transcription of completed recordings. The downloads are model weights
+    /// (data), never code, so they are allowed by App Store guideline 2.5.2.
+    /// sherpa-onnx, whisper.cpp and llama.cpp would need a runtime compiled into
+    /// the app, and Fermion spawns an executable, so none of them run here.
+    /// Larger models also need a recent device with enough memory, which the
+    /// host reports as advice rather than hiding the entry.
+    public static let iOS = LocalModelHostSupport(backends: [.whisperKitCoreML])
+
     /// macOS runs WhisperKit's Core ML models in process on every channel.
     /// sherpa-onnx, llama.cpp and Fermion install or spawn executables, which only
     /// Developer ID builds may do; SpeakApp applies the same rule at compile

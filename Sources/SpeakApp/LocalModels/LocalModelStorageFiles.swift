@@ -35,15 +35,6 @@ struct LocalModelSourceFile<Record: Codable> {
   }
 }
 
-/// Validation shared by every "add a Hugging Face model" form.
-enum HuggingFaceRepoInput {
-  /// Whether the text names an `owner/repo` repository. Callers trim first
-  /// when they submit, so a form can enable before trailing spaces are gone.
-  static func isValidRepoID(_ text: String) -> Bool {
-    text.split(separator: "/").count == 2
-  }
-}
-
 /// Installs a download through a `.download` sibling that replaces the final
 /// file or folder only once `fill` succeeds, so a failed or cancelled
 /// download never leaves partial files where a model is expected.

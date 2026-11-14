@@ -1336,6 +1336,23 @@ sessions:
           - "Repeat the first dictation and fix in a password field, and once with Learn Corrections Automatically off."
         expected: "After the first fix, Candidates shows the wrong word \u2192 the right one, seen once, with Add and Dismiss buttons. After the second it moves to Applied to Transcripts and the third dictation is spelt correctly in the app and the keyboard. Once removed, the wrong spelling comes back. Nothing is learned from the password field or with learning off. VoiceOver reads every button's label."
         final_gate: false
+      - id: "ios-downloaded-local-models"
+        issues:
+          - 1650
+        title: "Downloaded Whisper models transcribe recordings on the device"
+        minutes: 10
+        core: false
+        build: "TestFlight Just Speak to It Alpha, the first build that includes #1650 iOS downloaded local transcription models, on an iPhone and an iPad"
+        steps:
+          - "Open Settings \u203a Transcription \u203a Downloaded Models. Check each model shows its size and whether it is recommended for this device, then tap Download on the smallest one."
+          - "Watch the progress bar, then tap Cancel on a second model part-way through: it returns to Download and its partial files are gone."
+          - "When the first finishes, set Where transcription runs = Local and Local Engine = Downloaded Model, and pick the downloaded model."
+          - "Turn on Airplane Mode, record a sentence and stop. Then record about five seconds of silence and stop."
+          - "Open History and the sentence's detail. Then pick a model you have not downloaded, record again, and remove the downloaded model with its Remove button."
+          - "Expand Import from Hugging Face, enter argmaxinc/whisperkit-coreml and openai_whisper-base.en, tap Add Model, then download it."
+          - "Turn VoiceOver on and move through a model row while it downloads."
+        expected: "The sentence is transcribed with Airplane Mode on and History names the model (for example WhisperKit Base), never a generic label or a cloud provider. The silent recording produces no text and no placeholder. The not-downloaded model fails with a message to download it rather than uploading. Removed models show Download again. The import appears in the list and downloads. VoiceOver reads each model's name, size, state and progress, and announces when a download finishes."
+        final_gate: false
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"

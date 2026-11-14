@@ -51,6 +51,9 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
         SentryManager.start()
         SentryManager.observeConsent()
         if HostedUnitTestLaunch.isActive { return true }
+        // Downloaded transcription models run in process; registering does no
+        // file or model work until a model is downloaded or used.
+        IOSLocalTranscriptionEngines.register(WhisperKitLocalTranscriptionEngine())
         iOSHistoryManager.resetSyncStateIfContainerChanged()
         UNUserNotificationCenter.current().delegate = self
         TranscriptReadyNotificationRoute.reconcileDisabledPreference()

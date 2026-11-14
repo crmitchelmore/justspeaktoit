@@ -89,6 +89,31 @@ public enum WhisperKitHuggingFaceModels {
         )
     }
 
+    /// Persisted imports with legacy identifiers normalised, and whether any
+    /// changed (so the host writes the canonical list back). When two records
+    /// resolve to one identifier, the later import wins.
+    public static func loadImportedModels(
+        from records: [LocalTranscriptionModelRecord]
+    ) -> (models: [LocalTranscriptionModel], didMigrate: Bool) {
+        var didMigrate = false
+        let migrated = records.map { record in
+            let model = normalizedImportedModel(record.model)
+            if model != record.model { didMigrate = true }
+            return model
+        }
+        return (deduplicated(migrated), didMigrate)
+    }
+
+    /// `models` with one entry per identifier, keeping the later one in place.
+    public static func deduplicated(_ models: [LocalTranscriptionModel]) -> [LocalTranscriptionModel] {
+        var seenIDs = Set<String>()
+        return models.reversed().compactMap { model in
+            guard !seenIDs.contains(model.id) else { return nil }
+            seenIDs.insert(model.id)
+            return model
+        }.reversed()
+    }
+
     /// Resolves Argmax shorthands to exact variants. Any other name is kept,
     /// trimmed, with a size parsed from a trailing `_<n>MB` component (or 0).
     public static func resolve(repoID: String, modelName: String) -> ResolvedHuggingFaceModel {

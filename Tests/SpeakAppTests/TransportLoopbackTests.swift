@@ -275,9 +275,12 @@ final class TransportLoopbackTests: XCTestCase {
     /// A channel that finished the encrypted handshake but has not authenticated.
     func securedChannel(to endpoint: NWEndpoint) async throws -> TransportChannel {
         let channel = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
+        let pairingCode = PairingManager.shared.pairingCode
         do {
-            try await channel.start()
-            try await channel.establishSecureSession(pairingCode: PairingManager.shared.pairingCode)
+            try await withHangGuard("secure session") {
+                try await channel.start()
+                try await channel.establishSecureSession(pairingCode: pairingCode)
+            }
             return channel
         } catch {
             channel.close()
@@ -290,7 +293,11 @@ final class TransportLoopbackTests: XCTestCase {
         do {
             try await channel.send(.hello(HelloMessage(deviceName: "Test Phone", deviceId: deviceId)))
             try await channel.send(.authenticate(AuthenticateMessage(pairingCode: PairingManager.shared.pairingCode)))
-            guard case .authResult(let result) = try await channel.receive(), result.success else {
+            let authenticated = try await withHangGuard("auth result") { () -> Bool in
+                guard case .authResult(let result) = try await channel.receive() else { return false }
+                return result.success
+            }
+            guard authenticated else {
                 throw NSError(domain: "TransportLoopbackTests", code: 1)
             }
             // Auth sends its result before registering the device; ping is a barrier.
@@ -302,9 +309,15 @@ final class TransportLoopbackTests: XCTestCase {
         }
     }
 
+    /// Every receive here is hang-guarded: a Network.framework receive can miss its completion, and an
+    /// unguarded await then stalls the whole test run instead of failing this test.
     func ping(_ channel: TransportChannel) async throws {
         try await channel.send(.ping)
-        guard case .pong = try await channel.receive() else {
+        let ponged = try await withHangGuard("pong") { () -> Bool in
+            guard case .pong = try await channel.receive() else { return false }
+            return true
+        }
+        guard ponged else {
             throw NSError(domain: "TransportLoopbackTests", code: 2)
         }
     }

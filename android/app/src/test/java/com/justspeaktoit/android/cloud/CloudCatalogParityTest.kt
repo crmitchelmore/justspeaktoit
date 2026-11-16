@@ -57,7 +57,7 @@ class CloudCatalogParityTest {
                 it.getBoolean("requiresPCM16WAV").toString(),
             )
         }
-        val actual = CloudCatalog.transcriptionModels.map {
+        val actual = CloudCatalog.batchTranscriptionModels.map {
             listOf(
                 it.catalogId,
                 it.displayName,
@@ -71,7 +71,36 @@ class CloudCatalogParityTest {
             )
         }
         assertEquals(expected, actual)
-        assertEquals(CloudCatalog.transcriptionModels.first(), CloudCatalog.defaultTranscriptionModel)
+        assertEquals(CloudCatalog.batchTranscriptionModels.first(), CloudCatalog.defaultTranscriptionModel)
+    }
+
+    @Test
+    fun testLiveModels_matchTheGeneratedCatalogueInOrder() {
+        val expected = asset.getJSONArray("liveTranscriptionModels").objects().map {
+            listOf(
+                it.getString("catalogId"),
+                it.getString("displayName"),
+                it.getString("provider"),
+                it.getString("apiName"),
+                it.getInt("sampleRate").toString(),
+                it.getString("languageField"),
+                it.getString("vocabularyField"),
+                it.getInt("postStopFinalizeBudgetMs").toString(),
+            )
+        }
+        val actual = CloudCatalog.liveTranscriptionModels.map {
+            val live = checkNotNull(it.live)
+            listOf(
+                it.catalogId, it.displayName, it.provider.id, it.apiName, live.sampleRate.toString(),
+                live.languageField, live.vocabularyField, live.finalizeBudgetMs.toString(),
+            )
+        }
+        assertTrue(actual.isNotEmpty())
+        assertEquals(expected, actual)
+        assertEquals(
+            CloudCatalog.batchTranscriptionModels + CloudCatalog.liveTranscriptionModels,
+            CloudCatalog.transcriptionModels,
+        )
     }
 
     @Test

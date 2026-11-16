@@ -101,6 +101,7 @@ dependencies {
     implementation(libs.androidx.fragment)
     implementation(libs.sentry.android.core)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
     testImplementation(libs.org.json)
@@ -156,6 +157,18 @@ abstract class GenerateCloudCatalog : DefaultTask() {
                 "            languageCodes = ${codes(it["languageCodes"])},\n" +
                 "            languageHints = ${hints(it["languageHints"])},\n" +
                 "            requiresPCM16WAV = ${it["requiresPCM16WAV"] as Boolean},\n" +
+                "        ),\n"
+        }
+        val liveModels = objects("liveTranscriptionModels").joinToString("") {
+            "        LiveModelSpec(\n" +
+                "            catalogId = ${lit(it["catalogId"])},\n" +
+                "            displayName = ${lit(it["displayName"])},\n" +
+                "            providerId = ${lit(it["provider"])},\n" +
+                "            apiName = ${lit(it["apiName"])},\n" +
+                "            sampleRate = ${it["sampleRate"] as Int},\n" +
+                "            languageField = ${lit(it["languageField"])},\n" +
+                "            vocabularyField = ${lit(it["vocabularyField"])},\n" +
+                "            postStopFinalizeBudgetMs = ${it["postStopFinalizeBudgetMs"] as Int},\n" +
                 "        ),\n"
         }
         val cleanupModels = objects("cleanupModels").joinToString("") {
@@ -223,6 +236,10 @@ abstract class GenerateCloudCatalog : DefaultTask() {
             |${models.trimEnd('\n')}
             |    )
             |
+            |    val liveTranscriptionModels: List<LiveModelSpec> = listOf(
+            |${liveModels.trimEnd('\n')}
+            |    )
+            |
             |    val cleanupModels: List<CleanupModelSpec> = listOf(
             |${cleanupModels.trimEnd('\n')}
             |    )
@@ -247,6 +264,7 @@ abstract class GenerateCloudCatalog : DefaultTask() {
             |    /** SpeakCore's `DictationProfile`: where profiles are stored and the fields they encode. */
             |    const val PROFILE_STORAGE_KEY = ${lit(profiles["storageKey"])}
             |    const val PROFILE_CLOUD_TRANSCRIPTION_ROUTING = ${lit(profiles["cloudTranscriptionRouting"])}
+            |    const val PROFILE_CLOUD_STREAMING_TRANSCRIPTION_ROUTING = ${lit(profiles["cloudStreamingTranscriptionRouting"])}
             |    val PROFILE_FIELDS: List<String> = listOf(
             |${profileFields.trimEnd('\n')}
             |    )

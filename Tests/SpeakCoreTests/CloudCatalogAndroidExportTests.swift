@@ -47,6 +47,37 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         XCTAssertEqual(models.first?.id, OpenAITranscriptionModels.gptTranscribeCatalogID)
     }
 
+    func testLiveModelsAreCurrentRoutesOfAndroidLiveProviders() throws {
+        let models = CloudCatalogAndroidExport.liveTranscriptionModels
+        let expected = ModelCatalog.liveTranscription.filter { option in
+            guard let route = LiveTranscriptionRouting.route(for: option.id) else { return false }
+            return [.deepgram, .assemblyai, .openai].contains(route.provider)
+                && ModelRetirements.retirement(for: option.id) == nil
+        }
+        XCTAssertEqual(models.map(\.id), expected.map(\.id))
+        for model in models {
+            let provider = try XCTUnwrap(LiveTranscriptionRouting.route(for: model.id)).provider.rawValue
+            XCTAssertTrue(CloudCatalogAndroidExport.transcriptionProviderIDs.contains(provider), model.id)
+        }
+        XCTAssertTrue(models.map(\.id).contains(AssemblyAIModels.universal36ProStreamingID))
+        XCTAssertTrue(models.map(\.id).contains(OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID))
+
+        let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
+        let exported = try XCTUnwrap(object?["liveTranscriptionModels"] as? [[String: Any]])
+        for entry in exported {
+            let id = try XCTUnwrap(entry["catalogId"] as? String)
+            let route = try XCTUnwrap(LiveTranscriptionRouting.route(for: id))
+            let capabilities = ModelCatalog.liveCapabilities(for: id)
+            XCTAssertEqual(entry["apiName"] as? String, route.apiModelName, id)
+            XCTAssertEqual(entry["sampleRate"] as? Int, route.sampleRate, id)
+            XCTAssertEqual((entry["languageField"] as? String)?.isEmpty, !capabilities.supportsLanguageHint, id)
+            XCTAssertEqual(
+                entry["postStopFinalizeBudgetMs"] as? Int,
+                Int((capabilities.postStopFinalizeBudget * 1000).rounded()), id
+            )
+        }
+    }
+
     /// Android offers every provider whose shared batch client iOS calls, plus OpenAI, Reson8, the
     /// direct routes the desktop hosts run, the region-bound Azure, Alibaba and StepFun routes and
     /// OpenRouter, so every current batch model reaches Android.

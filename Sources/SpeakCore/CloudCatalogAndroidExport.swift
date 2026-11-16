@@ -14,6 +14,11 @@ import Foundation
 /// directly), except models with an announced retirement: Android has no saved-selection migration,
 /// so it never starts offering a model that is about to shut down.
 ///
+/// Android also streams the live routes whose protocols it implements natively (Deepgram,
+/// AssemblyAI Universal-3.6 Pro and OpenAI Realtime), with the canonical identifiers, sample rates,
+/// language-hint and vocabulary fields and post-stop finalise budgets, so the Kotlin clients never
+/// keep a second list. Retired live models are not offered, for the same reason as batch models.
+///
 /// `CloudCatalogAndroidExportTests` fails when the committed asset is stale; regenerate it with
 /// `UPDATE_CLOUD_CATALOG_ANDROID=1 swift test --filter CloudCatalogAndroidExportTests`.
 public enum CloudCatalogAndroidExport {
@@ -141,8 +146,10 @@ public enum CloudCatalogAndroidExport {
     /// Where and how Android stores `DictationProfile`s, so its profiles keep the shared shape.
     private struct Profiles: Encodable {
         let storageKey: String
-        /// The routing Android writes for a profile's cloud model: it only uploads finished recordings.
+        /// The routing Android writes for a profile's batch cloud model: the finished recording is uploaded.
         let cloudTranscriptionRouting: String
+        /// The routing Android writes for a profile's live cloud model: audio streams while recording.
+        let cloudStreamingTranscriptionRouting: String
         /// `DictationProfile`'s JSON field names; Android writes only these.
         let fields: [String]
     }
@@ -184,6 +191,7 @@ public enum CloudCatalogAndroidExport {
         let version: Int
         let providers: [Provider]
         let transcriptionModels: [Model]
+        let liveTranscriptionModels: [LiveModel]
         let cleanup: Cleanup
         let cleanupModels: [CleanupModel]
         /// Removed cleanup selections and the offered model each now uses.
@@ -201,6 +209,7 @@ public enum CloudCatalogAndroidExport {
             version: 1,
             providers: providers,
             transcriptionModels: transcriptionModels.map(exported),
+            liveTranscriptionModels: liveTranscriptionModels.compactMap(exportedLive),
             cleanup: Cleanup(
                 provider: OpenRouterService.providerID,
                 model: ModelCatalog.defaultPostProcessingModel,
@@ -217,6 +226,7 @@ public enum CloudCatalogAndroidExport {
             profiles: Profiles(
                 storageKey: DataMigrationProfileCatalog.defaultsKey,
                 cloudTranscriptionRouting: DictationProfileTranscriptionRouting.remoteBatch.rawValue,
+                cloudStreamingTranscriptionRouting: DictationProfileTranscriptionRouting.remoteStreaming.rawValue,
                 fields: DictationProfile.CodingKeys.allCases.map(\.rawValue)
             ),
             openRouterBrowser: openRouterBrowser,
@@ -268,16 +278,6 @@ public enum CloudCatalogAndroidExport {
             languageHints: languageHints(for: option.id),
             requiresPCM16WAV: requiresPCM16WAV(option.id)
         )
-    }
-
-    /// Models whose Android client reads the recording as canonical 16 kHz PCM16 WAV: Meta, Azure
-    /// (sent as Meta's WAV, as on the desktop hosts), Alibaba (whose duration and silence checks read
-    /// the samples) and OpenRouter's WAV-only audio models.
-    static func requiresPCM16WAV(_ catalogID: String) -> Bool {
-        catalogID == MetaMuseVoiceTranscribe.batchCatalogID
-            || AzureTranscriptionModels.batchIDs.contains(catalogID)
-            || AlibabaSpeechModels.batchIDs.contains(catalogID)
-            || OpenRouterInlineAudioTranscriptionClient.requiresCanonicalPCM16WAV(model: catalogID)
     }
 
     private static func exportedCleanup(_ option: ModelCatalog.Option) -> CleanupModel {
@@ -337,5 +337,17 @@ public enum CloudCatalogAndroidExport {
 
     private static func providerID(of catalogID: String) -> String {
         String(catalogID.prefix { $0 != "/" })
+    }
+}
+
+extension CloudCatalogAndroidExport {
+    /// Models whose Android client reads the recording as canonical 16 kHz PCM16 WAV: Meta, Azure
+    /// (sent as Meta's WAV, as on the desktop hosts), Alibaba (whose duration and silence checks read
+    /// the samples) and OpenRouter's WAV-only audio models.
+    static func requiresPCM16WAV(_ catalogID: String) -> Bool {
+        catalogID == MetaMuseVoiceTranscribe.batchCatalogID
+            || AzureTranscriptionModels.batchIDs.contains(catalogID)
+            || AlibabaSpeechModels.batchIDs.contains(catalogID)
+            || OpenRouterInlineAudioTranscriptionClient.requiresCanonicalPCM16WAV(model: catalogID)
     }
 }

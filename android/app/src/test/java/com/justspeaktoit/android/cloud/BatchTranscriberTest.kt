@@ -52,7 +52,7 @@ class BatchTranscriberTest {
     fun testEveryCatalogueModel_hasATranscriptionRoute() {
         audio.writeBytes(WavFormat.header(2) + ByteArray(2))
         val failing = BatchTranscriber(transport = { _, _ -> BatchWire.Response(401, "") }, background = {})
-        for (model in CloudCatalog.transcriptionModels.filterNot { it.provider.isOpenAICompatible }) {
+        for (model in CloudCatalog.batchTranscriptionModels.filterNot { it.provider.isOpenAICompatible }) {
             val error = assertThrows(CloudException::class.java) {
                 failing.transcribe(model, "k", audio, null, CallHandle(), wav, emptyList())
             }

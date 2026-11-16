@@ -38,6 +38,8 @@ internal class HistoryRetry(
         keepAudio: Boolean = false,
     ): HistoryEntry {
         val file = File(entry.audioPath ?: return entry)
+        // A streaming model cannot transcribe a file; the audio stays for a retry with a batch model.
+        if (model.live != null) return entry.copy(failure = DictationFailure.LiveOnlyModel.name)
         return try {
             if (!withContext(io) { file.isFile }) {
                 // The audio is gone, so the entry can no longer be transcribed.

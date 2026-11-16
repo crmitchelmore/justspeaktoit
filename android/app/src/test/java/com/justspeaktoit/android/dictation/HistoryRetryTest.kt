@@ -9,6 +9,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -72,6 +73,19 @@ class HistoryRetryTest {
         secrets.remove("openai.apiKey")
         assertEquals(DictationFailure.MissingKey.name, transcribe(kept(audio)).failure)
         assertEquals(2, cloud.transcriptions.size)
+    }
+
+    @Test
+    fun testLiveOnlyModel_failsWithoutUploadingAndKeepsTheAudio() {
+        val audio = folder.newFile("a.wav")
+        val liveModel = CloudCatalog.liveTranscriptionModels.first()
+
+        val updated = runBlocking { retry.transcribe(kept(audio), liveModel, "en-GB") }
+
+        assertEquals(DictationFailure.LiveOnlyModel.name, updated.failure)
+        assertEquals(audio.absolutePath, updated.audioPath)
+        assertTrue(audio.exists())
+        assertTrue(cloud.transcriptions.isEmpty())
     }
 
     @Test

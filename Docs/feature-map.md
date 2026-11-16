@@ -88,7 +88,7 @@ The flags live in `Project.swift`; release selection is in
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | F01 | Global record hotkey (hold, toggle, double-tap) | Yes | N/A | Yes | Limited | N/A | | Linux depends on the Wayland portal. |
 | F02 | Custom action shortcuts | Yes | N/A | Yes | Yes | N/A | | |
-| F03 | Live streaming cloud transcription | Yes | Yes | Yes | Yes | Partial | #1590 | Android partials come only from the platform recogniser. |
+| F03 | Live streaming cloud transcription | Yes | Yes | Yes | Yes | Partial | #1590 | Android streams Deepgram, AssemblyAI and OpenAI Realtime only. |
 | F04 | Batch cloud provider catalogue | Yes | Yes | Yes | Yes | Yes | | |
 | F05 | Downloaded local transcription models | Yes | Partial | Yes | Yes | No | #1650 | iOS: WhisperKit Core ML batch transcription only; no live, sherpa-onnx or Phonon models. |
 | F06 | Platform on-device recogniser | Yes | Yes | N/A | N/A | Yes | | |
@@ -160,11 +160,11 @@ The flags live in `Project.swift`; release selection is in
 ### F03 Live streaming cloud transcription
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Partial
 - **Excluded:** none
-- **Gaps:** Android #1590 (cloud partials).
+- **Gaps:** Android #1590 (streams Deepgram, AssemblyAI and OpenAI Realtime; other live routes are not yet offered).
 - **How:** Shared provider clients in `SpeakCore/Live` own protocol, readiness, framing and finish sequencing; platform adapters only feed PCM and render text. Interim text replaces the current turn; only finals commit. Change the shared client, not an adapter.
-- **Refs:** `Sources/SpeakCore/Live/Providers`, `Sources/SpeakCore/LiveModelCapabilities.swift`, `Sources/SpeakApp/Live/SharedClientLiveController.swift`, `Sources/SpeakDesktop`, `android/app/src/main/java/com/justspeaktoit/android/dictation/AndroidSpeechEngine.kt`
+- **Refs:** `Sources/SpeakCore/Live/Providers`, `Sources/SpeakCore/LiveModelCapabilities.swift`, `Sources/SpeakApp/Live/SharedClientLiveController.swift`, `Sources/SpeakDesktop`, `android/app/src/main/java/com/justspeaktoit/android/cloud/live`
 - **Sunset:** OpenAI GPT-4o streaming models shut down 2027-02-26 and Mistral Voxtral Realtime 2027-04-30 (`ModelRetirements`). Saved AssemblyAI Universal-3.5 Pro streaming IDs migrate to Universal-3.6 Pro (`AssemblyAIModels.legacyUniversal3StreamingIDs` in `Sources/SpeakCore/Transcription/Providers/AssemblyAIModels.swift`).
-- **Nuances:** OpenRouter cannot stream transcription, so it never appears in streaming pickers ([OpenRouter audio](openrouter-audio.md)). Provider-specific protocol rules (AssemblyAI, OpenAI Realtime, xAI) are in AGENTS.md. Install audio taps only with `installTapSafely`.
+- **Nuances:** OpenRouter cannot stream transcription, so it never appears in streaming pickers ([OpenRouter audio](openrouter-audio.md)). Provider-specific protocol rules (AssemblyAI, OpenAI Realtime, xAI) are in AGENTS.md. Install audio taps only with `installTapSafely`. Android's Kotlin clients (`cloud/live`) mirror the shared finish sequencing: budgets start once queued audio has left the device, a close after the end signal completes only on a clean 1000 close, and OpenAI waits for the final committed item's completion (failing with the heard text at the 8 s deadline).
 
 ### F04 Batch cloud provider catalogue
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes

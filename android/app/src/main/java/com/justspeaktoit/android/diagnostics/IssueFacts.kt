@@ -163,6 +163,7 @@ data class IssueFailure(
             DictationFailure.InterruptedByCall, DictationFailure.AudioFocusLost, DictationFailure.AudioDeviceChanged ->
                 IssueFailure("unknown", "cancelled", "operatingSystem")
             DictationFailure.Unavailable -> IssueFailure("admission", "unavailable", "unknown")
+            DictationFailure.LiveOnlyModel -> IssueFailure("admission", "unavailable", "application")
             DictationFailure.InvalidKey -> IssueFailure("request", "authentication", "provider")
             DictationFailure.KeyUnavailable, DictationFailure.MissingKey ->
                 IssueFailure("admission", "authentication", "application")

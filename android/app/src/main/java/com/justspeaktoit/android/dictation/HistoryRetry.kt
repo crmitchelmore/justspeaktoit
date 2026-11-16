@@ -92,8 +92,8 @@ internal class HistoryRetry(
 
     companion object {
         /**
-         * A Downloaded recording is only ever transcribed on the phone. A recording recovered after the app
-         * stopped has no model, so it follows the current mode.
+         * A Downloaded recording, including one recovered after the app stopped, is only ever transcribed on
+         * the phone. A recovered Cloud recording has no model, so it follows the current mode.
          */
         fun usesDownloadedModel(entry: HistoryEntry, activeMode: RecognitionMode?): Boolean {
             if (entry.mode == RecognitionMode.Downloaded.name) return true

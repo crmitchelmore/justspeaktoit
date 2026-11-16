@@ -15,7 +15,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.InputStream
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class LocalModelManagerTest {
     @get:Rule val folder = TemporaryFolder()
@@ -101,6 +104,48 @@ class LocalModelManagerTest {
         manager.download(tiny.catalogId, allowMobileData = false)
 
         manager.awaitState(tiny.catalogId) { it == ModelInstallState.Failed(DownloadFailure.Network, 500) }
+        assertFalse(manager.isInstalled(tiny.catalogId))
+    }
+
+    @Test
+    fun testCancel_duringABlockedRead_staysCancelledWhenTheReadCompletes() {
+        val reading = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        // The first read returns 500 bytes; the second blocks until released, then returns the rest,
+        // which completes the file and would cross the progress threshold.
+        source.respond = {
+            ModelResponse(
+                200,
+                null,
+                object : InputStream() {
+                    private var position = 0
+
+                    override fun read(): Int = throw UnsupportedOperationException()
+
+                    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                        if (position == content.size) return -1
+                        if (position > 0) {
+                            reading.countDown()
+                            release.await(TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                        }
+                        val count = minOf(length, if (position == 0) 500 else content.size - position)
+                        content.copyInto(buffer, offset, position, position + count)
+                        position += count
+                        return count
+                    }
+                },
+            )
+        }
+        val manager = manager()
+        runBlocking { manager.refresh().join() }
+
+        manager.download(tiny.catalogId, allowMobileData = false)
+        assertTrue(reading.await(TIMEOUT_MS, TimeUnit.MILLISECONDS))
+        manager.cancel(tiny.catalogId)
+        assertEquals(ModelInstallState.NotDownloaded(500), manager.models.value.single().state)
+        release.countDown()
+
+        manager.awaitState(tiny.catalogId) { it == ModelInstallState.NotDownloaded(content.size.toLong()) }
         assertFalse(manager.isInstalled(tiny.catalogId))
     }
 

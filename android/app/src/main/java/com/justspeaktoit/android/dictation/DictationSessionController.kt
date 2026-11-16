@@ -289,6 +289,7 @@ internal class DictationSessionController(
             onLimitReached = { rec -> scope.launch { if (capture.owns(rec)) stop() } },
             onCaptureFailed = { rec -> scope.launch { if (capture.owns(rec)) failCapture() } },
             onPcm = run?.let { it.client::append },
+            onDevice = localPlan != null,
         )
         if (!started) cancelLive()
         recording = capture.current.takeIf { started }

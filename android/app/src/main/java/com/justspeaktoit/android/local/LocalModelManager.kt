@@ -1,8 +1,10 @@
 package com.justspeaktoit.android.local
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,6 +14,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.coroutines.CoroutineContext
 
 /** Where one downloadable model stands on this phone. */
 sealed interface ModelInstallState {
@@ -90,6 +93,9 @@ class LocalModelManager(
     private val io: CoroutineDispatcher,
 ) {
     private val jobs = mutableMapOf<String, Job>()
+
+    /** Orders a download's progress against [cancel], so a read that ends after Cancel cannot report. */
+    private val publishLock = Any()
     private val _models = MutableStateFlow<List<LocalModelItem>>(emptyList())
     val models: StateFlow<List<LocalModelItem>> = _models.asStateFlow()
 
@@ -123,46 +129,62 @@ class LocalModelManager(
         set(id, ModelInstallState.Downloading(0L))
         // A cancelled download may still be finishing its last write to the partial file.
         val previous = jobs[id]
-        jobs[id] = scope.launch {
-            previous?.join()
-            val failure = withContext(io) {
-                set(id, ModelInstallState.Downloading(store.partialBytes(model)))
-                val context = currentCoroutineContext()
-                var reported = 0L
-                downloader.download(
-                    model,
-                    store,
-                    progress = { bytes ->
-                        if (bytes - reported >= PROGRESS_STEP_BYTES || bytes == model.bytes) {
-                            reported = bytes
-                            set(id, ModelInstallState.Downloading(bytes))
-                        }
+        val job = scope.launch {
+            val self = currentCoroutineContext()[Job]
+            try {
+                previous?.join()
+                val failure = withContext(io) {
+                    val context = currentCoroutineContext()
+                    publishWhileActive(context, id, ModelInstallState.Downloading(store.partialBytes(model)))
+                    var reported = 0L
+                    downloader.download(
+                        model,
+                        store,
+                        progress = { bytes ->
+                            if (bytes - reported >= PROGRESS_STEP_BYTES || bytes == model.bytes) {
+                                reported = bytes
+                                publishWhileActive(context, id, ModelInstallState.Downloading(bytes))
+                            }
+                        },
+                        cancelled = { !context.isActive },
+                    )
+                }
+                set(
+                    id,
+                    when (failure) {
+                        null -> ModelInstallState.Installed
+                        DownloadFailure.Cancelled -> ModelInstallState.NotDownloaded(store.partialBytes(model))
+                        else -> ModelInstallState.Failed(failure, store.partialBytes(model))
                     },
-                    cancelled = { !context.isActive },
                 )
+            } catch (e: CancellationException) {
+                // The blocking read has settled now, so report what it left on disk, unless a new
+                // download or Remove has taken this model over.
+                withContext(NonCancellable) {
+                    val partial = withContext(io) { store.partialBytes(model) }
+                    synchronized(publishLock) {
+                        if (jobs[id] === self) set(id, ModelInstallState.NotDownloaded(partial))
+                    }
+                }
+                throw e
             }
-            set(
-                id,
-                when (failure) {
-                    null -> ModelInstallState.Installed
-                    DownloadFailure.Cancelled -> ModelInstallState.NotDownloaded(store.partialBytes(model))
-                    else -> ModelInstallState.Failed(failure, store.partialBytes(model))
-                },
-            )
         }
+        synchronized(publishLock) { jobs[id] = job }
     }
 
     /** Stops [id]'s download, keeping what has arrived so the next attempt resumes. */
     fun cancel(id: String) {
         val model = find(id) ?: return
-        jobs[id]?.cancel()
-        set(id, ModelInstallState.NotDownloaded(store.partialBytes(model)))
+        synchronized(publishLock) {
+            jobs[id]?.cancel()
+            set(id, ModelInstallState.NotDownloaded(store.partialBytes(model)))
+        }
     }
 
     /** Stops any download and deletes the model and its partial file. */
     fun remove(id: String): Job? {
         val model = find(id) ?: return null
-        val running = jobs.remove(id)
+        val running = synchronized(publishLock) { jobs.remove(id) }
         running?.cancel()
         return scope.launch {
             running?.join()
@@ -174,6 +196,10 @@ class LocalModelManager(
     private fun diskState(model: WhisperModel): ModelInstallState = when {
         store.isInstalled(model) -> ModelInstallState.Installed
         else -> ModelInstallState.NotDownloaded(store.partialBytes(model))
+    }
+
+    private fun publishWhileActive(context: CoroutineContext, id: String, state: ModelInstallState) {
+        synchronized(publishLock) { if (context.isActive) set(id, state) }
     }
 
     private fun set(id: String, state: ModelInstallState) {

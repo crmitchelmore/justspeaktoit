@@ -225,11 +225,15 @@ internal class DictationHistory(
         return (outcome ?: throw CancellationException("History closed")).getOrThrow()
     }
 
-    /** Saves each recording as a failed Cloud entry with its audio, ready to transcribe. */
+    /**
+     * Saves each recording as a failed entry with its audio, ready to transcribe: Downloaded when it was
+     * recorded for a downloaded model, so it stays on the phone, otherwise Cloud.
+     */
     private fun recover(files: List<File>, retention: Retention): List<HistoryEntry> {
         var entries = store.cached
         files.forEach { file ->
             val createdAt = file.lastModified().takeIf { it > 0 } ?: now()
+            val mode = if (RecorderRetirement.isOnDevice(file)) RecognitionMode.Downloaded else RecognitionMode.Cloud
             if (RecordingRecovery.finalise(file) < 0) {
                 file.delete()
                 return@forEach
@@ -243,7 +247,7 @@ internal class DictationHistory(
             val entry = HistoryEntry(
                 id = id,
                 createdAtMs = createdAt,
-                mode = RecognitionMode.Cloud.name,
+                mode = mode.name,
                 model = null,
                 status = HistoryStatus.Failed,
                 text = "",

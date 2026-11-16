@@ -71,6 +71,16 @@ internal object AndroidSettings {
     const val RETENTION = "historyRetention"
     const val PROMPT = "postProcessingSystemPrompt"
     const val PROFILE = "activeDictationProfileID"
+    const val DOWNLOADED_MODEL = "downloadedTranscriptionModel"
+
+    /** A downloaded-model choice is a shared `local/whisperkit/...` ID, or null for none. */
+    fun downloadedModel(value: Any?): Assign<String?>? = when {
+        value == JSONObject.NULL -> Assign(null)
+        value is String && value.removePrefix(DOWNLOADED_MODEL_PREFIX).let { it != value && it.isNotEmpty() } -> Assign(value)
+        else -> null
+    }
+
+    private const val DOWNLOADED_MODEL_PREFIX = "local/whisperkit/"
 }
 
 /** `ApplicationHistoryItem` values for Android's History, and back. */

@@ -31,6 +31,7 @@ import com.justspeaktoit.android.cloud.CloudClient
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.WavRecorder
 import com.justspeaktoit.android.corrections.PersonalCorrections
+import com.justspeaktoit.android.dictation.AndroidAudioInterruptions
 import com.justspeaktoit.android.dictation.AndroidSpeechEngine
 import com.justspeaktoit.android.dictation.CloudCapture
 import com.justspeaktoit.android.dictation.DictationEvent
@@ -481,7 +482,7 @@ class DictationKeyboardService : InputMethodService() {
             val mode = KeyboardPolicy.mode(chosen, options, cloud)
             if (mode == null) {
                 unavailable = true
-                batchCloudModel = cloudModel.takeIf { cloud == KeyboardCloud.NotLive }
+                batchCloudModel = cloudModel.takeIf { KeyboardPolicy.blamesBatchCloud(chosen, cloud) }
                 voiceEdit = null
                 render()
                 return@checkOnDeviceLanguage
@@ -560,6 +561,7 @@ class DictationKeyboardService : InputMethodService() {
             corrections = { AppPreferences(this).corrections },
             silence = { AppPreferences(this).silence },
             onState = ::onLiveState,
+            interruptions = AndroidAudioInterruptions(this),
         ).also { liveDictation = it }
     }
 
@@ -707,7 +709,8 @@ class DictationKeyboardService : InputMethodService() {
             else -> when (val s = state) {
                 DictationState.Idle, is DictationState.Done -> getString(R.string.keyboard_ready)
                 is DictationState.Starting -> getString(R.string.state_starting)
-                is DictationState.Listening -> listeningStatus(s.mode)
+                is DictationState.Listening ->
+                    if (liveDictation?.isPaused == true) getString(R.string.state_paused) else listeningStatus(s.mode)
                 is DictationState.Finishing -> getString(R.string.state_finishing)
                 is DictationState.Failed -> failureStatus(s)
             }

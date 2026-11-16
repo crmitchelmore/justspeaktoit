@@ -2,13 +2,16 @@ package com.justspeaktoit.android.ime
 
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.corrections.CorrectionRule
+import com.justspeaktoit.android.dictation.AudioInterruptions
 import com.justspeaktoit.android.dictation.CloudCapture
 import com.justspeaktoit.android.dictation.DictationFailure
 import com.justspeaktoit.android.dictation.DictationSessionController
 import com.justspeaktoit.android.dictation.DictationState
 import com.justspeaktoit.android.dictation.LiveSessions
+import com.justspeaktoit.android.dictation.NoAudioInterruptions
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.dictation.SessionHistory
+import com.justspeaktoit.android.dictation.SessionInterruptionWatch
 import com.justspeaktoit.android.dictation.SessionPlan
 import com.justspeaktoit.android.dictation.SessionRequests
 import com.justspeaktoit.android.dictation.SessionSettings
@@ -29,6 +32,8 @@ import java.io.File
  * process and applies personal corrections exactly as the app does. Nothing is saved to History and no
  * cleanup runs. Finishing is bounded at [finishTimeoutMs], like the keyboard's recognisers: a stream that
  * has not settled by then fails with [DictationFailure.NetworkTimeout], and no other route is tried.
+ * While it captures, [interruptions] is watched exactly as in the app: a transient loss of audio focus
+ * pauses it ([isPaused]), and a call, a lasting focus loss or a headset change ends it as a failure.
  *
  * Call from the main thread of [scope]; each change of the session's state is handed to [onState].
  */
@@ -43,6 +48,7 @@ internal class KeyboardLiveDictation(
     silence: () -> SilenceSettings,
     private val onState: (DictationState) -> Unit,
     liveSessions: LiveSessions = LiveSessions.Default,
+    interruptions: AudioInterruptions = NoAudioInterruptions,
     private val finishTimeoutMs: Long = KeyboardPolicy.FINISH_TIMEOUT_MS,
 ) {
     /** True from [start] until the session ends, so a late update from an abandoned one is ignored. */
@@ -51,6 +57,8 @@ internal class KeyboardLiveDictation(
     /** Set once this session's state turns active; the controller publishes its previous state first. */
     private var begun = false
     private var finishWatch: Job? = null
+
+    private val interruptionWatch = SessionInterruptionWatch(interruptions) { controller }
 
     private val controller = DictationSessionController(
         engine = engine,
@@ -73,6 +81,9 @@ internal class KeyboardLiveDictation(
     )
 
     val isRunning: Boolean get() = running
+
+    /** True while another app briefly holds audio focus: audio is not being sent. */
+    val isPaused: Boolean get() = running && controller.state.paused
 
     /** Starts streaming to [model], which must be a live model; a batch model is never uploaded instead. */
     fun start(model: CloudModel, languageTag: String) {
@@ -105,10 +116,13 @@ internal class KeyboardLiveDictation(
     /** Ends the session and releases the microphone when the keyboard goes away. */
     fun close() {
         cancel()
+        interruptionWatch.stop()
         controller.close()
     }
 
     private fun onSession(session: SessionState) {
+        // Before the running check, so watching always ends with capture, however the session ended.
+        interruptionWatch.onSessionChanged(session)
         if (!running) return
         val dictation = session.dictation
         if (dictation.isActive) begun = true

@@ -87,6 +87,18 @@ class KeyboardPolicyTest {
     }
 
     @Test
+    fun testUnavailableExplicitLocalChoice_neverBlamesCloud() {
+        // On-device chosen but missing, with the opt-in on and a batch Cloud model saved.
+        val noOnDevice = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = false)
+        val options = RecognizerAvailability.evaluate(noOnDevice, LanguageSupport.Unknown, cloudKeySaved = true)
+        assertNull(KeyboardPolicy.mode(RecognitionMode.OnDevice, options, KeyboardCloud.NotLive))
+        assertFalse(KeyboardPolicy.blamesBatchCloud(RecognitionMode.OnDevice, KeyboardCloud.NotLive))
+        assertFalse(KeyboardPolicy.blamesBatchCloud(null, KeyboardCloud.NotLive))
+        assertFalse(KeyboardPolicy.blamesBatchCloud(RecognitionMode.Cloud, KeyboardCloud.Off))
+        assertTrue(KeyboardPolicy.blamesBatchCloud(RecognitionMode.Cloud, KeyboardCloud.NotLive))
+    }
+
+    @Test
     fun testMode_neverUsesADownloadedModel() {
         val both = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = true)
         val options = RecognizerAvailability.evaluate(both, LanguageSupport.Installed, downloaded = ModeStatus.Ready)

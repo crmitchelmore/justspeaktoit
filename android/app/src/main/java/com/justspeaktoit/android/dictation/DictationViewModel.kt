@@ -287,6 +287,8 @@ class DictationViewModel internal constructor(
     private var historySignIn: Job? = null
     private var pendingHistorySync: Job? = null
 
+    private val interruptionWatch = SessionInterruptionWatch(interruptions) { session }
+
     private val session: DictationSessionController = DictationSessionController(
         engine = engine,
         capture = capture,
@@ -354,7 +356,6 @@ class DictationViewModel internal constructor(
     private var handsFreeStartPending = false
 
     private var appVisible = true
-    private var watchingInterruptions = false
     private var foregroundPhase: ForegroundPhase? = null
 
     /** True while Android lets the foreground service keep the session running off screen. */
@@ -1098,15 +1099,7 @@ class DictationViewModel internal constructor(
 
     /** Keeps the foreground service and interruption watching in step with the session. */
     private fun onSessionChanged(s: SessionState) {
-        val capturing = s.dictation is DictationState.Starting || s.dictation is DictationState.Listening
-        if (capturing != watchingInterruptions) {
-            watchingInterruptions = capturing
-            if (capturing) {
-                interruptions.start(requestFocus = s.dictation.modeOrNull()?.recordsAudio == true, ::onInterruption)
-            } else {
-                interruptions.stop()
-            }
-        }
+        interruptionWatch.onSessionChanged(s)
         followHandsFreeSession(s)
         syncForeground(s)
     }
@@ -1126,20 +1119,9 @@ class DictationViewModel internal constructor(
         }
     }
 
-    private fun onInterruption(signal: InterruptionSignal) {
-        if (!session.isCapturing) return
-        val mode = session.state.dictation.modeOrNull() ?: return
-        when (val action = InterruptionPolicy.decide(signal, mode, session.state.paused)) {
-            InterruptionAction.None -> Unit
-            InterruptionAction.Pause -> session.pause()
-            InterruptionAction.Resume -> session.resume()
-            is InterruptionAction.Stop -> session.interrupt(action.failure)
-        }
-    }
-
     override fun onCleared() {
         handsFree.disarm()
-        interruptions.stop()
+        interruptionWatch.stop()
         if (foregroundPhase != null) foreground.hide()
         if (ForegroundDictation.listener === foregroundListener) ForegroundDictation.listener = null
         engine.close()

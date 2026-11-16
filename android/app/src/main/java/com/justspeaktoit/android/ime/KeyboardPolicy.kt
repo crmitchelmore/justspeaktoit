@@ -72,6 +72,13 @@ object KeyboardPolicy {
         else -> KeyboardCloud.NotLive
     }
 
+    /**
+     * Whether an unavailable keyboard should name the batch Cloud model as the reason: only when the user
+     * chose Cloud and the opt-in is on, so an unusable on-device or speech-service choice never blames Cloud.
+     */
+    fun blamesBatchCloud(chosen: RecognitionMode?, cloud: KeyboardCloud): Boolean =
+        chosen == RecognitionMode.Cloud && cloud == KeyboardCloud.NotLive
+
     /** Modes the keyboard never uses outside the Cloud opt-in: Cloud (BYOK) and Downloaded models. */
     private val APP_ONLY_MODES = setOf(RecognitionMode.Cloud, RecognitionMode.Downloaded)
 

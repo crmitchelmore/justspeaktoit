@@ -10,9 +10,11 @@ import com.justspeaktoit.android.dictation.DictationState
 import com.justspeaktoit.android.dictation.DictationTimings
 import com.justspeaktoit.android.dictation.FakeCloud
 import com.justspeaktoit.android.dictation.FakeEngine
+import com.justspeaktoit.android.dictation.FakeInterruptions
 import com.justspeaktoit.android.dictation.FakeLiveClient
 import com.justspeaktoit.android.dictation.FakeLiveSessions
 import com.justspeaktoit.android.dictation.FakeRecorders
+import com.justspeaktoit.android.dictation.InterruptionSignal
 import com.justspeaktoit.android.dictation.MemorySecrets
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.dictation.RecorderRetirement
@@ -49,6 +51,7 @@ class KeyboardLiveDictationTest {
     private val recorders = FakeRecorders()
     private val cloud = FakeCloud()
     private val live = FakeLiveSessions()
+    private val interruptions = FakeInterruptions()
     private val resources = SystemResourceRegistry()
     private val executor = Executors.newSingleThreadExecutor { Thread(it, "test-main") }
     private val main = executor.asCoroutineDispatcher()
@@ -76,6 +79,7 @@ class KeyboardLiveDictationTest {
                 states.value = it
             },
             liveSessions = live,
+            interruptions = interruptions,
             finishTimeoutMs = finishTimeoutMs,
         )
     }
@@ -176,6 +180,42 @@ class KeyboardLiveDictationTest {
         assertTrue(client.cancelled)
         assertFalse(onMain { keyboard.isRunning })
         assertEquals(reported, onMain { seen.size })
+    }
+
+    @Test
+    fun testInterruptions_pauseOnTransientFocusLossAndStopVisiblyOnHeadsetChange() {
+        val client = start(CloudProvider.OpenAI)
+        ViewModelHarness.await(client.connected)
+        await { it is DictationState.Listening }
+        assertEquals("a capturing Cloud session holds audio focus", listOf(true), interruptions.starts.toList())
+
+        onMain { interruptions.signal(InterruptionSignal.FocusLostTransient) }
+        assertTrue(onMain { keyboard.isPaused })
+        onMain { interruptions.signal(InterruptionSignal.FocusGained) }
+        assertFalse(onMain { keyboard.isPaused })
+
+        onMain { interruptions.signal(InterruptionSignal.InputDeviceChanged) }
+        val failed = await { it is DictationState.Failed } as DictationState.Failed
+        assertEquals(DictationFailure.AudioDeviceChanged, failed.failure)
+        assertTrue(client.cancelled)
+        assertFalse(onMain { keyboard.isRunning })
+        assertFalse("watching ends with capture", interruptions.watching)
+        assertTrue(cloud.transcriptions.isEmpty())
+    }
+
+    @Test
+    fun testFinishedSession_stopsWatchingInterruptions() {
+        val client = start(CloudProvider.OpenAI)
+        ViewModelHarness.await(client.connected)
+        await { it is DictationState.Listening }
+        assertTrue(interruptions.watching)
+
+        onMain { keyboard.stop() }
+        assertFalse("focus is abandoned once capture ends", interruptions.watching)
+        ViewModelHarness.await(client.finished)
+        client.listener.onEnd(LiveOutcome.Completed("done"))
+        await { it is DictationState.Done }
+        assertEquals(1, interruptions.starts.size)
     }
 
     @Test(expected = IllegalArgumentException::class)

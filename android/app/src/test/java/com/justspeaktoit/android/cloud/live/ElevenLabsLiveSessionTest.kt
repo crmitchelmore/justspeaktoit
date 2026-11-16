@@ -130,6 +130,23 @@ class ElevenLabsLiveSessionTest {
     }
 
     @Test
+    fun testFinishDeadlineBeforeThePostCommitWindowEnds_failsKeepingTheTextInsteadOfCompleting() {
+        val session = started()
+        session.append(pcm(100))
+        sockets.last.serverSends(committed("Heard so far."))
+        sockets.last.queuedBytes = 4_000
+
+        session.finish()
+        scheduler.advanceBy(7_000)
+        sockets.last.queuedBytes = 0
+        scheduler.advanceBy(100)
+        assertNull(listener.outcome)
+        scheduler.advanceBy(900)
+
+        assertEquals(LiveOutcome.Failed(DictationFailure.NetworkTimeout, "Heard so far."), listener.outcome)
+    }
+
+    @Test
     fun testStopWithoutTheCommitsAnswer_returnsOnlyCommittedSegments() {
         val session = started()
         session.append(pcm(100))

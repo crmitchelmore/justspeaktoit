@@ -1669,6 +1669,7 @@ sessions:
           - "Dictate three sentences with ElevenLabs Scribe v3 Live (Streaming), pausing between them, then tap Stop mid-word. Repeat with ElevenLabs Scribe v2 (Streaming)."
           - "Add a personal correction, write as \"Kubernetes\", and say \"Kubernetes\" with each model."
           - "Start another dictation, say a sentence, then turn on flight mode while still talking."
+          - "Turn off flight mode and wait for network access to return."
           - "Save an invalid ElevenLabs key and dictate with ElevenLabs Scribe v3 Live (Streaming)."
         expected: "Words appear while speaking and each settled phrase replaces its partial, never duplicated. Stop returns the full text within a few seconds, including the last words. The vocabulary word is spelt correctly. Flight mode ends with a network failure and History keeps the words heard so far as unfinished, with no upload or other provider instead. The invalid key fails with \"rejected the API key\"."
         final_gate: true

@@ -16,7 +16,8 @@ import java.util.Base64
  *   twin of a segment already counted never adds it again;
  * - a stop drains the audio, sends one manual commit and reads the finals that follow for a bounded
  *   post-commit window, because VAD commits carry no id that marks the commit's own answer. Partials that
- *   arrive during that window are ignored, and the finish returns the committed segments.
+ *   arrive during that window are ignored, and the finish returns the committed segments. A finish
+ *   deadline that ends before the window has run is a timeout, not a completion.
  */
 class ElevenLabsLiveSession(
     private val model: CloudModel,
@@ -31,6 +32,9 @@ class ElevenLabsLiveSession(
     private val finals = mutableListOf<String>()
     private var partial = ""
     private val twins = FinalTwinTracker()
+
+    /** Set once the post-commit window has run: until then a finish still awaits the commit's finals. */
+    private var postCommitWindowElapsed = false
 
     override val readyDeadlineMs: Long = READY_DEADLINE_MS
 
@@ -72,8 +76,19 @@ class ElevenLabsLiveSession(
         }
         endSignalSent = true
         // The post-commit window starts once the audio and the commit have left the device.
-        afterDrained { after(POST_COMMIT_WINDOW_MS) { completeIfDrained() } }
+        afterDrained {
+            after(POST_COMMIT_WINDOW_MS) {
+                postCommitWindowElapsed = true
+                completeIfDrained()
+            }
+        }
     }
+
+    /**
+     * A slow drain can push the window past the overall finish deadline. That deadline then reports a
+     * timeout with the text heard, never a success that dropped a final still due in the window.
+     */
+    override fun isSettled(): Boolean = postCommitWindowElapsed
 
     override fun transcript(): String = (finals + partial.trim()).filter { it.isNotEmpty() }.joinToString(" ")
 

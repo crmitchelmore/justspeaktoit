@@ -6,6 +6,7 @@ gboolean parse_window_command(gint argc, const gchar *const *argv, WindowCommand
         { JSTI_TOGGLE_ARGUMENT, 1, 0 }, { JSTI_SPEAK_CLIPBOARD_ARGUMENT, 7, 0 },
         { JSTI_PASTE_LAST_HISTORY_ARGUMENT, 11, 0 },
         { JSTI_SPEAK_SELECTED_TEXT_ARGUMENT, 12, 0 },
+        { JSTI_EDIT_SELECTION_BY_VOICE_ARGUMENT, 13, 0 },
         { JSTI_STOP_SPEECH_ARGUMENT, 3, 0 }, { JSTI_PAUSE_SPEECH_ARGUMENT, 8, 0 },
         { JSTI_QUICK_VOICE_1_ARGUMENT, 6, 1 }, { JSTI_QUICK_VOICE_2_ARGUMENT, 6, 2 },
         { JSTI_QUICK_VOICE_3_ARGUMENT, 6, 3 }
@@ -29,7 +30,7 @@ gboolean parse_window_command(gint argc, const gchar *const *argv, WindowCommand
 
 gboolean is_forwardable_command(gint run, gint slot) {
     if (run == 6) return slot >= 1 && slot <= 3;
-    return slot == 0 && (run == 3 || run == 7 || run == 8 || run == 11 || run == 12);
+    return slot == 0 && (run == 3 || run == 7 || run == 8 || run == 11 || run == 12 || run == 13);
 }
 
 gboolean parse_action_command(int argc, const gchar *const *argv, WindowCommand *command) {

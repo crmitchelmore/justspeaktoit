@@ -154,7 +154,8 @@ final class IOSSettingsConfiguration {
             issues.append(.init(path: "settings.selectedModel", message: "\"\(model)\" cannot stream on this device."))
         }
         if case .string(let model)? = changes["batchTranscriptionModel"],
-           !AppSettings.supportedBatchModels.contains(where: { $0.id == model }) {
+           !AppSettings.supportedBatchModels.contains(where: { $0.id == model }),
+           IOSLocalTranscriptionModels.model(for: model) == nil {
             issues.append(.init(
                 path: "settings.batchTranscriptionModel", message: "\"\(model)\" cannot transcribe on this device."))
         }
@@ -259,6 +260,15 @@ extension IOSSettingsConfiguration {
         string("transcriptionKeywords", \.transcriptionKeywords)
         bool("upgradeOfflineTranscriptsWhenOnline", \.upgradeOfflineTranscriptsWhenOnline)
         bool("keepAudioOnCancel", \.keepAudioOnCancel)
+        bind("preferredAudioInputUID", \.settings, \.preferredAudioInputUID,
+             read: { $0.map { .string($0) } ?? .null },
+             decode: { value -> String?? in
+                 switch value {
+                 case .null: return .some(nil)
+                 case .string(let uid): return .some(uid)
+                 default: return nil
+                 }
+             })
 
         // Recording, results and display
         choice("visualDensity", \.visualDensity)
@@ -284,6 +294,18 @@ extension IOSSettingsConfiguration {
         string("postProcessingModel", \.postProcessingModel)
         bool("cleanupModelDiscoveryEnabled", \.cleanupModelDiscoveryEnabled)
         bool("autoPostProcess", \.autoPostProcess)
+
+        // Learned corrections
+        bool("autoCorrectionsEnabled", \.autoCorrectionsEnabled)
+        bind("autoCorrectionsPromotionThreshold", \.settings, \.autoCorrectionsPromotionThreshold,
+             read: { .int($0) },
+             decode: { value -> Int? in
+                 switch value {
+                 case .int(let number): return number
+                 case .double(let number) where number.rounded() == number: return Int(number)
+                 default: return nil
+                 }
+             })
 
         // Read aloud
         choice("ttsProvider", \.voice, \.ttsProvider)

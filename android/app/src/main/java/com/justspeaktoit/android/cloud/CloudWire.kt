@@ -34,26 +34,35 @@ object CloudWire {
         fun contentLength(fileBytes: Long): Long = head.size + fileBytes + tail.size
     }
 
-    /** Builds everything around the file part so the audio itself can be streamed from disk. */
+    /**
+     * Builds everything around the file part so the audio itself can be streamed from disk.
+     * [trailingFields] follow the file, for providers (Modulate) that read their options after it.
+     */
     fun multipart(
         fields: List<Pair<String, String>>,
         fileField: String,
         fileName: String,
         mimeType: String,
         boundary: String,
+        trailingFields: List<Pair<String, String>> = emptyList(),
     ): Multipart {
+        fun StringBuilder.field(name: String, value: String) {
+            append("--").append(boundary).append("\r\n")
+            append("Content-Disposition: form-data; name=\"").append(name).append("\"\r\n\r\n")
+            append(value).append("\r\n")
+        }
         val head = buildString {
-            for ((name, value) in fields) {
-                append("--").append(boundary).append("\r\n")
-                append("Content-Disposition: form-data; name=\"").append(name).append("\"\r\n\r\n")
-                append(value).append("\r\n")
-            }
+            for ((name, value) in fields) field(name, value)
             append("--").append(boundary).append("\r\n")
             append("Content-Disposition: form-data; name=\"").append(fileField)
                 .append("\"; filename=\"").append(fileName).append("\"\r\n")
             append("Content-Type: ").append(mimeType).append("\r\n\r\n")
         }
-        val tail = "\r\n--$boundary--\r\n"
+        val tail = buildString {
+            append("\r\n")
+            for ((name, value) in trailingFields) field(name, value)
+            append("--").append(boundary).append("--\r\n")
+        }
         return Multipart(boundary, head.toByteArray(), tail.toByteArray())
     }
 
@@ -70,28 +79,44 @@ object CloudWire {
         transcript: String,
         maxTokens: Int? = null,
         systemPrompt: String = CleanupPolicy.systemPrompt(),
-    ): String = JSONObject()
-        .put("model", model)
-        .apply { if (maxTokens != null) put("max_tokens", maxTokens) }
-        .put(
-            "messages",
-            JSONArray()
-                .put(JSONObject().put("role", "system").put("content", systemPrompt))
-                .put(JSONObject().put("role", "user").put("content", CleanupPolicy.userMessage(transcript))),
-        )
-        .toString()
+    ): String = chatBody(model, systemPrompt, CleanupPolicy.userMessage(transcript), maxTokens)
+
+    /** One system and one user message; cleanup and voice edit both use it. */
+    fun chatBody(model: String, systemPrompt: String, userMessage: String, maxTokens: Int? = null): String =
+        JSONObject()
+            .put("model", model)
+            .apply { if (maxTokens != null) put("max_tokens", maxTokens) }
+            .put(
+                "messages",
+                JSONArray()
+                    .put(JSONObject().put("role", "system").put("content", systemPrompt))
+                    .put(JSONObject().put("role", "user").put("content", userMessage)),
+            )
+            .toString()
 
     /** @throws CloudException when the body is not the expected JSON. */
     fun transcriptText(body: String): String = parse { JSONObject(body).requireString("text") }
 
     /** Rejects output the model did not finish (for example `finish_reason: "length"`). */
-    fun cleanupText(body: String): String = parse {
+    fun cleanupText(body: String): String = parse { replyContent(body) }
+
+    /**
+     * [cleanupText] without trimming: `VoiceEditPolicy.normalizedRewrite` decides which whitespace
+     * is accidental, since a selection may end in a newline the rewrite must keep.
+     */
+    fun rewriteText(body: String): String = try {
+        replyContent(body)
+    } catch (e: JSONException) {
+        throw CloudException(DictationFailure.Server, "Unexpected response", e)
+    }
+
+    private fun replyContent(body: String): String {
         val choice = JSONObject(body).getJSONArray("choices").getJSONObject(0)
         val finish = choice.opt("finish_reason")
         if (finish is String && finish != "stop") {
             throw CloudException(DictationFailure.Server, "Cleanup did not finish: $finish")
         }
-        choice.getJSONObject("message").requireString("content")
+        return choice.getJSONObject("message").requireString("content")
     }
 
     // Android's getString() coerces null, numbers and objects to text; only a real string is a transcript.

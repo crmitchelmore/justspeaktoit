@@ -28,11 +28,12 @@ class AssemblyAILiveSessionTest {
 
     @Test
     fun testUrl_usesTheEuHostAndBoundedKeyterms() {
-        val url = AssemblyAILiveSession.url(model, AssemblyAILiveSession.HOSTS[0], "tok", listOf("Kubernetes", "x".repeat(51)))
+        val url = AssemblyAILiveSession.url(model, AssemblyAILiveSession.HOSTS[0], listOf("Kubernetes", "x".repeat(51)))
 
         assertTrue(url, url.startsWith("wss://streaming.eu.assemblyai.com/v3/ws?sample_rate=16000&encoding=pcm_s16le"))
         assertTrue(url, url.contains("&speech_model=universal-3-6-pro"))
         assertTrue(url, !url.contains("format_turns"))
+        assertTrue(url, !url.contains("token="))
         val keyterms = url.split('&').single { it.startsWith("keyterms_prompt=") }.substringAfter('=')
         assertEquals(listOf("Kubernetes"), JSONArray(URLDecoder.decode(keyterms, "UTF-8")).let { a -> List(a.length()) { a.getString(it) } })
     }
@@ -138,6 +139,37 @@ class AssemblyAILiveSessionTest {
         sockets.last.serverCloses()
 
         assertEquals(LiveOutcome.Completed("unformatted"), listener.outcome)
+    }
+
+    @Test
+    fun testFinaliseBudget_startsOnlyOnceTheAudioAndForceEndpointHaveLeft() {
+        val session = begun()
+        session.append(pcm(100))
+        sockets.last.queuedBytes = 3_200
+
+        session.finish()
+        scheduler.advanceBy(2_000)
+        assertEquals(AssemblyAILiveSession.FORCE_ENDPOINT, sockets.last.sent.last())
+        sockets.last.queuedBytes = 0
+        scheduler.advanceBy(1_999)
+        assertEquals(AssemblyAILiveSession.FORCE_ENDPOINT, sockets.last.sent.last())
+        scheduler.advanceBy(100)
+
+        assertEquals(AssemblyAILiveSession.TERMINATE, sockets.last.sent.last())
+    }
+
+    @Test
+    fun testDropAfterTerminate_failsKeepingTheText() {
+        val session = begun()
+        session.append(pcm(100))
+        sockets.last.serverSends(turn(0, "unformatted"))
+        session.finish()
+        scheduler.advanceBy(2_000)
+        assertEquals(AssemblyAILiveSession.TERMINATE, sockets.last.sent.last())
+
+        sockets.last.serverFails()
+
+        assertEquals(LiveOutcome.Failed(DictationFailure.Network, "unformatted"), listener.outcome)
     }
 
     @Test

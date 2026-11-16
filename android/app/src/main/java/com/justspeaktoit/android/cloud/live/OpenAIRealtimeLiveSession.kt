@@ -12,8 +12,9 @@ import java.util.Base64
  * - `?intent=transcription` with no `OpenAI-Beta` header, and the shared `session.update` payload;
  * - audio waits for `session.updated` for a transcription session, then goes up as base64 24 kHz PCM;
  * - deltas append to their item and a completed event replaces it; items keep commit order;
- * - turn detection is off, so a stop commits once (padded to 100 ms, never empty) and waits for that
- *   item's completion or the catalogue's finalise budget, within an eight-second bound.
+ * - turn detection is off, so a stop commits once (padded to 100 ms, never empty) and completes only
+ *   when that item, and every earlier one, has its completed transcript. A transcription that failed,
+ *   or no completion within the eight-second bound, ends as a failure keeping the text so far.
  */
 class OpenAIRealtimeLiveSession(
     private val model: CloudModel,
@@ -28,6 +29,7 @@ class OpenAIRealtimeLiveSession(
     private val itemOrder = mutableListOf<String>()
     private val deltas = HashMap<String, String>()
     private val completed = HashMap<String, String>()
+    private val failedItems = HashSet<String>()
     private var audioBytesSinceCommit = 0
     private var commitSent = false
     private var finalItem: String? = null
@@ -61,6 +63,7 @@ class OpenAIRealtimeLiveSession(
             "input_audio_buffer.committed" -> {
                 register(item)
                 if (commitSent && finalItem == null) finalItem = item
+                settleIfDone()
             }
             "conversation.item.input_audio_transcription.delta" -> {
                 val delta = message.optString("delta")
@@ -74,10 +77,14 @@ class OpenAIRealtimeLiveSession(
                 completed[item] = message.optString("transcript")
                 deltas.remove(item)
                 publish()
-                if (commitSent && item == finalItem) complete()
+                settleIfDone()
             }
-            "conversation.item.input_audio_transcription.failed" ->
-                if (commitSent && item == finalItem) fail(DictationFailure.Server)
+            "conversation.item.input_audio_transcription.failed" -> {
+                // Recoverable while recording, but the session can no longer end with every word.
+                register(item)
+                failedItems += item
+                if (commitSent && item == finalItem) fail(DictationFailure.Server) else settleIfDone()
+            }
             "error" -> handleError(message.optJSONObject("error")?.optString("event_id"))
         }
     }
@@ -95,7 +102,16 @@ class OpenAIRealtimeLiveSession(
         commitSent = true
         endSignalSent = true
         audioBytesSinceCommit = 0
-        after(route.finalizeBudgetMs) { completeIfDrained() }
+    }
+
+    /** The final commit's item and every earlier one have a completed transcript. */
+    override fun isSettled(): Boolean = commitSent && finalItem != null && failedItems.isEmpty() &&
+        itemOrder.all { it == PENDING_ITEM || it in completed }
+
+    private fun settleIfDone() {
+        if (!commitSent || finalItem == null) return
+        if (itemOrder.any { it != PENDING_ITEM && it !in completed && it !in failedItems }) return
+        if (failedItems.isEmpty()) complete() else fail(DictationFailure.Server)
     }
 
     override fun transcript(): String = itemOrder

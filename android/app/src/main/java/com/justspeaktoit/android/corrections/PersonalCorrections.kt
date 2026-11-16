@@ -58,7 +58,8 @@ object PersonalCorrections {
     /** Builds a rule from the editor's fields; aliases are comma- or line-separated. Null when unusable. */
     fun rule(writeAs: String, heardAs: String): CorrectionRule? = rule(writeAs, heardAs.split(',', '\n'))
 
-    private fun rule(writeAs: String, heardAs: List<String>): CorrectionRule? {
+    /** Trims [writeAs] and drops blank, repeated or identical aliases. Null when there is no spelling. */
+    internal fun rule(writeAs: String, heardAs: List<String>): CorrectionRule? {
         val spelling = writeAs.trim()
         if (spelling.isEmpty()) return null
         val seen = mutableSetOf<String>()

@@ -108,6 +108,9 @@ extension AppSettings {
         case transcriptClipboardNoticeVersion
         case upgradeOfflineTranscriptsWhenOnline
         case keepAudioOnCancel
+        case preferredAudioInputUID
+        case autoCorrectionsEnabled
+        case autoCorrectionsPromotionThreshold
     }
 
     enum CredentialLoadingError: LocalizedError {

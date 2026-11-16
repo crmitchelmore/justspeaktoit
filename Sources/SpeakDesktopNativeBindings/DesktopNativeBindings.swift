@@ -18,7 +18,8 @@ package enum DesktopNativeBindings {
         cleanupPreview: jsti_window_cleanup_preview,
         endCleanupPreview: jsti_window_end_cleanup_preview,
         setHistoryManagement: jsti_window_set_history_management,
-        setHUDLayout: jsti_window_set_hud_layout
+        setHUDLayout: jsti_window_set_hud_layout,
+        setRawConfiguration: jsti_window_set_raw_configuration
     )
 
     package static let comparison = DesktopNativeComparisonCalls(
@@ -77,6 +78,9 @@ package enum DesktopNativeBindings {
         try DesktopNativeLists.configureAbout(
             for: platform, link: { JSTIAboutLink(title: $0, url: $1) }, configure: jsti_window_configure_about
         )
+        try DesktopNativeLists.configureTipJar(
+            link: { JSTIAboutLink(title: $0, url: $1) }, configure: jsti_window_configure_tip_links
+        )
     }
 
     /// False when the window refused the filter controls.
@@ -93,6 +97,60 @@ package enum DesktopNativeBindings {
             rows, row: { JSTISettingsSearchResult(title: $0, detail: $1, identifier: $2) },
             set: jsti_window_set_settings_search_results
         )
+    }
+
+    /// Hands the window the Browse OpenRouter models… query (#1618).
+    package static func configureOpenRouterBrowser() throws {
+        guard jsti_window_set_openrouter_browser_source(openRouterBrowserQuery) == 0 else {
+            throw DesktopHostError(message: "The OpenRouter model browser could not be configured.")
+        }
+    }
+
+    /// Answers on the window's UI thread; every string lives until `receive` returns.
+    private static let openRouterBrowserQuery: JSTIOpenRouterBrowserQuery = {
+        deliver(
+            DesktopHostOpenRouterBrowser.page(
+                purpose: $0, query: $1.map { String(cString: $0) } ?? "",
+                provider: $2.map { String(cString: $0) } ?? "", zeroPricesOnly: $3 != 0, selectedSlot: $4
+            ),
+            to: $5, context: $6
+        )
+    }
+
+    private static func deliver(
+        _ page: DesktopOpenRouterBrowser.Page?, to receive: JSTIOpenRouterBrowserReceive?,
+        context: UnsafeMutableRawPointer?
+    ) -> Int32 {
+        guard let page, let receive else { return -1 }
+        let strings = DesktopNativeStrings()
+        func add(_ value: String) -> UnsafePointer<CChar> {
+            strings.add(DesktopHostOpenRouterBrowser.nativeText(value))
+        }
+        let providers: [UnsafePointer<CChar>?] = page.providers.map { add($0) }
+        let rows = page.rows.map { row in
+            JSTIOpenRouterBrowserRow(
+                title: add(row.title), subtitle: add(row.subtitle), details: add(row.details), url: add(row.url),
+                identifier: add(row.automationID), slot: row.slot, selected: row.selected ? 1 : 0
+            )
+        }
+        withExtendedLifetime(strings) {
+            providers.withUnsafeBufferPointer { providers in
+                rows.withUnsafeBufferPointer { rows in
+                    var native = JSTIOpenRouterBrowserPage(
+                        title: add(page.title), intro: add(page.intro), action: add(page.action),
+                        selected_action: add(page.selectedAction),
+                        search_placeholder: add(OpenRouterModelBrowserCatalog.searchPlaceholder),
+                        all_providers: add(OpenRouterModelBrowserCatalog.allProvidersTitle),
+                        zero_prices: add(OpenRouterModelBrowserCatalog.zeroPricesTitle),
+                        link_title: add(DesktopOpenRouterBrowser.detailsLinkTitle), status: add(page.status),
+                        providers: providers.baseAddress, provider_count: providers.count,
+                        rows: rows.baseAddress, row_count: rows.count
+                    )
+                    receive(&native, context)
+                }
+            }
+        }
+        return 0
     }
 
     /// False when the window refused the SSML helper's examples.

@@ -10,7 +10,9 @@ import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.abs
 import kotlin.math.log10
+import kotlin.math.max
 import kotlin.math.sqrt
 
 /** 16 kHz mono PCM WAV header, the format every supported cloud model accepts. */
@@ -40,6 +42,22 @@ object WavFormat {
         }.array()
     }
 
+    /** Whether every sample after the header is zero, as `AlibabaAppleBatchTranscription.hasAudio` reads it. */
+    fun isSilent(file: File): Boolean = file.inputStream().buffered().use { input ->
+        val buffer = ByteArray(8192)
+        var offset = 0L
+        var count = input.read(buffer)
+        var silent = true
+        while (count >= 0 && silent) {
+            for (i in 0 until count) {
+                if (offset + i >= HEADER_BYTES && buffer[i] != 0.toByte()) silent = false
+            }
+            offset += count
+            count = input.read(buffer)
+        }
+        silent
+    }
+
     /** Maps PCM loudness onto the -2..10 range SpeechRecognizer reports, so one meter fits both. */
     fun level(samples: ShortArray, count: Int): Float {
         if (count <= 0) return -2f
@@ -52,7 +70,81 @@ object WavFormat {
         val dbfs = if (rms <= 0.0) -60.0 else (20 * log10(rms)).coerceIn(-60.0, 0.0)
         return ((dbfs + 60.0) / 5.0 - 2.0).toFloat()
     }
+
+    /**
+     * SpeakCore's `DictationSilencePolicy.normalizedLevel`: 0..1 from a weighted mix of average and
+     * peak loudness, the scale the shared silence threshold is set on.
+     */
+    fun normalizedLevel(samples: ShortArray, count: Int): Double {
+        if (count <= 0) return 0.0
+        var squares = 0.0
+        var peak = 0.0
+        for (i in 0 until count) {
+            val amplitude = abs(samples[i].toDouble()) / FULL_SCALE
+            squares += amplitude * amplitude
+            peak = max(peak, amplitude)
+        }
+        if (peak <= 0.0) return 0.0
+        val averageDb = 20 * log10(sqrt(squares / count))
+        val peakDb = 20 * log10(peak)
+        return ((0.7 * averageDb + 0.3 * peakDb + 60) / 60).coerceIn(0.0, 1.0)
+    }
+
+    private const val FULL_SCALE = 32_768.0
 }
+
+/** Opens the microphone for 16 kHz mono speech capture, as every Cloud recording uses it. */
+internal object Microphone {
+    /**
+     * A recording [AudioRecord] routed to [input] (the system default when null), or null when the
+     * microphone cannot be opened. Requires RECORD_AUDIO. The caller releases [input] either way.
+     */
+    @SuppressLint("MissingPermission")
+    fun open(input: InputRoute? = null): AudioRecord? {
+        val minBuffer = AudioRecord.getMinBufferSize(
+            WavFormat.SAMPLE_RATE,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+        )
+        if (minBuffer <= 0) return null
+        val audio = try {
+            AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                WavFormat.SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                maxOf(minBuffer, WavFormat.BYTES_PER_SECOND / 5),
+            )
+        } catch (e: IllegalArgumentException) {
+            return null
+        } catch (e: SecurityException) {
+            return null
+        }
+        if (audio.state != AudioRecord.STATE_INITIALIZED) {
+            audio.release()
+            return null
+        }
+        input?.applyTo(audio)
+        try {
+            audio.startRecording()
+        } catch (e: IllegalStateException) {
+            audio.release()
+            return null
+        }
+        if (audio.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+            audio.release()
+            return null
+        }
+        return audio
+    }
+}
+
+/**
+ * One capture block's loudness: [meter] on SpeechRecognizer's -2..10 scale for the level indicator,
+ * [normalized] on SpeakCore's 0..1 silence scale (not a number while paused), and [atSeconds] of
+ * audio written so far.
+ */
+data class CaptureLevel(val meter: Float, val normalized: Double, val atSeconds: Double)
 
 /** A microphone capture to one file; [WavRecorder] in production. */
 interface AudioRecorder {
@@ -76,7 +168,7 @@ interface AudioRecorder {
 fun interface RecorderFactory {
     fun create(
         file: File,
-        onLevel: (Float) -> Unit,
+        onLevel: (CaptureLevel) -> Unit,
         onLimitReached: () -> Unit,
         onCaptureFailed: () -> Unit,
     ): AudioRecorder
@@ -88,11 +180,13 @@ fun interface RecorderFactory {
  */
 class WavRecorder(
     private val file: File,
-    private val onLevel: (Float) -> Unit,
+    private val onLevel: (CaptureLevel) -> Unit,
     private val onLimitReached: () -> Unit,
     /** Called on the capture thread when the microphone or disk fails mid-recording. */
     private val onCaptureFailed: () -> Unit,
     private val maxSeconds: Int = 600,
+    /** The microphone the user chose, or null for the system default. */
+    private val input: InputRoute? = null,
 ) : AudioRecorder {
     @Volatile private var running = false
 
@@ -110,39 +204,9 @@ class WavRecorder(
     }
 
     /** Returns false when the microphone cannot be opened. Requires RECORD_AUDIO. */
-    @SuppressLint("MissingPermission")
     override fun start(): Boolean {
-        val minBuffer = AudioRecord.getMinBufferSize(
-            WavFormat.SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-        )
-        if (minBuffer <= 0) return false
-        val audio = try {
-            AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                WavFormat.SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT,
-                maxOf(minBuffer, WavFormat.BYTES_PER_SECOND / 5),
-            )
-        } catch (e: IllegalArgumentException) {
-            return false
-        } catch (e: SecurityException) {
-            return false
-        }
-        if (audio.state != AudioRecord.STATE_INITIALIZED) {
-            audio.release()
-            return false
-        }
-        try {
-            audio.startRecording()
-        } catch (e: IllegalStateException) {
-            audio.release()
-            return false
-        }
-        if (audio.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-            audio.release()
+        val audio = Microphone.open(input) ?: run {
+            input?.release()
             return false
         }
         record = audio
@@ -178,7 +242,7 @@ class WavRecorder(
                     continue
                 }
                 if (paused) {
-                    onLevel(WavFormat.level(chunk, 0))
+                    onLevel(CaptureLevel(WavFormat.level(chunk, 0), Double.NaN, seconds(written)))
                     continue
                 }
                 if (System.nanoTime() < mutedUntil) chunk.fill(0, 0, read)
@@ -187,7 +251,8 @@ class WavRecorder(
                 out.write(bytes.array(), 0, read * 2)
                 sink?.invoke(bytes.array().copyOf(read * 2))
                 written += read * 2
-                onLevel(WavFormat.level(chunk, read))
+                val meter = WavFormat.level(chunk, read)
+                onLevel(CaptureLevel(meter, WavFormat.normalizedLevel(chunk, read), seconds(written)))
                 if (written >= limit) {
                     running = false
                     onLimitReached()
@@ -196,6 +261,8 @@ class WavRecorder(
         }
         RandomAccessFile(file, "rw").use { it.write(WavFormat.header(written)) }
     }
+
+    private fun seconds(bytes: Long): Double = bytes.toDouble() / WavFormat.BYTES_PER_SECOND
 
     override fun setPaused(paused: Boolean) {
         this.paused = paused
@@ -220,6 +287,7 @@ class WavRecorder(
         record?.release()
         record = null
         thread = null
+        input?.release()
         if (failed) return -1
         return (file.length() - WavFormat.HEADER_BYTES).coerceAtLeast(0)
     }

@@ -14,7 +14,8 @@ extension WindowsHostPlatform {
 enum WindowsActionShortcutRun: Equatable {
     case record, page(String), playPause, stopSpeech, apiKeys, permissions, compareModels
     case quickVoice(Int), pasteLastHistoryItem, speakSelectedText, speakClipboard, troubleshooting, voiceEdit
-    /// Kept for the Mac; Windows has no command palette yet.
+    /// Kept for the Mac: the command palette is opened by Ctrl+K in the window,
+    /// never run from itself.
     case unavailable
 
     // swiftlint:disable:next cyclomatic_complexity

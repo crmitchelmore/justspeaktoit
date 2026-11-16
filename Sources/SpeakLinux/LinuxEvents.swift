@@ -31,6 +31,8 @@ final class LinuxEventContext: DesktopNativeEventHolder, @unchecked Sendable {
     let globalActionShortcuts = LinuxGlobalActionShortcuts()
     let automation: LinuxAutomationSwitch
     let apiKeys = DesktopAPIKeyRequests()
+    /// Provider balances beside API keys, on their own channel to the dialog.
+    let balances: DesktopProviderBalances
     let historyPaste = DesktopHistoryPasteAdmission()
     private(set) var gestures: LinuxShortcutGestures!
     lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
@@ -38,8 +40,12 @@ final class LinuxEventContext: DesktopNativeEventHolder, @unchecked Sendable {
     lazy var systemResources = LinuxSystemResources.makeMonitor()
     /// Set before the window opens, when iCloud sync is configured.
     var cloudSync: LinuxCloudSync?
-    /// Sidebar settings search; read and written on the GTK main thread only.
-    lazy var settingsSearch = DesktopSettingsSearchSession(platform: .linux)
+    /// Set before the window opens: Send from phone, off until the user turns it on.
+    var phoneReceiver: LinuxPhoneReceiver?
+    /// The sidebar's "Search for anything" palette; read and written on the GTK main thread only.
+    lazy var commandPalette = DesktopCommandPaletteSession(
+        platform: .linux, runnable: LinuxSettingsSearch.runnable, history: controller.paletteHistory
+    )
     /// The context every native window callback receives. It retains this
     /// holder until shutdown unregisters it; later callbacks then do nothing.
     private(set) var callbacks: NativeCallbackContext<LinuxEventContext>!
@@ -63,6 +69,10 @@ final class LinuxEventContext: DesktopNativeEventHolder, @unchecked Sendable {
             await controller.copyTranscript(text, variant: variant)
         }
         self.historyEvents = Self.makeHistoryEvents(controller)
+        self.balances = DesktopProviderBalances(
+            readKey: { await controller.savedAPIKeyForBalance(identifier: $0) },
+            publish: { LinuxWindow.presentAPIKeyBalance($0) }
+        )
         callbacks = NativeCallbackContext(self)
     }
 

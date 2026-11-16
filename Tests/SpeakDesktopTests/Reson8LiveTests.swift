@@ -7,21 +7,29 @@ import XCTest
 @testable import SpeakDesktop
 
 final class Reson8LiveTests: XCTestCase {
-    func testDesktopAndSharedRoutingUseTheRealClient() throws {
-        let route = try XCTUnwrap(LiveTranscriptionRouting.route(for: FileSpeechProvider.reson8LiveID))
-        XCTAssertEqual(route.provider, .reson8)
-        XCTAssertEqual(route.sampleRate, 16_000)
-        XCTAssertEqual(route.apiKeyIdentifier, "reson8.apiKey")
-        XCTAssertTrue(route.isSupportedOnIOS)
-        XCTAssertTrue(DesktopLiveTranscription.liveModels.contains { $0.id == route.modelID })
-        XCTAssertTrue(DesktopLiveTranscription.languageHintModelIDs.contains(route.modelID))
-        let client = DesktopLiveTranscription.makeClient(
-            model: route.modelID, apiKey: "synthetic", language: "nl_NL", makeConnection: { _ in Reson8Socket() }
-        )
-        XCTAssertTrue(client is Reson8LiveClient)
-        XCTAssertEqual(client?.finalisationBudget, FileSpeechProvider.reson8FinishBudget)
-        XCTAssertEqual(ModelCatalog.liveCapabilities(for: route.modelID).postStopFinalizeBudget,
-                       FileSpeechProvider.reson8FinishBudget)
+    func testDesktopAndSharedRoutingUseTheRealClientForEveryModel() throws {
+        XCTAssertEqual(FileSpeechProvider.reson8LiveID, "reson8/resonant-1-streaming")
+        XCTAssertEqual(Reson8Model.rumble2.liveID, "reson8/rumble-2-streaming")
+        for model in Reson8Model.allCases {
+            let route = try XCTUnwrap(LiveTranscriptionRouting.route(for: model.liveID))
+            XCTAssertEqual(route.provider, .reson8)
+            XCTAssertEqual(route.sampleRate, 16_000)
+            XCTAssertEqual(route.apiKeyIdentifier, "reson8.apiKey")
+            XCTAssertTrue(route.isSupportedOnIOS)
+            XCTAssertEqual(ModelCatalog.liveTranscription.filter { $0.id == model.liveID }.count, 1)
+            XCTAssertTrue(DesktopLiveTranscription.liveModels.contains { $0.id == route.modelID })
+            XCTAssertTrue(DesktopLiveTranscription.languageHintModelIDs.contains(route.modelID))
+            XCTAssertEqual(ModelCatalog.transcriptionDisplayName(for: model.liveID, isBatch: false),
+                           model.liveOption.displayName)
+            let client = DesktopLiveTranscription.makeClient(
+                model: route.modelID, apiKey: "synthetic", language: "nl_NL", makeConnection: { _ in Reson8Socket() }
+            )
+            XCTAssertEqual((client as? Reson8LiveClient)?.model, model)
+            XCTAssertEqual(client?.finalisationBudget, FileSpeechProvider.reson8FinishBudget)
+            XCTAssertEqual(ModelCatalog.liveCapabilities(for: route.modelID).postStopFinalizeBudget,
+                           FileSpeechProvider.reson8FinishBudget)
+        }
+        XCTAssertNil(LiveTranscriptionRouting.route(for: "reson8/rumble-2-flash-streaming"))
     }
 
     func testHandshakeGatesPCMAndCredentialsNeverReachQuery() throws {

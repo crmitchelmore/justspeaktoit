@@ -22,6 +22,12 @@ JSTIAtspiSelection *jsti_atspi_selection_capture(void) {
     JSTIAtspiSelection *lease = capture_selection(selection_current, &selection_admission);
     g_mutex_unlock(&state_lock); return lease;
 }
+JSTIAtspiSelection *jsti_atspi_voice_edit_capture(void) {
+    g_mutex_lock(&state_lock);
+    JSTIAtspiSelection *lease = capture_selection(selection_current, &selection_admission);
+    if (lease != NULL) lease->edit = TRUE;
+    g_mutex_unlock(&state_lock); return lease;
+}
 
 Session *session_ref(Session *s) { g_atomic_int_inc(&s->refs); return s; }
 void session_unref(Session *s) {
@@ -221,6 +227,18 @@ gboolean track(JSTIAtspiTarget *t, const char *detail, gint start, gint length, 
         if (!operation(detail, "insert") || t->insert_events != 0 || start != t->start
             || length != t->end - t->start || g_strcmp0(text, t->original) != 0) return FALSE;
         ++t->insert_events; return TRUE;
+    }
+    if (t->phase == REPLACING) {
+        /* Exactly our deletion of the captured text, then our insertion. */
+        if (operation(detail, "delete") && t->delete_events == 0 && t->insert_events == 0
+            && start == t->start && length == t->end - t->start && g_strcmp0(text, t->original) == 0) {
+            ++t->delete_events; return TRUE;
+        }
+        if (operation(detail, "insert") && t->delete_events == 1 && t->insert_events == 0
+            && start == t->start && t->tracked != NULL && g_strcmp0(text, t->tracked) == 0) {
+            ++t->insert_events; return TRUE;
+        }
+        return FALSE;
     }
     if (t->phase != INSERTED && t->phase != SAMPLING) return FALSE;
     if (start <= t->start || start >= t->end || ++t->mutations > 128) return FALSE;

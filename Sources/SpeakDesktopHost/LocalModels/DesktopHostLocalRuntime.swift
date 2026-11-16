@@ -148,6 +148,17 @@ package extension DesktopHostLocalModelPlatform {
         host.localReadiness(model)
     }
 
+    static func migrationModels(
+        host: isolated some DesktopHostLocalModelHost<Self>
+    ) -> DesktopMigrationRestore.ConfigurationModels {
+        let specs = host.localModelSpecs
+        let installer = host.localInstaller
+        return .init(
+            available: Dictionary(specs.map { ($0.catalogueID, $0.displayName) }) { first, _ in first },
+            installed: Set(specs.filter { installer.state(of: .init($0)) == .installed }.map(\.catalogueID))
+        )
+    }
+
     static func transcribeLocally(
         _ audio: URL, model: String, language: String?, host: isolated some DesktopHostLocalModelHost<Self>
     ) async throws -> TranscriptionResult {

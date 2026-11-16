@@ -96,7 +96,7 @@ down the screen are reference material describing what the app *can* use, not wh
 ### When does Speak connect to the internet?
 - **Apple Speech**: For language-model download when needed, and for recognition when on-device processing is unavailable
 - **Cloud transcription providers**: When actively transcribing with a cloud model
-- **Mac local receivers**: Local-network automation when enabled; the public iOS app has no Send to Mac sender
+- **Send to Mac**: On iOS, only when you pair with a Mac or send it a transcript, over your local network to that Mac
 - **iCloud History**: History, including raw and cleaned-up transcript text, syncs to your private CloudKit database
   automatically when the device is signed in to iCloud (macOS builds without iCloud support do not sync). It is on by
   default and can be turned off per device: on iOS in Settings → Sync → iCloud History Sync, and on Mac in Settings →
@@ -136,9 +136,14 @@ When using Alibaba Model Studio:
 
 ## Local Network (Send to Mac)
 
-Public iOS builds do not ship a Send to Mac sender or pairing screen and do not
-declare a local-network purpose string. Mac local receivers are separate from
-the iPhone app. QR configuration transfer does not require Bonjour discovery.
+The iOS app asks for Local Network access when you open Settings → Sync & Transfer →
+Send to Mac, to find Macs running the Send to Mac receiver. Pairing uses the six-digit
+code the Mac shows; the Mac then issues a device credential, which the iOS app
+keeps in its Keychain in an item that neither iCloud key sync nor the
+configuration QR code carries. A transcript you send goes, end-to-end encrypted,
+over your local network to that Mac only, and is pasted at its cursor; nothing
+is sent through a server. QR configuration transfer does not require Bonjour
+discovery.
 
 ## Data You Can Delete
 
@@ -146,7 +151,8 @@ the iPhone app. QR configuration transfer does not require Bonjour discovery.
 Settings → API Keys → Clear each key individually
 
 ### Clear pairing data
-Settings → Send to Mac → (macOS: regenerate pairing code)
+- iOS: Settings → Sync & Transfer → Send to Mac → Forget This Mac (deletes the stored credential)
+- macOS: Settings → Send to Mac → regenerate the pairing code (revokes every device credential)
 
 ### Clear all app data
 Delete local History and recordings in the app and remove provider keys from
@@ -215,6 +221,31 @@ The Mac App Store build and all iOS/keyboard targets compile this transport out.
 
 Apple may separately provide aggregated App Store and crash diagnostics under
 Apple's own privacy terms. That is distinct from the app's Sentry collection.
+
+### Windows and Linux
+
+The Windows and Linux apps have two switches in Settings › General, both off
+until you turn them on: **Share anonymous usage analytics** and **Send crash
+reports and diagnostics**. The choices are kept on that computer in the app's
+`telemetry.json`; they are never part of exported or imported settings, so a
+Mac or phone preference never opts a desktop in, and automation (`speak config`,
+MCP) cannot change them. No SDK is used: the apps send small HTTPS requests over
+the same native networking they use for cloud sync.
+
+- **Crash reports** go to Sentry's EU service from release builds only, when the
+  app stops on an error it cannot recover from or finds on launch that the
+  previous session did not shut down cleanly. A report holds the error type and
+  a message with quoted text, web addresses, credentials, long tokens, email
+  addresses, identifiers and home-folder names removed (capped at 300
+  characters), plus the app version, OS version and processor type. It has no
+  installation ID, user, device name, transcript, audio, prompt, API key or file
+  path. A report that cannot be sent is dropped, never stored or retried.
+- **Product analytics** use the same PostHog EU project, envelope, catalogue and
+  `$geoip_disable` request as the Mac, with `platform` set to `windows` or
+  `linux`. Opting in creates one random ID in `telemetry.json`; opting out
+  deletes it and drops queued events. Events wait in memory only (at most 50),
+  and a failed request drops its event. Release packages do not include the
+  PostHog project key yet, so they send no analytics even after opting in.
 
 ### Identifiability
 

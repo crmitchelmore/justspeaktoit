@@ -51,6 +51,13 @@ package extension DesktopNativeWindowPlatform {
         }
     }
 
+    /// Shows a raw configuration action's outcome in its window, which announces it.
+    static func rawConfiguration(_ outcome: DesktopRawConfigurationOutcome) {
+        _ = nativeWindow.setRawConfiguration(
+            outcome.text, outcome.status, outcome.issuesText, outcome.announcement, outcome.failed ? 1 : 0
+        )
+    }
+
     static func hud(_ state: DesktopHUDState) {
         _ = nativeWindow.setHUDLayout(
             state.phase.rawValue, state.headline, state.subheadline, state.liveText,

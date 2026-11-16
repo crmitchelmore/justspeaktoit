@@ -53,8 +53,8 @@ public struct AutoCorrectionCandidate: Identifiable, Codable, Equatable, Sendabl
 // MARK: - Word Diff Result
 
 /// Represents a single word-level change detected between original and edited text.
-public struct WordChange: Equatable, Hashable {
-  public enum ChangeType: String, Codable {
+public struct WordChange: Equatable, Hashable, Sendable {
+  public enum ChangeType: String, Codable, Sendable {
     case replacement  // Single word replaced with another single word
     case split        // One word became multiple words
     case merge        // Multiple words became one word

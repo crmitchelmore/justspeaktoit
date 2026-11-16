@@ -41,7 +41,7 @@ internal class SessionRequests(
     /**
      * Transcribes [file] with [model]. [missingKey] is the failure when no key is saved; [prepare]
      * runs after the key is read and before the upload (a shared file is copied in there) and returns
-     * its format. Without it the file is the recorder's WAV. [prompt] is the vocabulary glossary.
+     * its format. Without it the file is the recorder's WAV. [vocabulary] is the personal dictionary's terms.
      * A live model cannot transcribe a file, and another model is never substituted for it.
      */
     suspend fun transcribe(
@@ -49,12 +49,12 @@ internal class SessionRequests(
         file: File,
         languageTag: String,
         missingKey: DictationFailure,
-        prompt: String? = null,
+        vocabulary: List<String> = emptyList(),
         prepare: suspend () -> SharedAudio.Format? = { null },
     ): DictationEvent = if (model.live != null) {
         DictationEvent.Error(DictationFailure.LiveOnlyModel)
     } else {
-        upload(model, file, languageTag, missingKey, prompt, prepare)
+        upload(model, file, languageTag, missingKey, vocabulary, prepare)
     }
 
     /**
@@ -78,7 +78,7 @@ internal class SessionRequests(
         file: File,
         languageTag: String,
         missingKey: DictationFailure,
-        prompt: String?,
+        vocabulary: List<String>,
         prepare: suspend () -> SharedAudio.Format?,
     ): DictationEvent = try {
         val key = withContext(io) { secrets.read(model.provider.credentialId) }
@@ -89,9 +89,9 @@ internal class SessionRequests(
             DictationEvent.Final(
                 capture.call(timings.transcribeMs, model.provider) { call ->
                     if (format == null) {
-                        cloud.transcribe(model, key, file, languageTag, call, prompt = prompt)
+                        cloud.transcribe(model, key, file, languageTag, call, vocabulary = vocabulary)
                     } else {
-                        cloud.transcribe(model, key, file, languageTag, call, format, prompt)
+                        cloud.transcribe(model, key, file, languageTag, call, format, vocabulary)
                     }
                 },
             )

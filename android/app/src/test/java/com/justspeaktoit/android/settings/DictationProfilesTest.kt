@@ -20,6 +20,7 @@ class DictationProfilesTest {
         assertTrue("Android writes a field SpeakCore does not know", fields.containsAll(DictationProfiles.written))
         assertEquals(profiles.getString("storageKey"), AppPreferences.KEY_PROFILES)
         assertEquals(profiles.getString("cloudTranscriptionRouting"), DictationProfile.REMOTE_BATCH)
+        assertEquals(profiles.getString("cloudStreamingTranscriptionRouting"), DictationProfile.REMOTE_STREAMING)
     }
 
     @Test
@@ -55,6 +56,13 @@ class DictationProfilesTest {
             transcriptionRouting = "remoteStreaming",
         )
         assertNull(streaming.cloudModel)
+        val liveAsBatch = DictationProfile(
+            id = "C",
+            name = "Live upload",
+            transcriptionModelId = CloudCatalog.liveTranscriptionModels.first().catalogId,
+            transcriptionRouting = "remoteBatch",
+        )
+        assertNull(liveAsBatch.cloudModel)
         assertNull(DictationProfile(id = "B", name = "Mac", transcriptionModelId = "apple/local/default").cloudModel)
     }
 
@@ -67,6 +75,15 @@ class DictationProfilesTest {
         assertEquals("remoteBatch", json.getString("transcriptionRouting"))
         assertEquals(listOf(created), DictationProfiles.decode(DictationProfiles.encode(listOf(created)))
             .map { it.copy(source = null) })
+    }
+
+    @Test
+    fun testLiveModelProfile_savesStreamingRoutingAndRoundTrips() {
+        val live = CloudCatalog.liveTranscriptionModels.first()
+        val created = DictationProfile.create("Live").withCloudModel(live)
+        val json = JSONArray(DictationProfiles.encode(listOf(created))).getJSONObject(0)
+        assertEquals("remoteStreaming", json.getString("transcriptionRouting"))
+        assertEquals(live, DictationProfiles.decode(DictationProfiles.encode(listOf(created))).single().cloudModel)
     }
 
     @Test

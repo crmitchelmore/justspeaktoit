@@ -8,25 +8,30 @@ package struct DesktopNativeWindowCalls: Sendable {
     package typealias CString = UnsafePointer<CChar>?
     /// phase, headline, subheadline, live text, display milliseconds, compact, expanded.
     package typealias HUDLayout = @Sendable (Int32, CString, CString, CString, Int32, Int32, Int32) -> Int32
+    /// Raw configuration window: editor text (nil keeps it), status, issues, announcement, failed.
+    package typealias RawConfiguration = @Sendable (CString, CString, CString, CString, Int32) -> Int32
 
     package var beginCleanupPreview: @Sendable () -> UInt64
     package var cleanupPreview: @Sendable (CString, UInt64) -> Int32
     package var endCleanupPreview: @Sendable (UInt64) -> Void
     package var setHistoryManagement: @Sendable (CString) -> Int32
     package var setHUDLayout: HUDLayout
+    package var setRawConfiguration: RawConfiguration
 
     package init(
         beginCleanupPreview: @escaping @Sendable () -> UInt64,
         cleanupPreview: @escaping @Sendable (CString, UInt64) -> Int32,
         endCleanupPreview: @escaping @Sendable (UInt64) -> Void,
         setHistoryManagement: @escaping @Sendable (CString) -> Int32,
-        setHUDLayout: @escaping HUDLayout
+        setHUDLayout: @escaping HUDLayout,
+        setRawConfiguration: @escaping RawConfiguration
     ) {
         self.beginCleanupPreview = beginCleanupPreview
         self.cleanupPreview = cleanupPreview
         self.endCleanupPreview = endCleanupPreview
         self.setHistoryManagement = setHistoryManagement
         self.setHUDLayout = setHUDLayout
+        self.setRawConfiguration = setRawConfiguration
     }
 }
 

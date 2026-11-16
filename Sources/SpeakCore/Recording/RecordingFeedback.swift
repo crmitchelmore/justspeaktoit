@@ -39,6 +39,8 @@ public enum RecordingFeedbackDefaults {
     public static let enabled = true
     public static let profile = RecordingFeedbackProfile.classic
     public static let volume = 0.7
+    /// The volume slider's range on every platform; the quietest step stays audible.
+    public static let volumeRange: ClosedRange<Double> = 0.02...1
 
     public static let filenames = RecordingFeedbackProfile.allCases.flatMap { profile in
         RecordingFeedbackSound.allCases.map { profile.filename(for: $0) }

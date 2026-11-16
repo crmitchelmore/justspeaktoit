@@ -337,6 +337,8 @@ var iosAppDependencies: [TargetDependency] = [
     .package(product: "SpeakiOSLib"),
     .package(product: "SpeakSync"),
     .package(product: "Sentry"),
+    // Downloaded local transcription models (issue #1650); runs Core ML in process.
+    .package(product: "WhisperKit"),
     .target(name: "JustSpeakToItWidgetExtension")
 ]
 if isIOSKeyboardEnabled {
@@ -405,6 +407,14 @@ var iosAppInfoPlist: [String: Plist.Value] = [
     // Apple's OS-encryption documentation exemption applies (see submission docs).
     "ITSAppUsesNonExemptEncryption": false,
     "NSSupportsLiveActivities": true,
+    // Send to Mac (#1640): Settings -> Sync & Transfer browses for the Mac
+    // receiver's Bonjour service, pairs with its code and sends finished
+    // transcripts to it. The service type follows the release train.
+    "NSLocalNetworkUsageDescription": .string(
+        "Just Speak to It looks for your Mac on the local network so you can pair with it and send it "
+            + "transcripts you choose. Transcripts go straight to your Mac, encrypted, and nowhere else."
+    ),
+    "NSBonjourServices": [.string(trainValue("transportServiceType"))],
     // The "Continue on Mac" Handoff pointer (issue #1006). The payload is
     // the History entry id, never the transcript itself.
     "NSUserActivityTypes": ["com.justspeaktoit.transcript"],

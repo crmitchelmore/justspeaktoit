@@ -92,6 +92,74 @@ class DeepgramLiveSessionTest {
     }
 
     @Test
+    fun testDropAfterCloseStream_failsRatherThanCompleting() {
+        val session = session()
+        session.connect("dg-key")
+        sockets.last.serverOpen()
+        session.append(pcm(100))
+        sockets.last.serverSends(nova("send the report", final = true))
+        session.finish()
+        assertEquals(DeepgramLiveSession.CLOSE_STREAM, sockets.last.sent.last())
+
+        sockets.last.serverFails()
+
+        assertEquals(LiveOutcome.Failed(DictationFailure.Network, "send the report"), listener.outcome)
+    }
+
+    @Test
+    fun testNormalCloseAfterCloseStream_completesOnlyWhenNothingIsLeftUnsent() {
+        val session = session()
+        session.connect("dg-key")
+        sockets.last.serverOpen()
+        session.append(pcm(100))
+        sockets.last.serverSends(nova("heard", final = true))
+        session.finish()
+        sockets.last.queuedBytes = 3_200
+
+        sockets.last.serverCloses(1000)
+
+        assertEquals(LiveOutcome.Failed(DictationFailure.Network, "heard"), listener.outcome)
+    }
+
+    @Test
+    fun testCloseGrace_startsOnlyOnceCloseStreamHasLeftTheDevice() {
+        val session = session(FLUX_EN)
+        session.connect("dg-key")
+        sockets.last.serverOpen()
+        session.append(pcm(100))
+        sockets.last.queuedBytes = 3_200
+        session.finish()
+
+        scheduler.advanceBy(3_000)
+        assertNull(listener.outcome)
+        sockets.last.queuedBytes = 0
+        scheduler.advanceBy(1_000)
+        assertNull("the grace starts after the drain", listener.outcome)
+        scheduler.advanceBy(1_000)
+
+        assertTrue(listener.outcome is LiveOutcome.Completed)
+    }
+
+    @Test
+    fun testNovaKeepAlive_isSentOnlyWhileNoAudioFlows() {
+        val session = session()
+        session.connect("dg-key")
+        sockets.last.serverOpen()
+        session.append(pcm(100))
+        scheduler.advanceBy(DeepgramLiveSession.KEEP_ALIVE_INTERVAL_MS)
+        assertTrue(DeepgramLiveSession.KEEP_ALIVE !in sockets.last.texts)
+
+        scheduler.advanceBy(DeepgramLiveSession.KEEP_ALIVE_INTERVAL_MS)
+        assertEquals(1, sockets.last.texts.count { it == DeepgramLiveSession.KEEP_ALIVE })
+
+        val flux = DeepgramLiveSession(liveModel(FLUX_EN), null, emptyList(), scheduler, sockets, listener)
+        flux.connect("dg-key")
+        sockets.last.serverOpen()
+        scheduler.advanceBy(DeepgramLiveSession.KEEP_ALIVE_INTERVAL_MS * 2)
+        assertTrue(sockets.last.texts.none { it == DeepgramLiveSession.KEEP_ALIVE })
+    }
+
+    @Test
     fun testRejectedKey_failsAsInvalidKeyWithoutAnotherAttempt() {
         val session = session()
         session.connect("bad")

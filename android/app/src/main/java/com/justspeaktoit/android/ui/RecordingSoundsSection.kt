@@ -93,6 +93,7 @@ internal fun RecordingSoundsSection(
         Slider(
             value = choice.volume,
             onValueChange = { onChange(choice.copy(volume = it)) },
+            valueRange = RecordingSoundSettings.VOLUME_RANGE,
             onValueChangeFinished = onPreview,
             modifier = Modifier
                 .fillMaxWidth()

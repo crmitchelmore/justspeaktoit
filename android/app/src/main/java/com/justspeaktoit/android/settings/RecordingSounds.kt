@@ -36,7 +36,7 @@ enum class RecordingSoundProfile(
 data class RecordingSoundSettings(
     val enabled: Boolean = DEFAULT_ENABLED,
     val profile: RecordingSoundProfile = RecordingSoundProfile.Classic,
-    /** 0 to 1, as the slider shows it. */
+    /** Within [VOLUME_RANGE], as the slider shows it. */
     val volume: Float = DEFAULT_VOLUME,
 ) {
     /** SpeakCore's `RecordingFeedbackDefaults.gain`: squared, so the quiet end of the slider is usable. */
@@ -45,5 +45,10 @@ data class RecordingSoundSettings(
     companion object {
         const val DEFAULT_ENABLED = true
         const val DEFAULT_VOLUME = 0.7f
+
+        /** SpeakCore's `RecordingFeedbackDefaults.volumeRange`: the quietest step stays audible. */
+        val VOLUME_RANGE = 0.02f..1f
+
+        fun clampVolume(volume: Float): Float = if (volume.isNaN()) DEFAULT_VOLUME else volume.coerceIn(VOLUME_RANGE)
     }
 }

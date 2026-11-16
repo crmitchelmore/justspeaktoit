@@ -28,6 +28,7 @@ package extension DesktopNativeEventHolder {
         DesktopEventDispatcher(coalescing: DesktopHistoryEvent.coalesce) { event in
             switch event {
             case .selection(let identifier): await controller.selectHistory(identifier)
+            case .reveal(let identifier): await controller.revealHistory(identifier)
             case .version(let identifier, let variant):
                 await controller.selectTranscriptVariant(variant, identifier: identifier)
             case .playPause(let identifier): await controller.playbackToggle(identifier)
@@ -214,5 +215,20 @@ package final class DesktopNativeHandlerSlot<Holder: DesktopNativeEventHolder>: 
     /// Callback forwarding never takes the slot's lock or awaits work.
     package func end(_ registration: NativeCallbackContext<Holder>) {
         if !slot.end(registration) { Holder.Platform.update("\(name) could not be detached safely.") }
+    }
+}
+
+package extension DesktopNativeEventHolder {
+    /// Preferences › General › Edit raw configuration. Runs in settings order,
+    /// so an Apply follows the edits before it, then shows the outcome in the
+    /// window. False for other events.
+    func handleRawConfigurationEvent(_ event: DesktopNativeWindowEvent, value: String, index: Int32) -> Bool {
+        guard event == .rawConfiguration else { return false }
+        guard let action = DesktopRawConfigurationAction(rawValue: index) else { return true }
+        let controller = self.controller
+        enqueueSettings {
+            Platform.rawConfiguration(await controller.rawConfiguration(action, text: value))
+        }
+        return true
     }
 }

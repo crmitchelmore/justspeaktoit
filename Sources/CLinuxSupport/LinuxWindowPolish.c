@@ -46,6 +46,7 @@ static void polish_update_model_controls(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(polish_page()->polish_directives_row), instructions);
     gtk_widget_set_sensitive(GTK_WIDGET(polish_page()->polish_tags_row), instructions);
     gtk_widget_set_visible(GTK_WIDGET(polish_page()->polish_key_row), location == 1);
+    if (polish_page()->polish_browse != NULL) gtk_widget_set_visible(polish_page()->polish_browse, location == 1);
     if (polish_page()->polish_local_group != NULL) gtk_widget_set_visible(polish_page()->polish_local_group, local);
     if (location != 1) gtk_editable_set_text(GTK_EDITABLE(polish_page()->polish_key_row), "");
 }
@@ -103,6 +104,25 @@ void on_polish_model(GObject *object, GParamSpec *spec, gpointer data) {
         else polish_page()->polish_remote_selected = selected;
     }
     polish_update_model_controls();
+}
+
+/* A chosen OpenRouter model is a Remote choice; Apply saves it like any other. */
+static void on_polish_openrouter_chosen(int32_t slot) {
+    gboolean suppressed = ui.suppress;
+    ui.suppress = TRUE;
+    adw_combo_row_set_selected(polish_page()->polish_location_row, 1);
+    ui.suppress = suppressed;
+    polish_page()->polish_remote_selected = slot;
+    polish_select_location(slot, FALSE);
+    jsti_window_update(polish_selected_model() == slot
+        ? "OpenRouter model chosen. Press Apply to use it for cleanup."
+        : "That OpenRouter model is no longer listed. Choose another model.", NULL, -1);
+}
+
+static void on_polish_browse(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    jsti_openrouter_browser_open(ui.window, JSTI_OPENROUTER_BROWSER_CLEANUP, polish_selected_model(),
+                                 on_polish_openrouter_chosen);
 }
 
 void on_polish_apply(GtkButton *button, gpointer data) {
@@ -173,6 +193,15 @@ GtkWidget *build_post_processing(void) {
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_model_row), "Polishing model");
     adw_combo_row_set_model(polish_page()->polish_model_row, G_LIST_MODEL(polish_page()->polish_models));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(polish_page()->polish_model_row));
+    polish_page()->polish_browse = gtk_button_new_with_label("Browse OpenRouter models…");
+    gtk_widget_set_name(polish_page()->polish_browse, "settings.postProcessing.browseOpenRouter");
+    gtk_accessible_update_property(GTK_ACCESSIBLE(polish_page()->polish_browse),
+        GTK_ACCESSIBLE_PROPERTY_DESCRIPTION, "Search OpenRouter's cleanup models, compare prices and choose one", -1);
+    gtk_widget_set_halign(polish_page()->polish_browse, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(polish_page()->polish_browse, 8);
+    gtk_widget_set_visible(polish_page()->polish_browse, FALSE);
+    g_signal_connect(polish_page()->polish_browse, "clicked", G_CALLBACK(on_polish_browse), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), polish_page()->polish_browse);
     polish_page()->polish_directives_row = ADW_SWITCH_ROW(adw_switch_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(polish_page()->polish_directives_row), "Include personal lexicon directives");
     adw_action_row_set_subtitle(ADW_ACTION_ROW(polish_page()->polish_directives_row),

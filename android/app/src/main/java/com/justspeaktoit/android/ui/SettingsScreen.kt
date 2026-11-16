@@ -21,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -55,21 +56,34 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.justspeaktoit.android.R
+import com.justspeaktoit.android.diagnostics.AndroidIssueEnvironment
+import com.justspeaktoit.android.diagnostics.AndroidTroubleshooting
+import com.justspeaktoit.android.diagnostics.TroubleshootingFix
+import com.justspeaktoit.android.diagnostics.TroubleshootingRules
+import com.justspeaktoit.android.diagnostics.IssueFacts
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CleanupModelPicker
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.OpenRouterBrowser
+import com.justspeaktoit.android.cloud.OpenRouterDiscovery
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.dictation.DictationUiState
+import com.justspeaktoit.android.dictation.SilenceSettings
+import com.justspeaktoit.android.sendtomac.SendToMacState
 import com.justspeaktoit.android.settings.ApiKeyStatusFilter
+import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RecordingSoundSettings
 import com.justspeaktoit.android.settings.SettingsSearchEntry
 import com.justspeaktoit.android.settings.SettingsSearchIndex
 import com.justspeaktoit.android.settings.SettingsSearchRecents
 import com.justspeaktoit.android.settings.SettingsSearchResult
+import com.justspeaktoit.android.sync.HistorySyncAvailability
+import com.justspeaktoit.android.sync.HistorySyncStatus
 import com.justspeaktoit.android.tips.TipJarUiState
+import com.justspeaktoit.android.ui.theme.supportsDynamicColor
 
 class SettingsActions(
     val onBack: () -> Unit,
@@ -78,11 +92,23 @@ class SettingsActions(
     val onChooseModel: (CloudModel) -> Unit,
     val onCleanupChanged: (Boolean) -> Unit,
     val onKeepAudioOnCancelChanged: (Boolean) -> Unit,
+    val onKeepRecordingsChanged: (Boolean) -> Unit = {},
     val onChooseCleanupModel: (CleanupModel) -> Unit,
+    /** Chooses a transcription model by ID, including one from the OpenRouter browser. */
+    val onChooseTranscriptionId: (String) -> Unit = {},
+    /** Live OpenRouter discovery; `true` is a Refresh press, which skips the fresh-cache check. */
+    val onRefreshTranscriptionModels: (Boolean) -> Unit = {},
+    val onRefreshCleanupModels: (Boolean) -> Unit = {},
+    val onCleanupDiscoveryChanged: (Boolean) -> Unit = {},
     val onReleaseResource: (String) -> Unit = {},
     val onReleaseEverything: () -> Unit = {},
     val onChooseLanguage: (String) -> Unit = {},
     val onCorrectionsChanged: (List<CorrectionRule>) -> Unit = {},
+    val onLearnCorrectionsChanged: (Boolean) -> Unit = {},
+    val onCorrectionThresholdChanged: (Int) -> Unit = {},
+    val onAcceptCorrection: (String) -> Unit = {},
+    val onDismissCorrection: (String) -> Unit = {},
+    val onClearCorrectionSuggestions: () -> Unit = {},
     val onCleanupPromptChanged: (String) -> Unit = {},
     val onSaveProfile: (DictationProfile) -> Unit = {},
     val onDeleteProfile: (String) -> Unit = {},
@@ -92,10 +118,43 @@ class SettingsActions(
     /** Applies validated raw-configuration changes all or none; false when they cannot apply now. */
     val onApplyConfiguration: (Map<String, Any?>) -> Boolean = { false },
     val onRecordingSoundsChanged: (RecordingSoundSettings) -> Unit = {},
+    val onAudioInputChanged: (String?) -> Unit = {},
     val onPreviewRecordingSound: () -> Unit = {},
+    val onSilenceChanged: (SilenceSettings) -> Unit = {},
+    val onHandsFreeChanged: (Boolean) -> Unit = {},
+    val onRunSetup: () -> Unit = {},
+    val onAppearanceChanged: (AppearanceChoice) -> Unit = {},
+    val onCheckBalance: (CloudProvider) -> Unit = {},
+    val onSaveAzureEndpoint: (String) -> Unit = {},
+    val onClearAzureEndpoint: () -> Unit = {},
+    val onExportConfiguration: () -> Unit = {},
+    val onImportConfiguration: () -> Unit = {},
+    val onExportCredentialsChanged: (Boolean) -> Unit = {},
+    val onImportCredentialsChanged: (Boolean) -> Unit = {},
+    val onApplyConfigurationImport: () -> Unit = {},
+    val onDismissConfiguration: () -> Unit = {},
+    val onRequestMicrophone: () -> Unit = {},
+    val onOpenAppSettings: () -> Unit = {},
+    val onOpenKeyboardSettings: () -> Unit = {},
+    /** Opens the dictation screen, where the mode is chosen and the on-device model downloaded. */
+    val onChooseMode: () -> Unit = {},
+    val onSignInToHistorySync: () -> Unit = {},
+    val onSignOutOfHistorySync: () -> Unit = {},
+    val onSyncHistoryNow: () -> Unit = {},
+    /** Pairs with the named Mac using the six-digit code it shows. */
+    val onPairWithMac: (String, String) -> Unit = { _, _ -> },
+    val onForgetMac: () -> Unit = {},
+    val onStartMacDiscovery: () -> Unit = {},
+    val onStopMacDiscovery: () -> Unit = {},
+    val onClearSendToMacActivity: () -> Unit = {},
 )
 
+/** The app-wide theme choice: light, dark or the phone's, and wallpaper colours where supported. */
+data class AppearanceChoice(val appearance: AppAppearance = AppAppearance.System, val dynamicColor: Boolean = false)
+
 const val PRIVACY_POLICY_URL = "https://justspeaktoit.com/privacy"
+
+private const val API_KEYS_ANCHOR = "android.apiKeys"
 
 /** Where a search result scrolls to on this screen. */
 private fun anchorFor(entry: SettingsSearchEntry): String = when {
@@ -108,13 +167,20 @@ fun SettingsScreen(
     state: DictationUiState,
     actions: SettingsActions,
     privacy: PrivacyChoices = PrivacyChoices(),
+    appearance: AppearanceChoice = AppearanceChoice(),
     tips: TipJarUiState = TipJarUiState(),
+    troubleshooting: TroubleshootingFacts = TroubleshootingFacts(),
+    historySync: HistorySyncStatus = HistorySyncStatus(HistorySyncAvailability.MissingToken),
+    sendToMac: SendToMacState = SendToMacState(),
 ) {
     val context = LocalContext.current
     val searchIndex = remember {
         context.assets.open("settings_search.json").bufferedReader().use {
             SettingsSearchIndex.fromCatalogueJson(it.readText())
         }
+    }
+    val troubleshootingRules = remember {
+        context.assets.open(TroubleshootingRules.ASSET).bufferedReader().use { TroubleshootingRules.parse(it.readText()) }
     }
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
@@ -125,6 +191,13 @@ fun SettingsScreen(
     var highlighted by remember { mutableStateOf<String?>(null) }
     val anchors = remember { mutableStateMapOf<String, Int>() }
     val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+    val discovery = OpenRouterDiscoveryUi(
+        state = state.openRouterDiscovery,
+        cleanupEnabled = state.cleanupModelDiscoveryEnabled,
+        onCleanupEnabledChanged = actions.onCleanupDiscoveryChanged,
+        onRefreshCleanup = actions.onRefreshCleanupModels,
+        onRefreshTranscription = actions.onRefreshTranscriptionModels,
+    )
     LaunchedEffect(highlighted) {
         if (highlighted != null) {
             delay(2_500)
@@ -144,6 +217,21 @@ fun SettingsScreen(
         if (target.startsWith(SettingsSearchIndex.KEY_PREFIX)) keyFilter = ApiKeyStatusFilter.All
         highlighted = target
         scope.launch { anchors[target]?.let { scrollState.animateScrollTo(it) } }
+    }
+    fun applyFix(fix: TroubleshootingFix) {
+        when (fix) {
+            TroubleshootingFix.RequestMicrophone -> actions.onRequestMicrophone()
+            TroubleshootingFix.OpenSystemSettings -> actions.onOpenAppSettings()
+            TroubleshootingFix.OpenTranscriptionSettings -> actions.onChooseMode()
+            TroubleshootingFix.OpenApiKeys, TroubleshootingFix.VerifyKey -> {
+                keyFilter = ApiKeyStatusFilter.All
+                highlighted = API_KEYS_ANCHOR
+                scope.launch { anchors[API_KEYS_ANCHOR]?.let { scrollState.animateScrollTo(it) } }
+            }
+            TroubleshootingFix.DisablePostProcessing -> actions.onCleanupChanged(false)
+            TroubleshootingFix.OpenKeyboardSetup -> actions.onOpenKeyboardSettings()
+            TroubleshootingFix.RequestSpeechRecognition -> Unit
+        }
     }
 
     Scaffold { padding ->
@@ -193,7 +281,7 @@ fun SettingsScreen(
 
             HorizontalDivider()
             SectionTitle(R.string.settings_cloud_model_title, anchor("android.cloudModel"))
-            CloudCatalog.transcriptionModels.forEach { model ->
+            CloudCatalog.transcriptionModels.filterNot(CloudCatalog::isOpenRouterTranscription).forEach { model ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
@@ -208,6 +296,7 @@ fun SettingsScreen(
                     Text(model.displayName, modifier = Modifier.padding(start = 8.dp))
                 }
             }
+            OpenRouterTranscriptionRow(state, actions, discovery, anchor("android.cloudModel.openRouter"))
 
             HorizontalDivider()
             Row(
@@ -228,7 +317,7 @@ fun SettingsScreen(
                 Switch(checked = state.cleanupEnabled, onCheckedChange = null)
             }
             Text(stringResource(R.string.settings_cleanup_note), style = MaterialTheme.typography.bodyMedium)
-            CleanupModelRow(state, actions)
+            CleanupModelRow(state, actions, discovery)
             if (state.cleanupEnabled && state.cleanupModel.provider !in state.savedKeys) {
                 Text(
                     stringResource(R.string.settings_cleanup_needs_key, state.cleanupModel.provider.displayName),
@@ -238,6 +327,7 @@ fun SettingsScreen(
             CleanupPromptField(
                 stringResource(R.string.settings_cleanup_prompt_title),
                 state.cleanupPrompt,
+                state.transfer.generation,
                 actions.onCleanupPromptChanged,
                 anchor("android.cleanupPrompt"),
             )
@@ -250,6 +340,7 @@ fun SettingsScreen(
                 savedKeys = state.savedKeys,
                 onSave = actions.onSaveProfile,
                 onDelete = actions.onDeleteProfile,
+                discovery = discovery,
             )
 
             HorizontalDivider()
@@ -273,6 +364,27 @@ fun SettingsScreen(
             Text(stringResource(R.string.settings_keep_audio_note), style = MaterialTheme.typography.bodyMedium)
 
             HorizontalDivider()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = anchor("android.keepRecordings")
+                    .fillMaxWidth()
+                    .testTag(AutomationIds.SETTINGS_KEEP_RECORDINGS)
+                    .toggleable(
+                        value = state.keepRecordings,
+                        role = Role.Switch,
+                        onValueChange = actions.onKeepRecordingsChanged,
+                    ),
+            ) {
+                Text(
+                    stringResource(R.string.settings_keep_recordings_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = state.keepRecordings, onCheckedChange = null)
+            }
+            Text(stringResource(R.string.settings_keep_recordings_note), style = MaterialTheme.typography.bodyMedium)
+
+            HorizontalDivider()
             RecordingSoundsSection(
                 state.recordingSounds,
                 onChange = actions.onRecordingSoundsChanged,
@@ -281,8 +393,81 @@ fun SettingsScreen(
             )
 
             HorizontalDivider()
+            MicrophoneSection(
+                choice = state.audioInputChoice,
+                inputs = state.audioInputs,
+                onChoose = actions.onAudioInputChanged,
+                modifier = anchor("android.microphone"),
+            )
+
+            HorizontalDivider()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = anchor("android.silenceDetection")
+                    .fillMaxWidth()
+                    .testTag(AutomationIds.SETTINGS_SILENCE)
+                    .toggleable(
+                        value = state.silence.enabled,
+                        role = Role.Switch,
+                        onValueChange = { actions.onSilenceChanged(state.silence.copy(enabled = it)) },
+                    ),
+            ) {
+                Text(
+                    stringResource(R.string.settings_silence_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = state.silence.enabled, onCheckedChange = null)
+            }
+            Text(stringResource(R.string.settings_silence_note), style = MaterialTheme.typography.bodyMedium)
+            // Hands-free recordings stop after the silence duration even with this switch off.
+            if (state.silence.enabled || state.handsFreeEnabled) SilenceSliders(state.silence, actions.onSilenceChanged)
+
+            HorizontalDivider()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = anchor("android.handsFree")
+                    .fillMaxWidth()
+                    .testTag(AutomationIds.SETTINGS_HANDS_FREE)
+                    .toggleable(
+                        value = state.handsFreeEnabled,
+                        role = Role.Switch,
+                        onValueChange = actions.onHandsFreeChanged,
+                    ),
+            ) {
+                Text(
+                    stringResource(R.string.settings_hands_free_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = state.handsFreeEnabled, onCheckedChange = null)
+            }
+            Text(stringResource(R.string.settings_hands_free_note), style = MaterialTheme.typography.bodyMedium)
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_history_sync_title, anchor("android.historySync"))
+            HistorySyncSection(historySync, actions)
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_send_to_mac_title, anchor("android.sendToMac"))
+            SendToMacSection(sendToMac, actions)
+
+            HorizontalDivider()
             SectionTitle(R.string.settings_corrections_title, anchor("android.personalCorrections"))
             CorrectionsEditor(state.corrections, actions.onCorrectionsChanged)
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_learned_corrections_title, anchor("android.learnedCorrections"))
+            LearnedCorrections(
+                enabled = state.learnCorrections,
+                threshold = state.correctionPromotionThreshold,
+                candidates = state.correctionCandidates,
+                actions = actions,
+            )
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_appearance_title, anchor("android.appearance"))
+            AppearanceSection(appearance, actions.onAppearanceChanged)
 
             HorizontalDivider()
             SectionTitle(R.string.settings_raw_config_title, anchor("general.rawConfiguration"))
@@ -293,7 +478,7 @@ fun SettingsScreen(
             ResourcesInUse(state.resourcesInUse, actions)
 
             HorizontalDivider()
-            SectionTitle(R.string.settings_keys_title, anchor("android.apiKeys"))
+            SectionTitle(R.string.settings_keys_title, anchor(API_KEYS_ANCHOR))
             Text(stringResource(R.string.settings_keys_note), style = MaterialTheme.typography.bodyMedium)
             if (state.keyStoreError) {
                 Text(stringResource(R.string.settings_key_error), color = MaterialTheme.colorScheme.error)
@@ -316,8 +501,16 @@ fun SettingsScreen(
                     failed = provider in state.keyErrors,
                     actions,
                     anchor("${SettingsSearchIndex.KEY_PREFIX}${provider.id}"),
+                    balance = state.balanceAccounts[provider.credentialId]?.let { account ->
+                        KeyBalance(account, account.id in state.checkableBalances, state.balances[account.id])
+                    },
+                    azureEndpoint = state.azureEndpoint,
                 )
             }
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_transfer_title, anchor("android.configTransfer"))
+            ConfigTransferSection(state.transfer, dictating = state.dictation.isActive, actions)
 
             HorizontalDivider()
             Text(
@@ -345,6 +538,25 @@ fun SettingsScreen(
             TipJarSection(tips, actions.onTip)
 
             HorizontalDivider()
+            SectionTitle(R.string.settings_troubleshooting_title, anchor("android.troubleshooting"))
+            TroubleshootingSection(
+                findings = troubleshootingRules.findings(
+                    AndroidTroubleshooting.input(state, troubleshooting.mic, troubleshooting.keyboardEnabled),
+                ),
+                checking = state.checkingAvailability,
+                fixesFor = { AndroidTroubleshooting.fixes(it, state) },
+                onFix = ::applyFix,
+            )
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_setup_title, anchor("android.setupGuide"))
+            Text(stringResource(R.string.settings_setup_note), style = MaterialTheme.typography.bodyMedium)
+            OutlinedButton(
+                onClick = actions.onRunSetup,
+                modifier = Modifier.testTag(AutomationIds.SETTINGS_RUN_SETUP),
+            ) { Text(stringResource(R.string.settings_setup_run)) }
+
+            HorizontalDivider()
             val uriHandler = LocalUriHandler.current
             // Google Play's User Data policy requires the privacy policy inside the app as well as on the listing.
             TextButton(
@@ -353,12 +565,23 @@ fun SettingsScreen(
             ) {
                 Text(stringResource(R.string.privacy_policy_link))
             }
+            var reporting by rememberSaveable { mutableStateOf(false) }
+            TextButton(
+                onClick = { reporting = true },
+                modifier = anchor("android.reportIssue").testTag(AutomationIds.SETTINGS_REPORT_ISSUE),
+            ) {
+                Text(stringResource(R.string.settings_report_issue))
+            }
+            if (reporting) {
+                val facts = remember { IssueFacts.forSettings(AndroidIssueEnvironment.current(context)) }
+                IssueReportDialog(facts) { reporting = false }
+            }
         }
     }
 }
 
 @Composable
-private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions) {
+private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions, discovery: OpenRouterDiscoveryUi) {
     var picking by remember { mutableStateOf(false) }
     val title = stringResource(R.string.settings_cleanup_model)
     val label = CleanupModelPicker.selectionLabel(state.cleanupModel)
@@ -391,14 +614,64 @@ private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions) {
                 picking = false
             },
             onDismiss = { picking = false },
+            discovery = discovery,
+        )
+    }
+}
+
+/**
+ * **Browse OpenRouter models…** under the cloud transcription models: the chosen OpenRouter model as
+ * "OpenRouter › name", and a saved live model that OpenRouter no longer lists, which stays selected.
+ */
+@Composable
+private fun OpenRouterTranscriptionRow(
+    state: DictationUiState,
+    actions: SettingsActions,
+    discovery: OpenRouterDiscoveryUi,
+    modifier: Modifier,
+) {
+    var browsing by remember { mutableStateOf(false) }
+    val found = state.openRouterDiscovery
+    val count = remember(found.transcriptionModels) {
+        OpenRouterBrowser.transcriptionItems(found.transcriptionModels).size
+    }
+    val missing = OpenRouterDiscovery.missingTranscriptionSelection(
+        state.cloudModel.catalogId,
+        found.transcriptionModels,
+        found.transcriptionLoaded,
+    )
+    BrowseOpenRouterRow(
+        count = count,
+        selectedLabel = openRouterTranscriptionLabel(state.cloudModel, found),
+        onOpen = { browsing = true },
+        modifier = modifier.testTag(AutomationIds.SETTINGS_CLOUD_MODEL_OPENROUTER),
+        warning = missing?.let { stringResource(R.string.transcription_picker_missing, it) },
+    )
+    if (browsing) {
+        TranscriptionModelPickerDialog(
+            selectedId = state.cloudModel.catalogId,
+            savedKeys = state.savedKeys,
+            discovery = discovery,
+            onChoose = {
+                actions.onChooseTranscriptionId(it)
+                browsing = false
+            },
+            onDismiss = { browsing = false },
         )
     }
 }
 
 /** The user's base cleanup prompt; every edit is saved, and empty means the built-in prompt. */
 @Composable
-private fun CleanupPromptField(title: String, saved: String?, onChange: (String) -> Unit, modifier: Modifier) {
-    var text by rememberSaveable { mutableStateOf(saved.orEmpty()) }
+private fun CleanupPromptField(
+    title: String,
+    saved: String?,
+    // Changes when an import replaces the saved prompt, so the field shows the new one.
+    generation: Int,
+    onChange: (String) -> Unit,
+    modifier: Modifier,
+) {
+    var text by rememberSaveable(generation) { mutableStateOf(saved.orEmpty()) }
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         OutlinedTextField(
             value = text,
@@ -424,6 +697,54 @@ private fun CleanupPromptField(title: String, saved: String?, onChange: (String)
         }
     }
 }
+
+@Composable
+private fun AppearanceSection(choice: AppearanceChoice, onChange: (AppearanceChoice) -> Unit) {
+    AppAppearance.entries.forEach { option ->
+        val selected = option == choice.appearance
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(AutomationIds.appearanceOption(option.rawValue))
+                .selectable(
+                    selected = selected,
+                    role = Role.RadioButton,
+                    onClick = { onChange(choice.copy(appearance = option)) },
+                ),
+        ) {
+            RadioButton(selected = selected, onClick = null)
+            Text(stringResource(option.label), modifier = Modifier.padding(start = 8.dp))
+        }
+    }
+    if (!supportsDynamicColor) return
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(AutomationIds.SETTINGS_DYNAMIC_COLOR)
+            .toggleable(
+                value = choice.dynamicColor,
+                role = Role.Switch,
+                onValueChange = { onChange(choice.copy(dynamicColor = it)) },
+            ),
+    ) {
+        Text(
+            stringResource(R.string.settings_dynamic_color_label),
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(checked = choice.dynamicColor, onCheckedChange = null)
+    }
+    Text(stringResource(R.string.settings_dynamic_color_note), style = MaterialTheme.typography.bodyMedium)
+}
+
+private val AppAppearance.label: Int
+    @StringRes get() = when (this) {
+        AppAppearance.System -> R.string.settings_appearance_system
+        AppAppearance.Light -> R.string.settings_appearance_light
+        AppAppearance.Dark -> R.string.settings_appearance_dark
+    }
 
 @Composable
 private fun SectionTitle(@StringRes title: Int, modifier: Modifier = Modifier) {

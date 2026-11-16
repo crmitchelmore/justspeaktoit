@@ -1,0 +1,245 @@
+{
+  "accounts" : [
+    {
+      "billingUrl" : "https://platform.openai.com/settings/organization/billing/overview",
+      "credentialIds" : [
+        "openai.apiKey",
+        "openai.tts.apiKey"
+      ],
+      "displayName" : "OpenAI",
+      "id" : "openai",
+      "primaryCredentialId" : "openai.apiKey",
+      "reason" : "OpenAI's admin API reports costs already incurred, not a wallet balance, and it needs an admin key this app does not hold.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://console.groq.com/settings/billing",
+      "credentialIds" : [
+        "groq.apiKey"
+      ],
+      "displayName" : "Groq",
+      "id" : "groq",
+      "primaryCredentialId" : "groq.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://www.assemblyai.com/app/account",
+      "credentialIds" : [
+        "assemblyai.apiKey"
+      ],
+      "displayName" : "AssemblyAI",
+      "id" : "assemblyai",
+      "primaryCredentialId" : "assemblyai.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://console.deepgram.com/project",
+      "credentialIds" : [
+        "deepgram.apiKey"
+      ],
+      "displayName" : "Deepgram",
+      "id" : "deepgram",
+      "primaryCredentialId" : "deepgram.apiKey",
+      "support" : "balance"
+    },
+    {
+      "billingUrl" : "https://elevenlabs.io/app/subscription",
+      "credentialIds" : [
+        "elevenlabs.apiKey"
+      ],
+      "displayName" : "ElevenLabs",
+      "id" : "elevenlabs",
+      "primaryCredentialId" : "elevenlabs.apiKey",
+      "support" : "balance"
+    },
+    {
+      "billingUrl" : "https://console.mistral.ai/billing",
+      "credentialIds" : [
+        "mistral.apiKey"
+      ],
+      "displayName" : "Mistral",
+      "id" : "mistral",
+      "primaryCredentialId" : "mistral.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://modulate.ai",
+      "credentialIds" : [
+        "modulate.apiKey"
+      ],
+      "displayName" : "Modulate",
+      "id" : "modulate",
+      "primaryCredentialId" : "modulate.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://console.reson8.dev",
+      "credentialIds" : [
+        "reson8.apiKey"
+      ],
+      "displayName" : "Reson8",
+      "id" : "reson8",
+      "primaryCredentialId" : "reson8.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://www.rev.ai/account",
+      "credentialIds" : [
+        "revai.apiKey"
+      ],
+      "displayName" : "Rev.ai",
+      "id" : "revai",
+      "primaryCredentialId" : "revai.apiKey",
+      "support" : "balance"
+    },
+    {
+      "billingUrl" : "https://console.soniox.com/billing",
+      "credentialIds" : [
+        "soniox.apiKey"
+      ],
+      "displayName" : "Soniox",
+      "id" : "soniox",
+      "primaryCredentialId" : "soniox.apiKey",
+      "reason" : "Soniox reports consumed usage rather than a wallet balance.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://portal.speechmatics.com",
+      "credentialIds" : [
+        "speechmatics.apiKey"
+      ],
+      "displayName" : "Speechmatics",
+      "id" : "speechmatics",
+      "primaryCredentialId" : "speechmatics.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://play.cartesia.ai/subscription",
+      "credentialIds" : [
+        "cartesia.apiKey"
+      ],
+      "displayName" : "Cartesia",
+      "id" : "cartesia",
+      "primaryCredentialId" : "cartesia.apiKey",
+      "reason" : "Cartesia's credits endpoint reports admin usage rather than a spendable wallet, so it is not shown here as a balance.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://app.gladia.io",
+      "credentialIds" : [
+        "gladia.apiKey"
+      ],
+      "displayName" : "Gladia",
+      "id" : "gladia",
+      "primaryCredentialId" : "gladia.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://aistudio.google.com/app/plan_information",
+      "credentialIds" : [
+        "google.apiKey"
+      ],
+      "displayName" : "Google Gemini",
+      "id" : "google",
+      "primaryCredentialId" : "google.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://llama.developer.meta.com",
+      "credentialIds" : [
+        "meta.apiKey"
+      ],
+      "displayName" : "Meta",
+      "id" : "meta",
+      "primaryCredentialId" : "meta.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://app.smallest.ai/dashboard/api-keys",
+      "credentialIds" : [
+        "smallest.apiKey"
+      ],
+      "displayName" : "Smallest AI",
+      "id" : "smallest",
+      "primaryCredentialId" : "smallest.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://console.x.ai",
+      "credentialIds" : [
+        "xai.apiKey"
+      ],
+      "displayName" : "xAI",
+      "id" : "xai",
+      "primaryCredentialId" : "xai.apiKey",
+      "reason" : "xAI's management billing API needs a separate management key, which an inference key does not provide.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://portal.azure.com/#view/Microsoft_Azure_GTM/ModernBillingMenuBlade",
+      "credentialIds" : [
+        "azure.speech.apiKey"
+      ],
+      "displayName" : "Azure",
+      "id" : "azure",
+      "primaryCredentialId" : "azure.speech.apiKey",
+      "reason" : "Azure balances need a separate billing sign-in and an offer eligibility check, which a Speech resource key cannot perform.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://bailian.console.aliyun.com",
+      "credentialIds" : [
+        "alibaba.apiKey"
+      ],
+      "displayName" : "Alibaba Model Studio",
+      "id" : "alibaba",
+      "primaryCredentialId" : "alibaba.apiKey",
+      "reason" : "Speak cannot read an Alibaba balance with this Model Studio key. Check billing in your account's console.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://platform.stepfun.ai",
+      "credentialIds" : [
+        "stepfun.apiKey"
+      ],
+      "displayName" : "StepFun",
+      "id" : "stepfun",
+      "primaryCredentialId" : "stepfun.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    },
+    {
+      "billingUrl" : "https://openrouter.ai/credits",
+      "credentialIds" : [
+        "openrouter.apiKey"
+      ],
+      "displayName" : "OpenRouter",
+      "id" : "openrouter",
+      "primaryCredentialId" : "openrouter.apiKey",
+      "support" : "balance"
+    },
+    {
+      "billingUrl" : "https://platform.claude.com/settings/billing",
+      "credentialIds" : [
+        "anthropic.apiKey"
+      ],
+      "displayName" : "Anthropic",
+      "id" : "anthropic",
+      "primaryCredentialId" : "anthropic.apiKey",
+      "reason" : "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead.",
+      "support" : "billingLinkOnly"
+    }
+  ],
+  "requestTimeoutSeconds" : 15,
+  "version" : 1
+}

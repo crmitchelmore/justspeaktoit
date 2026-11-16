@@ -1,0 +1,239 @@
+{
+  "checks" : [
+    {
+      "id" : "microphone-permission",
+      "states" : {
+        "denied" : {
+          "detail" : "Recording cannot start. Allow the microphone in Just Speak's app permissions.",
+          "fixes" : [
+            "openSystemSettings"
+          ],
+          "severity" : "issue",
+          "title" : "Microphone Is Turned Off"
+        },
+        "granted" : {
+          "detail" : "Just Speak can use the microphone.",
+          "fixes" : [
+
+          ],
+          "severity" : "ok",
+          "title" : "Microphone Allowed"
+        },
+        "notDetermined" : {
+          "detail" : "You have not been asked yet. Allow it now so the first recording does not stop for a prompt.",
+          "fixes" : [
+            "requestMicrophone"
+          ],
+          "severity" : "warning",
+          "title" : "Microphone Not Allowed Yet"
+        },
+        "restricted" : {
+          "detail" : "A device policy such as Screen Time or a work profile blocks it. Whoever manages the device can lift the restriction.",
+          "fixes" : [
+
+          ],
+          "severity" : "issue",
+          "title" : "Microphone Is Restricted"
+        }
+      }
+    },
+    {
+      "id" : "speech-recognition-permission",
+      "states" : {
+        "denied" : {
+          "detail" : "The on-device model cannot run. Turn speech recognition on for Just Speak in Settings, or choose a cloud model.",
+          "fixes" : [
+            "openSystemSettings",
+            "openTranscriptionSettings"
+          ],
+          "severity" : "issue",
+          "title" : "Speech Recognition Is Turned Off"
+        },
+        "granted" : {
+          "detail" : "The on-device recogniser is allowed for this app.",
+          "fixes" : [
+
+          ],
+          "severity" : "ok",
+          "title" : "Speech Recognition Allowed"
+        },
+        "notDetermined" : {
+          "detail" : "You have not been asked yet. Allow it now so the first recording does not stop for a prompt.",
+          "fixes" : [
+            "requestSpeechRecognition"
+          ],
+          "severity" : "warning",
+          "title" : "Speech Recognition Not Allowed Yet"
+        },
+        "restricted" : {
+          "detail" : "A device policy such as Screen Time or a work profile blocks it. Whoever manages the device can lift the restriction.",
+          "fixes" : [
+
+          ],
+          "severity" : "issue",
+          "title" : "Speech Recognition Is Restricted"
+        }
+      }
+    },
+    {
+      "id" : "recogniser",
+      "states" : {
+        "needsDownload" : {
+          "detail" : "Your spoken language is supported, but its on-device model is not on the phone yet. Download it from the dictation screen, or choose another mode.",
+          "fixes" : [
+            "openTranscriptionSettings"
+          ],
+          "severity" : "warning",
+          "title" : "On-Device Model Not Downloaded"
+        },
+        "ready" : {
+          "detail" : "The recogniser your dictation mode uses supports your spoken language and is ready.",
+          "fixes" : [
+
+          ],
+          "severity" : "ok",
+          "title" : "Speech Recogniser Ready"
+        },
+        "unavailable" : {
+          "detail" : "This phone does not offer the recogniser your dictation mode needs, so recording cannot start. Choose another mode, such as a cloud model.",
+          "fixes" : [
+            "openTranscriptionSettings"
+          ],
+          "severity" : "issue",
+          "title" : "Speech Recogniser Unavailable"
+        },
+        "unknown" : {
+          "detail" : "Could not ask the system about the on-device model. A recording will still try to use it.",
+          "fixes" : [
+
+          ],
+          "severity" : "info",
+          "title" : "On-Device Model Not Checked"
+        },
+        "unsupportedLanguage" : {
+          "detail" : "The on-device recogniser has no model for your spoken language. Choose another language or another dictation mode.",
+          "fixes" : [
+            "openTranscriptionSettings"
+          ],
+          "severity" : "issue",
+          "title" : "Language Not Supported On Device"
+        }
+      }
+    },
+    {
+      "id" : "transcription-api-key",
+      "states" : {
+        "missing" : {
+          "detail" : "The selected model uses {provider}, and no key is saved. Add one or choose another model.",
+          "fixes" : [
+            "openAPIKeys",
+            "openTranscriptionSettings"
+          ],
+          "severity" : "issue",
+          "title" : "Transcription Needs a {provider} Key"
+        },
+        "present" : {
+          "detail" : "A {provider} key is saved. {provider} checks it when a recording connects.",
+          "fixes" : [
+
+          ],
+          "severity" : "ok",
+          "title" : "Transcription Key Saved"
+        },
+        "rejected" : {
+          "detail" : "{provider} did not accept the saved key. Replace it with a current key from your account.",
+          "fixes" : [
+            "openAPIKeys"
+          ],
+          "severity" : "issue",
+          "title" : "{provider} Rejected the Transcription Key"
+        },
+        "unreadable" : {
+          "detail" : "The saved {provider} key could not be read securely. This does not mean it is missing; if it keeps happening, save the key again.",
+          "fixes" : [
+            "openAPIKeys"
+          ],
+          "severity" : "warning",
+          "title" : "Transcription Key Could Not Be Read"
+        }
+      }
+    },
+    {
+      "id" : "postprocessing-api-key",
+      "states" : {
+        "missing" : {
+          "detail" : "Cleanup is on and its model uses {provider}. Add the key, or turn cleanup off.",
+          "fixes" : [
+            "openAPIKeys",
+            "disablePostProcessing"
+          ],
+          "severity" : "issue",
+          "title" : "Cleanup Needs a {provider} Key"
+        },
+        "present" : {
+          "detail" : "A {provider} key is saved. {provider} checks it when a recording connects.",
+          "fixes" : [
+
+          ],
+          "severity" : "ok",
+          "title" : "Cleanup Key Saved"
+        },
+        "rejected" : {
+          "detail" : "{provider} did not accept the saved key. Replace it with a current key from your account.",
+          "fixes" : [
+            "openAPIKeys",
+            "disablePostProcessing"
+          ],
+          "severity" : "issue",
+          "title" : "{provider} Rejected the Cleanup Key"
+        },
+        "unreadable" : {
+          "detail" : "The saved {provider} key could not be read securely. This does not mean it is missing; if it keeps happening, save the key again.",
+          "fixes" : [
+            "openAPIKeys"
+          ],
+          "severity" : "warning",
+          "title" : "Cleanup Key Could Not Be Read"
+        }
+      }
+    },
+    {
+      "id" : "keyboard",
+      "states" : {
+        "needsFullAccess" : {
+          "detail" : "The keyboard is added, but without Full Access it cannot hand dictation to the app or read its transcript back.",
+          "fixes" : [
+            "openKeyboardSetup",
+            "openSystemSettings"
+          ],
+          "severity" : "warning",
+          "title" : "Keyboard Needs Full Access"
+        },
+        "notAdded" : {
+          "detail" : "Turn on the Just Speak keyboard in the phone's keyboard settings to dictate in other apps.",
+          "fixes" : [
+            "openKeyboardSetup"
+          ],
+          "severity" : "info",
+          "title" : "Keyboard Not Turned On"
+        },
+        "ready" : {
+          "detail" : "The Just Speak keyboard is turned on in the phone's keyboard settings.",
+          "fixes" : [
+
+          ],
+          "severity" : "ok",
+          "title" : "Keyboard Ready"
+        }
+      }
+    }
+  ],
+  "providerPlaceholder" : "{provider}",
+  "severities" : [
+    "issue",
+    "warning",
+    "info",
+    "ok"
+  ],
+  "version" : 1
+}

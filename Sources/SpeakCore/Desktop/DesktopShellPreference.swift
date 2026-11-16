@@ -24,17 +24,19 @@ public enum DesktopAppVisibility: String, CaseIterable, Sendable {
 
 /// App-shell preferences in General. `appVisibility` and the compact icon are
 /// applied by hosts with a notification-area shell (Windows); other hosts keep
-/// and transfer them. The analytics choice is a Mac preference: desktop hosts
-/// send no analytics or crash reports whatever it says.
+/// and transfer them.
 ///
 /// Apple-only shell values are deliberately not fields, so they stay preserved
 /// and transfer untouched: `showStatusBarIconInDockOnly` (the Mac's Dock-only
 /// menu bar extra), `paidAccessRoutingEnabled` (Mac/iOS paid routing; no desktop
-/// route exists) and `recordingsDirectory` (a device path that imports must
-/// never execute; desktop folders are chosen locally).
+/// route exists), `recordingsDirectory` (a device path that imports must never
+/// execute; desktop folders are chosen locally) and `analyticsEnabled` (the
+/// Mac's analytics choice; desktop consent is device-local, see
+/// `DesktopTelemetryConsent`, so an imported value never opts a desktop in).
 public enum ShellPreference {
     public static let appVisibilityKey = ApplicationPreferenceKey.appVisibility.rawValue
     public static let compactIconKey = ApplicationPreferenceKey.compactStatusBarIcon.rawValue
+    /// The Mac's analytics switch, preserved and transferred but never a desktop opt-in.
     public static let analyticsKey = ApplicationPreferenceKey.analyticsEnabled.rawValue
 
     public static let fields: [DesktopConfiguration.Field] = [
@@ -45,9 +47,6 @@ public enum ShellPreference {
               }), defaultValue: AnyCodable(.string(DesktopAppVisibility.defaultValue.rawValue))),
         .init(key: compactIconKey,
               title: "Compact notification-area icon (state shown by the icon only)",
-              group: "General", kind: .boolean, defaultValue: AnyCodable(.bool(false))),
-        .init(key: analyticsKey,
-              title: "Share anonymous usage analytics (Mac only; this desktop app sends none)",
               group: "General", kind: .boolean, defaultValue: AnyCodable(.bool(false)))
     ]
     public static let keys = Set(fields.map(\.key))
@@ -55,7 +54,8 @@ public enum ShellPreference {
     public static let appleOnlyKeys: Set<String> = [
         ApplicationPreferenceKey.showStatusBarIconInDockOnly.rawValue,
         ApplicationPreferenceKey.paidAccessRoutingEnabled.rawValue,
-        ApplicationPreferenceKey.recordingsDirectory.rawValue
+        ApplicationPreferenceKey.recordingsDirectory.rawValue,
+        analyticsKey
     ]
 }
 

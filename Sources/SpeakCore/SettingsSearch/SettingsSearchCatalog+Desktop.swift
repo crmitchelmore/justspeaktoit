@@ -23,9 +23,22 @@ extension SettingsSearchCatalog {
             platforms: [.linux, .windows]
         ),
         SettingsSearchEntry(
+            id: "desktop.supportDevelopment", title: "Support development", section: .about,
+            systemImage: "heart.fill",
+            summary: "Leave an optional tip on GitHub Sponsors or Ko-fi. Tips don't unlock features.",
+            keywords: [
+                "tip jar", "tip", "donate", "support", "sponsor", "github sponsors", "ko-fi", "buy me a coffee"
+            ],
+            platforms: [.windows, .linux]
+        ),
+        SettingsSearchEntry(
             id: "desktop.dataBackup", title: "Data backup", section: .dataMigration, systemImage: "archivebox",
-            summary: "Save History, optional audio and app profiles in a ZIP backup, or restore one.",
-            keywords: ["backup", "export history", "zip", "restore", "include saved recording audio", "migrate"],
+            summary: "Save History, settings and vocabulary, with optional audio, app profiles and API keys, "
+                + "in a ZIP backup, or restore one.",
+            keywords: [
+                "backup", "export history", "zip", "restore", "include saved recording audio", "migrate",
+                "include api keys", "export settings", "transfer settings"
+            ],
             platforms: .linux
         ),
         SettingsSearchEntry(
@@ -37,8 +50,11 @@ extension SettingsSearchCatalog {
         ),
         SettingsSearchEntry(
             id: "desktop.apiKeys", title: "API Keys", section: .apiKeys, systemImage: "key.fill",
-            summary: "Add, validate and remove provider API keys.",
-            keywords: ["manage api keys", "credentials", "token", "openrouter key", "openai key", "deepgram key"],
+            summary: "Add, validate and remove provider API keys, and check account balances.",
+            keywords: [
+                "manage api keys", "credentials", "token", "openrouter key", "openai key", "deepgram key", "balance",
+                "credit", "billing"
+            ],
             platforms: .linux
         ),
         SettingsSearchEntry(
@@ -51,7 +67,11 @@ extension SettingsSearchCatalog {
         SettingsSearchEntry(
             id: "desktop.model", title: "Model", section: .transcription, systemImage: "waveform",
             summary: "The transcription model and its provider key.",
-            keywords: ["transcription model", "model picker", "provider", "api key for the selected provider"],
+            keywords: [
+                "transcription model", "model picker", "provider", "api key for the selected provider",
+                "browse openrouter models", "openrouter models", "model browser", "model pricing",
+                "zero listed prices"
+            ],
             settingKeys: ["liveTranscriptionModel", "batchTranscriptionModel", "transcriptionMode"],
             platforms: [.windows, .linux]
         ),
@@ -81,7 +101,8 @@ extension SettingsSearchCatalog {
             summary: "Turn post-processing on and choose a local or remote model and prompt.",
             keywords: [
                 "enable post-processing", "polish", "llm", "openrouter", "model source", "local", "remote",
-                "instructions", "prompt", "lexicon directives"
+                "instructions", "prompt", "lexicon directives", "browse openrouter models", "openrouter models",
+                "model browser", "model pricing", "zero listed prices"
             ],
             settingKeys: [
                 "postProcessingEnabled", "postProcessingModel", "postProcessingIncludeLexiconDirectives",
@@ -126,13 +147,25 @@ extension SettingsSearchCatalog {
             id: "desktop.selectedTextSpeech", title: "Selected-text speech", section: .voiceOutput,
             systemImage: "text.bubble",
             summary: "Read selected text aloud from any app.",
-            keywords: ["speak selection", "read selected text", "accessibility"],
+            keywords: [
+                "speak selection", "read selected text", "accessibility", "voice edit", "edit selection by voice"
+            ],
             platforms: .linux
         ),
         SettingsSearchEntry(
             id: "desktop.cloudSync", title: "iCloud sync", section: .general, systemImage: "icloud",
             summary: "Sign in with your Apple ID to sync History and import keys from your Mac.",
             keywords: ["apple id", "sync history with my mac", "import api keys from my mac", "cloudkit"],
+            platforms: [.windows, .linux]
+        ),
+        SettingsSearchEntry(
+            id: "desktop.receiveFromPhone", title: "Send from phone", section: .general,
+            systemImage: "iphone.and.arrow.forward",
+            summary: "Receive transcripts dictated on a paired iPhone or iPad and type them at the cursor.",
+            keywords: [
+                "send to computer", "send to pc", "send to mac", "receive from phone", "pair phone", "pairing code",
+                "paired devices", "forget phone", "iphone", "ipad"
+            ],
             platforms: [.windows, .linux]
         ),
         SettingsSearchEntry(
@@ -159,10 +192,11 @@ extension SettingsSearchCatalog {
         SettingsSearchEntry(
             id: "windows.audioOutputBackup", title: "Audio, output and backup", section: .general,
             systemImage: "mic",
-            summary: "The microphone, where finished text goes, and ZIP backups of History, audio and app profiles.",
+            summary: "The microphone, where finished text goes, and ZIP backups of History, settings, vocabulary, "
+                + "audio, app profiles and API keys.",
             keywords: [
                 "microphone", "input device", "text output", "backup", "zip", "restore backup", "saved audio",
-                "export history", "migrate"
+                "export history", "migrate", "export settings", "api keys"
             ],
             settingKeys: ["preferredAudioInputUID"], platforms: .windows
         ),
@@ -177,10 +211,10 @@ extension SettingsSearchCatalog {
         ),
         SettingsSearchEntry(
             id: "windows.apiKeys", title: "API keys", section: .apiKeys, systemImage: "key.fill",
-            summary: "Add, validate and remove provider API keys in Windows Credential Manager.",
+            summary: "Add, validate and remove provider API keys in Windows Credential Manager, and check balances.",
             keywords: [
                 "manage api keys", "credentials", "credential manager", "token", "openrouter key", "openai key",
-                "deepgram key", "save key"
+                "deepgram key", "save key", "balance", "credit", "billing"
             ],
             platforms: .windows
         ),

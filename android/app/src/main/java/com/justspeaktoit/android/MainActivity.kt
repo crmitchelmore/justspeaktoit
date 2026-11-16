@@ -4,19 +4,24 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -31,10 +36,15 @@ import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justspeaktoit.android.dictation.DictationViewModel
+import com.justspeaktoit.android.sendtomac.SendToMacViewModel
+import com.justspeaktoit.android.sync.AndroidHistorySync
 import com.justspeaktoit.android.telemetry.OptInSurface
 import com.justspeaktoit.android.telemetry.Telemetry
 import com.justspeaktoit.android.tips.PlayBillingTipStore
 import com.justspeaktoit.android.ui.ConsentDialog
+import com.justspeaktoit.android.onboarding.OnboardingGuide
+import com.justspeaktoit.android.onboarding.SetupSystem
+import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.ui.DictationActions
 import com.justspeaktoit.android.ui.DictationScreen
 import com.justspeaktoit.android.ui.HistoryActions
@@ -42,20 +52,33 @@ import com.justspeaktoit.android.ui.HistoryScreen
 import com.justspeaktoit.android.ui.HistoryTranscription
 import com.justspeaktoit.android.ui.MicPermission
 import com.justspeaktoit.android.ui.PrivacyChoices
+import com.justspeaktoit.android.ui.OnboardingActions
+import com.justspeaktoit.android.ui.OnboardingScreen
+import com.justspeaktoit.android.ui.OnboardingStatus
+import com.justspeaktoit.android.ui.AppearanceChoice
 import com.justspeaktoit.android.ui.SettingsActions
 import com.justspeaktoit.android.ui.SettingsScreen
+import com.justspeaktoit.android.ui.TroubleshootingFacts
 import com.justspeaktoit.android.ui.theme.JustSpeakTheme
+import java.io.FileNotFoundException
+import java.time.LocalDate
 
-private enum class Screen { Dictation, Settings, History }
+private enum class Screen { Dictation, Settings, History, Onboarding }
 
 class MainActivity : ComponentActivity() {
     private val viewModel: DictationViewModel by viewModels { DictationViewModel.Factory }
+    private val sendToMac: SendToMacViewModel by viewModels { SendToMacViewModel.Factory }
     private val permission = mutableStateOf(MicPermission.NotRequested)
     private val screenState = mutableStateOf(Screen.Dictation)
     private val telemetry: Telemetry get() = (application as JustSpeakApplication).telemetry
     private val privacy = mutableStateOf(PrivacyChoices())
     private val consentPending = mutableStateOf(false)
     private lateinit var tipStore: PlayBillingTipStore
+    private val setupStatus = mutableStateOf(OnboardingStatus(MicPermission.NotRequested, false, false))
+    private val prefs by lazy { AppPreferences(this) }
+
+    // The guide and Troubleshooting ask for the microphone without starting a recording; every other request starts one.
+    private var startAfterGrant = true
 
     private val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         permission.value = when {
@@ -63,15 +86,30 @@ class MainActivity : ComponentActivity() {
             shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO) -> MicPermission.Denied
             else -> MicPermission.DeniedPermanently
         }
-        if (granted) {
+        if (granted && startAfterGrant) {
             requestNotifications()
             viewModel.requestAutoStart()
         }
+        startAfterGrant = true
     }
 
     // The answer does not matter: without it the recording notification is only hidden from the shade.
     private val requestNotification = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
     private var askedForNotifications = false
+
+    private val exportConfiguration =
+        registerForActivityResult(ActivityResultContracts.CreateDocument(ARCHIVE_TYPE)) { uri ->
+            if (uri == null) return@registerForActivityResult
+            viewModel.exportConfiguration(
+                open = { contentResolver.openOutputStream(uri, "wt") },
+                discard = { deleteDocument(uri) },
+            )
+        }
+
+    private val importConfiguration = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        viewModel.inspectConfiguration { contentResolver.openInputStream(uri) }
+    }
 
     @OptIn(ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,8 +119,13 @@ class MainActivity : ComponentActivity() {
         savedInstanceState?.getString(KEY_SCREEN)?.let { name ->
             Screen.entries.firstOrNull { it.name == name }?.let { screenState.value = it }
         }
+        startAfterGrant = savedInstanceState?.getBoolean(KEY_START_AFTER_GRANT, true) ?: true
         // A recreated Activity has already acted on its launch intent.
-        if (savedInstanceState == null) handleIntent(intent)
+        if (savedInstanceState == null) {
+            if (shouldShowOnboarding()) screenState.value = Screen.Onboarding
+            // Dictate and share intents go straight to dictation; the guide waits for the next launch.
+            handleIntent(intent)
+        }
         tipStore = PlayBillingTipStore(this)
         refreshPrivacy()
         val actions = DictationActions(
@@ -95,6 +138,7 @@ class MainActivity : ComponentActivity() {
             onOpenSettings = ::openAppSettings,
             onShowSettings = {},
             onShowOriginal = viewModel::showOriginal,
+            onTurnOffHandsFree = viewModel::turnOffHandsFree,
         )
         setContent {
             val state by viewModel.state.collectAsStateWithLifecycle()
@@ -103,9 +147,31 @@ class MainActivity : ComponentActivity() {
             val privacyChoices by privacy
             val askConsent by consentPending
             val tips by tipStore.state.collectAsStateWithLifecycle()
-            LaunchedEffect(screen) { if (screen == Screen.Settings) tipStore.connect() }
-            JustSpeakTheme {
-                if (screen != Screen.Dictation) BackHandler { screen = Screen.Dictation }
+            val historySync by viewModel.historySyncStatus.collectAsStateWithLifecycle()
+            val sendToMacState by sendToMac.state.collectAsStateWithLifecycle()
+            LaunchedEffect(screen) {
+                if (screen == Screen.Settings) {
+                    tipStore.connect()
+                    // The keyboard may have learned corrections since the app last looked.
+                    viewModel.refreshLearnedCorrections()
+                    // As the Apple key pages do on open; it never blocks typing a key.
+                    viewModel.refreshBalances()
+                }
+            }
+            val appearance = AppearanceChoice(state.appearance, state.dynamicColor)
+            val dark = appearance.appearance.isDark(isSystemInDarkTheme())
+            // Bar icons follow the chosen appearance, not the phone's, so they stay readable.
+            DisposableEffect(dark) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark },
+                    navigationBarStyle = SystemBarStyle.auto(LIGHT_SCRIM, DARK_SCRIM) { dark },
+                )
+                onDispose {}
+            }
+            JustSpeakTheme(dark = dark, dynamicColor = appearance.dynamicColor) {
+                if (screen != Screen.Dictation) {
+                    BackHandler { if (screen == Screen.Onboarding) finishOnboarding() else screen = Screen.Dictation }
+                }
                 // Back leaves a session running in the background rather than closing it with the screen.
                 if (screen == Screen.Dictation && state.dictation.isActive) BackHandler { moveTaskToBack(true) }
                 // Expose test tags as resource IDs so UiAutomator and accessibility-driven agents can find controls.
@@ -113,18 +179,34 @@ class MainActivity : ComponentActivity() {
                     when (screen) {
                         Screen.Settings -> SettingsScreen(
                             state = state,
+                            appearance = appearance,
                             actions = SettingsActions(
                                 onBack = { screen = Screen.Dictation },
                                 onSaveKey = viewModel::saveKey,
                                 onRemoveKey = viewModel::removeKey,
+                                onCheckBalance = viewModel::checkBalance,
+                                onSaveAzureEndpoint = viewModel::saveAzureEndpoint,
+                                onClearAzureEndpoint = viewModel::clearAzureEndpoint,
                                 onChooseModel = viewModel::chooseCloudModel,
                                 onCleanupChanged = viewModel::setCleanupEnabled,
                                 onKeepAudioOnCancelChanged = viewModel::setKeepAudioOnCancel,
+                                onSilenceChanged = viewModel::setSilence,
+                                onHandsFreeChanged = viewModel::setHandsFree,
+                                onKeepRecordingsChanged = viewModel::setKeepRecordings,
                                 onChooseCleanupModel = viewModel::chooseCleanupModel,
+                                onChooseTranscriptionId = viewModel::chooseTranscriptionModel,
+                                onRefreshTranscriptionModels = viewModel::refreshTranscriptionModels,
+                                onRefreshCleanupModels = viewModel::refreshCleanupModels,
+                                onCleanupDiscoveryChanged = viewModel::setCleanupModelDiscovery,
                                 onReleaseResource = viewModel::releaseResource,
                                 onReleaseEverything = viewModel::releaseEverything,
                                 onChooseLanguage = viewModel::chooseLanguage,
                                 onCorrectionsChanged = viewModel::setCorrections,
+                                onLearnCorrectionsChanged = viewModel::setLearnCorrections,
+                                onCorrectionThresholdChanged = viewModel::setCorrectionPromotionThreshold,
+                                onAcceptCorrection = viewModel::acceptCorrectionCandidate,
+                                onDismissCorrection = viewModel::dismissCorrectionCandidate,
+                                onClearCorrectionSuggestions = viewModel::clearCorrectionCandidates,
                                 onCleanupPromptChanged = viewModel::setCleanupPrompt,
                                 onSaveProfile = viewModel::saveProfile,
                                 onDeleteProfile = viewModel::deleteProfile,
@@ -139,10 +221,46 @@ class MainActivity : ComponentActivity() {
                                 onTip = { productId -> tipStore.purchase(this@MainActivity, productId) },
                                 onApplyConfiguration = viewModel::applyConfiguration,
                                 onRecordingSoundsChanged = viewModel::setRecordingSounds,
+                                onAudioInputChanged = viewModel::setAudioInput,
                                 onPreviewRecordingSound = viewModel::previewRecordingSound,
+                                onRunSetup = { screen = Screen.Onboarding },
+                                onAppearanceChanged = { viewModel.setAppearance(it.appearance, it.dynamicColor) },
+                                onExportConfiguration = {
+                                    exportConfiguration.launch("JustSpeakToIt-config-${LocalDate.now()}.zip")
+                                },
+                                onImportConfiguration = { importConfiguration.launch(IMPORT_TYPES) },
+                                onExportCredentialsChanged = viewModel::setExportCredentials,
+                                onImportCredentialsChanged = viewModel::setImportCredentials,
+                                onApplyConfigurationImport = viewModel::applyConfigurationImport,
+                                onDismissConfiguration = viewModel::dismissConfigurationImport,
+                                onRequestMicrophone = ::requestMicWithoutRecording,
+                                onOpenAppSettings = ::openAppSettings,
+                                onOpenKeyboardSettings = { startActivity(SetupSystem.keyboardSettingsIntent()) },
+                                onChooseMode = { screen = Screen.Dictation },
+                                onSignInToHistorySync = {
+                                    viewModel.signInToHistorySync { url ->
+                                        AndroidHistorySync.openInBrowser(applicationContext, url)
+                                    }
+                                },
+                                onSignOutOfHistorySync = viewModel::signOutOfHistorySync,
+                                onSyncHistoryNow = viewModel::syncHistory,
+                                onPairWithMac = sendToMac::pair,
+                                onForgetMac = sendToMac::forget,
+                                onStartMacDiscovery = sendToMac::startDiscovery,
+                                onStopMacDiscovery = sendToMac::stopDiscovery,
+                                onClearSendToMacActivity = sendToMac::clearActivity,
                             ),
                             privacy = privacyChoices,
                             tips = tips,
+                            troubleshooting = TroubleshootingFacts(mic, setupStatus.value.keyboardEnabled),
+                            historySync = historySync,
+                            sendToMac = sendToMacState,
+                        )
+                        Screen.Onboarding -> OnboardingScreen(
+                            state = state,
+                            level = viewModel.level,
+                            status = setupStatus.value.copy(mic = mic),
+                            actions = onboardingActions(actions),
                         )
                         Screen.History -> HistoryScreen(
                             entries = state.history,
@@ -158,7 +276,10 @@ class MainActivity : ComponentActivity() {
                                 onDelete = viewModel::deleteHistoryEntry,
                                 onClear = viewModel::clearHistory,
                                 onTranscribe = viewModel::transcribeHistoryEntry,
+                                onSendToMac = sendToMac::send,
+                                onDismissSendToMac = sendToMac::clearActivity,
                             ),
+                            sendToMac = sendToMacState,
                         )
                         Screen.Dictation -> DictationScreen(
                             state = state,
@@ -195,6 +316,7 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_SCREEN, screenState.value.name)
+        outState.putBoolean(KEY_START_AFTER_GRANT, startAfterGrant)
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -227,8 +349,11 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         viewModel.onEnteredApp()
         if (hasMic()) permission.value = MicPermission.Granted
+        setupStatus.value = setupStatus.value.copy(keyboardEnabled = SetupSystem.isKeyboardEnabled(this))
         viewModel.refreshAvailability()
         viewModel.refreshHistory()
+        viewModel.refreshLearnedCorrections()
+        viewModel.syncHistory()
         telemetry.analytics.appBecameActive()
     }
 
@@ -266,15 +391,78 @@ class MainActivity : ComponentActivity() {
         if (!granted) requestNotification.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
+    private fun shouldShowOnboarding(): Boolean {
+        val completed = prefs.hasCompletedOnboarding
+        val show = OnboardingGuide.shouldShow(
+            completed,
+            hasChosenMode = prefs.chosenMode != null,
+            micGranted = hasMic(),
+        )
+        // Record the decision for installs that predate the guide, so granting later never reopens it.
+        if (completed == null && !show) prefs.hasCompletedOnboarding = true
+        return show
+    }
+
+    private fun finishOnboarding() {
+        prefs.hasCompletedOnboarding = true
+        screenState.value = Screen.Dictation
+    }
+
+    private fun onboardingActions(dictation: DictationActions) = OnboardingActions(
+        onRequestMic = ::requestMicWithoutRecording,
+        onOpenAppSettings = ::openAppSettings,
+        onOpenKeyboardSettings = { startActivity(SetupSystem.keyboardSettingsIntent()) },
+        onAddTile = if (SetupSystem.canRequestTile) {
+            {
+                SetupSystem.requestTile(this) { added ->
+                    setupStatus.value = setupStatus.value.copy(tileAdded = added)
+                }
+            }
+        } else {
+            null
+        },
+        onFinish = ::finishOnboarding,
+        dictation = dictation,
+    )
+
+    /** The setup guide and Troubleshooting ask for the microphone without starting a recording. */
+    private fun requestMicWithoutRecording() {
+        startAfterGrant = false
+        requestMic.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
     private fun hasMic() =
         ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     companion object {
         private const val DICTATE_ENTRY = "com.justspeaktoit.android.DictateEntry"
         private const val KEY_SCREEN = "screen"
+        private const val KEY_START_AFTER_GRANT = "startAfterGrant"
+
+        // The navigation bar scrims `enableEdgeToEdge()` uses by default.
+        private val LIGHT_SCRIM = Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
+        private val DARK_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
+
+        private const val ARCHIVE_TYPE = "application/zip"
+
+        // Some file managers label a ZIP as a generic binary or with the legacy Windows type.
+        private val IMPORT_TYPES = arrayOf(ARCHIVE_TYPE, "application/x-zip-compressed", "application/octet-stream")
 
         fun dictateIntent(context: Context): Intent =
             Intent(Intent.ACTION_MAIN).setClassName(context, DICTATE_ENTRY)
+    }
+
+    /** Removes an export that did not finish, so a partial file is never kept as a backup. */
+    private fun deleteDocument(uri: Uri) {
+        try {
+            DocumentsContract.deleteDocument(contentResolver, uri)
+        } catch (_: FileNotFoundException) {
+            // Already gone.
+        } catch (_: SecurityException) {
+            // The provider does not let this app delete it; the export failure is still shown.
+        } catch (_: UnsupportedOperationException) {
+            // The provider does not support deleting.
+        }
     }
 
     private fun openAppSettings() {

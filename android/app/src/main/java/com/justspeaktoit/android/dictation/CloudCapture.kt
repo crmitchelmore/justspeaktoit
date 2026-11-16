@@ -2,6 +2,7 @@ package com.justspeaktoit.android.dictation
 
 import com.justspeaktoit.android.cloud.AudioRecorder
 import com.justspeaktoit.android.cloud.CallHandle
+import com.justspeaktoit.android.cloud.CaptureLevel
 import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.RecorderFactory
@@ -82,7 +83,7 @@ internal class CloudCapture(
      * [onPcm] also receives the captured audio as it is recorded, on the capture thread.
      */
     fun start(
-        onLevel: (Float) -> Unit,
+        onLevel: (CaptureLevel) -> Unit,
         onLimitReached: (Recording) -> Unit,
         onCaptureFailed: (Recording) -> Unit,
         onPcm: ((ByteArray) -> Unit)? = null,

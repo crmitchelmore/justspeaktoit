@@ -1,17 +1,26 @@
 package com.justspeaktoit.android.dictation
 
 import android.net.Uri
+import com.justspeaktoit.android.cloud.AudioInput
+import com.justspeaktoit.android.cloud.AudioInputChoice
+import com.justspeaktoit.android.cloud.BalanceAccount
+import com.justspeaktoit.android.cloud.BalanceEntry
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.OpenRouterDiscoveryState
+import com.justspeaktoit.android.corrections.AutoCorrectionCandidate
+import com.justspeaktoit.android.corrections.AutoCorrectionLearningPolicy
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceHold
+import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RecordingSoundSettings
+import com.justspeaktoit.android.transfer.ConfigTransferState
 import java.util.Locale
 
 data class SharedAudioOffer(val uri: Uri, val mimeType: String?)
@@ -33,12 +42,26 @@ data class DictationUiState(
     val savedKeys: Set<CloudProvider> = emptySet(),
     val cleanupEnabled: Boolean = false,
     val cleanupModel: CleanupModel = CloudCatalog.cleanupModel(null),
+    /** Whether the cleanup browser also lists OpenAI models OpenRouter offers today. */
+    val cleanupModelDiscoveryEnabled: Boolean = false,
+    /** Live OpenRouter models for the transcription and cleanup browsers. */
+    val openRouterDiscovery: OpenRouterDiscoveryState = OpenRouterDiscoveryState(),
     val cleanup: CleanupStatus = CleanupStatus.None,
     val originalTranscript: String? = null,
     /** Set when a key could not be saved or removed securely. */
     val keyStoreError: Boolean = false,
+    /** The saved Azure Speech resource endpoint, or empty to use the key's region. */
+    val azureEndpoint: String = "",
     /** Providers whose key last failed to save, be read or be accepted, for the Errors filter. */
     val keyErrors: Set<CloudProvider> = emptySet(),
+    /** Balance accounts keyed by the credential whose card shows the balance. */
+    val balanceAccounts: Map<String, BalanceAccount> = emptyMap(),
+    /** Accounts whose balance Android can read once their key is saved. */
+    val checkableBalances: Set<String> = emptySet(),
+    /** Checked or checking balances by account id; never holds a key. */
+    val balances: Map<String, BalanceEntry> = emptyMap(),
+    /** Providers that refused their saved key, a subset of [keyErrors]; saving or removing the key clears it. */
+    val rejectedKeys: Set<CloudProvider> = emptySet(),
     /** True until a discarded recording has released the microphone. */
     val releasingMicrophone: Boolean = false,
     /** A Cloud recording paused while another app holds audio focus. */
@@ -52,10 +75,23 @@ data class DictationUiState(
     val sharedAudio: SharedAudioOffer? = null,
     /** Cancelled Cloud recordings are kept in History for a later transcription. */
     val keepAudioOnCancel: Boolean = AppPreferences.DEFAULT_KEEP_AUDIO_ON_CANCEL,
+    /** Whether a Cloud recording stops by itself after a pause. */
+    val silence: SilenceSettings = SilenceSettings(),
+    /** Whether the record button arms hands-free dictation; Cloud mode only. */
+    val handsFreeEnabled: Boolean = false,
+    val handsFree: HandsFreeStatus = HandsFreeStatus.Off,
+    /** Finished Cloud recordings stay in History to play back or transcribe again. */
+    val keepRecordings: Boolean = false,
     /** The History entry whose kept audio is being transcribed, if any. */
     val transcribingEntryId: String? = null,
     /** Personal corrections, in the order they apply. */
     val corrections: List<CorrectionRule> = emptyList(),
+    /** Whether the keyboard learns corrections from the user's edits. */
+    val learnCorrections: Boolean = AutoCorrectionLearningPolicy.ENABLED_BY_DEFAULT,
+    /** Edits seen before one becomes a correction automatically. */
+    val correctionPromotionThreshold: Int = AutoCorrectionLearningPolicy.DEFAULT_PROMOTION_THRESHOLD,
+    /** Learned edits waiting for review, dismissed ones excluded. */
+    val correctionCandidates: List<AutoCorrectionCandidate> = emptyList(),
     /** System resources the app holds now, oldest first (#1473). */
     val resourcesInUse: List<SystemResourceHold> = emptyList(),
     /** The user's base cleanup prompt; null means the built-in one. */
@@ -65,7 +101,18 @@ data class DictationUiState(
     /** The active profile; its choices override the user's own for new sessions. */
     val profile: DictationProfile? = null,
     val recordingSounds: RecordingSoundSettings = RecordingSoundSettings(),
+    /** The microphone Cloud recordings use; null is the system default. */
+    val audioInputId: String? = null,
+    val audioInputs: List<AudioInput> = emptyList(),
+    /** Light, dark or the phone's; the Activity themes itself from this. */
+    val appearance: AppAppearance = AppAppearance.System,
+    /** Wallpaper colours instead of the brand palette, where the phone supports them. */
+    val dynamicColor: Boolean = false,
+    /** Exporting and importing the configuration archive. */
+    val transfer: ConfigTransferState = ConfigTransferState(),
 ) {
+    val audioInputChoice: AudioInputChoice get() = AudioInputChoice.resolve(audioInputId, audioInputs)
+
     /** The cloud model a new Cloud session uses: the profile's, else the user's. */
     val sessionCloudModel: CloudModel get() = profile?.cloudModel ?: cloudModel
 
@@ -97,6 +144,14 @@ data class DictationUiState(
     val canStart: Boolean
         get() = !dictation.isActive && !checkingAvailability && !releasingMicrophone &&
             cleanup != CleanupStatus.Running && options.firstOrNull { it.mode == activeMode }?.usable == true
+
+    /** True while hands-free holds the microphone, listening or recording. */
+    val handsFreeArmed: Boolean
+        get() = handsFree == HandsFreeStatus.Listening || handsFree == HandsFreeStatus.Recording
+
+    /** Tapping record arms hands-free rather than recording at once. */
+    val armsHandsFree: Boolean
+        get() = handsFreeEnabled && activeMode == RecognitionMode.Cloud
 
     /** Cleanup runs only when switched on (by the profile or the user) and its model's provider has a key. */
     val cleanupReady: Boolean

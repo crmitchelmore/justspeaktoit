@@ -5,17 +5,18 @@ preserved tiers, see the [October 2026 transcription audit](transcription-model-
 
 File (batch) transcription for Cartesia, Gladia, Speechmatics, Smallest AI,
 Reson8 and StepFun. Supported saved live selections are preserved; retired
-identifiers migrate through the shared catalogue. Reson8 also adds a genuine
-live route; Pulse Pro and StepAudio 3 remain batch-only. Nothing here changes
+identifiers migrate through the shared catalogue. Reson8 also adds genuine
+live routes; Pulse Pro and StepAudio 3 remain batch-only. Nothing here changes
 Text-to-Speech.
 
 | Catalogue ID | Picker name | Credential | macOS | iOS |
 | --- | --- | --- | --- | --- |
 | `cartesia/ink-whisper` | Cartesia Ink Whisper (Batch) | `cartesia.apiKey` | yes | yes |
 | `gladia/solaria-1` | Gladia Solaria-1 (Batch) | `gladia.apiKey` | yes | yes |
-| `speechmatics/enhanced` | Speechmatics Enhanced (Batch) | `speechmatics.apiKey` | yes | no |
-| `speechmatics/standard` | Speechmatics Standard (Batch) | `speechmatics.apiKey` | yes | no |
+| `speechmatics/enhanced` | Speechmatics Enhanced (Batch) | `speechmatics.apiKey` | yes | yes |
+| `speechmatics/standard` | Speechmatics Standard (Batch) | `speechmatics.apiKey` | yes | yes |
 | `smallest/pulse-pro` | Smallest AI Pulse Pro | `smallest.apiKey` | yes | yes |
+| `reson8/rumble-2` | Reson8 Rumble-2 | `reson8.apiKey` | yes | yes |
 | `reson8/resonant-1` | Reson8 Resonant-1 | `reson8.apiKey` | yes | yes |
 | `stepfun/stepaudio-3-asr-max` | StepFun StepAudio 3 ASR Max | `stepfun.apiKey` | yes | yes |
 
@@ -39,17 +40,31 @@ Source recordings are never deleted by these clients.
   and M4A recordings; headerless PCM requires metadata and is not accepted here.
 - **Reson8**: `POST https://api.reson8.dev/v1/speech-to-text/prerecorded`,
   `Authorization: ApiKey`, raw recording bytes, word timings in milliseconds.
-  Automatic omits the language hint; supported explicit codes are `de`, `en`,
-  `es`, `fr`, `fy`, `it`, `nl`, `pl`, `pt`, `sv`. Unsupported hints fail before
-  upload. Reson8 documents a `model` query parameter with three models:
-  `rumble-2` (recommended, about 55 languages, prerecorded and realtime),
-  `rumble-2-flash` (prerecorded plain text only; it rejects timestamps and
-  words) and `resonant-1`, the default when `model` is omitted. Both
+  Reson8 documents a `model` query parameter with three models: `rumble-2`
+  (recommended, prerecorded and realtime), `rumble-2-flash` (prerecorded plain
+  text only) and `resonant-1`, the default when `model` is omitted. Every
+  catalogue ID sends its own model explicitly through `Reson8Model`
+  (`Sources/SpeakCore/Batch/Reson8Model.swift`), so a change to the server
+  default cannot change the engine behind an identifier:
+  `reson8/rumble-2` and `reson8/rumble-2-streaming` send `model=rumble-2`;
   `reson8/resonant-1` and `reson8/resonant-1-streaming` send
-  `model=resonant-1` explicitly, so a change to the server default cannot
-  change the engine behind the identifier, and the language allow-list above
-  is Resonant-1's. Rumble-2 is not offered yet: it needs its own routes and
-  language list (#1656). No unverified price is displayed.
+  `model=resonant-1`. Automatic omits the language hint. Each model has its
+  own allow-list, and an unsupported explicit hint fails before upload or
+  connection. Resonant-1 accepts `de`, `en`, `es`, `fr`, `fy`, `it`, `nl`,
+  `pl`, `pt`, `sv`. Rumble-2 accepts 56 codes: `af`, `ar`, `az`, `be`, `bg`,
+  `bn`, `bs`, `ca`, `ceb`, `cs`, `da`, `de`, `el`, `en`, `es`, `et`, `eu`,
+  `fa`, `fi`, `fil`, `fr`, `fy`, `gl`, `hi`, `hr`, `hu`, `id`, `is`, `it`,
+  `ja`, `jv`, `ko`, `lt`, `lv`, `mk`, `mr`, `ms`, `mt`, `nb`, `nl`, `pl`,
+  `pt`, `ro`, `ru`, `sk`, `sl`, `sq`, `sr`, `sv`, `ta`, `th`, `tr`, `uk`,
+  `vi`, `yue`, `zh`. Rumble-2 takes the same timestamp, word, confidence and
+  interim options as Resonant-1; it rejects only `patterns`, which the app
+  never sends. Reson8 publishes prices only in EUR (Rumble-2 from
+  €0.16/hour prerecorded and €0.24/hour realtime on the Launch plan), so the
+  USD comparison leaves both models unknown and no unverified price is shown.
+  `rumble-2-flash` is not offered: Reson8 positions it for testing and
+  non-critical workloads outside its SLA, it rejects `include_timestamps` and
+  `include_words`, and it would need a third request shape with no word
+  timings for little gain on short dictation.
 - **StepAudio 3**: `POST https://api.stepfun.ai/v1/audio/asr/sse`
   (International, platform.stepfun.ai) or `POST https://api.stepfun.com/v1/audio/asr/sse`
   (China, platform.stepfun.com). Keys are region-bound, so the region is saved
@@ -71,8 +86,8 @@ Source recordings are never deleted by these clients.
   added to the live picker. Published pricing is **2.8 CNY/hour**; history keeps
   CNY and the USD comparison deliberately leaves it unknown.
 
-Reson8 also has a genuine live route, `reson8/resonant-1-streaming`, on macOS,
-iOS and shared native desktop hosts. `Reson8LiveClient` opens
+Reson8 also has genuine live routes, `reson8/rumble-2-streaming` and
+`reson8/resonant-1-streaming`, on macOS, iOS and shared native desktop hosts. `Reson8LiveClient` opens
 `wss://api.reson8.dev/v1/speech-to-text/realtime` with PCM16 mono configuration
 and header-only ApiKey authorization. Audio waits for the real handshake; at
 most five seconds/256 frames are admitted, with one send in flight. Interims
@@ -92,7 +107,7 @@ Official contracts checked 2026-10-13 (StepFun regions re-checked 2026-11-13):
 [languages](https://docs.reson8.dev/speech-to-text/features/languages/),
 [models](https://docs.reson8.dev/speech-to-text/models/) (checked 2026-11-13),
 [Resonant-1 announcement](https://www.reson8.dev/blog/benchmarks),
-[models](https://docs.reson8.dev/speech-to-text/models/) (checked 2026-11-13),
+[pricing](https://www.reson8.dev/pricing) (checked 2026-11-13),
 [StepFun International SSE](https://platform.stepfun.ai/docs/en/api-reference/audio/asr-sse),
 [StepFun SSE](https://platform.stepfun.com/docs/zh/api-reference/audio/asr-sse.md),
 [pricing](https://platform.stepfun.com/docs/zh/guides/pricing/details.md).
@@ -176,23 +191,46 @@ host the existing key validator probes — with `Authorization: Bearer`:
 
 Cancelling issues a best-effort `DELETE /v2/jobs/{id}?force=true`.
 
-## Platform restriction: Speechmatics batch is macOS-only
+## iOS upload paths
 
-The iOS app now stores `speechmatics.apiKey` — the Speechmatics live provider
-added the field and its API-keys row — so the credential is no longer what
-holds the batch entries back. What does is the upload path:
-`IOSBatchTranscriptionRoute` has no Speechmatics case, so a visible entry would
-fall through to the OpenRouter route and send the audio to the wrong service.
-The batch entries are therefore filtered out of the iOS Batch picker.
-`PlatformFeatureVisibilityTests.testSpeechmaticsBatchIsHiddenOnIOSBecauseThereIsNoUploadRoute`
-pins that behaviour. Lifting the restriction means adding a `.speechmatics`
-route and its `transcribeWithSpeechmatics` client call, at which point the
-filter line and that test change together.
+iOS lists every catalogue batch model it can upload. Deepgram, AssemblyAI,
+ElevenLabs, Groq, Mistral, Modulate, Rev AI, Soniox and Speechmatics go through
+the same shared SpeakCore clients Mac and the desktop hosts use
+(`IOSBatchTranscriptionRoute.shared`, issue #1636), with the provider's own
+key. `BatchTranscriptionRouting.iosSharedClientProviderIDs` is the list; a
+provider joins it only once iOS stores its key, so no entry falls through to
+OpenRouter. iOS gained a Groq key card for this.
+`PlatformFeatureVisibilityTests.testSharedClientBatchProvidersAreListedAndRoutedToTheirOwnClient`
+pins it.
 
 Cartesia and Gladia are wired on both platforms:
 `IOSBatchTranscriptionRoute` sends each identifier to its own shared client, and
 `ModelCredentialResolver` resolves the provider's own key rather than the
 OpenRouter fallback.
+
+## Android upload paths
+
+Android offers the providers in `CloudCatalogAndroidExport.transcriptionProviderIDs`
+(issues #1636 and #1724): OpenAI and Groq through the OpenAI-compatible form, and
+AssemblyAI, Cartesia, Deepgram, ElevenLabs, Gemini (Google), Gladia, Meta Muse
+Voice, Mistral, Modulate, OpenRouter audio models, Reson8, Rev AI, Smallest,
+Soniox, Speechmatics and xAI speech-to-text through Kotlin clients in
+`android/app/src/main/java/com/justspeaktoit/android/cloud/BatchWire.kt`
+(requests and parsers) and `BatchTranscriber.kt` (upload, polling and cleanup).
+They mirror the shared clients above field for field; `BatchWireTest` and
+`BatchTranscriberTest` pin them. The export carries what each Kotlin client
+needs from SpeakCore: a model's fixed language list as `languageCodes` (Reson8,
+Smallest), the hint each language sends as `languageHints` (Gladia, Meta, xAI;
+any other language auto-detects), and `requiresPCM16WAV` for routes that take
+only the canonical WAV Android records (Meta, Inkling). OpenRouter models keep
+their vendor prefix (`google/...`), so the route comes from the export, never
+from the ID. Android always sends a concrete language, so Automatic means the
+phone's language.
+
+Azure Speech and MAI, Alibaba and StepFun stay off Android (#1724): each key is
+bound to a region, resource endpoint or workspace that Android has no setting
+for. OpenAI models that are not sent directly are all scheduled for retirement,
+so Android never starts offering them.
 
 ## Verification status
 

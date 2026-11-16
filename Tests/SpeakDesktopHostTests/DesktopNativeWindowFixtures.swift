@@ -58,7 +58,8 @@ enum NativeTestPlatform: DesktopNativeWindowPlatform {
         cleanupPreview: { log.record("cleanupPreview", [$0, $1]) },
         endCleanupPreview: { _ = log.record("endCleanupPreview", [$0]) },
         setHistoryManagement: { log.record("historyManagement", [$0]) },
-        setHUDLayout: { log.record("hud", [$0, $1, $2, $3, $4, $5, $6]) }
+        setHUDLayout: { log.record("hud", [$0, $1, $2, $3, $4, $5, $6]) },
+        setRawConfiguration: { log.record("rawConfiguration", [$0, $1, $2, $3, $4]) }
     )
     static let nativeComparison = DesktopNativeComparisonCalls(
         presentBatch: { models, _, _, _, busy, _, _, _, _, _, _, _, remaining, _ in

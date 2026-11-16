@@ -1,7 +1,14 @@
 package com.justspeaktoit.android.dictation
 
 /** What the ongoing dictation notification shows. */
-internal enum class ForegroundPhase { Recording, Paused, Finishing }
+internal enum class ForegroundPhase {
+    Recording,
+    Paused,
+    Finishing,
+
+    /** Hands-free is armed between recordings, listening for speech. */
+    Listening,
+}
 
 /**
  * The phase a session needs the foreground service for, or null when it needs none. The service runs

@@ -20,9 +20,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -60,9 +62,11 @@ class DictationSessionControllerTest {
     /** Each cue played, with how many times the Cloud recorder had been stopped when it played. */
     private val cues = CopyOnWriteArrayList<Pair<RecordingCue, Int>>()
 
+    private lateinit var capture: CloudCapture
+
     private val controller by lazy {
         val cacheDir = folder.newFolder("cache")
-        val capture = CloudCapture(recorders, cacheDir, Dispatchers.IO, RecorderRetirement(Dispatchers.IO), resources)
+        capture = CloudCapture(recorders, cacheDir, Dispatchers.IO, RecorderRetirement(Dispatchers.IO), resources)
         val secrets = MemorySecrets(
             "openai.apiKey" to "sk-test",
             CloudCatalog.cleanupModels.first().provider.credentialId to "sk-cleanup",
@@ -251,7 +255,7 @@ class DictationSessionControllerTest {
         startCloud()
         onMain { controller.stop() }
         await(states) { it.dictation.text() == "Kubernetes works" }
-        assertEquals("Kubernetes", cloud.transcriptions.single().prompt)
+        assertEquals(listOf("Kubernetes"), cloud.transcriptions.single().vocabulary)
     }
 
     @Test
@@ -300,6 +304,21 @@ class DictationSessionControllerTest {
         assertTrue("a live session never falls back to an upload", cloud.transcriptions.isEmpty())
         assertEquals(client.model.catalogId, await(history) { it.isNotEmpty() }.single().model)
         assertFalse(recorders.last.file.exists())
+    }
+
+    @Test
+    fun testClosingWhileALiveFinishIsPending_keepsTheRecordingForRecovery() {
+        val client = startLive(CloudProvider.OpenAI)
+        ViewModelHarness.await(client.connected)
+        onMain { controller.stop() }
+        ViewModelHarness.await(client.finished)
+        val file = recorders.last.file
+
+        onMain { controller.close() }
+        runBlocking { scope.coroutineContext.job.cancelAndJoin() }
+
+        assertTrue("the unsettled stream's audio is kept", file.exists())
+        assertEquals(listOf(file), capture.recoverable())
     }
 
     @Test

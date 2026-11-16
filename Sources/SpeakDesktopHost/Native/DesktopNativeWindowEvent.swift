@@ -53,6 +53,7 @@ package enum DesktopNativeWindowEvent: Int32, CaseIterable, Sendable {
     case settingsSearchOpen = 161        // index: chosen row
     case systemResourceRelease = 170     // text: the row's id
     case systemResourcesReleaseAll = 171
+    case rawConfiguration = 180          // index: DesktopRawConfigurationAction; text: JSON or path
 
     /// Issue report preview actions that carry a preview ticket.
     package var isIssueReportAction: Bool { (151...155).contains(rawValue) }
@@ -94,6 +95,10 @@ package enum DesktopNativeLinuxEvent: Int32, CaseIterable, Sendable {
     case cloudSyncSignIn = 61
     case cloudSyncSignOut = 62
     case cloudSyncNow = 63
+    case phoneReceiverEnable = 64  // index: 1 on
+    case phoneReceiverNewCode = 65
+    case phoneReceiverForget = 66  // text: paired device ID
+    case voiceEdit = 114
     case actionShortcutEdit = 115
     case apiKeys = 117
     case permissions = 118

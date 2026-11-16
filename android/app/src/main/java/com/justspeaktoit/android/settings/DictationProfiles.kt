@@ -34,12 +34,20 @@ data class DictationProfile(
     /** The stored JSON, so fields Android does not edit (matchers, output language) survive a save. */
     internal val source: String? = null,
 ) {
-    /** The profile's cloud model when Android can run it as an uploaded recording; null otherwise. */
+    /**
+     * The profile's cloud model when Android can run it on the profile's routing: a batch model as an
+     * uploaded recording, a live model as a stream. Null otherwise.
+     */
     val cloudModel: CloudModel?
         get() {
             val id = transcriptionModelId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-            if (transcriptionRouting != null && transcriptionRouting != REMOTE_BATCH) return null
-            return CloudCatalog.transcriptionModels.firstOrNull { it.catalogId == id }
+            val model = CloudCatalog.findTranscriptionModel(id) ?: return null
+            return when (transcriptionRouting) {
+                null -> model
+                REMOTE_BATCH -> model.takeIf { it.live == null }
+                REMOTE_STREAMING -> model.takeIf { it.live != null }
+                else -> null
+            }
         }
 
     /** The profile's language, or null to keep the user's own. */
@@ -50,8 +58,7 @@ data class DictationProfile(
     val cleanupModel: CleanupModel?
         get() {
             val id = cleanupModelId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-            val current = GeneratedCloudCatalog.cleanupModelSuccessors[id] ?: id
-            return CloudCatalog.cleanupModels.firstOrNull { it.selectionId == current }
+            return CloudCatalog.findCleanupModel(id)
         }
 
     /** The profile's base cleanup prompt, or null to keep the user's own. */
@@ -60,12 +67,15 @@ data class DictationProfile(
     /** Sets [model] as the profile's cloud model, or clears it with null. */
     fun withCloudModel(model: CloudModel?): DictationProfile = copy(
         transcriptionModelId = model?.catalogId,
-        transcriptionRouting = model?.let { REMOTE_BATCH },
+        transcriptionRouting = model?.let { if (it.live != null) REMOTE_STREAMING else REMOTE_BATCH },
     )
 
     companion object {
-        /** The routing Android runs: it uploads finished recordings. */
+        /** The routing of a batch model: the finished recording is uploaded. */
         const val REMOTE_BATCH = GeneratedCloudCatalog.PROFILE_CLOUD_TRANSCRIPTION_ROUTING
+
+        /** The routing of a live model: audio streams while recording. */
+        const val REMOTE_STREAMING = GeneratedCloudCatalog.PROFILE_CLOUD_STREAMING_TRANSCRIPTION_ROUTING
 
         fun create(name: String): DictationProfile =
             DictationProfile(id = UUID.randomUUID().toString().uppercase(), name = name)

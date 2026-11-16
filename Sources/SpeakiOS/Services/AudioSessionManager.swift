@@ -118,6 +118,7 @@ public final class AudioSessionManager: ObservableObject {
         } else {
             try await configureForegroundRecording(on: session)
         }
+        await applyPreferredInput(on: session)
 
         try Task.checkCancellation()
         lastError = nil
@@ -201,23 +202,6 @@ public final class AudioSessionManager: ObservableObject {
     /// AirPods) into logs and is localised.
     private static func routeDescription(ports: [AVAudioSessionPortDescription]) -> String {
         ports.isEmpty ? "none" : ports.map(\.portType.rawValue).joined(separator: "+")
-    }
-
-    private static func describe(options: AVAudioSession.CategoryOptions) -> String {
-        var names: [String] = []
-        if options.contains(.mixWithOthers) { names.append("mixWithOthers") }
-        if options.contains(.duckOthers) { names.append("duckOthers") }
-        if options.contains(.allowBluetooth) { names.append("allowBluetooth") }
-        if options.contains(.defaultToSpeaker) { names.append("defaultToSpeaker") }
-        if options.contains(.interruptSpokenAudioAndMixWithOthers) {
-            names.append("interruptSpokenAudioAndMixWithOthers")
-        }
-        if options.contains(.allowBluetoothA2DP) { names.append("allowBluetoothA2DP") }
-        if options.contains(.allowAirPlay) { names.append("allowAirPlay") }
-        if #available(iOS 14.5, *), options.contains(.overrideMutedMicrophoneInterruption) {
-            names.append("overrideMutedMicrophoneInterruption")
-        }
-        return names.isEmpty ? "none" : names.joined(separator: ",")
     }
 
     /// Deactivate audio session when done recording.
@@ -340,6 +324,7 @@ public final class AudioSessionManager: ObservableObject {
 
         logger.info("Route changed: \(String(describing: reason), privacy: .public)")
         updateCurrentRoute()
+        refreshPreferredInputStatus()
         notifyRouteChangeObservers(reason: reason)
     }
 
@@ -362,6 +347,23 @@ extension AudioSessionManager {
     /// category already in place and does not reconfigure an active session.
     static let mixableRecordingOptions: AVAudioSession.CategoryOptions =
         baseRecordingOptions.union(.mixWithOthers)
+
+    private static func describe(options: AVAudioSession.CategoryOptions) -> String {
+        var names: [String] = []
+        if options.contains(.mixWithOthers) { names.append("mixWithOthers") }
+        if options.contains(.duckOthers) { names.append("duckOthers") }
+        if options.contains(.allowBluetooth) { names.append("allowBluetooth") }
+        if options.contains(.defaultToSpeaker) { names.append("defaultToSpeaker") }
+        if options.contains(.interruptSpokenAudioAndMixWithOthers) {
+            names.append("interruptSpokenAudioAndMixWithOthers")
+        }
+        if options.contains(.allowBluetoothA2DP) { names.append("allowBluetoothA2DP") }
+        if options.contains(.allowAirPlay) { names.append("allowAirPlay") }
+        if #available(iOS 14.5, *), options.contains(.overrideMutedMicrophoneInterruption) {
+            names.append("overrideMutedMicrophoneInterruption")
+        }
+        return names.isEmpty ? "none" : names.joined(separator: ",")
+    }
 
     private func configureForegroundRecording(on session: AVAudioSession) async throws {
         do {

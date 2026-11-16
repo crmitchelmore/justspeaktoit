@@ -36,8 +36,9 @@ typedef struct {
     const char *detail;
     const char *identifier;
 } JSTISettingsSearchResult;
-/* Replaces the settings search results (UTF-8, at most 50) shown under the
- * sidebar's search box; an empty set shows "No settings match" while a query is
+/* Replaces the "Search for anything" results (UTF-8, at most 50: actions,
+ * History and settings from the shared DesktopCommandPaletteSession) shown under
+ * the sidebar's search box; an empty set shows "No results" while a query is
  * typed. Rows are read aloud as "<title>, <detail>". Strings are copied before
  * return. Thread safe and latest-only; -1 for invalid input or no window. */
 int jsti_window_set_settings_search_results(const JSTISettingsSearchResult *results, size_t count);
@@ -137,7 +138,7 @@ int jsti_shell_open_directory(const char *path, char *error, size_t error_capaci
 int jsti_window_confirm_audio_cleanup(const char *token, size_t count, char *error, size_t error_capacity);
 int jsti_window_show_migration_report(const char *text, char *error, size_t error_capacity);
 /* Shows a restore preview and answers MIGRATION_RESTORE_RESPONSE exactly once
- * with token. offers_replace enables the Replace app profiles choice. */
+ * with token. offers_replace enables the Replace choice. */
 int jsti_window_confirm_migration_restore(const char *token, const char *text, int offers_replace,
                                           char *error, size_t error_capacity);
 

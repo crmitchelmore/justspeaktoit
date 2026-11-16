@@ -22,6 +22,7 @@ class DeepgramLiveSession(
     private val flux = isFlux(model.apiName)
     private val finals = mutableListOf<String>()
     private var interim = ""
+    private var audioSinceKeepAlive = false
 
     override val finishDeadlineMs: Long = 5_000
 
@@ -30,9 +31,28 @@ class DeepgramLiveSession(
 
     override fun encode(pcm: ByteArray): List<ByteArray> = listOf(pcm)
 
-    override fun sendAudio(socket: LiveSocket, frame: ByteArray): Boolean = socket.send(frame)
+    override fun sendAudio(socket: LiveSocket, frame: ByteArray): Boolean {
+        audioSinceKeepAlive = true
+        return socket.send(frame)
+    }
 
-    override fun onSocketOpen(socket: LiveSocket) = markReady()
+    override fun onSocketOpen(socket: LiveSocket) {
+        markReady()
+        if (!flux) keepAlive()
+    }
+
+    /**
+     * Nova closes a connection that hears nothing for ten seconds, and a paused recording sends no
+     * audio, so a `KeepAlive` goes up whenever a tick passes without audio. Flux is not sent it.
+     */
+    private fun keepAlive() {
+        after(KEEP_ALIVE_INTERVAL_MS) {
+            if (endSignalSent || finishRequested) return@after
+            if (!audioSinceKeepAlive) currentSocket?.send(KEEP_ALIVE)
+            audioSinceKeepAlive = false
+            keepAlive()
+        }
+    }
 
     override fun onMessage(text: String) {
         val message = try {
@@ -60,7 +80,8 @@ class DeepgramLiveSession(
             return
         }
         endSignalSent = true
-        after(if (flux) FLUX_CLOSE_GRACE_MS else CLOSE_GRACE_MS) { completeIfDrained() }
+        // The grace for the last results starts once CloseStream has left the device.
+        afterDrained { after(if (flux) FLUX_CLOSE_GRACE_MS else CLOSE_GRACE_MS) { completeIfDrained() } }
     }
 
     override fun transcript(): String = (finals + interim.trim()).filter { it.isNotEmpty() }.joinToString(" ")
@@ -83,7 +104,10 @@ class DeepgramLiveSession(
     }
 
     companion object {
+        private const val HOST = "wss://api.deepgram.com"
         const val CLOSE_STREAM = """{"type":"CloseStream"}"""
+        const val KEEP_ALIVE = """{"type":"KeepAlive"}"""
+        const val KEEP_ALIVE_INTERVAL_MS = 3_000L
         private const val CLOSE_GRACE_MS = 1_000L
         private const val FLUX_CLOSE_GRACE_MS = 3_000L
 
@@ -108,7 +132,7 @@ class DeepgramLiveSession(
                 items += LiveVocabulary.deepgramKeyterms(keyterms).map { route.vocabularyField to it }
             }
             val version = if (flux) "v2" else "v1"
-            return "${model.provider.baseUrl}/$version/listen?${queryString(items)}"
+            return "$HOST/$version/listen?${queryString(items)}"
         }
     }
 }

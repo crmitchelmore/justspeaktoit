@@ -6,7 +6,7 @@ import CLinuxSupport
 
 enum LinuxActionShortcutRun: Equatable {
     case record, page(String), stop, troubleshooting, comparison, quickVoice(Int), clipboard, pauseSpeech
-    case apiKeys, permissions, pasteLastHistory, selectedText, unavailable
+    case apiKeys, permissions, pasteLastHistory, selectedText, voiceEdit, unavailable
 
     // swiftlint:disable:next cyclomatic_complexity
     init(_ action: DesktopShortcutAction) {
@@ -35,7 +35,8 @@ enum LinuxActionShortcutRun: Equatable {
         case .openPermissionsSettings: self = .permissions
         case .pasteLastHistoryItem: self = .pasteLastHistory
         case .speakSelectedText: self = .selectedText
-        case .editSelectionByVoice, .openCommandPalette: self = .unavailable
+        case .editSelectionByVoice: self = .voiceEdit
+        case .openCommandPalette: self = .unavailable
         }
     }
 
@@ -54,6 +55,7 @@ enum LinuxActionShortcutRun: Equatable {
         case .permissions: 10
         case .pasteLastHistory: 11
         case .selectedText: 12
+        case .voiceEdit: 13
         }
     }
     var page: String { if case .page(let name) = self { name } else { "" } }
@@ -64,6 +66,7 @@ enum LinuxActionShortcutRun: Equatable {
         case .clipboard: JSTI_SPEAK_CLIPBOARD_ARGUMENT
         case .pasteLastHistory: JSTI_PASTE_LAST_HISTORY_ARGUMENT
         case .selectedText: JSTI_SPEAK_SELECTED_TEXT_ARGUMENT
+        case .voiceEdit: JSTI_EDIT_SELECTION_BY_VOICE_ARGUMENT
         case .stop: JSTI_STOP_SPEECH_ARGUMENT
         case .pauseSpeech: JSTI_PAUSE_SPEECH_ARGUMENT
         case .quickVoice(1): JSTI_QUICK_VOICE_1_ARGUMENT
@@ -78,9 +81,11 @@ enum LinuxActionShortcutRun: Equatable {
             .subtracting([JSTI_TOGGLE_ARGUMENT])
     }
 
+    var needsExternalSelection: Bool { self == .selectedText || self == .voiceEdit }
+
     var supportsAutomaticGlobalRegistration: Bool {
         switch self {
-        case .record, .clipboard, .pasteLastHistory, .selectedText: true
+        case .record, .clipboard, .pasteLastHistory, .selectedText, .voiceEdit: true
         default: false
         }
     }
@@ -135,7 +140,7 @@ extension LinuxWindow {
                 keysym: unset ? 0 : chord?.keysym ?? 0,
                 modifiers: chord?.modifiers ?? 0, run: run.code, slot: run.slot,
                 enabled: binding.isEnabled && !binding.isGlobal && chord != nil
-                    && run != .unavailable && run != .selectedText ? 1 : 0,
+                    && run != .unavailable && !run.needsExternalSelection ? 1 : 0,
                 binding_enabled: binding.isEnabled ? 1 : 0, binding_global: binding.isGlobal ? 1 : 0,
                 can_be_global: action.supportsGlobalShortcut ? 1 : 0, has_key: unset ? 0 : 1
             )
@@ -149,8 +154,8 @@ extension LinuxWindow {
         let run = LinuxActionShortcutRun(action)
         if !binding.isEnabled { return "Off" }
         if run == .unavailable { return "Not implemented on Linux yet. The binding stays saved." }
-        if run == .selectedText {
-            return selectedTextShortcutNote(binding: binding, globalNote: globalNote)
+        if run.needsExternalSelection {
+            return selectedTextShortcutNote(run: run, binding: binding, globalNote: globalNote)
         }
         if binding.isGlobal { return globalShortcutNote(run: run, note: globalNote) }
         guard let chord = binding.linuxChord else {
@@ -185,13 +190,20 @@ extension LinuxWindow {
         return "Global action registration is not available yet. The binding stays saved."
     }
 
-    private static func selectedTextShortcutNote(binding: DesktopShortcutBinding, globalNote: String?) -> String {
+    /// Selected-text speech and voice edit act on another app's field, so an
+    /// in-window binding could never reach one.
+    private static func selectedTextShortcutNote(
+        run: LinuxActionShortcutRun, binding: DesktopShortcutBinding, globalNote: String?
+    ) -> String {
+        let fields = run == .voiceEdit
+            ? "External editable AT-SPI fields only; a changed field, selection or text is never replaced."
+            : "External editable AT-SPI fields only."
         if binding.isGlobal, LinuxHostPlatform.session.displayServer == .x11 {
             return (globalNote ?? "X11 global shortcut starts when the app is ready.")
-                + " External editable AT-SPI fields only; allow session access in Voice Output."
+                + " \(fields) Allow session access in Voice Output."
         }
-        return "External editable AT-SPI fields only. Allow session access in Voice Output, then bind "
-            + "`\(LinuxShortcuts.toggleCommand) \(JSTI_SPEAK_SELECTED_TEXT_ARGUMENT)` "
+        return "\(fields) Allow session access in Voice Output, then bind "
+            + "`\(LinuxShortcuts.toggleCommand) \(run.desktopCommandArgument ?? "")` "
             + "in desktop keyboard settings. This app's fields are excluded; the saved binding "
             + "is not registered automatically."
     }
@@ -211,16 +223,15 @@ extension LinuxActionShortcutRun {
             (.quickVoice1, .quickVoice(1)), (.quickVoice2, .quickVoice(2)), (.quickVoice3, .quickVoice(3)),
             (.speakClipboard, .clipboard), (.pauseResumeTTS, .pauseSpeech), (.openAPIKeysSettings, .apiKeys),
             (.openPermissionsSettings, .permissions), (.pasteLastHistoryItem, .pasteLastHistory),
-            (.speakSelectedText, .selectedText)
+            (.speakSelectedText, .selectedText), (.editSelectionByVoice, .voiceEdit)
         ]
-        let unavailable: [DesktopShortcutAction] = [
-            .editSelectionByVoice, .openCommandPalette
-        ]
+        let unavailable: [DesktopShortcutAction] = [.openCommandPalette]
         guard expected.allSatisfy({ Self($0.0) == $0.1 }),
               unavailable.allSatisfy({ Self($0) == .unavailable }),
               Self(.pasteLastHistoryItem).code == 11,
               Self(.pasteLastHistoryItem).page.isEmpty, Self(.pasteLastHistoryItem).slot == 0,
               Self(.speakSelectedText).code == 12, Self(.speakSelectedText).slot == 0,
+              Self(.editSelectionByVoice).code == 13, Self(.editSelectionByVoice).page.isEmpty,
               desktopCommandProjectionIsValid(),
               Set(expected.map(\.0) + unavailable) == Set(DesktopShortcutAction.allCases) else {
             throw DesktopHostError(
@@ -235,6 +246,7 @@ extension LinuxActionShortcutRun {
             (.speakClipboard, JSTI_SPEAK_CLIPBOARD_ARGUMENT),
             (.pasteLastHistoryItem, JSTI_PASTE_LAST_HISTORY_ARGUMENT),
             (.speakSelectedText, JSTI_SPEAK_SELECTED_TEXT_ARGUMENT),
+            (.editSelectionByVoice, JSTI_EDIT_SELECTION_BY_VOICE_ARGUMENT),
             (.stopTTS, JSTI_STOP_SPEECH_ARGUMENT), (.pauseResumeTTS, JSTI_PAUSE_SPEECH_ARGUMENT),
             (.quickVoice1, JSTI_QUICK_VOICE_1_ARGUMENT), (.quickVoice2, JSTI_QUICK_VOICE_2_ARGUMENT),
             (.quickVoice3, JSTI_QUICK_VOICE_3_ARGUMENT)

@@ -9,13 +9,7 @@ import UIKit
 extension ContentView {
     var transcriptLayer: some View {
         VStack {
-            if let notice = handsFree.captureStopNotice
-                ?? coordinator.captureStopNotice ?? backgroundService.captureStopNotice {
-                Text(notice)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("captureStopNotice")
-            }
+            captureNotices
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(
@@ -345,6 +339,7 @@ extension ContentView {
                 // foreground in case it returned while suspended (issue #999).
                 OfflineTranscriptUpgrader.shared.startObservingNetwork()
                 Task { await OfflineTranscriptUpgrader.shared.run() }
+                Task { await IOSLearnedCorrections.shared.ingestKeyboardObservations() }
             }
             .onChange(of: scenePhase) { _, phase in
                 // Scene intent is recorded synchronously so an owned utterance
@@ -354,6 +349,7 @@ extension ContentView {
                     refreshBackgroundState()
                     Task { await sharedImporter.drain() }
                     Task { await OfflineTranscriptUpgrader.shared.run() }
+                    Task { await IOSLearnedCorrections.shared.ingestKeyboardObservations() }
                 }
             }
             .onChange(of: coordinator.state) { _, state in

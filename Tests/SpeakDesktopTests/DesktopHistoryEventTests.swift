@@ -208,7 +208,7 @@ private actor HistoryHostProbe {
     func perform(_ event: DesktopHistoryEvent) {
         applied.append(event)
         switch event {
-        case .selection(let id):
+        case .selection(let id), .reveal(let id):
             applySelection(id)
         case .version: break
         case .playPause(let id):

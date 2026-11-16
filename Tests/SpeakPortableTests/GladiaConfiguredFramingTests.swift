@@ -25,6 +25,8 @@ final class GladiaConfiguredFramingTests: XCTestCase {
             let bytes = socket.sentAudio.reduce(into: Data()) { $0.append($1) }
             XCTAssertEqual(bytes.prefix(original.count), original)
             XCTAssertEqual(bytes.dropFirst(original.count), Data(repeating: 0, count: 1_398))
+            // stop_recording follows the tail send asynchronously.
+            await waitUntil("stop_recording sent") { socket.stopRecordingSent }
             XCTAssertEqual(socket.sentTexts, [GladiaLiveProtocol.stopRecordingJSON])
             socket.endSession()
             let result = try await fixture.result(finish)

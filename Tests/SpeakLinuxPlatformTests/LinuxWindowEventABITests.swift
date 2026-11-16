@@ -39,7 +39,8 @@ final class LinuxWindowEventABITests: XCTestCase {
             (.historyLoadMore, Int(JSTI_EVENT_HISTORY_LOAD_MORE)), (.settingsSearch, Int(JSTI_EVENT_SETTINGS_SEARCH)),
             (.settingsSearchOpen, Int(JSTI_EVENT_SETTINGS_SEARCH_OPEN)),
             (.systemResourceRelease, Int(JSTI_EVENT_SYSTEM_RESOURCE_RELEASE)),
-            (.systemResourcesReleaseAll, Int(JSTI_EVENT_SYSTEM_RESOURCES_RELEASE_ALL))
+            (.systemResourcesReleaseAll, Int(JSTI_EVENT_SYSTEM_RESOURCES_RELEASE_ALL)),
+            (.rawConfiguration, Int(JSTI_EVENT_RAW_CONFIGURATION))
         ]
         for (event, native) in pairs { XCTAssertEqual(Int(event.rawValue), native, "\(event)") }
         XCTAssertEqual(Int(Shared.vocabularyAction.rawValue), 70)
@@ -60,7 +61,11 @@ final class LinuxWindowEventABITests: XCTestCase {
             (.cloudSyncApply, Int(JSTI_EVENT_CLOUD_SYNC_APPLY)),
             (.cloudSyncSignIn, Int(JSTI_EVENT_CLOUD_SYNC_SIGN_IN)),
             (.cloudSyncSignOut, Int(JSTI_EVENT_CLOUD_SYNC_SIGN_OUT)), (.cloudSyncNow, Int(JSTI_EVENT_CLOUD_SYNC_NOW)),
+            (.phoneReceiverEnable, Int(JSTI_EVENT_PHONE_RECEIVER_ENABLE)),
+            (.phoneReceiverNewCode, Int(JSTI_EVENT_PHONE_RECEIVER_NEW_CODE)),
+            (.phoneReceiverForget, Int(JSTI_EVENT_PHONE_RECEIVER_FORGET)),
             (.recordingsLocation, Int(JSTI_EVENT_RECORDINGS_LOCATION)),
+            (.voiceEdit, Int(JSTI_EVENT_VOICE_EDIT)),
             (.actionShortcutEdit, Int(JSTI_EVENT_ACTION_SHORTCUT_EDIT)), (.apiKeys, Int(JSTI_EVENT_API_KEYS)),
             (.permissions, Int(JSTI_EVENT_PERMISSIONS)), (.speakSelectedText, Int(JSTI_EVENT_SPEAK_SELECTED_TEXT)),
             (.profiles, Int(JSTI_EVENT_PROFILES))

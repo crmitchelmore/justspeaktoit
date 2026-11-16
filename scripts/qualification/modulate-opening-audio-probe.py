@@ -152,8 +152,9 @@ class OpeningHandler(WS.ProbeHandler):
                 raise ValueError("controlled upgrade release deadline exceeded")
             session.update(upgradeHoldMilliseconds=round((time.monotonic() - held_at) * 1000, 3))
             if session.snapshot()["rejectUpgrade"]:
-                self.request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                # Record the failure before replying so a client that reads the 503 sees "failed".
                 session.update(stage="failed")
+                self.request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
                 return
             accept = base64.b64encode(hashlib.sha1((key + WS.GUID).encode("ascii")).digest()).decode("ascii")
             self.request.sendall(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"

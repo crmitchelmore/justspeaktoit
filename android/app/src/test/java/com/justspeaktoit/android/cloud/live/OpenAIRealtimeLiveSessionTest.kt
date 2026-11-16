@@ -114,17 +114,73 @@ class OpenAIRealtimeLiveSessionTest {
     }
 
     @Test
-    fun testStopWithoutACompletedItem_endsAfterTheFinaliseBudgetWithTheDeltas() {
+    fun testStopWithoutACompletedItem_waitsForItThenFailsAtTheDeadlineKeepingTheDeltas() {
         val session = ready()
         session.append(pcm(200))
         sockets.last.serverSends(delta("a", "half heard"))
 
         session.finish()
-        scheduler.advanceBy(499)
+        sockets.last.serverSends("""{"type":"input_audio_buffer.committed","item_id":"a"}""")
+        scheduler.advanceBy(7_999)
         assertNull(listener.outcome)
         scheduler.advanceBy(1)
 
-        assertEquals(LiveOutcome.Completed("half heard"), listener.outcome)
+        assertEquals(LiveOutcome.Failed(DictationFailure.NetworkTimeout, "half heard"), listener.outcome)
+    }
+
+    @Test
+    fun testSlowFinalTranscription_stillCompletesWithinTheDeadline() {
+        val session = ready()
+        session.append(pcm(200))
+        session.finish()
+        sockets.last.serverSends("""{"type":"input_audio_buffer.committed","item_id":"a"}""")
+
+        scheduler.advanceBy(3_000)
+        assertNull(listener.outcome)
+        sockets.last.serverSends(completed("a", "Slow but whole."))
+
+        assertEquals(LiveOutcome.Completed("Slow but whole."), listener.outcome)
+    }
+
+    @Test
+    fun testServerCloseAfterCommitBeforeCompletion_isAFailure() {
+        val session = ready()
+        session.append(pcm(200))
+        sockets.last.serverSends(delta("a", "almost"))
+        session.finish()
+
+        sockets.last.serverCloses(1000)
+
+        assertEquals(LiveOutcome.Failed(DictationFailure.Network, "almost"), listener.outcome)
+    }
+
+    @Test
+    fun testEarlierItemFailedWhileRecording_failsTheFinishKeepingTheText() {
+        val session = ready()
+        session.append(pcm(200))
+        sockets.last.serverSends(delta("a", "lost"))
+        sockets.last.serverSends("""{"type":"conversation.item.input_audio_transcription.failed","item_id":"a"}""")
+        assertNull(listener.outcome)
+
+        session.finish()
+        sockets.last.serverSends("""{"type":"input_audio_buffer.committed","item_id":"b"}""")
+        sockets.last.serverSends(completed("b", "Kept."))
+
+        assertEquals(LiveOutcome.Failed(DictationFailure.Server, "lost Kept."), listener.outcome)
+    }
+
+    @Test
+    fun testStopBeforeTheKeyArrives_isStillBoundedByTheFinishDeadline() {
+        val session = session()
+        session.append(pcm(200))
+        session.finish()
+        scheduler.advanceBy(1_000)
+        session.connect("sk-test")
+        sockets.last.serverOpen()
+
+        scheduler.advanceBy(7_000)
+
+        assertEquals(LiveOutcome.Failed(DictationFailure.NetworkTimeout, ""), listener.outcome)
     }
 
     @Test

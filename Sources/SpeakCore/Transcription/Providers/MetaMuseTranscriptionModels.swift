@@ -21,17 +21,19 @@ public enum MetaMuseVoiceTranscribe {
             .split(whereSeparator: { $0 == "-" || $0 == "_" })
             .first
             .map(String.init) ?? ""
-        let names: [String: String] = [
-            "ar": "Arabic", "bn": "Bengali", "nl": "Dutch", "en": "English",
-            "fr": "French", "de": "German", "he": "Hebrew", "hi": "Hindi",
-            "id": "Indonesian", "it": "Italian", "ja": "Japanese", "kn": "Kannada",
-            "ko": "Korean", "ms": "Malay", "zh": "Mandarin Chinese", "mr": "Marathi",
-            "pl": "Polish", "pt": "Portuguese", "es": "Spanish", "fil": "Tagalog",
-            "tl": "Tagalog", "ta": "Tamil", "te": "Telugu", "th": "Thai",
-            "tr": "Turkish", "vi": "Vietnamese"
-        ]
-        return names[code].map { [$0] } ?? []
+        return languageBiasNames[code].map { [$0] } ?? []
     }
+
+    /// The language name Meta takes for each primary language subtag.
+    static let languageBiasNames: [String: String] = [
+        "ar": "Arabic", "bn": "Bengali", "nl": "Dutch", "en": "English",
+        "fr": "French", "de": "German", "he": "Hebrew", "hi": "Hindi",
+        "id": "Indonesian", "it": "Italian", "ja": "Japanese", "kn": "Kannada",
+        "ko": "Korean", "ms": "Malay", "zh": "Mandarin Chinese", "mr": "Marathi",
+        "pl": "Polish", "pt": "Portuguese", "es": "Spanish", "fil": "Tagalog",
+        "tl": "Tagalog", "ta": "Tamil", "te": "Telugu", "th": "Thai",
+        "tr": "Turkish", "vi": "Vietnamese"
+    ]
 
     /// Parses comma/newline-separated recognition terms into Meta's keyword array.
     public static func keywords(from rawValue: String) -> [String] {

@@ -34,13 +34,55 @@ extension SettingsSchema {
                   defaultValue: .bool(false)),
             Field(key: "cleanup_model", kind: .enumeration, summary: "Model used to clean up transcripts.",
                   defaultValue: .string(ModelCatalog.defaultPostProcessingModel), allowedValues: cleanupModels),
+            Field(key: "cleanupModelDiscoveryEnabled", kind: .boolean,
+                  summary: "List OpenAI cleanup models OpenRouter offers today, as well as the bundled ones.",
+                  defaultValue: .bool(false)),
             Field(key: "keepAudioOnCancel", kind: .boolean,
                   summary: "Keep a cancelled cloud recording's audio in History.",
                   defaultValue: .bool(SpeechDefaults.keepAudioOnCancel)),
+            Field(key: "handsFreeDictationEnabled", kind: .boolean,
+                  summary: "Speech starts and stops Cloud recordings.",
+                  defaultValue: .bool(SharedApplicationPreferences.handsFreeDictationEnabled.iOS.defaultValue)),
             Field(key: "history_retention", kind: .enumeration, summary: "How long History keeps transcripts.",
-                  defaultValue: .string("Month"), allowedValues: androidHistoryRetentions)
-        ]
+                  defaultValue: .string("Month"), allowedValues: androidHistoryRetentions),
+            Field(key: "keepRecordingsInHistory", kind: .boolean,
+                  summary: "Keep finished cloud recordings in History to play back or transcribe again.",
+                  defaultValue: .bool(false))
+        ] + androidAudioFields + androidAppearanceFields
     }()
+
+    private static let androidAudioFields: [Field] = [
+        Field(key: "silenceDetectionEnabled", kind: .boolean, summary: "Stop a cloud recording after silence.",
+              defaultValue: .bool(false)),
+        Field(key: "silenceThreshold", kind: .number, summary: "Level below which audio counts as silence.",
+              defaultValue: .double(DictationSilencePolicy.defaultThreshold),
+              range: DictationSilencePolicy.thresholdRange),
+        Field(key: "silenceDuration", kind: .number, summary: "Seconds of silence before stopping.",
+              defaultValue: .double(DictationSilencePolicy.defaultDuration),
+              range: DictationSilencePolicy.durationRange),
+        Field(key: "autoCorrectionsEnabled", kind: .boolean,
+              summary: "Learn corrections from edits to text the keyboard inserted.",
+              defaultValue: .bool(AutoCorrectionLearningPolicy.enabledByDefault)),
+        Field(key: "autoCorrectionsPromotionThreshold", kind: .integer,
+              summary: "Edits before a correction is learned.",
+              defaultValue: .int(AutoCorrectionLearningPolicy.defaultPromotionThreshold),
+              range: AutoCorrectionLearningPolicy.numericPromotionThresholdRange),
+        Field(key: "recordingSoundsEnabled", kind: .boolean, summary: "Play start and stop sounds.",
+              defaultValue: .bool(RecordingFeedbackDefaults.enabled)),
+        Field(key: "recordingSoundProfile", kind: .enumeration, summary: "Start and stop sound set.",
+              defaultValue: .string(RecordingFeedbackDefaults.profile.rawValue),
+              allowedValues: RecordingFeedbackProfile.allCases.map(\.rawValue)),
+        Field(key: "recordingSoundVolume", kind: .number, summary: "Start and stop sound volume.",
+              defaultValue: .double(RecordingFeedbackDefaults.volume), range: RecordingFeedbackDefaults.volumeRange)
+    ]
+
+    private static let androidAppearanceFields: [Field] = [
+        Field(key: "appearance", kind: .enumeration, summary: "Light, dark or follow the phone.",
+              defaultValue: .string("system"), allowedValues: ["system", "light", "dark"]),
+        Field(key: "dynamicColor", kind: .boolean,
+              summary: "Use wallpaper colours instead of the app's palette (Android 12 and later).",
+              defaultValue: .bool(false))
+    ]
 }
 
 /// The Android raw-configuration schema as JSON, so the app validates documents

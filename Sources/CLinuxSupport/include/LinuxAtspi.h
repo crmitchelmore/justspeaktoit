@@ -41,6 +41,19 @@ int32_t jsti_atspi_selection_status(void);
 JSTIAtspiSelection *jsti_atspi_selection_capture(void);
 int32_t jsti_atspi_selection_read(JSTIAtspiSelection *lease, char *output, size_t capacity);
 void jsti_atspi_selection_release(JSTIAtspiSelection *lease);
+/* Voice edit: the same single pending lease and session consent, read once
+ * with jsti_atspi_selection_read. It stays armed across dictation; any focus,
+ * caret, selection, text, privacy or window change invalidates it. Replace
+ * re-verifies the same control, range, text and surroundings before it
+ * dispatches DeleteText+InsertText at the captured range, exactly once.
+ * 0 refused BEFORE dispatch (nothing changed); 1 replaced and read back;
+ * -1 indeterminate AFTER dispatch. A caller must never retry after -1. */
+JSTIAtspiSelection *jsti_atspi_voice_edit_capture(void);
+int32_t jsti_atspi_voice_edit_is_current(JSTIAtspiSelection *lease);
+int32_t jsti_atspi_voice_edit_replace(JSTIAtspiSelection *lease, const char *text);
+/* Invalidates the lease without releasing it; safe while a replace is in flight,
+ * which then stops before its next accessibility call. */
+void jsti_atspi_voice_edit_cancel(JSTIAtspiSelection *lease);
 /* Pure fixtures: no bus, UI, services or field access. */
 int32_t jsti_atspi_contract_self_test(void);
 int32_t jsti_atspi_selection_contract_self_test(void);

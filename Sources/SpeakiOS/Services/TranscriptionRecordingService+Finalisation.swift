@@ -108,6 +108,7 @@ extension TranscriptionRecordingService {
 
         let endingSession = transcriptionSession
         let drained = await drainActiveTranscriber(duration: duration)
+        await dependencies.prepareLearnedCorrections()
         startTime = nil
         guard polishLedger.isCurrent(completionID) else {
             // Explicit Cancel during the drain must not publish History or
@@ -132,7 +133,7 @@ extension TranscriptionRecordingService {
 
         // Use the best available text and make the returned result, the history
         // entry, the clipboard, and the spoken dialog all agree on it.
-        let text = bestAvailableText(from: drained)
+        let text = dependencies.applyLearnedCorrections(bestAvailableText(from: drained))
         let result = drained.replacingText(text)
         // Onboarding progress is earned by evidence only: an unidentified
         // caller, or a run that produced no text, proves nothing.

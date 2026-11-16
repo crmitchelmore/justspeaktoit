@@ -31,7 +31,8 @@ struct APIKeyCredentialWriter {
         "speechmatics": \.speechmaticsAPIKey,
         "revai": \.revAIAPIKey,
         "mistral": \.mistralAPIKey,
-        "anthropic": \.anthropicAPIKey
+        "anthropic": \.anthropicAPIKey,
+        "groq": \.groqAPIKey
     ]
 
     func store(_ key: String, for id: String) {

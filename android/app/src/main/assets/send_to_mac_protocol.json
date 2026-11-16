@@ -1,0 +1,100 @@
+{
+  "endpointPath" : "/speak",
+  "handshakeFrameLimitBytes" : 4096,
+  "labels" : {
+    "clientFinished" : "justspeaktoit.send-to-mac.v2 client finished",
+    "clientToServerInfo" : "justspeaktoit.send-to-mac.v2 client to server",
+    "credentialKeySalt" : "justspeaktoit.send-to-mac.device-credential",
+    "frameAssociatedData" : "justspeaktoit.send-to-mac.v2.frame",
+    "pairingKeySalt" : "justspeaktoit.send-to-mac.pairing-key",
+    "preSharedKeyInfo" : "v2",
+    "serverFinished" : "justspeaktoit.send-to-mac.v2 server finished",
+    "serverToClientInfo" : "justspeaktoit.send-to-mac.v2 server to client",
+    "transcript" : "justspeaktoit.send-to-mac.v2"
+  },
+  "messages" : {
+    "mac" : {
+      "ack" : "{\"payload\":{\"sequenceNumber\":1},\"type\":\"ack\"}",
+      "authResultAlpha" : "{\"payload\":{\"releaseTrain\":\"alpha\",\"sessionToken\":\"vector-session-token\",\"success\":true},\"type\":\"authResult\"}",
+      "authResultFailure" : "{\"payload\":{\"errorMessage\":\"Invalid pairing code\",\"success\":false},\"type\":\"authResult\"}",
+      "authResultLegacySuccess" : "{\"payload\":{\"sessionToken\":\"vector-session-token\",\"success\":true},\"type\":\"authResult\"}",
+      "authResultSuccess" : "{\"payload\":{\"releaseTrain\":\"stable\",\"sessionToken\":\"vector-session-token\",\"success\":true},\"type\":\"authResult\"}",
+      "error" : "{\"payload\":{\"code\":401,\"message\":\"Authentication failed\"},\"type\":\"error\"}",
+      "ping" : "{\"type\":\"ping\"}"
+    },
+    "phone" : {
+      "authenticateCredential" : "{\"type\":\"authenticate\",\"payload\":{\"pairingCode\":\"\",\"timestamp\":\"2026-01-02T03:04:05Z\"}}",
+      "authenticatePairing" : "{\"type\":\"authenticate\",\"payload\":{\"pairingCode\":\"482915\",\"timestamp\":\"2026-01-02T03:04:05Z\"}}",
+      "hello" : "{\"type\":\"hello\",\"payload\":{\"protocolVersion\":2,\"deviceName\":\"Pixel 9\",\"deviceId\":\"8C0F7D2E-5B1A-4E8B-9C3D-2A6F1E0B7C45\",\"releaseTrain\":\"stable\"}}",
+      "pong" : "{\"type\":\"pong\"}",
+      "sessionEnd" : "{\"type\":\"sessionEnd\",\"payload\":{\"sessionId\":\"D3B07384-D9A0-4E5B-9F1C-6A2B3C4D5E6F\",\"finalText\":\"Hello \\\"Mac\\\"\\nfrom Android — café 🎙️ / done\",\"duration\":12.5,\"wordCount\":9}}",
+      "sessionStart" : "{\"type\":\"sessionStart\",\"payload\":{\"sessionId\":\"D3B07384-D9A0-4E5B-9F1C-6A2B3C4D5E6F\",\"model\":\"deepgram/nova-3\",\"language\":\"en-US\"}}",
+      "transcriptChunk" : "{\"type\":\"transcriptChunk\",\"payload\":{\"sessionId\":\"D3B07384-D9A0-4E5B-9F1C-6A2B3C4D5E6F\",\"sequenceNumber\":1,\"text\":\"Hello \\\"Mac\\\"\\nfrom Android — café 🎙️ / done\",\"isFinal\":true,\"timestamp\":\"2026-01-02T03:04:05Z\"}}"
+    }
+  },
+  "protocolVersion" : 2,
+  "revokedCredentialMessage" : "This device is no longer paired with this Mac. Pair again with the code shown on the Mac.",
+  "serviceTypes" : {
+    "alpha" : "_speakalpha._tcp",
+    "stable" : "_speaktransport._tcp"
+  },
+  "sessionFrameLimitBytes" : 1048576,
+  "sizes" : {
+    "credentialID" : 16,
+    "credentialSecret" : 32,
+    "key" : 32,
+    "nonce" : 12,
+    "tag" : 16
+  },
+  "vectors" : {
+    "clientPrivateKey" : "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+    "credential" : {
+      "clientFinished" : "c3f2fd2f93b4fd1be88e1da68873d23c656676caef51783c85213265eb581f3545462d8648a4603b1aa50611baebe5cbccf1b1332356998da0a4c297",
+      "clientFrame" : "{\"protocolVersion\":2,\"keyShare\":\"B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw=\",\"credentialID\":\"6F9619FF-8B86-D011-B42D-00C04FC964FF\"}",
+      "clientPublicKey" : "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c",
+      "clientToServerKey" : "651df7cf56e068b356fe8fbf7deebee6be11ec77a9015f7423bcc3e762e460ec",
+      "macMessage" : {
+        "json" : "{\"payload\":{\"releaseTrain\":\"stable\",\"sessionToken\":\"vector-session-token\",\"success\":true},\"type\":\"authResult\"}",
+        "sealed" : "5b03769a7d07657a26e44ef4dc147d6f33a390057c337456e2b5dc459d220175cb1a66bf6c4c3f01dfdffb28125dbacadc036e3161bbd3c9bb2b726b893407bea9954e48e15ff26279db532c779f0e0ffca00a5ca089936220279665b2fe92193afd53aab9d19e2bd65d41d079121d7925524b8a76f8806a1ba66060ddbd"
+      },
+      "phoneMessage" : {
+        "json" : "{\"type\":\"hello\",\"payload\":{\"protocolVersion\":2,\"deviceName\":\"Pixel 9\",\"deviceId\":\"8C0F7D2E-5B1A-4E8B-9C3D-2A6F1E0B7C45\",\"releaseTrain\":\"stable\"}}",
+        "sealed" : "07b1327bce2b5f9160d8070ad8181bd8b986850e9740d169b517168a9e2e7f16d02f6033a2218f46ab83181e98d8907b60d479d08a16869feef7aba85b3b5e4874daecb1e2ec2ade6bc969778eaf2544b96043f3a2c83dde60e948300a42f32840fb7d7e53a6674367944aaf2941db4efd8b0119b862cefb4cf16abfa431a15f205ce9685d258dc08d0825db208e0398a3726bac05deb20a6782878ab08658ff8d"
+      },
+      "preSharedKey" : "3f6a5d42b499043ab3b524f1a0b75e26c640389d7c51136fbcd74d6ccd7b461b",
+      "serverFinished" : "9f73ec45461b371e30ad585c99e7123c4c35f3d71fe287fcd89c9e79d5458c5c68b1d5be5296ed761535cd77ccc55f69e618d46ef624b187425fd87d",
+      "serverFrame" : "{\"keyShare\":\"WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns=\",\"protocolVersion\":2}",
+      "serverPublicKey" : "5869aff450549732cbaaed5e5df9b30a6da31cb0e5742bad5ad4a1a768f1a67b",
+      "serverToClientKey" : "54d274967496a6d318131e50652accb7e2fd1fe5ca2dadb794b17d14a18b12d0",
+      "sharedSecret" : "a84dc7c3c8f058b1b2dc4cd1e9b5dc0a7987f88b6a9564cde3391fc421159e77",
+      "transcriptHash" : "4bbd65eed57292c5f45e8b45d8419c7ac29a53d6401cb886a67e6b8cced89d0b"
+    },
+    "pairing" : {
+      "clientFinished" : "2a78e35dd546eca68d0e7e7b01772985e282436b6fcc6c75ff9880ad4f12fb5383c59b849bda35a8bc6e467718cc06bcf2d6a4cf53519036bfabc2f2",
+      "clientFrame" : "{\"protocolVersion\":2,\"keyShare\":\"B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9/AsrhtHHw=\",\"requestsCredential\":true}",
+      "clientPublicKey" : "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c",
+      "clientToServerKey" : "736599baf1885cdb247fdf129a92f77a2926ab0620e098fbd21aa695f4765501",
+      "issuedCredential" : {
+        "id" : "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+        "secret" : "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "macMessage" : {
+        "json" : "{\"payload\":{\"releaseTrain\":\"stable\",\"sessionToken\":\"vector-session-token\",\"success\":true},\"type\":\"authResult\"}",
+        "sealed" : "9cacb138df744b4386ae94973c783382da15d3658d20016f82c25a5e65368f59d6daee60ad06216328038c8344e35f658de639b24bd1a6fb790e44a207e7ad5bd6e10cc202d50677bcb12bfa04c4d37b96a3d1b111c75a783b8b0149bbd9255f76c54bb86011219ff149177edeba42434e0357420c14091f47cbd6fcb405"
+      },
+      "phoneMessage" : {
+        "json" : "{\"type\":\"hello\",\"payload\":{\"protocolVersion\":2,\"deviceName\":\"Pixel 9\",\"deviceId\":\"8C0F7D2E-5B1A-4E8B-9C3D-2A6F1E0B7C45\",\"releaseTrain\":\"stable\"}}",
+        "sealed" : "1451f6a4475a43c4bcf2854889ae0a89f3e703a5bf7ae782094dc1a699bc8d6a70792082e7bdf33ed5c8a301064f2a9fc954332453fb18dbd00d78a9bbfde8cb584f5f47c4b33057edf9bc1ddba9e694594e0e8e11840b22806b537c5ec148039b423ce0faace04174048c088c720e5097291743daa0895aef9fac0d87cbabf45ad5d4973b4b6c1c1246712cba79272b3eafd51b2e4dc2bced669076dd5881e8b2"
+      },
+      "preSharedKey" : "ac9d7a6afa2cdbc04451f275c0e515a8ef6dee3868055dd79d680fcae033fc9d",
+      "serverFinished" : "bdbcd06d8b21be3a4ee9a26f0e5e44ee6673eb294d294058875145b20e9107b671938033d2e20a5f8050274cbf611bd9c33fc87313d6f5466ec028f142a5228a934434489d729068427355ff101b590daa4a14615ee56542851368698c7f9778aed1b80c32e348128ea32863",
+      "serverFrame" : "{\"keyShare\":\"WGmv9FBUlzLLqu1eXfmzCm2jHLDldCutWtShp2jxpns=\",\"protocolVersion\":2}",
+      "serverPublicKey" : "5869aff450549732cbaaed5e5df9b30a6da31cb0e5742bad5ad4a1a768f1a67b",
+      "serverToClientKey" : "af73f6dfbf7fbcfc59c0f9a138d474bbb95c8ee282a45bbe87d02fe705601027",
+      "sharedSecret" : "a84dc7c3c8f058b1b2dc4cd1e9b5dc0a7987f88b6a9564cde3391fc421159e77",
+      "transcriptHash" : "19a30dc05ab852e64eaecdc81d3e1707d71a3920a11846d7895f241a16f23652"
+    },
+    "serverPrivateKey" : "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40"
+  },
+  "version" : 1
+}

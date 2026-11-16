@@ -1,5 +1,7 @@
 package com.justspeaktoit.android.cloud
 
+import java.util.Locale
+
 /** A provider row of `assets/cloud_catalog.json`, as written into [GeneratedCloudCatalog]. */
 internal data class CloudProviderSpec(val id: String, val credentialId: String)
 
@@ -19,6 +21,9 @@ internal data class CloudModelSpec(
     val apiName: String,
     val languageField: String,
     val supportsPrompt: Boolean,
+    val languageCodes: List<String>?,
+    val languageHints: Map<String, String>?,
+    val requiresPCM16WAV: Boolean,
 )
 
 /** A live (streaming) transcription row of `assets/cloud_catalog.json`, as written into [GeneratedCloudCatalog]. */
@@ -49,9 +54,30 @@ enum class CloudProvider(val id: String, val displayName: String, val baseUrl: S
     Anthropic("anthropic", "Anthropic", "https://api.anthropic.com/v1"),
     Google("google", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai"),
     Mistral("mistral", "Mistral", "https://api.mistral.ai/v1"),
-    Deepgram("deepgram", "Deepgram", "wss://api.deepgram.com"),
-    AssemblyAI("assemblyai", "AssemblyAI", "wss://streaming.eu.assemblyai.com"),
+    AssemblyAI("assemblyai", "AssemblyAI", "https://api.assemblyai.com/v2"),
+    Deepgram("deepgram", "Deepgram", "https://api.deepgram.com/v1"),
+    ElevenLabs("elevenlabs", "ElevenLabs", "https://api.elevenlabs.io/v1"),
+    Modulate("modulate", "Modulate", "https://platform.modulate.ai"),
+    Reson8("reson8", "Reson8", "https://api.reson8.dev/v1"),
+    RevAI("revai", "Rev AI", "https://api.rev.ai/speechtotext/v1"),
+    Soniox("soniox", "Soniox", "https://api.soniox.com/v1"),
+    Speechmatics("speechmatics", "Speechmatics", "https://eu1.asr.api.speechmatics.com"),
+    Cartesia("cartesia", "Cartesia", "https://api.cartesia.ai"),
+    Gladia("gladia", "Gladia", "https://api.gladia.io"),
+    Meta("meta", "Meta", "https://api.meta.ai/v1"),
+    Smallest("smallest", "Smallest AI", "https://api.smallest.ai/waves/v1"),
+    XAI("xai", "xAI", "https://api.x.ai/v1"),
+
+    // Regional keys: each request's origin comes from the saved credential (see RegionalCredentials),
+    // so these base URLs are only the providers' default hosts.
+    Azure("azure", "Azure Speech", "https://eastus.api.cognitive.microsoft.com"),
+    Alibaba("alibaba", "Alibaba Model Studio", "https://dashscope.aliyuncs.com"),
+    StepFun("stepfun", "StepFun", "https://api.stepfun.ai/v1"),
     ;
+
+    /** OpenAI and Groq take the OpenAI `/audio/transcriptions` form; the rest use [BatchTranscriber]. */
+    val isOpenAICompatible: Boolean
+        get() = this == OpenAI || this == Groq
 
     val credentialId: String
         get() = GeneratedCloudCatalog.providers.first { it.id == id }.credentialId
@@ -71,6 +97,15 @@ data class CloudModel(
     val languageField: String,
     /** Whether the model takes a vocabulary glossary as its `prompt` form field. */
     val supportsPrompt: Boolean = false,
+    /** The only languages the model accepts (Reson8, Smallest); null when the provider takes any. */
+    val languageCodes: List<String>? = null,
+    /**
+     * The hint each primary language subtag sends (Gladia, Meta, xAI); a language outside it is sent as
+     * automatic detection. Null when the provider takes any language code.
+     */
+    val languageHints: Map<String, String>? = null,
+    /** Whether the provider takes only the canonical 16 kHz mono 16-bit WAV Android records (Meta, Inkling). */
+    val requiresPCM16WAV: Boolean = false,
     /** Set for a streaming model: it transcribes while recording and cannot transcribe a file. */
     val live: LiveRoute? = null,
 )
@@ -116,6 +151,9 @@ object CloudCatalog {
             apiName = it.apiName,
             languageField = it.languageField,
             supportsPrompt = it.supportsPrompt,
+            languageCodes = it.languageCodes,
+            languageHints = it.languageHints,
+            requiresPCM16WAV = it.requiresPCM16WAV,
         )
     }
 
@@ -147,12 +185,10 @@ object CloudCatalog {
     /** The provider the default cleanup model uses. */
     val cleanupProvider: CloudProvider = CloudProvider.forId(GeneratedCloudCatalog.CLEANUP_PROVIDER)
 
-    // Declared before cleanupModels: object properties initialise in order.
-    /** Matches `ModelPickerGrouping.vendorNames` on the Mac. */
-    private val VENDOR_NAMES = mapOf(
-        "anthropic" to "Anthropic", "google" to "Google", "meta-llama" to "Meta Llama",
-        "mistralai" to "Mistral", "openai" to "OpenAI", "qwen" to "Qwen",
-    )
+    /** SpeakCore's `ModelPickerGrouping.vendorNames`: the vendor an OpenRouter slug is filed under. */
+    fun vendorName(slug: String): String = slug.substringBefore('/').let { prefix ->
+        GeneratedCloudCatalog.openRouterVendorNames[prefix.lowercase(Locale.ROOT)] ?: prefix
+    }
 
     /** Cleanup models in catalogue order: native provider routes, then OpenRouter slugs. */
     val cleanupModels: List<CleanupModel> = GeneratedCloudCatalog.cleanupModels.map {
@@ -163,7 +199,7 @@ object CloudCatalog {
             provider = provider,
             apiName = it.apiName,
             vendor = if (provider == CloudProvider.OpenRouter) {
-                it.apiName.substringBefore('/').let { prefix -> VENDOR_NAMES[prefix] ?: prefix }
+                vendorName(it.apiName)
             } else {
                 provider.displayName
             },
@@ -173,14 +209,58 @@ object CloudCatalog {
     /**
      * A saved choice; a removed model's successor on the same route; otherwise the default.
      */
-    fun cleanupModel(selectionId: String?): CleanupModel {
+    fun cleanupModel(selectionId: String?): CleanupModel =
+        findCleanupModel(selectionId) ?: cleanupModels.first { it.selectionId == CLEANUP_MODEL }
+
+    /**
+     * A bundled cleanup model (or a removed one's successor), or a saved discovered OpenAI model
+     * (`openrouter/cleanup/openai/…`), which stays selected even when discovery is off or offline.
+     */
+    fun findCleanupModel(selectionId: String?): CleanupModel? {
         val current = selectionId?.let { GeneratedCloudCatalog.cleanupModelSuccessors[it] } ?: selectionId
-        return cleanupModels.firstOrNull { it.selectionId == current }
-            ?: cleanupModels.first { it.selectionId == CLEANUP_MODEL }
+        cleanupModels.firstOrNull { it.selectionId == current }?.let { return it }
+        val slug = OpenRouterCleanupSelection.modelId(current) ?: return null
+        return CleanupModel(
+            selectionId = OpenRouterCleanupSelection.selectionId(slug),
+            displayName = discoveredCleanupNames[slug]?.let { "$it (discovered)" } ?: "$slug (saved discovery)",
+            provider = CloudProvider.OpenRouter,
+            apiName = slug,
+            vendor = vendorName(slug),
+        )
     }
 
-    fun transcriptionModel(catalogId: String?): CloudModel =
-        transcriptionModels.firstOrNull { it.catalogId == catalogId } ?: defaultTranscriptionModel
+    fun transcriptionModel(catalogId: String?): CloudModel = findTranscriptionModel(catalogId) ?: defaultTranscriptionModel
+
+    /**
+     * A bundled transcription model, or a saved OpenRouter speech-to-text model
+     * (`openrouter/transcription/…`), which is sent to OpenRouter's dedicated endpoint.
+     */
+    fun findTranscriptionModel(catalogId: String?): CloudModel? {
+        transcriptionModels.firstOrNull { it.catalogId == catalogId }?.let { return it }
+        val slug = OpenRouterTranscriptionSelection.modelId(catalogId) ?: return null
+        return CloudModel(
+            catalogId = OpenRouterTranscriptionSelection.selectionId(slug),
+            displayName = discoveredTranscriptionNames[slug] ?: slug,
+            provider = CloudProvider.OpenRouter,
+            apiName = slug,
+            languageField = "language",
+        )
+    }
+
+    /** Whether a transcription model goes through OpenRouter, so it is labelled "OpenRouter › name". */
+    fun isOpenRouterTranscription(model: CloudModel): Boolean = model.provider == CloudProvider.OpenRouter
+
+    @Volatile
+    private var discoveredCleanupNames: Map<String, String> = emptyMap()
+
+    @Volatile
+    private var discoveredTranscriptionNames: Map<String, String> = emptyMap()
+
+    /** Discovery's latest names, so a saved discovered model shows its name rather than its slug. */
+    fun rememberDiscoveredNames(cleanup: Map<String, String>, transcription: Map<String, String>) {
+        discoveredCleanupNames = cleanup
+        discoveredTranscriptionNames = transcription
+    }
 
     /** Providers whose keys the app can use, in settings order. */
     val providers: List<CloudProvider> = GeneratedCloudCatalog.providers.map { CloudProvider.forId(it.id) }

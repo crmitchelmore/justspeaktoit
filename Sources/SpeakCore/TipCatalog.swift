@@ -45,6 +45,28 @@ public enum TipCatalog {
     }
 }
 
+/// Web tips for builds without a store tip jar: the Mac's direct download, Windows and Linux.
+///
+/// The tipper chooses the amount on the site, so these carry no catalogue tier or price. Tips
+/// unlock nothing. Keep these in step with `.github/FUNDING.yml`.
+public enum TipWebLink: String, CaseIterable, Sendable {
+    case githubSponsors, koFi
+
+    public var title: String {
+        switch self {
+        case .githubSponsors: "GitHub Sponsors"
+        case .koFi: "Ko-fi"
+        }
+    }
+
+    public var url: URL {
+        switch self {
+        case .githubSponsors: URL(string: "https://github.com/sponsors/crmitchelmore")!
+        case .koFi: URL(string: "https://ko-fi.com/crmitchelmore")!
+        }
+    }
+}
+
 /// The tip catalogue as JSON for the Android app. `TipCatalogAndroidExportTests` fails when the
 /// committed asset is stale; regenerate it with `scripts/update-android-assets`.
 public enum TipCatalogAndroidExport {

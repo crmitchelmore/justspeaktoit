@@ -94,6 +94,11 @@ extension ModelCatalog {
             postStopFinalizeBudget: FileSpeechProvider.reson8FinishBudget,
             supportsLanguageHint: true
         ),
+        Reson8Model.rumble2.liveID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: FileSpeechProvider.reson8FinishBudget,
+            supportsLanguageHint: true
+        ),
         AlibabaSpeechModels.funLive: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
         ),

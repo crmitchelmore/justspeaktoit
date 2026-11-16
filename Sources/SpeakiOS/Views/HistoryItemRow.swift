@@ -16,6 +16,8 @@ struct HistoryItemRow: View {
     var onReprocess: () -> Void = {}
     var onDelete: () -> Void = {}
     var onReport: () -> Void = {}
+    /// Nil hides the action, as when no Mac is paired.
+    var onSendToMac: (() -> Void)?
     @State private var isExpanded = false
 
     var body: some View {
@@ -70,6 +72,13 @@ struct HistoryItemRow: View {
                 } label: {
                     Label("Copy Polished", systemImage: "doc.on.doc.fill")
                 }
+            }
+
+            if let onSendToMac, !item.bestText.isEmpty {
+                Button(action: onSendToMac) {
+                    Label("Send to Mac", systemImage: "desktopcomputer")
+                }
+                .accessibilityIdentifier("historySendToMac")
             }
 
             Button {

@@ -71,6 +71,19 @@ sanitised errors, limits, cancellation, and temporary-file ownership. Both nativ
 targets must compile and pass their existing test gates before merge. Paid-provider
 acceptance across the changing catalogue is separate from these mocked contracts.
 
+Browser copy, ordering and the search/provider/zero-price filter live in
+`OpenRouterModelBrowserCatalog` and `OpenRouterBrowserFilter` (SpeakCore), so
+other platforms reuse them. Windows and Linux build their browser pages from them
+in `DesktopOpenRouterBrowser` (SpeakDesktop): the Transcription page shows
+**Browse OpenRouter models…** for Remote Batch only, the browser offers the
+OpenRouter batch routes the picker lists (bundled, then discovered), and choosing
+one selects that route, labelled `OpenRouter › name`. Android shows the same
+button under its cloud transcription models (and in each profile): the bundled
+OpenRouter batch models, then the live speech-to-text catalogue, with the same
+six-hour cache and fallback. A chosen live model is saved as
+`openrouter/transcription/<model ID>` and sent to `/api/v1/audio/transcriptions`
+with the limits above; Android has no streaming cloud picker (#1618).
+
 Issue #821 remains open for progressive speech playback, provider-specific cost
 enrichment and capability controls, and full real-provider/device qualification.
 This change delivers discovery, explicit testing, selection, and normal STT/TTS

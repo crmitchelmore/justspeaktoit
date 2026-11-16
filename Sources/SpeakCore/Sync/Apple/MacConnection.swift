@@ -2,21 +2,52 @@ import Combine
 import Foundation
 import Network
 
+/// Where a Send to Mac client keeps the device credential each Mac issued it.
+///
+/// A shipping client must persist these in the Keychain: losing one only means
+/// pairing with the code again, but storing it in plain preferences would let
+/// anyone who reads them impersonate the phone.
+public protocol TransportCredentialStore: AnyObject, Sendable {
+    func credential(forMac macName: String) -> TransportDeviceCredential?
+    func save(_ credential: TransportDeviceCredential, forMac macName: String)
+    func removeCredential(forMac macName: String)
+}
+
+/// Keeps credentials for the lifetime of the store only. `MacConnection`'s default.
+public final class InMemoryTransportCredentialStore: TransportCredentialStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var credentials: [String: TransportDeviceCredential] = [:]
+
+    public init() {}
+
+    public func credential(forMac macName: String) -> TransportDeviceCredential? {
+        self.lock.withLock { self.credentials[macName] }
+    }
+
+    public func save(_ credential: TransportDeviceCredential, forMac macName: String) {
+        self.lock.withLock { self.credentials[macName] = credential }
+    }
+
+    public func removeCredential(forMac macName: String) {
+        self.lock.withLock { _ = self.credentials.removeValue(forKey: macName) }
+    }
+}
+
 /// Client half of the local transport: connects to a Mac that runs
-/// `TransportServer`, agrees encryption keys from the pairing code,
+/// `TransportServer`, agrees encryption keys from the pairing code (or, after
+/// the first pairing, from the device credential the Mac issued),
 /// authenticates, then streams transcripts to it.
 ///
 /// It lives in `SpeakCore` rather than the iOS library so that the shipping
 /// client and the shipping server can be exercised against each other in one
 /// test process.
 ///
-/// There is no shipping caller. The iOS "Send to Mac" screen that used to drive
-/// it was removed because nothing ever called `sendTranscript` — pairing worked
-/// and no transcript was ever delivered. This type is retained deliberately as
-/// the client that `TransportLoopbackTests` drives against the real server, so
-/// the receiver keeps its wire-protocol coverage. The `speak` CLI and MCP instead
-/// use `UnixSocketAutomationClient` with the separate local `AutomationServer`.
-/// Do not delete this client without replacing the receiver's loopback coverage.
+/// The iOS "Send to Mac" sender drives it through `SendToMacSender`, which
+/// opens one connection per transcript and waits for the Mac's acknowledgement
+/// (`deliverTranscript`). `TransportLoopbackTests` drives it against the real
+/// server, so the receiver keeps its wire-protocol coverage. The `speak` CLI and
+/// MCP instead use `UnixSocketAutomationClient` with the separate local
+/// `AutomationServer`.
 @MainActor
 public final class MacConnection: ObservableObject {
     public enum ConnectionState: Equatable {
@@ -34,22 +65,40 @@ public final class MacConnection: ObservableObject {
     private var receiveTask: Task<Void, Never>?
     private var sessionToken: String?
     private var sequenceNumber = 0
+    private var receivedAcks: Set<Int> = []
+    private var pendingAcks: [Int: CheckedContinuation<Void, Error>] = [:]
 
     /// Protocol version this client announces in its hello.
     ///
     /// Production always announces the version it was built with. Tests lower it
     /// to prove that the server's rejection path runs.
     private let announcedProtocolVersion: Int
+    private let credentialStore: TransportCredentialStore
 
     public convenience init() {
-        self.init(announcedProtocolVersion: SpeakTransportProtocolVersion)
+        self.init(credentialStore: InMemoryTransportCredentialStore())
     }
 
-    init(announcedProtocolVersion: Int) {
+    public convenience init(credentialStore: TransportCredentialStore) {
+        self.init(announcedProtocolVersion: SpeakTransportProtocolVersion, credentialStore: credentialStore)
+    }
+
+    init(
+        announcedProtocolVersion: Int,
+        credentialStore: TransportCredentialStore = InMemoryTransportCredentialStore()
+    ) {
         self.announcedProtocolVersion = announcedProtocolVersion
+        self.credentialStore = credentialStore
     }
 
-    /// Connects to a Mac found by discovery and authenticates with `pairingCode`.
+    /// Connects to a Mac found by discovery and authenticates.
+    ///
+    /// The first time, `pairingCode` proves the pairing and the Mac issues a
+    /// device credential, which is stored under `name`. From then on the
+    /// credential is used and `pairingCode` is ignored: the phone never falls
+    /// back to the code on its own, because a spoofed Mac could otherwise ask
+    /// for it and guess it offline (#1643). If the Mac has revoked the
+    /// credential, call `forgetMac(named:)` before pairing with the code again.
     ///
     /// The state property carries the outcome: `.connected` on success, or
     /// `.error` with the reason the Mac gave, such as a protocol-version
@@ -60,15 +109,21 @@ public final class MacConnection: ObservableObject {
 
         let channel = TransportChannel.connecting(to: endpoint)
         self.channel = channel
+        let stored = self.credentialStore.credential(forMac: name)
 
         do {
             try await channel.start()
             self.state = .authenticating
-            try await channel.establishSecureSession(
-                pairingCode: pairingCode,
+            let secret: TransportPairingSecret = stored.map { .credential($0) } ?? .code(pairingCode)
+            let issued = try await channel.establishSecureSession(
+                secret: secret,
+                requestsCredential: true,
                 protocolVersion: self.announcedProtocolVersion
             )
-            try await self.authenticate(on: channel, pairingCode: pairingCode)
+            if let issued {
+                self.credentialStore.save(issued, forMac: name)
+            }
+            try await self.authenticate(on: channel, pairingCode: stored == nil ? pairingCode : "")
         } catch {
             self.fail(with: error.localizedDescription)
             return
@@ -77,6 +132,11 @@ public final class MacConnection: ObservableObject {
         guard self.state == .connected else { return }
         self.connectedMacName = name
         self.startReceiveLoop(on: channel)
+    }
+
+    /// Deletes the credential for `name`, so the next `connect` pairs with the code.
+    public func forgetMac(named name: String) {
+        self.credentialStore.removeCredential(forMac: name)
     }
 
     /// Closes the connection and returns to the disconnected state.
@@ -122,7 +182,57 @@ public final class MacConnection: ObservableObject {
         try await channel.send(.sessionEnd(end))
     }
 
+    /// Delivers one finished transcript as a whole session and waits until the
+    /// Mac acknowledges it.
+    ///
+    /// Throws `MacConnectionDeliveryError.notConnected` unless `connect` has
+    /// succeeded, `.acknowledgementTimedOut` when the Mac does not confirm the
+    /// transcript within `acknowledgementTimeout`, and `.connectionLost` when the
+    /// connection fails while waiting.
+    public func deliverTranscript(
+        _ text: String,
+        sessionId: String = UUID().uuidString,
+        model: String,
+        duration: TimeInterval,
+        acknowledgementTimeout: Duration = .seconds(5)
+    ) async throws {
+        guard let channel = self.connectedChannel() else { throw MacConnectionDeliveryError.notConnected }
+        self.sequenceNumber = 0
+        try await channel.send(.sessionStart(SessionStartMessage(sessionId: sessionId, model: model)))
+        self.sequenceNumber += 1
+        let sequence = self.sequenceNumber
+        let chunk = TranscriptChunkMessage(sessionId: sessionId, sequenceNumber: sequence, text: text, isFinal: true)
+        try await channel.send(.transcriptChunk(chunk))
+        try await self.waitForAcknowledgement(of: sequence, timeout: acknowledgementTimeout)
+        let wordCount = text.split(whereSeparator: \.isWhitespace).count
+        let end = SessionEndMessage(sessionId: sessionId, finalText: text, duration: duration, wordCount: wordCount)
+        // The Mac already has the transcript; a lost session end changes nothing it shows.
+        try? await channel.send(.sessionEnd(end))
+    }
+
     // MARK: - Private
+
+    private func waitForAcknowledgement(of sequence: Int, timeout: Duration) async throws {
+        if self.receivedAcks.remove(sequence) != nil { return }
+        guard self.state == .connected else { throw MacConnectionDeliveryError.connectionLost }
+        let timer = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            self?.resolveAcknowledgement(sequence, with: .failure(MacConnectionDeliveryError.acknowledgementTimedOut))
+        }
+        defer { timer.cancel() }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            self.pendingAcks[sequence] = continuation
+        }
+    }
+
+    private func resolveAcknowledgement(_ sequence: Int, with result: Result<Void, Error>) {
+        guard let continuation = self.pendingAcks.removeValue(forKey: sequence) else {
+            if case .success = result { self.receivedAcks.insert(sequence) }
+            return
+        }
+        continuation.resume(with: result)
+    }
 
     private func connectedChannel() -> TransportChannel? {
         guard self.state == .connected else { return nil }
@@ -181,6 +291,8 @@ public final class MacConnection: ObservableObject {
         switch message {
         case .ping:
             Task { try? await channel.send(.pong) }
+        case .ack(let ack):
+            self.resolveAcknowledgement(ack.sequenceNumber, with: .success(()))
         case .error(let error):
             self.fail(with: error.message)
         default:
@@ -211,5 +323,29 @@ public final class MacConnection: ObservableObject {
         self.sessionToken = nil
         self.connectedMacName = nil
         self.sequenceNumber = 0
+        self.receivedAcks = []
+        let pending = self.pendingAcks
+        self.pendingAcks = [:]
+        for continuation in pending.values {
+            continuation.resume(throwing: MacConnectionDeliveryError.connectionLost)
+        }
+    }
+}
+
+/// Why `MacConnection.deliverTranscript` could not confirm a delivery.
+public enum MacConnectionDeliveryError: Error, Equatable, LocalizedError {
+    case notConnected
+    case acknowledgementTimedOut
+    case connectionLost
+
+    public var errorDescription: String? {
+        switch self {
+        case .notConnected:
+            "Not connected to the Mac."
+        case .acknowledgementTimedOut:
+            "The Mac did not confirm it received the transcript."
+        case .connectionLost:
+            "The connection to the Mac was lost before it confirmed the transcript."
+        }
     }
 }

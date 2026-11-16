@@ -1,7 +1,6 @@
 package com.justspeaktoit.android.cloud.live
 
 import com.justspeaktoit.android.cloud.CloudModel
-import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.dictation.DictationFailure
 import org.json.JSONArray
 import org.json.JSONException
@@ -42,7 +41,7 @@ class AssemblyAILiveSession(
     override val finishDeadlineMs: Long = 8_000
 
     override fun request(apiKey: String): LiveRequest =
-        LiveRequest(url(model, host, apiKey, keyterms), mapOf("Authorization" to apiKey))
+        LiveRequest(url(model, host, keyterms), mapOf("Authorization" to apiKey))
 
     override fun encode(pcm: ByteArray): List<ByteArray> = framer.push(pcm)
 
@@ -77,7 +76,8 @@ class AssemblyAILiveSession(
             return
         }
         forceEndpointSent = true
-        if (route.finalizeBudgetMs <= 0) terminate() else after(route.finalizeBudgetMs) { terminate() }
+        // The budget for the trailing formatted turn starts once the audio and ForceEndpoint have left.
+        afterDrained { if (route.finalizeBudgetMs <= 0) terminate() else after(route.finalizeBudgetMs) { terminate() } }
     }
 
     override fun transcript(): String {
@@ -108,12 +108,12 @@ class AssemblyAILiveSession(
             return
         }
         endSignalSent = true
-        after(TERMINATION_GRACE_MS) { completeIfDrained() }
+        afterDrained { after(TERMINATION_GRACE_MS) { completeIfDrained() } }
     }
 
     companion object {
         /** The EU host first, then the global one. */
-        val HOSTS = listOf(CloudProvider.AssemblyAI.baseUrl.substringAfter("://"), "streaming.assemblyai.com")
+        val HOSTS = listOf("streaming.eu.assemblyai.com", "streaming.assemblyai.com")
         const val FORCE_ENDPOINT = """{"type":"ForceEndpoint"}"""
         const val TERMINATE = """{"type":"Terminate"}"""
         const val BEGIN_DEADLINE_MS = 8_000L
@@ -124,14 +124,13 @@ class AssemblyAILiveSession(
         /** AssemblyAI rejects frames shorter than 50 ms. */
         private const val MINIMUM_TAIL_DIVISOR = 20
 
-        fun url(model: CloudModel, host: String, apiKey: String, keyterms: List<String>): String {
+        fun url(model: CloudModel, host: String, keyterms: List<String>): String {
             val route = checkNotNull(model.live)
             val items = mutableListOf(
                 "sample_rate" to route.sampleRate.toString(),
                 "encoding" to "pcm_s16le",
                 "speech_model" to model.apiName,
                 "min_turn_silence" to MIN_TURN_SILENCE_MS.toString(),
-                "token" to apiKey,
             )
             val terms = LiveVocabulary.assemblyAIKeyterms(keyterms)
             if (route.vocabularyField.isNotEmpty() && terms.isNotEmpty()) {

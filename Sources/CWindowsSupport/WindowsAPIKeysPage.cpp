@@ -2,6 +2,7 @@
 #include "WindowsSupportInternal.hpp"
 #include "WindowsWindowChrome.hpp"
 #include <shellapi.h>
+#include <map>
 #include <mutex>
 #include <tuple>
 #include <vector>
@@ -10,11 +11,12 @@
 // with Save/Replace, Remove (confirmed), Check validity and the provider's key
 // page. The host owns the credential store and every network check; this
 // dialog never shows a stored key and wipes typed text once it is handed over.
+// Account balances arrive on their own channel and never make the dialog busy.
 
 namespace {
 enum Control {
     introID = 1100, listLabelID, listID, detailID, keyLabelID, keyID, saveID, removeID, validateID, linkID, statusID,
-    filterLabelID, filterID
+    filterLabelID, filterID, balanceID
 };
 // SpeakCore's APIKeyStatusFilter cases in order; a row passes filter `i` when
 // bit `i` of its host-computed mask is set, so the predicate stays shared.
@@ -25,9 +27,10 @@ constexpr const wchar_t *emptyMessages[] = {
 };
 constexpr int filterCount = 4;
 constexpr UINT refreshMessage = WM_APP + 97;
+constexpr UINT balanceMessage = WM_APP + 98;
 constexpr DWORD windowStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
 constexpr DWORD windowExStyle = WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT;
-constexpr int minimumClientWidth = 560, minimumClientHeight = 520;
+constexpr int minimumClientWidth = 600, minimumClientHeight = 540;
 constexpr int keyCapacity = 4096;
 
 struct Row {
@@ -35,6 +38,12 @@ struct Row {
     std::wstring label, uses, status, url, hint;
     bool saved = false;
     uint32_t filters = 1;
+};
+
+struct Balance {
+    std::wstring text;
+    bool refreshable = false;
+    bool result = false;
 };
 
 struct Configuration {
@@ -46,6 +55,7 @@ struct Configuration {
 };
 std::mutex configurationMutex;
 Configuration configuration;
+std::map<std::string, Balance> balances; // Guarded by configurationMutex; identifier -> balance line.
 HWND openDialog = nullptr; // Guarded by configurationMutex; at most one dialog.
 
 bool confirmRemoval(HWND window, const std::wstring &label) {
@@ -65,12 +75,18 @@ struct Dialog {
     int selected = 0;
     int filter = 0;
     std::vector<size_t> visible; // List index -> row index for the current filter.
+    std::map<std::string, Balance> balances;
     bool busy = false;
 };
 
 Configuration snapshot() {
     std::lock_guard<std::mutex> lock(configurationMutex);
     return configuration;
+}
+
+std::map<std::string, Balance> balanceSnapshot() {
+    std::lock_guard<std::mutex> lock(configurationMutex);
+    return balances;
 }
 
 using jsti::chrome::scale;
@@ -87,7 +103,7 @@ void layout(HWND window) {
     const int statusTop = closeTop - gap - at(44);
     const int actionsTop = statusTop - gap - button;
     const int keyTop = actionsTop - gap - field;
-    const int detailHeight = at(64);
+    const int detailHeight = at(88);
     const int detailTop = keyTop - gap - detailHeight;
     const int listTop = at(82);
     move(introID, margin, at(14), width, at(40));
@@ -98,11 +114,12 @@ void layout(HWND window) {
     move(detailID, margin, detailTop, width, detailHeight);
     move(keyLabelID, margin, keyTop + at(4), at(120), at(22));
     move(keyID, margin + at(128), keyTop, width - at(128), field);
-    const int actionWidth = (width - 3 * gap) / 4;
+    const int actionWidth = (width - 4 * gap) / 5;
     move(saveID, margin, actionsTop, actionWidth, button);
     move(removeID, margin + actionWidth + gap, actionsTop, actionWidth, button);
     move(validateID, margin + 2 * (actionWidth + gap), actionsTop, actionWidth, button);
-    move(linkID, margin + 3 * (actionWidth + gap), actionsTop, width - 3 * (actionWidth + gap), button);
+    move(balanceID, margin + 3 * (actionWidth + gap), actionsTop, actionWidth, button);
+    move(linkID, margin + 4 * (actionWidth + gap), actionsTop, width - 4 * (actionWidth + gap), button);
     move(statusID, margin, statusTop, width, at(44));
     move(IDCANCEL, static_cast<int>(bounds.right) - margin - at(100), closeTop, at(100), button);
 }
@@ -116,6 +133,12 @@ const Row *selectedRow(const Dialog &dialog) {
 
 bool hasTypedKey(HWND window) { return GetWindowTextLengthW(GetDlgItem(window, keyID)) > 0; }
 
+const Balance *balanceFor(const Dialog &dialog, const Row *row) {
+    if (!row) return nullptr;
+    const auto found = dialog.balances.find(row->identifier);
+    return found == dialog.balances.end() ? nullptr : &found->second;
+}
+
 // Buttons follow the selected row; while the host works nothing else is sent.
 void updateActions(HWND window, Dialog &dialog) {
     const Row *row = selectedRow(dialog);
@@ -126,10 +149,14 @@ void updateActions(HWND window, Dialog &dialog) {
     EnableWindow(GetDlgItem(window, validateID), idle && (typed || row->saved));
     EnableWindow(GetDlgItem(window, linkID), row && !row->url.empty());
     EnableWindow(GetDlgItem(window, keyID), row != nullptr && !dialog.busy);
+    // Balance checks run beside key work, so busy never disables this button.
+    const Balance *balance = balanceFor(dialog, row);
+    EnableWindow(GetDlgItem(window, balanceID), balance && balance->refreshable);
     std::wstring detail;
     if (dialog.visible.empty()) detail = emptyMessages[dialog.filter];
     if (row) {
         detail = L"Used for: " + row->uses + L"\r\n" + row->status;
+        if (balance) detail += L"\r\n" + balance->text;
         if (!row->hint.empty()) detail += L"\r\n" + row->hint;
     }
     SetDlgItemTextW(window, detailID, detail.c_str());
@@ -184,10 +211,12 @@ bool createControls(HWND window, Dialog &dialog) {
         add(L"BUTTON", L"&Save key", BS_PUSHBUTTON | WS_TABSTOP, saveID) &&
         add(L"BUTTON", L"Re&move key", BS_PUSHBUTTON | WS_TABSTOP, removeID) &&
         add(L"BUTTON", L"&Check validity", BS_PUSHBUTTON | WS_TABSTOP, validateID) &&
+        add(L"BUTTON", L"Check &balance", BS_PUSHBUTTON | WS_TABSTOP, balanceID) &&
         add(L"BUTTON", L"&Get API key…", BS_PUSHBUTTON | WS_TABSTOP, linkID) &&
         add(L"STATIC", L"", SS_LEFT, statusID) &&
         add(L"BUTTON", L"Close", BS_DEFPUSHBUTTON | WS_TABSTOP, IDCANCEL);
     if (!okay) return false;
+    dialog.balances = balanceSnapshot();
     SendDlgItemMessageW(window, keyID, EM_SETLIMITTEXT, keyCapacity - 1, 0);
     for (const wchar_t *name : filterNames) {
         SendDlgItemMessageW(window, filterID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name));
@@ -231,6 +260,28 @@ void act(HWND window, Dialog &dialog, int action) {
     if (!key.empty()) SecureZeroMemory(&key[0], key.size());
 }
 
+// Asks the host for the selected account's balance. No key leaves the dialog
+// and nothing turns busy; the host answers through jsti_window_set_api_key_balance.
+void checkBalance(HWND window, Dialog &dialog) {
+    const Row *row = selectedRow(dialog);
+    const Balance *balance = balanceFor(dialog, row);
+    if (!row || !balance || !balance->refreshable || !dialog.config.callback) return;
+    const std::string identifier = row->identifier;
+    dialog.config.callback(JSTI_API_KEY_BALANCE, identifier.c_str(), nullptr, dialog.config.context);
+    updateActions(window, dialog);
+}
+
+// Takes the latest balances and announces a new result for the selected row.
+void applyBalances(HWND window, Dialog &dialog) {
+    const Row *row = selectedRow(dialog);
+    const Balance *before = balanceFor(dialog, row);
+    const std::wstring previous = before ? before->text : std::wstring();
+    dialog.balances = balanceSnapshot();
+    const Balance *after = balanceFor(dialog, row);
+    updateActions(window, dialog);
+    if (after && after->result && after->text != previous) jsti::accessibility::announce(window, after->text, false);
+}
+
 void openKeyPage(HWND window, const Dialog &dialog) {
     const Row *row = selectedRow(dialog);
     if (!row || row->url.rfind(L"https://", 0) != 0) return;
@@ -256,6 +307,9 @@ bool handle(HWND window, Dialog &dialog, UINT message, WPARAM wparam, LPARAM, LR
         }
         return true;
     }
+    case balanceMessage:
+        applyBalances(window, dialog);
+        return true;
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
         case listID:
@@ -282,6 +336,7 @@ bool handle(HWND window, Dialog &dialog, UINT message, WPARAM wparam, LPARAM, LR
         case saveID: if (HIWORD(wparam) == BN_CLICKED) act(window, dialog, JSTI_API_KEY_SAVE); return true;
         case removeID: if (HIWORD(wparam) == BN_CLICKED) act(window, dialog, JSTI_API_KEY_REMOVE); return true;
         case validateID: if (HIWORD(wparam) == BN_CLICKED) act(window, dialog, JSTI_API_KEY_VALIDATE); return true;
+        case balanceID: if (HIWORD(wparam) == BN_CLICKED) checkBalance(window, dialog); return true;
         case linkID: if (HIWORD(wparam) == BN_CLICKED) openKeyPage(window, dialog); return true;
         case IDCANCEL: if (HIWORD(wparam) == BN_CLICKED) close(window); return true;
         }
@@ -380,8 +435,30 @@ int jsti_window_set_api_keys(const JSTIAPIKeyRow *rows, size_t count, const char
 }
 
 void jsti_window_clear_api_keys(void) {
-    { std::lock_guard<std::mutex> lock(configurationMutex); configuration = Configuration(); }
+    {
+        std::lock_guard<std::mutex> lock(configurationMutex);
+        configuration = Configuration();
+        balances.clear();
+    }
     jsti_window_update(nullptr, nullptr, -1);
+}
+
+int jsti_window_set_api_key_balance(const char *identifier, const char *text, int refreshable, int result) {
+    if (!validIdentifier(identifier) || (refreshable != 0 && refreshable != 1) || (result != 0 && result != 1)) {
+        return -1;
+    }
+    HWND dialog = nullptr;
+    try {
+        Balance balance;
+        if (!jsti::wide(text, balance.text) || balance.text.empty() || balance.text.size() > 1024) return -1;
+        balance.refreshable = refreshable == 1;
+        balance.result = result == 1;
+        std::lock_guard<std::mutex> lock(configurationMutex);
+        balances[identifier] = std::move(balance);
+        dialog = openDialog;
+    } catch (const std::exception &) { return -1; }
+    if (dialog) PostMessageW(dialog, balanceMessage, 0, 0);
+    return 0;
 }
 
 // ---- self-test -------------------------------------------------------------
@@ -397,9 +474,11 @@ bool decline(HWND, const std::wstring &) { return false; }
 
 // Validation, per-row buttons, every action with its row and key, a declined
 // removal, the field wiped after each hand-over, busy until the host refreshes,
-// selection kept across a refresh and Close emitting nothing.
+// selection kept across a refresh, a balance shown and checked without turning
+// busy, and Close emitting nothing.
 bool jsti_api_keys_self_test(HWND owner, std::string &error) {
     const Configuration original = snapshot();
+    const std::map<std::string, Balance> originalBalances = balanceSnapshot();
     const auto originalConfirm = confirm;
     std::vector<Call> calls;
     bool passed = false;
@@ -471,7 +550,20 @@ bool jsti_api_keys_self_test(HWND owner, std::string &error) {
                 GetDlgItemTextW(window, saveID, replace, 32);
                 const bool kept = !dialog.busy && dialog.selected == 0 && enabled(removeID) && enabled(validateID) &&
                     std::wstring(replace) == L"&Replace key";
+                const bool rejectsBalance =
+                    jsti_window_set_api_key_balance("open router", "Balance: checking\xE2\x80\xA6", 1, 0) == -1 &&
+                    jsti_window_set_api_key_balance("openrouter.apiKey", "", 1, 0) == -1 &&
+                    jsti_window_set_api_key_balance("openrouter.apiKey", "Balance: $4.10 credit.", 2, 0) == -1;
+                jsti_window_set_api_key_balance("openrouter.apiKey", "Balance: $4.10 credit.", 1, 1);
+                SendMessageW(window, balanceMessage, 0, 0);
+                wchar_t detail[512] = {};
+                GetDlgItemTextW(window, detailID, detail, 512);
+                const bool balanced = rejectsBalance && enabled(balanceID) &&
+                    std::wstring(detail).find(L"Balance: $4.10 credit.") != std::wstring::npos;
+                click(balanceID);
+                const bool balanceIdle = !dialog.busy && enabled(keyID) && enabled(balanceID);
                 select(1);
+                const bool noBalance = !enabled(balanceID);
                 click(validateID);
                 refresh("OpenAI key is valid.");
                 confirm = decline;
@@ -486,10 +578,12 @@ bool jsti_api_keys_self_test(HWND owner, std::string &error) {
                 if (IsWindow(window)) DestroyWindow(window);
                 const std::vector<Call> expected = {
                     Call{JSTI_API_KEY_SAVE, "openrouter.apiKey", "sk-or-fixture-0000"},
+                    Call{JSTI_API_KEY_BALANCE, "openrouter.apiKey", "<none>"},
                     Call{JSTI_API_KEY_VALIDATE, "openai.apiKey", "<none>"},
                     Call{JSTI_API_KEY_REMOVE, "openai.apiKey", "<none>"}
                 };
-                passed = listed && filtered && unsaved && typed && wiped && busy && kept && declined && closed && calls == expected;
+                passed = listed && filtered && unsaved && typed && wiped && busy && kept && balanced && balanceIdle &&
+                    noBalance && declined && closed && calls == expected;
                 if (!passed) error = "The API keys dialog did not match its row states or reported the wrong action.";
             }
         }
@@ -500,6 +594,7 @@ bool jsti_api_keys_self_test(HWND owner, std::string &error) {
         const uint64_t revision = configuration.revision;
         configuration = original;
         configuration.revision = revision + 1;
+        balances = originalBalances;
     }
     jsti_window_update(nullptr, nullptr, -1);
     return passed;

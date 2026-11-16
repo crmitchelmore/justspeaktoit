@@ -120,6 +120,7 @@ extension DesktopHostController {
     /// window: its record is already saved, and nothing is output.
     func present(_ record: DesktopRecordingStore.Record, output: DesktopHostRecordingOutput<Platform>?) {
         guard !closed else { return }
+        noteTranscriptionSucceeded(record)
         selectedHistoryID = record.id
         transcriptVariant = .processed
         refreshHistory(selectRecord: true)
@@ -230,5 +231,21 @@ extension DesktopHostController {
         postProcessingTask?.cancel()
         liveFinalisation?.cancel()
         update("Cancelling… Saved audio and completed results will be retained.", state: 2)
+    }
+}
+
+extension DesktopHostController {
+    /// Counts a first successful transcription for opted-in analytics: only the
+    /// provider family and engine type, never the model, text or audio.
+    func noteTranscriptionSucceeded(_ record: DesktopRecordingStore.Record) {
+        guard record.failure == nil, record.result?.text.isEmpty == false else { return }
+        let model = record.modelIdentifier
+        let local = DesktopHostModels.isLocal(model)
+        let id = DesktopHostModels.provider(for: model)?.id ?? ""
+        let provider = local ? AnalyticsProviderType.local
+            : LiveTranscriptionProviderID(rawValue: id).map(AnalyticsProviderType.init(liveProvider:))
+                ?? AnalyticsProviderType(rawValue: id) ?? .other
+        let telemetry = self.telemetry
+        Task { await telemetry.transcriptionSucceeded(provider: provider, engine: local ? .onDevice : .cloud) }
     }
 }

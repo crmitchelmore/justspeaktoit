@@ -68,6 +68,7 @@ extension XCUIApplication {
     /// Scrolls `element` wholly into the usable band and waits for it to settle.
     func reveal(_ element: XCUIElement, attempts: Int = 8, settleTimeout: TimeInterval = 5) -> Bool {
         let band = self.usableBand
+        var frameBeforeDrag: CGRect?
         for _ in 0..<attempts {
             guard let frame = element.snapshotFrame else {
                 self.swipeUp()
@@ -77,9 +78,19 @@ extension XCUIApplication {
                 if self.waitUntilSettled(element, inside: band, timeout: settleTimeout) { return true }
                 continue
             }
+            let delta = max(-(band.height - 40), min(band.height - 40, band.midY - frame.midY))
+            // A measured drag that left the element where it was did not scroll
+            // anything: on API Keys the API Key field sat under the Save bar and
+            // eight identical drags never moved it (run 43513946260). Swipe the
+            // content instead; a short list stops the overshoot at its end.
+            if frame == frameBeforeDrag {
+                frameBeforeDrag = nil
+                if delta < 0 { self.swipeUp() } else { self.swipeDown() }
+                continue
+            }
+            frameBeforeDrag = frame
             // A full swipe overshoots the band in both directions (run 42302311943
             // attempt 2), so drag by the measured distance and hold to stop momentum.
-            let delta = max(-(band.height - 40), min(band.height - 40, band.midY - frame.midY))
             let startY = delta > 0 ? band.minY + 20 : band.maxY - 20
             let start = self.coordinate(withNormalizedOffset: .zero)
                 .withOffset(CGVector(dx: band.midX, dy: startY))

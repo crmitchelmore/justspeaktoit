@@ -92,6 +92,23 @@ class CloudWireTest {
     }
 
     @Test
+    fun testRewriteText_keepsWhitespaceAndRejectsUnfinishedOrMalformedReplies() {
+        // VoiceEditPolicy decides which whitespace is accidental, so the reply arrives untouched.
+        assertEquals(
+            "  Indented.\n",
+            CloudWire.rewriteText("""{"choices":[{"finish_reason":"stop","message":{"content":"  Indented.\n"}}]}"""),
+        )
+        listOf(
+            "",
+            """{"choices":[]}""",
+            """{"choices":[{"finish_reason":"length","message":{"content":"Partial"}}]}""",
+            """{"choices":[{"message":{"content":null}}]}""",
+        ).forEach { body ->
+            assertEquals(DictationFailure.Server, assertThrows(CloudException::class.java) { CloudWire.rewriteText(body) }.failure)
+        }
+    }
+
+    @Test
     fun testMalformedResponses_failAsServerErrors() {
         listOf("", "not json", "{}", """{"choices":[]}""").forEach { body ->
             try {
@@ -119,7 +136,6 @@ class CloudWireTest {
     @Test
     fun testCatalogue_fallsBackToDefaultForUnknownModel() {
         assertEquals(CloudCatalog.defaultTranscriptionModel, CloudCatalog.transcriptionModel("retired/model"))
-        assertTrue(CloudCatalog.transcriptionModels.all { it.provider != CloudProvider.OpenRouter })
     }
 
     @Test

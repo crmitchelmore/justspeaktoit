@@ -39,7 +39,9 @@ interface LiveTranscriber {
  * - audio waits until the provider says it is ready, keeping only the newest five seconds;
  * - after that, more than five seconds stuck in the socket is a stall, never silently dropped audio;
  * - each connection attempt has an identity, so callbacks from a superseded or ended one are ignored;
- * - a finish drains admitted audio, sends the provider's end signal and ends within a deadline;
+ * - a finish drains admitted audio, sends the provider's end signal and ends within a deadline that
+ *   holds across connection attempts; a provider's response budget starts once the signal has left;
+ * - a connection that drops before the provider confirmed the end is a failure, never a completion;
  * - a failure ends the session with the text received so far; nothing switches provider silently.
  *
  * All state is confined to [scheduler]'s thread.
@@ -104,6 +106,9 @@ abstract class LiveSession(
     /** Whether a failure before readiness should try another connection instead of ending. */
     protected open fun retryBeforeReady(): Boolean = false
 
+    /** Whether the provider has returned everything a finish waits for, so the session may complete. */
+    protected open fun isSettled(): Boolean = true
+
     override fun connect(apiKey: String) = scheduler.execute {
         if (done || this.apiKey != null) return@execute
         this.apiKey = apiKey
@@ -125,8 +130,9 @@ abstract class LiveSession(
             complete()
             return@execute
         }
-        after(finishDeadlineMs) {
-            if (endSignalSent && (socket?.queuedBytes ?: 0L) == 0L) complete() else fail(DictationFailure.NetworkTimeout)
+        // Not tied to the connection attempt: a stop before the key is read still ends in time.
+        afterSession(finishDeadlineMs) {
+            if (endSignalSent && drained() && isSettled()) complete() else fail(DictationFailure.NetworkTimeout)
         }
         if (ready) beginFinish()
     }
@@ -159,6 +165,22 @@ abstract class LiveSession(
         }
     }
 
+    private fun afterSession(delayMs: Long, task: () -> Unit) {
+        timers += scheduler.schedule(delayMs) {
+            scheduler.execute { if (!done) task() }
+        }
+    }
+
+    /**
+     * Runs [task] once everything sent has left the device, so a provider's response budget never
+     * starts while audio or the end signal is still queued. The finish deadline bounds the wait.
+     */
+    protected fun afterDrained(task: () -> Unit) {
+        if (drained()) task() else after(DRAIN_POLL_MS) { afterDrained(task) }
+    }
+
+    private fun drained(): Boolean = (socket?.queuedBytes ?: 0L) == 0L
+
     protected fun complete() {
         if (done) return
         val text = finalTranscript().trim()
@@ -168,7 +190,7 @@ abstract class LiveSession(
 
     /** Ends normally once everything sent has left the device; until then the finish deadline decides. */
     protected fun completeIfDrained() {
-        if ((socket?.queuedBytes ?: 0L) == 0L) complete()
+        if (drained() && isSettled()) complete()
     }
 
     protected fun fail(failure: DictationFailure) {
@@ -233,10 +255,14 @@ abstract class LiveSession(
         if (socket.queuedBytes > maxBufferedBytes * 2) fail(DictationFailure.NetworkTimeout)
     }
 
-    /** The connection ended or the provider reported a fatal error. */
-    protected fun transportEnded(failure: DictationFailure) {
+    /**
+     * The connection ended or the provider reported a fatal error. Only the provider's normal close
+     * after the end signal, with nothing left unsent and nothing awaited, completes the session; any
+     * other end keeps the text so far as unfinished.
+     */
+    protected fun transportEnded(failure: DictationFailure, normalClose: Boolean = false) {
         if (endSignalSent) {
-            complete()
+            if (normalClose && drained() && isSettled()) complete() else fail(failure)
             return
         }
         if (!ready && !finishRequested && retryBeforeReady()) {
@@ -254,7 +280,9 @@ abstract class LiveSession(
 
         override fun onText(text: String) = onCurrent { onMessage(text) }
 
-        override fun onClosed(code: Int, reason: String) = onCurrent { transportEnded(DictationFailure.Network) }
+        override fun onClosed(code: Int, reason: String) = onCurrent {
+            transportEnded(DictationFailure.Network, normalClose = code == NORMAL_CLOSURE)
+        }
 
         override fun onFailure(error: Throwable, httpStatus: Int?) = onCurrent {
             transportEnded(httpStatus?.let(CloudWire::failureForStatus) ?: DictationFailure.Network)
@@ -265,5 +293,6 @@ abstract class LiveSession(
         const val BYTES_PER_SAMPLE = 2
         const val BUFFER_SECONDS = 5
         const val NORMAL_CLOSURE = 1000
+        private const val DRAIN_POLL_MS = 50L
     }
 }

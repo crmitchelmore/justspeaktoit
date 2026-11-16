@@ -188,8 +188,13 @@ def main():
         raise SystemExit('Wrong Sparkle release train')
     if surface == 'mac-store' and any(key.startswith('SU') for key in info):
         raise SystemExit('App Store archive contains Sparkle configuration')
-    if surface == 'ios' and any(key in info for key in ['NSLocalNetworkUsageDescription', 'NSBonjourServices']):
-        raise SystemExit('Public iOS archive declares an unavailable local-network feature')
+    if surface == 'ios':
+        # Send to Mac (#1640) browses for the receiver of the same train only.
+        purpose = info.get('NSLocalNetworkUsageDescription')
+        if not isinstance(purpose, str) or not purpose.strip() or '$(' in purpose:
+            raise SystemExit('iOS archive is missing the Send to Mac local-network purpose string')
+        if info.get('NSBonjourServices') != [config['transportServiceType']]:
+            raise SystemExit('iOS archive must declare only its train\'s Send to Mac Bonjour service')
     verify_submission_metadata(app, info, surface=surface, main=True)
     if surface != 'mac-direct':
         entitlements = signed_entitlements(app)

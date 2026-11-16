@@ -8,14 +8,17 @@ typedef struct {
     AdwPasswordEntryRow *key;
     AdwActionRow *details;
     GtkLabel *message;
-    GtkWidget *save, *check, *remove, *refresh, *website;
+    GtkWidget *save, *check, *remove, *refresh, *website, *balance;
     GPtrArray *rows;
     GArray *visible; /* Provider combo position -> row index for the current filter. */
     gchar *identity, *selection_epoch, *request;
     gboolean pending, suppress;
 } Form;
 typedef struct { GPtrArray *rows; gchar *request, *message; } Delivery;
+/* One account balance beside its primary key row; GTK thread only. */
+typedef struct { gchar *identifier, *text; gboolean refreshable, result; } Balance;
 static Form *active;
+static GHashTable *balances; /* identifier -> Balance, GTK thread only. */
 static GtkWidget *entry_button;
 static gboolean idle = TRUE;
 static GMutex lock;
@@ -74,6 +77,9 @@ static const JSTILinuxAPIKeyRow *selected(Form *form) {
     guint row = g_array_index(form->visible, guint, index);
     return row < form->rows->len ? g_ptr_array_index(form->rows, row) : NULL;
 }
+static const Balance *balance_for(const JSTILinuxAPIKeyRow *row) {
+    return row == NULL || balances == NULL ? NULL : g_hash_table_lookup(balances, row->identifier);
+}
 static guint filter_index(Form *form) {
     guint index = adw_combo_row_get_selected(form->filter);
     return index < G_N_ELEMENTS(empty_messages) ? index : 0;
@@ -108,17 +114,28 @@ static void enable(Form *form) {
     gtk_widget_set_sensitive(form->remove, available && row != NULL && row->saved);
     gtk_widget_set_sensitive(form->website, available && row != NULL && row->url[0] != '\0');
     gtk_widget_set_sensitive(form->refresh, available);
+    /* Balance checks run beside key work, so a pending key request never disables this. */
+    const Balance *balance = balance_for(row);
+    gtk_widget_set_sensitive(form->balance, balance != NULL && balance->refreshable);
+}
+/* Rewrites the details without touching the key field, so a balance landing
+ * mid-typing never clears what the user is entering. */
+static void describe(Form *form) {
+    const JSTILinuxAPIKeyRow *row = selected(form);
+    const Balance *balance = balance_for(row);
+    gchar *detail = row == NULL
+        ? g_strdup(form->rows != NULL && form->rows->len > 0 ? empty_messages[filter_index(form)]
+                                                             : "Refresh to load the shared provider catalogue.")
+        : balance != NULL ? g_strdup_printf("%s\n%s\n%s\n%s", row->uses, row->status, balance->text, row->hint)
+        : g_strdup_printf("%s\n%s\n%s", row->uses, row->status, row->hint);
+    adw_action_row_set_subtitle(form->details, detail);
+    g_free(detail);
+    enable(form);
 }
 static void show_selection(Form *form) {
     gtk_editable_set_text(GTK_EDITABLE(form->key), "");
     g_free(form->selection_epoch); form->selection_epoch = g_uuid_string_random();
-    const JSTILinuxAPIKeyRow *row = selected(form);
-    gchar *detail = row != NULL ? g_strdup_printf("%s\n%s\n%s", row->uses, row->status, row->hint)
-        : form->rows != NULL && form->rows->len > 0 ? g_strdup(empty_messages[filter_index(form)])
-        : g_strdup("Refresh to load the shared provider catalogue.");
-    adw_action_row_set_subtitle(form->details, detail);
-    g_free(detail);
-    enable(form);
+    describe(form);
 }
 static void selection_changed(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; Form *form = data;
@@ -169,7 +186,18 @@ static void request(Form *form, gint action) {
 static void save_clicked(GtkButton *button, gpointer data) { (void)button; request(data, JSTI_LINUX_API_KEY_SAVE); }
 static void check_clicked(GtkButton *button, gpointer data) { (void)button; request(data, JSTI_LINUX_API_KEY_VALIDATE); }
 static void refresh_clicked(GtkButton *button, gpointer data) { (void)button; request(data, JSTI_LINUX_API_KEY_REFRESH); }
-
+/* Asks the host for the selected account's balance: no key and no ticket
+ * leave the dialog, and nothing turns pending. */
+static void balance_clicked(GtkButton *button, gpointer data) {
+    (void)button; Form *form = data;
+    const JSTILinuxAPIKeyRow *row = selected(form);
+    const Balance *balance = balance_for(row);
+    if (balance == NULL || !balance->refreshable) return;
+    g_mutex_lock(&lock);
+    jsti_api_keys_fn fn = callback; gpointer target = context;
+    g_mutex_unlock(&lock);
+    if (fn != NULL) fn(JSTI_LINUX_API_KEY_BALANCE, form->identity, row->identifier, "", target);
+}
 typedef struct { gchar *identity, *epoch; } Removal;
 static void removal_free(gpointer data) {
     Removal *value = data; g_free(value->identity); g_free(value->epoch); g_free(value);
@@ -335,7 +363,9 @@ void jsti_api_keys_open(GtkWindow *owner) {
     GtkWidget *secondary = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     form->refresh = button("Refresh", G_CALLBACK(refresh_clicked), form);
     form->website = button("Get provider key", G_CALLBACK(website_clicked), form);
+    form->balance = button("Check balance", G_CALLBACK(balance_clicked), form);
     gtk_box_append(GTK_BOX(secondary), form->refresh); gtk_box_append(GTK_BOX(secondary), form->website);
+    gtk_box_append(GTK_BOX(secondary), form->balance);
     gtk_box_append(GTK_BOX(column), secondary);
     g_signal_connect(form->provider, "notify::selected", G_CALLBACK(selection_changed), form);
     g_signal_connect(form->filter, "notify::selected", G_CALLBACK(filter_changed), form);
@@ -416,15 +446,55 @@ int32_t jsti_api_keys_finish(const JSTILinuxAPIKeyRow *rows, size_t count, const
     Delivery *value = delivery_copy(rows, count, request_id, message);
     return value == NULL ? -1 : jsti_window_post(delivery_apply, value, delivery_free);
 }
+static void balance_free(gpointer data) {
+    Balance *value = data;
+    if (value == NULL) return;
+    g_free(value->identifier); g_free(value->text); g_free(value);
+}
+/* Stores the balance and, when its row is selected, shows it and announces a new result. */
+static void balance_apply(gpointer data) {
+    Balance *value = data;
+    if (balances == NULL) balances = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, balance_free);
+    const Balance *previous = g_hash_table_lookup(balances, value->identifier);
+    gboolean changed = previous == NULL || g_strcmp0(previous->text, value->text) != 0;
+    Balance *copy = g_new0(Balance, 1);
+    copy->identifier = g_strdup(value->identifier); copy->text = g_strdup(value->text);
+    copy->refreshable = value->refreshable; copy->result = value->result;
+    g_hash_table_replace(balances, copy->identifier, copy);
+    Form *form = active;
+    const JSTILinuxAPIKeyRow *row = form == NULL ? NULL : selected(form);
+    if (row == NULL || g_strcmp0(row->identifier, copy->identifier) != 0) return;
+    describe(form);
+    if (copy->result && changed)
+        jsti_accessible_announce(GTK_WIDGET(form->window), copy->text, GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
+}
+static Balance *balance_copy(const char *identifier, const char *text, int32_t refreshable, int32_t result) {
+    if (!text_valid(identifier, 128) || identifier[0] == '\0' || !text_valid(text, 2048) || text[0] == '\0' ||
+        (refreshable != 0 && refreshable != 1) || (result != 0 && result != 1)) return NULL;
+    Balance *value = g_new0(Balance, 1);
+    value->identifier = g_strdup(identifier); value->text = g_strdup(text);
+    value->refreshable = refreshable == 1; value->result = result == 1;
+    return value;
+}
+int32_t jsti_api_keys_set_balance(const char *identifier, const char *text, int32_t refreshable, int32_t result) {
+    Balance *value = balance_copy(identifier, text, refreshable, result);
+    return value == NULL ? -1 : jsti_window_post(balance_apply, value, balance_free);
+}
 
 typedef struct {
-    gint calls, action, cancels;
+    gint calls, action, cancels, balances;
     gboolean valid;
     gchar request[37];
 } Fixture;
 static void fixture_callback(int32_t action, const char *ticket, const char *identifier,
                              const char *secret, void *data) {
     Fixture *fixture = data;
+    if (action == JSTI_LINUX_API_KEY_BALANCE) {
+        ++fixture->balances;
+        fixture->valid = fixture->valid && g_uuid_string_is_valid(ticket) &&
+            g_strcmp0(identifier, "second.apiKey") == 0 && g_strcmp0(secret, "") == 0;
+        return;
+    }
     ++fixture->calls; fixture->action = action;
     fixture->valid = fixture->valid && g_uuid_string_is_valid(ticket);
     g_strlcpy(fixture->request, ticket, sizeof(fixture->request));
@@ -468,6 +538,20 @@ int32_t jsti_api_keys_self_test(GtkWindow *owner, char *error, size_t capacity) 
     adw_combo_row_set_selected(active->provider, 1);
     valid = valid && gtk_editable_get_text(GTK_EDITABLE(active->key))[0] == '\0' &&
         gtk_widget_get_sensitive(active->remove) && !gtk_widget_get_sensitive(active->website);
+    /* A balance lands on its own channel: shown beside the key, never clearing
+     * typed text or making the dialog pending, and Check balance sends no key. */
+    valid = valid && !gtk_widget_get_sensitive(active->balance) &&
+        balance_copy("second.apiKey", "", 1, 0) == NULL && balance_copy("", "Balance", 1, 0) == NULL &&
+        balance_copy("second.apiKey", "Balance", 2, 0) == NULL;
+    gtk_editable_set_text(GTK_EDITABLE(active->key), "typed-before-balance");
+    Balance *balance = balance_copy("second.apiKey", "Balance: $4.10 credit.", 1, 1);
+    balance_apply(balance); balance_free(balance);
+    valid = valid && g_strcmp0(gtk_editable_get_text(GTK_EDITABLE(active->key)), "typed-before-balance") == 0 &&
+        strstr(adw_action_row_get_subtitle(active->details), "Balance: $4.10 credit.") != NULL &&
+        gtk_widget_get_sensitive(active->balance);
+    gint before_balance = fixture.calls;
+    balance_clicked(NULL, active);
+    valid = valid && fixture.balances == 1 && fixture.calls == before_balance && !active->pending;
     gtk_editable_set_text(GTK_EDITABLE(active->key), "");
     request(active, JSTI_LINUX_API_KEY_SAVE);
     valid = valid && fixture.calls == 1;
@@ -522,6 +606,7 @@ int32_t jsti_api_keys_self_test(GtkWindow *owner, char *error, size_t capacity) 
         delivery_copy(NULL, 129, old, "") == NULL && fixture.valid;
     g_free(old);
     g_mutex_lock(&lock); callback = saved_callback; context = saved_context; g_mutex_unlock(&lock);
+    if (balances != NULL) g_hash_table_remove(balances, "second.apiKey");
     jsti_api_keys_set_idle(saved_idle);
     if (!valid) { jsti_set_error(error, capacity, "API Keys request, privacy or lifecycle fence failed."); return -1; }
     return 0;

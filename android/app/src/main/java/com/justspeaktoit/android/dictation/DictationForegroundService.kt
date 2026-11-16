@@ -99,6 +99,7 @@ class DictationForegroundService : Service() {
                     ForegroundPhase.Recording -> R.string.notification_dictation_recording
                     ForegroundPhase.Paused -> R.string.notification_dictation_paused
                     ForegroundPhase.Finishing -> R.string.notification_dictation_finishing
+                    ForegroundPhase.Listening -> R.string.notification_dictation_listening
                 },
             ),
         )

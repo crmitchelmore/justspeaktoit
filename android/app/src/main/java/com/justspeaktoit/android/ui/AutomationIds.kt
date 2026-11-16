@@ -41,6 +41,16 @@ object AutomationIds {
     /** One per History entry, keyed by its generated ID, never by its text. */
     fun historyPlay(entryId: String) = "history.play.$entryId"
     const val SETTINGS_BACK = "settings.back"
+    const val SETTINGS_DOWNLOADED_MOBILE_DATA = "settings.downloadedModels.mobileData"
+    const val SETTINGS_DOWNLOADED_UNAVAILABLE = "settings.downloadedModels.unavailable"
+    const val MODE_CHOOSE_DOWNLOADED_MODEL = "dictation.mode.chooseDownloadedModel"
+
+    /** One set per downloaded model, keyed by its catalogue ID such as `local/whisperkit/base`. */
+    fun downloadedModelUse(id: String) = "settings.downloadedModels.use.$id"
+    fun downloadedModelState(id: String) = "settings.downloadedModels.state.$id"
+    fun downloadedModelDownload(id: String) = "settings.downloadedModels.download.$id"
+    fun downloadedModelCancel(id: String) = "settings.downloadedModels.cancel.$id"
+    fun downloadedModelRemove(id: String) = "settings.downloadedModels.remove.$id"
     const val SETTINGS_SEARCH = "settingsSearchField"
     const val SETTINGS_SEARCH_CLEAR = "settingsSearchClear"
     const val API_KEYS_FILTER = "settings.apiKeysFilter"

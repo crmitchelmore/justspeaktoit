@@ -623,6 +623,8 @@ class DictationViewModelTest {
         val changes = mapOf(
             "chosen_mode" to null,
             "cloud_model" to cloud.catalogId,
+            "downloadedTranscriptionModel" to "local/whisperkit/base",
+            "downloadedModelsOnMobileData" to true,
             "preferredLocale" to language,
             "personal_corrections" to mapOf("Ada" to "ada, adder"),
             "cleanup_enabled" to true,
@@ -651,6 +653,8 @@ class DictationViewModelTest {
         assertEquals(changes, RawConfigurationValues.of(vm.state.value))
         assertNull(h.prefs.chosenMode)
         assertEquals(cloud.catalogId, h.prefs.cloudModelId)
+        assertEquals("local/whisperkit/base", h.prefs.downloadedTranscriptionModel)
+        assertTrue(h.prefs.downloadedModelsOnMobileData)
         assertEquals(language, h.prefs.languageId)
         assertEquals(listOf(CorrectionRule("Ada", listOf("ada", "adder"))), h.prefs.corrections)
         assertTrue(h.prefs.cleanupEnabled)

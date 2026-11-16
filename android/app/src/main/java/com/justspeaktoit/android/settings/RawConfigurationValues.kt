@@ -13,6 +13,8 @@ object RawConfigurationValues {
     fun of(state: DictationUiState): Map<String, Any?> = mapOf(
         "chosen_mode" to state.chosenMode?.name,
         "cloud_model" to state.cloudModel.catalogId,
+        "downloadedTranscriptionModel" to state.localModels.selectedId,
+        "downloadedModelsOnMobileData" to state.localModels.downloadOnMobileData,
         "preferredLocale" to state.languageId,
         "personal_corrections" to corrections(state.corrections),
         "cleanup_enabled" to state.cleanupEnabled,

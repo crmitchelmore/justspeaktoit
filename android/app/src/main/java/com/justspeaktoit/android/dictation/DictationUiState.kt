@@ -15,6 +15,7 @@ import com.justspeaktoit.android.corrections.AutoCorrectionLearningPolicy
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.local.LocalModelsState
 import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.AppPreferences
@@ -103,7 +104,7 @@ data class DictationUiState(
     /** The active profile; its choices override the user's own for new sessions. */
     val profile: DictationProfile? = null,
     val recordingSounds: RecordingSoundSettings = RecordingSoundSettings(),
-    /** The microphone Cloud recordings use; null is the system default. */
+    /** The microphone Cloud and Downloaded recordings use; null is the system default. */
     val audioInputId: String? = null,
     val audioInputs: List<AudioInput> = emptyList(),
     /** Light, dark or the phone's; the Activity themes itself from this. */
@@ -112,6 +113,8 @@ data class DictationUiState(
     val dynamicColor: Boolean = false,
     /** Exporting and importing the configuration archive. */
     val transfer: ConfigTransferState = ConfigTransferState(),
+    /** Downloaded Whisper models, their state on this phone and the one Downloaded mode uses. */
+    val localModels: LocalModelsState = LocalModelsState(),
 ) {
     val audioInputChoice: AudioInputChoice get() = AudioInputChoice.resolve(audioInputId, audioInputs)
 

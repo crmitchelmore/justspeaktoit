@@ -4,10 +4,11 @@
       "allowedValues" : [
         "OnDevice",
         "SpeechService",
-        "Cloud"
+        "Cloud",
+        "Downloaded"
       ],
       "default" : null,
-      "description" : "Recognition mode: OnDevice, SpeechService or Cloud; null picks the best available.",
+      "description" : "Recognition mode: OnDevice, SpeechService, Cloud or Downloaded; null picks the best available.",
       "key" : "chosen_mode",
       "readOnly" : false,
       "sensitive" : false,
@@ -198,6 +199,28 @@
       "default" : false,
       "description" : "Keep finished cloud recordings in History to play back or transcribe again.",
       "key" : "keepRecordingsInHistory",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "boolean"
+    },
+    {
+      "allowedValues" : [
+        "local/whisperkit/tiny",
+        "local/whisperkit/base",
+        "local/whisperkit/small",
+        "local/whisperkit/large-v3-turbo"
+      ],
+      "default" : null,
+      "description" : "Downloaded Whisper model used in Downloaded mode; null until one is chosen.",
+      "key" : "downloadedTranscriptionModel",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "optionalString"
+    },
+    {
+      "default" : false,
+      "description" : "Download models over mobile data as well as Wi-Fi.",
+      "key" : "downloadedModelsOnMobileData",
       "readOnly" : false,
       "sensitive" : false,
       "type" : "boolean"

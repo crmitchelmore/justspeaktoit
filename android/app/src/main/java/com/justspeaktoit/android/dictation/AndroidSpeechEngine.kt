@@ -136,7 +136,7 @@ class AndroidSpeechEngine(context: Context) : SpeechEngine {
                         null
                     }
                 RecognitionMode.SpeechService -> SpeechRecognizer.createSpeechRecognizer(context)
-                RecognitionMode.Cloud -> null
+                RecognitionMode.Cloud, RecognitionMode.Downloaded -> null
             }
         } catch (e: UnsupportedOperationException) {
             null

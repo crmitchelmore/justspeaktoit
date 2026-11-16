@@ -3,6 +3,7 @@ package com.justspeaktoit.android.ime
 import android.text.InputType
 import android.view.inputmethod.EditorInfo
 import com.justspeaktoit.android.dictation.LanguageSupport
+import com.justspeaktoit.android.dictation.ModeStatus
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.dictation.RecognizerAvailability
 import com.justspeaktoit.android.dictation.RecognizerCapabilities
@@ -83,6 +84,17 @@ class KeyboardPolicyTest {
         assertEquals(KeyboardCloud.Off, KeyboardPolicy.cloud(optedIn = false, liveModel = true))
         assertEquals(KeyboardCloud.Live, KeyboardPolicy.cloud(optedIn = true, liveModel = true))
         assertEquals(KeyboardCloud.NotLive, KeyboardPolicy.cloud(optedIn = true, liveModel = false))
+    }
+
+    @Test
+    fun testMode_neverUsesADownloadedModel() {
+        val both = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = true)
+        val options = RecognizerAvailability.evaluate(both, LanguageSupport.Installed, downloaded = ModeStatus.Ready)
+        assertEquals(RecognitionMode.OnDevice, KeyboardPolicy.mode(RecognitionMode.Downloaded, options))
+
+        val onlyDownloaded = RecognizerCapabilities(34, speechServiceAvailable = false, onDeviceAvailable = false)
+        val unusable = RecognizerAvailability.evaluate(onlyDownloaded, LanguageSupport.Unknown, downloaded = ModeStatus.Ready)
+        assertNull(KeyboardPolicy.mode(RecognitionMode.Downloaded, unusable))
     }
 
     @Test

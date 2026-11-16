@@ -42,8 +42,12 @@ object KeyboardPolicy {
      * keyboard in to live Cloud models in Settings, and only when the session's Cloud model streams
      * live ([KeyboardCloud.Live]); a batch model is never uploaded instead and returns null, so the
      * keyboard says why rather than switching route. Without the opt-in a Cloud choice is treated as
-     * no choice. Automatic never picks Cloud, and an explicit on-device or speech-service choice is
-     * honoured and never silently replaced if unusable.
+     * no choice. Automatic never picks Cloud. Downloaded Whisper models stay out of the keyboard until
+     * their load time, memory and transcription speed are measured on real phones (#1658,
+     * Docs/android-on-device-models.md): the keyboard's process has a tighter memory budget than the
+     * app and the user is waiting in another app's text field, so a Downloaded choice is treated as no
+     * choice. An explicit on-device or speech-service choice is honoured and never silently replaced
+     * if unusable.
      */
     fun mode(
         chosen: RecognitionMode?,
@@ -53,11 +57,11 @@ object KeyboardPolicy {
         if (chosen == RecognitionMode.Cloud && cloud != KeyboardCloud.Off) {
             return RecognitionMode.Cloud.takeIf { cloud == KeyboardCloud.Live }
         }
-        val local = options.filter { it.mode != RecognitionMode.Cloud }
-        return if (chosen != null && chosen != RecognitionMode.Cloud) {
-            chosen.takeIf { mode -> local.any { it.mode == mode && it.usable } }
+        val platform = options.filter { it.mode !in APP_ONLY_MODES }
+        return if (chosen != null && chosen !in APP_ONLY_MODES) {
+            chosen.takeIf { mode -> platform.any { it.mode == mode && it.usable } }
         } else {
-            RecognizerAvailability.defaultMode(local)
+            RecognizerAvailability.defaultMode(platform)
         }
     }
 
@@ -67,6 +71,9 @@ object KeyboardPolicy {
         liveModel -> KeyboardCloud.Live
         else -> KeyboardCloud.NotLive
     }
+
+    /** Modes the keyboard never uses outside the Cloud opt-in: Cloud (BYOK) and Downloaded models. */
+    private val APP_ONLY_MODES = setOf(RecognitionMode.Cloud, RecognitionMode.Downloaded)
 
     /**
      * The speech service may send audio to its provider, so it is disclosed before capture unless

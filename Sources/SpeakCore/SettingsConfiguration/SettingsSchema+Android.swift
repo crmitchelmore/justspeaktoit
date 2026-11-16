@@ -8,7 +8,7 @@ extension SettingsSchema {
     private typealias Field = SettingsSchemaField
 
     /// Names of the app's `RecognitionMode`; null means "not chosen yet".
-    static let androidRecognitionModes = ["OnDevice", "SpeechService", "Cloud"]
+    static let androidRecognitionModes = ["OnDevice", "SpeechService", "Cloud", "Downloaded"]
     /// Names of the app's history `Retention`.
     static let androidHistoryRetentions = ["Off", "Week", "Month", "Forever"]
 
@@ -19,7 +19,8 @@ extension SettingsSchema {
         let cleanupModels = CloudCatalogAndroidExport.cleanupModels.map(\.id)
         return [
             Field(key: "chosen_mode", kind: .optionalString,
-                  summary: "Recognition mode: OnDevice, SpeechService or Cloud; null picks the best available.",
+                  summary: "Recognition mode: OnDevice, SpeechService, Cloud or Downloaded; "
+                      + "null picks the best available.",
                   defaultValue: .null, allowedValues: androidRecognitionModes),
             Field(key: "cloud_model", kind: .enumeration, summary: "Model used when dictating in cloud mode.",
                   defaultValue: transcriptionModels.first.map { .string($0) }, allowedValues: transcriptionModels),
@@ -51,8 +52,17 @@ extension SettingsSchema {
             Field(key: "keepRecordingsInHistory", kind: .boolean,
                   summary: "Keep finished cloud recordings in History to play back or transcribe again.",
                   defaultValue: .bool(false))
-        ] + androidAudioFields + androidAppearanceFields
+        ] + androidDownloadedModelFields + androidAudioFields + androidAppearanceFields
     }()
+
+    /// Downloaded Whisper models (`WhisperCppModels`, exported by `WhisperCppAndroidExport`).
+    private static let androidDownloadedModelFields: [Field] = [
+        Field(key: "downloadedTranscriptionModel", kind: .optionalString,
+              summary: "Downloaded Whisper model used in Downloaded mode; null until one is chosen.",
+              defaultValue: .null, allowedValues: WhisperCppModels.all.map(\.catalogueID)),
+        Field(key: "downloadedModelsOnMobileData", kind: .boolean,
+              summary: "Download models over mobile data as well as Wi-Fi.", defaultValue: .bool(false))
+    ]
 
     private static let androidAudioFields: [Field] = [
         Field(key: "silenceDetectionEnabled", kind: .boolean, summary: "Stop a cloud recording after silence.",

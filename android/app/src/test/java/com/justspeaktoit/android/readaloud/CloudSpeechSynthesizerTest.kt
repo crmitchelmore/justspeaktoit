@@ -149,6 +149,53 @@ class CloudSpeechSynthesizerTest {
     }
 
     @Test
+    fun testGemini_retriesOneAnswerWithoutAudioOrServerFaultLikeSpeakCore() = runBlocking {
+        val pcm = byteArrayOf(9, 0, 8, 0)
+        val audioBody = """{"steps":[{"content":[{"type":"audio","data":"${Base64.getEncoder().encodeToString(pcm)}"}]}]}"""
+        val textOnly = """{"steps":[{"content":[{"type":"text","text":"Sure!"}]}]}""".toByteArray()
+        val voice = voice("google")
+        val segment = CloudSpeechSynthesizer.Segment("hi", false)
+
+        val noAudioThenAudio = FakeHttp(SpeechHttpResponse(200, textOnly), SpeechHttpResponse(200, audioBody.toByteArray()))
+        assertArrayEquals(pcm, CloudSpeechSynthesizer(noAudioThenAudio).synthesize(voice, segment, "k", "en").data)
+        assertEquals(2, noAudioThenAudio.sent.size)
+
+        val unavailableThenAudio = FakeHttp(SpeechHttpResponse(503, ByteArray(0)), SpeechHttpResponse(200, audioBody.toByteArray()))
+        assertArrayEquals(pcm, CloudSpeechSynthesizer(unavailableThenAudio).synthesize(voice, segment, "k", "en").data)
+
+        val neverAudio = FakeHttp(SpeechHttpResponse(200, textOnly), SpeechHttpResponse(200, textOnly))
+        assertEquals(
+            ReadAloudFailure.InvalidAudio(voice.providerName),
+            failureOf { CloudSpeechSynthesizer(neverAudio).synthesize(voice, segment, "k", "en") },
+        )
+        assertEquals(2, neverAudio.sent.size)
+
+        val refused = FakeHttp(SpeechHttpResponse(400, ByteArray(0)))
+        assertEquals(
+            ReadAloudFailure.ServiceError(voice.providerName, 400),
+            failureOf { CloudSpeechSynthesizer(refused).synthesize(voice, segment, "k", "en") },
+        )
+        assertEquals(1, refused.sent.size)
+    }
+
+    @Test
+    fun testAudio_isCutToWholeFramesSoTheSpeakerNeverStalls() = runBlocking {
+        val voice = voice("deepgram")
+        val segment = CloudSpeechSynthesizer.Segment("hi", false)
+
+        val stereo = FakeHttp(SpeechHttpResponse(200, wav(byteArrayOf(1, 0, 2, 0, 3, 0), channels = 2)))
+        val audio = CloudSpeechSynthesizer(stereo).synthesize(voice, segment, "k", "en")
+        assertEquals(2, audio.channels)
+        assertArrayEquals(byteArrayOf(1, 0, 2, 0), audio.data)
+
+        val partialFrame = FakeHttp(SpeechHttpResponse(200, wav(byteArrayOf(1, 0), channels = 2)))
+        assertEquals(
+            ReadAloudFailure.InvalidAudio("Deepgram"),
+            failureOf { CloudSpeechSynthesizer(partialFrame).synthesize(voice, segment, "k", "en") },
+        )
+    }
+
+    @Test
     fun testPlan_splitsLongTextAndRefusesTooManySegments() {
         val voice = voice("deepgram").copy(maxCharacters = 20, maxSegments = 2)
         val synthesizer = CloudSpeechSynthesizer(FakeHttp())
@@ -174,8 +221,14 @@ class CloudSpeechSynthesizerTest {
     }
 
     companion object {
-        /** A mono WAV; [dataSize] of -1 writes 0xFFFFFFFF as a streamed response does. */
-        fun wav(pcm: ByteArray, sampleRate: Int = 24000, bits: Int = 16, dataSize: Int = pcm.size): ByteArray =
+        /** A WAV, mono by default; [dataSize] of -1 writes 0xFFFFFFFF as a streamed response does. */
+        fun wav(
+            pcm: ByteArray,
+            sampleRate: Int = 24000,
+            bits: Int = 16,
+            dataSize: Int = pcm.size,
+            channels: Int = 1,
+        ): ByteArray =
             ByteBuffer.allocate(44 + pcm.size).order(ByteOrder.LITTLE_ENDIAN).apply {
                 put("RIFF".toByteArray())
                 putInt(36 + pcm.size)
@@ -183,10 +236,10 @@ class CloudSpeechSynthesizerTest {
                 put("fmt ".toByteArray())
                 putInt(16)
                 putShort(1)
-                putShort(1)
+                putShort(channels.toShort())
                 putInt(sampleRate)
-                putInt(sampleRate * bits / 8)
-                putShort((bits / 8).toShort())
+                putInt(sampleRate * channels * bits / 8)
+                putShort((channels * bits / 8).toShort())
                 putShort(bits.toShort())
                 put("data".toByteArray())
                 putInt(dataSize)

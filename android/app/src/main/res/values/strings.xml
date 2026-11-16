@@ -418,6 +418,7 @@
     <string name="read_aloud_paused">Reading paused</string>
     <string name="read_aloud_unavailable">No text-to-speech engine is available on this phone.</string>
     <string name="read_aloud_missing_key">Add a %1$s API key in Settings to read aloud with this voice.</string>
+    <string name="read_aloud_key_unreadable">The saved %1$s API key could not be read on this phone. Save it again in Settings.</string>
     <string name="read_aloud_key_rejected">%1$s did not accept the saved API key. Check it in Settings.</string>
     <string name="read_aloud_out_of_credit">%1$s says the account is out of credit.</string>
     <string name="read_aloud_rate_limited">%1$s is limiting requests. Try again shortly.</string>

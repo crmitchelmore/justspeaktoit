@@ -1,6 +1,7 @@
 package com.justspeaktoit.android.readaloud
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
@@ -8,17 +9,21 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.security.GeneralSecurityException
+import kotlin.coroutines.EmptyCoroutineContext
 
 class ReadAloudControllerTest {
     private class FakeEngine(private val fault: Exception? = null) : ReadAloudEngine {
         val spoken = mutableListOf<String>()
+        val languages = mutableListOf<String?>()
         val finish = CompletableDeferred<ReadAloudFailure?>()
         var pauses = 0
         var resumes = 0
         var cancelled = false
 
-        override suspend fun play(text: String, onAudible: () -> Unit) {
+        override suspend fun play(text: String, language: String?, onAudible: () -> Unit) {
             spoken += text
+            languages += language
             fault?.let { throw it }
             onAudible()
             try {
@@ -63,7 +68,7 @@ class ReadAloudControllerTest {
         val engine = FakeEngine()
         val focus = FakeFocus()
         val chosen = mutableListOf<VoiceSelection>()
-        val controller = ReadAloudController(this, { chosen += it; engine }, focus)
+        val controller = ReadAloudController(this, { chosen += it; engine }, focus, EmptyCoroutineContext)
 
         controller.speak("Learn SQL today", VoiceSelection.Cloud("m|v"), pronunciations)
         assertEquals(ReadAloudPhase.Preparing, controller.state.value.phase)
@@ -82,7 +87,7 @@ class ReadAloudControllerTest {
     fun testFailure_isReportedWithoutTryingAnotherVoice() = runBlocking {
         val engine = FakeEngine()
         var built = 0
-        val controller = ReadAloudController(this, { built++; engine }, FakeFocus())
+        val controller = ReadAloudController(this, { built++; engine }, FakeFocus(), EmptyCoroutineContext)
 
         controller.speak("Hello", VoiceSelection.Cloud("m|v"), emptyList())
         yield()
@@ -97,7 +102,7 @@ class ReadAloudControllerTest {
 
     @Test
     fun testEngineFault_isShownAsPlaybackFailure() = runBlocking {
-        val controller = ReadAloudController(this, { FakeEngine(IllegalStateException("boom")) }, FakeFocus())
+        val controller = ReadAloudController(this, { FakeEngine(IllegalStateException("boom")) }, FakeFocus(), EmptyCoroutineContext)
 
         controller.speak("Hello", VoiceSelection.System(), emptyList())
         yield()
@@ -109,13 +114,13 @@ class ReadAloudControllerTest {
     @Test
     fun testMissingKeyAndRefusedFocus_failBeforePlaying() = runBlocking {
         val focus = FakeFocus()
-        val missing = ReadAloudController(this, { throw ReadAloudException(ReadAloudFailure.MissingKey("Groq")) }, focus)
+        val missing = ReadAloudController(this, { throw ReadAloudException(ReadAloudFailure.MissingKey("Groq")) }, focus, EmptyCoroutineContext)
         missing.speak("Hello", VoiceSelection.Cloud("m|v"), emptyList())
         assertEquals(ReadAloudFailure.MissingKey("Groq"), missing.state.value.failure)
         assertEquals(0, focus.requests)
 
         val engine = FakeEngine()
-        val busy = ReadAloudController(this, { engine }, FakeFocus(grant = false))
+        val busy = ReadAloudController(this, { engine }, FakeFocus(grant = false), EmptyCoroutineContext)
         busy.speak("Hello", VoiceSelection.System(), emptyList())
         yield()
         assertEquals(ReadAloudFailure.AudioBusy, busy.state.value.failure)
@@ -123,10 +128,59 @@ class ReadAloudControllerTest {
     }
 
     @Test
+    fun testSetupFault_isShownAsAFailureNotThrownFromTheTap() = runBlocking {
+        val focus = FakeFocus()
+        val controller = ReadAloudController(this, { throw GeneralSecurityException("keystore") }, focus, EmptyCoroutineContext)
+
+        controller.speak("Hello", VoiceSelection.Cloud("m|v"), emptyList())
+
+        assertEquals(ReadAloudState(failure = ReadAloudFailure.PlaybackFailed), controller.state.value)
+        assertEquals(0, focus.requests)
+    }
+
+    @Test
+    fun testLanguage_dictatedLanguageReachesTheVoiceAsItsBaseCode() = runBlocking {
+        val engine = FakeEngine()
+        val controller = ReadAloudController(this, { engine }, FakeFocus(), EmptyCoroutineContext)
+
+        controller.speak("Hola", VoiceSelection.Cloud("m|v"), emptyList(), language = "es-MX")
+        yield()
+        controller.stop()
+        controller.speak("Hola", VoiceSelection.Cloud("m|v"), emptyList())
+        yield()
+        controller.stop()
+
+        assertEquals(listOf("es", null), engine.languages)
+    }
+
+    @Test
+    fun testLanguage_resolvesKnownThenDetectedThenDevice() {
+        assertEquals("es", ReadAloudLanguage.resolve("es_ES", "fr", "en"))
+        assertEquals("fr", ReadAloudLanguage.resolve(null, "fr-CA", "en"))
+        assertEquals("fr", ReadAloudLanguage.resolve("auto", "fr", "en"))
+        assertEquals("de", ReadAloudLanguage.resolve(null, "und", "de-DE"))
+        assertEquals("en", ReadAloudLanguage.resolve(null, null, ""))
+    }
+
+    @Test
+    fun testPronunciations_runOffTheTappingThread() = runBlocking {
+        val engine = FakeEngine()
+        val regexRule = listOf(PronunciationEntry(PronunciationEntry.newId(), "(SQL)", "sequel", "sequel", isRegex = true))
+        val controller = ReadAloudController(this, { engine }, FakeFocus(), Dispatchers.Default)
+
+        controller.speak("Learn SQL", VoiceSelection.System(), regexRule)
+        assertTrue(engine.spoken.isEmpty())
+        while (engine.spoken.isEmpty()) yield()
+
+        assertEquals(listOf("Learn sequel"), engine.spoken)
+        controller.stop()
+    }
+
+    @Test
     fun testFocus_transientLossPausesAndRegainResumesOnlyThatPause() = runBlocking {
         val engine = FakeEngine()
         val focus = FakeFocus()
-        val controller = ReadAloudController(this, { engine }, focus)
+        val controller = ReadAloudController(this, { engine }, focus, EmptyCoroutineContext)
         controller.speak("Hello", VoiceSelection.System(), emptyList())
         yield()
 
@@ -154,7 +208,7 @@ class ReadAloudControllerTest {
     fun testStop_cancelsWithoutFailure() = runBlocking {
         val engine = FakeEngine()
         val focus = FakeFocus()
-        val controller = ReadAloudController(this, { engine }, focus)
+        val controller = ReadAloudController(this, { engine }, focus, EmptyCoroutineContext)
         controller.speak("Hello", VoiceSelection.System(), emptyList())
         yield()
 
@@ -219,14 +273,30 @@ class CloudReadAloudEngineTest {
             val index = if (url.contains("One")) 1 else 2
             SpeechHttpResponse(200, CloudSpeechSynthesizerTest.wav(byteArrayOf(index.toByte(), 0)))
         }
-        val engine = CloudReadAloudEngine(voice, "k", "en", CloudSpeechSynthesizer(http), output)
+        val engine = CloudReadAloudEngine(voice, "k", CloudSpeechSynthesizer(http), output) { "en" }
 
-        engine.play("One short sentence. Another one here.") { audible++ }
+        engine.play("One short sentence. Another one here.", "en") { audible++ }
 
         assertEquals(listOf(1, 2), output.played.map { it[0].toInt() })
         assertEquals(1, audible)
         assertTrue(output.drained)
         assertEquals(1, output.stops)
+    }
+
+    @Test
+    fun testPlay_sendsTheKnownLanguageOrElseTheDetectedOne() = runBlocking {
+        val urls = mutableListOf<String>()
+        val http = http { url ->
+            urls += url
+            SpeechHttpResponse(200, CloudSpeechSynthesizerTest.wav(byteArrayOf(1, 0)))
+        }
+        val localized = voice.copy(request = voice.request.copy(url = "https://example.invalid/{language}/{text}"))
+        val engine = CloudReadAloudEngine(localized, "k", CloudSpeechSynthesizer(http), RecordingOutput()) { "fr" }
+
+        engine.play("Hola", "es") {}
+        engine.play("Bonjour", null) {}
+
+        assertEquals(listOf("https://example.invalid/es/Hola", "https://example.invalid/fr/Bonjour"), urls)
     }
 
     @Test
@@ -239,10 +309,10 @@ class CloudReadAloudEngineTest {
                 SpeechHttpResponse(401, ByteArray(0))
             }
         }
-        val engine = CloudReadAloudEngine(voice, "k", "en", CloudSpeechSynthesizer(http), output)
+        val engine = CloudReadAloudEngine(voice, "k", CloudSpeechSynthesizer(http), output) { "en" }
 
         val failure = try {
-            engine.play("One short sentence. Another one here.") {}
+            engine.play("One short sentence. Another one here.", "en") {}
             null
         } catch (error: ReadAloudException) {
             error.failure

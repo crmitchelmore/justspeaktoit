@@ -155,7 +155,9 @@ private fun VoicePicker(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(onClick = onDismiss, modifier = Modifier.testTag(AutomationIds.READ_ALOUD_VOICE_CANCEL)) {
+                Text(stringResource(R.string.action_cancel))
+            }
         },
     )
 }
@@ -298,6 +300,7 @@ internal object PronunciationEdits {
     /**
      * [entries] with a new entry for [word] spoken as [sayAs]. An entry for the same word is replaced
      * in place and keeps its identity, so other devices see an update rather than a second entry.
+     * A literal word is trimmed; a regular expression is kept exactly, as its spaces are part of it.
      */
     fun add(
         entries: List<PronunciationEntry>,
@@ -306,12 +309,12 @@ internal object PronunciationEdits {
         caseSensitive: Boolean,
         regex: Boolean,
     ): List<PronunciationEntry> {
-        val trimmedWord = word.trim()
+        val entryWord = if (regex) word else word.trim()
         val spoken = sayAs.trim()
-        val index = entries.indexOfFirst { it.word.equals(trimmedWord, ignoreCase = true) }
+        val index = entries.indexOfFirst { it.word.equals(entryWord, ignoreCase = true) }
         val entry = PronunciationEntry(
             id = entries.getOrNull(index)?.id ?: PronunciationEntry.newId(),
-            word = trimmedWord,
+            word = entryWord,
             pronunciation = spoken,
             replacement = spoken,
             category = entries.getOrNull(index)?.category,

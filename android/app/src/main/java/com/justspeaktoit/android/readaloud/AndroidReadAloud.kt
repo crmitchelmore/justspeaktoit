@@ -11,6 +11,8 @@ import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
+import android.view.textclassifier.TextClassificationManager
+import android.view.textclassifier.TextLanguage
 import com.justspeaktoit.android.security.SecretStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.currentCoroutineContext
@@ -29,8 +31,11 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
+import java.security.GeneralSecurityException
+import java.security.ProviderException
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -47,18 +52,43 @@ internal class AndroidReadAloudEngines(
     private val http: SpeechHttp = OkHttpSpeechHttp(),
 ) : (VoiceSelection) -> ReadAloudEngine {
     private val catalog by lazy { readVoiceCatalog(context) }
+    private val detector = TextLanguageDetector(context)
 
     override fun invoke(selection: VoiceSelection): ReadAloudEngine = when (selection) {
         is VoiceSelection.System -> SystemReadAloudEngine(system, selection.voiceName)
         is VoiceSelection.Cloud -> {
             val voice = catalog.voice(selection.key) ?: throw ReadAloudException(ReadAloudFailure.VoiceUnavailable)
-            val key = secrets.read(voice.credentialId)?.takeIf { it.isNotBlank() }
+            val key = readKey(voice)?.takeIf { it.isNotBlank() }
                 ?: throw ReadAloudException(ReadAloudFailure.MissingKey(voice.providerName))
-            CloudReadAloudEngine(voice, key, baseLanguage(), CloudSpeechSynthesizer(http), AudioTrackOutput())
+            CloudReadAloudEngine(voice, key, CloudSpeechSynthesizer(http), AudioTrackOutput()) { text ->
+                ReadAloudLanguage.resolve(null, detector(text), Locale.getDefault().language)
+            }
         }
     }
 
-    private fun baseLanguage(): String = Locale.getDefault().language.ifBlank { "en" }
+    /** A Keystore or cipher fault is reported as an unreadable key rather than escaping the tap. */
+    private fun readKey(voice: CloudVoice): String? = try {
+        secrets.read(voice.credentialId)
+    } catch (_: GeneralSecurityException) {
+        throw ReadAloudException(ReadAloudFailure.KeyUnreadable(voice.providerName))
+    } catch (_: ProviderException) {
+        throw ReadAloudException(ReadAloudFailure.KeyUnreadable(voice.providerName))
+    }
+}
+
+/** The dominant language of a text from the phone's text classifier, or null; call off the main thread. */
+internal class TextLanguageDetector(private val context: Context) : (String) -> String? {
+    override fun invoke(text: String): String? = try {
+        val classifier = context.getSystemService(TextClassificationManager::class.java)?.textClassifier
+        val result = classifier?.detectLanguage(TextLanguage.Request.Builder(text.take(SAMPLE_CHARS)).build())
+        if (result == null || result.localeHypothesisCount == 0) null else result.getLocale(0).language
+    } catch (_: RuntimeException) {
+        null
+    }
+
+    private companion object {
+        const val SAMPLE_CHARS = 2000
+    }
 }
 
 internal fun readVoiceCatalog(context: Context): VoiceCatalog =
@@ -125,8 +155,14 @@ internal class OkHttpSpeechHttp(private val client: OkHttpClient = sharedClient)
     }
 
     companion object {
+        /**
+         * Speech requests carry API keys in provider-specific headers that a redirect would forward to
+         * another host, so redirects are never followed; a 3xx answer is reported as a service error.
+         */
         val sharedClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
+                .followRedirects(false)
+                .followSslRedirects(false)
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
                 .callTimeout(120, TimeUnit.SECONDS)
@@ -298,9 +334,8 @@ internal class SystemReadAloudEngine(private val speech: SystemSpeech, private v
     private val paused = MutableStateFlow(false)
     @Volatile private var tts: TextToSpeech? = null
     @Volatile private var pending: Pair<String, CompletableDeferred<Outcome>>? = null
-    private var counter = 0
 
-    override suspend fun play(text: String, onAudible: () -> Unit) {
+    override suspend fun play(text: String, language: String?, onAudible: () -> Unit) {
         val engine = speech.engine() ?: throw ReadAloudException(ReadAloudFailure.SystemUnavailable)
         choose(engine)
         engine.setAudioAttributes(speechAttributes)
@@ -311,7 +346,7 @@ internal class SystemReadAloudEngine(private val speech: SystemSpeech, private v
         try {
             while (index < chunks.size) {
                 paused.first { !it }
-                val id = "$UTTERANCE_PREFIX${counter++}"
+                val id = "$UTTERANCE_PREFIX${nextUtterance.getAndIncrement()}"
                 val outcome = CompletableDeferred<Outcome>()
                 pending = id to outcome
                 if (engine.speak(chunks[index], TextToSpeech.QUEUE_FLUSH, null, id) == TextToSpeech.ERROR) {
@@ -373,5 +408,9 @@ internal class SystemReadAloudEngine(private val speech: SystemSpeech, private v
 
     private companion object {
         const val UTTERANCE_PREFIX = "jsti.readAloud."
+
+        // Process-wide: every reading shares one TextToSpeech, so a late callback for an earlier
+        // reading's utterance must never match a new one.
+        val nextUtterance = AtomicLong()
     }
 }

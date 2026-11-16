@@ -25,6 +25,7 @@ class PcmAudio(val sampleRate: Int, val channels: Int, val data: ByteArray)
 /** Why read aloud stopped, shown to the user; never a reason to switch to another voice. */
 sealed interface ReadAloudFailure {
     data class MissingKey(val provider: String) : ReadAloudFailure
+    data class KeyUnreadable(val provider: String) : ReadAloudFailure
     data class KeyRejected(val provider: String) : ReadAloudFailure
     data class OutOfCredit(val provider: String) : ReadAloudFailure
     data class RateLimited(val provider: String) : ReadAloudFailure
@@ -74,12 +75,22 @@ class CloudSpeechSynthesizer(private val http: SpeechHttp) {
             // The dialogue endpoint refused the request; the same text goes to the fallback model.
             if (response.status !in dialogue.fallbackStatuses) throw failure(voice, response.status)
         }
-        var response = exchange(voice, voice.request, segment.text, values)
-        if (voice.response == VoiceResponse.GeminiInteraction && response.status == SERVER_FAULT) {
-            response = exchange(voice, voice.request, segment.text, values)
+        // Gemini sometimes answers with text instead of audio, or a server fault; like SpeakCore's
+        // `GeminiTTSAPI`, either is retried once. Other providers' answers are final.
+        val attempts = if (voice.response == VoiceResponse.GeminiInteraction) 1 + GEMINI_RETRIES else 1
+        var outcome: ReadAloudException? = null
+        repeat(attempts) {
+            val response = exchange(voice, voice.request, segment.text, values)
+            if (response.status !in 200..299) {
+                outcome = failure(voice, response.status)
+                if (response.status < SERVER_FAULT) throw checkNotNull(outcome)
+            } else {
+                val audio = decode(voice, response.body)
+                if (audio != null) return audio
+                outcome = ReadAloudException(ReadAloudFailure.InvalidAudio(voice.providerName))
+            }
         }
-        if (response.status !in 200..299) throw failure(voice, response.status)
-        return audio(voice, response.body)
+        throw checkNotNull(outcome)
     }
 
     private fun values(voice: CloudVoice, credential: String, language: String): Map<String, String> {
@@ -106,13 +117,16 @@ class CloudSpeechSynthesizer(private val http: SpeechHttp) {
         }
     }
 
-    private fun audio(voice: CloudVoice, body: ByteArray): PcmAudio {
+    private fun audio(voice: CloudVoice, body: ByteArray): PcmAudio =
+        decode(voice, body) ?: throw ReadAloudException(ReadAloudFailure.InvalidAudio(voice.providerName))
+
+    /** Whole frames only: a speaker accepts complete frames, so a partial one at the end is dropped. */
+    private fun decode(voice: CloudVoice, body: ByteArray): PcmAudio? {
         val audio = when (voice.response) {
             VoiceResponse.Wav -> WavAudio.parse(body)
             VoiceResponse.GeminiInteraction -> geminiAudio(body, voice.sampleRate)
-        }
-        return audio?.takeIf { it.data.isNotEmpty() }
-            ?: throw ReadAloudException(ReadAloudFailure.InvalidAudio(voice.providerName))
+        } ?: return null
+        return wholeFrames(audio).takeIf { it.data.isNotEmpty() }
     }
 
     private fun failure(voice: CloudVoice, status: Int): ReadAloudException {
@@ -133,6 +147,7 @@ class CloudSpeechSynthesizer(private val http: SpeechHttp) {
         private const val REGION = "region"
         private const val LANGUAGE = "language"
         private const val SERVER_FAULT = 500
+        private const val GEMINI_RETRIES = 1
         private val PLACEHOLDER = Regex("""\{(text|key|region|language)\}""")
 
         /** The request with every placeholder filled in one pass, so text can never become a key. */
@@ -203,6 +218,13 @@ class CloudSpeechSynthesizer(private val http: SpeechHttp) {
         }
 
         private fun ByteArray.evenLength(): ByteArray = if (size % 2 == 0) this else copyOf(size - 1)
+
+        /** [audio] cut to whole 16-bit frames of all its channels. */
+        fun wholeFrames(audio: PcmAudio): PcmAudio {
+            val frame = 2 * audio.channels
+            val extra = audio.data.size % frame
+            return if (extra == 0) audio else PcmAudio(audio.sampleRate, audio.channels, audio.data.copyOf(audio.data.size - extra))
+        }
     }
 }
 

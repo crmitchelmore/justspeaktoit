@@ -2,12 +2,17 @@ package com.justspeaktoit.android.readaloud
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.Locale
+import kotlin.coroutines.CoroutineContext
 
 /** The voice read aloud uses, saved as `readAloudVoice`. */
 sealed interface VoiceSelection {
@@ -41,9 +46,10 @@ sealed interface VoiceSelection {
 interface ReadAloudEngine {
     /**
      * Speaks [text], returning once it has all been heard and calling [onAudible] when sound starts.
-     * Throws [ReadAloudException]; cancelling the caller stops the sound at once.
+     * [language] is the text's base language code when it is known, otherwise null. Throws
+     * [ReadAloudException]; cancelling the caller stops the sound at once.
      */
-    suspend fun play(text: String, onAudible: () -> Unit)
+    suspend fun play(text: String, language: String?, onAudible: () -> Unit)
 
     fun pause()
 
@@ -67,13 +73,34 @@ data class ReadAloudState(val phase: ReadAloudPhase = ReadAloudPhase.Idle, val f
 }
 
 /**
+ * The language a cloud voice is asked to speak, as SpeakCore's `VoiceOutputLanguageCatalog` resolves
+ * it: a known language first, then the language detected in the text, then the phone's.
+ */
+object ReadAloudLanguage {
+    private val automatic = setOf("auto", "automatic", "und")
+
+    /** The base code of a language identifier such as `es-MX`, or null when it names none. */
+    fun base(identifier: String?): String? {
+        val code = identifier?.trim()?.lowercase(Locale.ROOT)?.split('_', '-')?.first().orEmpty()
+        return code.takeUnless { it.isEmpty() || it in automatic }
+    }
+
+    fun resolve(known: String?, detected: String?, device: String?): String =
+        base(known) ?: base(detected) ?: base(device) ?: DEFAULT
+
+    private const val DEFAULT = "en"
+}
+
+/**
  * Reads text aloud with the chosen voice after applying the pronunciation dictionary. A failure
- * stops the reading and is reported in [state]; it never moves to another voice or provider.
+ * stops the reading and is reported in [state]; it never moves to another voice or provider. The
+ * dictionary runs on [work], never on the caller's thread.
  */
 class ReadAloudController(
     private val scope: CoroutineScope,
     private val engines: (VoiceSelection) -> ReadAloudEngine,
     private val focus: ReadAloudFocus,
+    private val work: CoroutineContext = Dispatchers.Default,
 ) {
     private val mutableState = MutableStateFlow(ReadAloudState())
     val state: StateFlow<ReadAloudState> = mutableState.asStateFlow()
@@ -82,14 +109,23 @@ class ReadAloudController(
     private var engine: ReadAloudEngine? = null
     private var pausedForFocus = false
 
-    fun speak(text: String, selection: VoiceSelection, pronunciations: List<PronunciationEntry>) {
+    /** Reads [text]; [language] is the language it was dictated in when known, such as `es-ES`. */
+    fun speak(
+        text: String,
+        selection: VoiceSelection,
+        pronunciations: List<PronunciationEntry>,
+        language: String? = null,
+    ) {
         stop()
-        val spoken = PronunciationDictionary.apply(text, pronunciations).trim()
-        if (spoken.isEmpty()) return
+        if (text.isBlank()) return
         val chosen = try {
             engines(selection)
         } catch (error: ReadAloudException) {
             mutableState.value = ReadAloudState(failure = error.failure)
+            return
+        } catch (_: Exception) {
+            // A key store or engine fault before playback; shown rather than escaping the tap.
+            mutableState.value = ReadAloudState(failure = ReadAloudFailure.PlaybackFailed)
             return
         }
         if (!focus.request(::onFocus)) {
@@ -101,8 +137,16 @@ class ReadAloudController(
         lateinit var reading: Job
         reading = scope.launch {
             val failure = try {
-                chosen.play(spoken) {
-                    mutableState.update { if (it.phase == ReadAloudPhase.Preparing) it.copy(phase = ReadAloudPhase.Speaking) else it }
+                // A user's regular expression can be slow, so it never runs on the tapping thread.
+                val spoken = withContext(work) {
+                    PronunciationDictionary.apply(text, pronunciations, active = { isActive }).trim()
+                }
+                if (spoken.isNotEmpty()) {
+                    chosen.play(spoken, ReadAloudLanguage.base(language)) {
+                        mutableState.update {
+                            if (it.phase == ReadAloudPhase.Preparing) it.copy(phase = ReadAloudPhase.Speaking) else it
+                        }
+                    }
                 }
                 null
             } catch (error: ReadAloudException) {

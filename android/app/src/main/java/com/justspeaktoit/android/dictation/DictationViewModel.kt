@@ -277,6 +277,7 @@ class DictationViewModel internal constructor(
 
     /** The import the preview describes, applied only when the user confirms it. */
     private var pendingImport: ImportPlan? = null
+    private var pronunciationEdits = 0
 
     private val sync: HistorySyncService? = historySync(
         object : SyncHistoryEntries {
@@ -494,6 +495,9 @@ class DictationViewModel internal constructor(
     /** Saves the whole pronunciation dictionary; read aloud uses it from the next reading. */
     fun setPronunciations(entries: List<PronunciationEntry>) {
         if (PronunciationDictionary.validate(entries) != null) return
+        // A previewed import was planned against the old dictionary; applying it would undo this edit.
+        pronunciationEdits++
+        if (pendingImport != null) dismissConfigurationImport()
         prefs.pronunciations = entries
         _state.update { it.copy(pronunciations = entries) }
     }
@@ -1028,6 +1032,7 @@ class DictationViewModel internal constructor(
         if (current.transfer.busy || current.dictation.isActive) return
         pendingImport = null
         updateTransfer { it.copy(busy = true, preview = null, importCredentials = false, outcome = null, detail = null) }
+        val edits = pronunciationEdits
         scope.launch {
             val history = historyOwner.snapshot(_state.value.retention)
             var detail: String? = null
@@ -1050,6 +1055,12 @@ class DictationViewModel internal constructor(
                 } catch (_: SecurityException) {
                     null
                 }
+            }
+            if (plan != null && edits != pronunciationEdits) {
+                // The dictionary changed while the archive was read, so this plan is already stale.
+                updateTransfer { it.copy(busy = false) }
+                withContext(transferIo) { transferFiles.clear() }
+                return@launch
             }
             pendingImport = plan
             updateTransfer {

@@ -338,12 +338,14 @@ internal object ConfigImporter {
             val result = existing.toMutableList()
             val entries = dictionary.toMutableList()
             val counts = Counts(skipped = all.size - records.size)
+            // Counted apart, so a dictionary rejected as a whole is reported as skipped, not applied.
+            val spoken = Counts(skipped = 0)
             var correctionsChanged = false
             var pronunciationsChanged = false
             records.forEach { record ->
                 when (record.kind) {
                     RecordKinds.LEXICON -> correctionsChanged = mergeCorrection(record, result, counts) || correctionsChanged
-                    RecordKinds.PRONUNCIATION -> pronunciationsChanged = mergePronunciation(record, entries, counts) || pronunciationsChanged
+                    RecordKinds.PRONUNCIATION -> pronunciationsChanged = mergePronunciation(record, entries, spoken) || pronunciationsChanged
                     else -> counts.unused++
                 }
             }
@@ -351,9 +353,18 @@ internal object ConfigImporter {
             if (pronunciationsChanged && PronunciationDictionary.validate(entries) != null) {
                 notices += "${category.title}: the imported pronunciations conflict with this phone's and were skipped."
                 pronunciationsChanged = false
+                spoken.skipped += spoken.added + spoken.updated
+                spoken.added = 0
+                spoken.updated = 0
             }
-            notUsed(category, counts.unused)
-            previews += CategoryPreview(category, counts.added, counts.updated, counts.unchanged, counts.skipped + counts.unused)
+            notUsed(category, counts.unused + spoken.unused)
+            previews += CategoryPreview(
+                category,
+                counts.added + spoken.added,
+                counts.updated + spoken.updated,
+                counts.unchanged + spoken.unchanged,
+                counts.skipped + counts.unused + spoken.skipped + spoken.unused,
+            )
             return VocabularyPlan(
                 corrections = result.takeIf { correctionsChanged },
                 pronunciations = entries.toList().takeIf { pronunciationsChanged },

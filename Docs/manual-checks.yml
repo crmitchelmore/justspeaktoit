@@ -1999,12 +1999,12 @@ sessions:
         core: false
         build: "Just Speak to It for Android, the first Alpha APK that includes the pronunciation dictionary for #1626, and a Mac or desktop app for the export check"
         steps:
-          - "Settings: open Pronunciation dictionary. Add Word \"JSTI\", Say as \"just speak to it\", then try adding \"jsti\" again and an invalid regular expression such as \"(\"."
+          - "Settings: open Pronunciation dictionary. Add Word \"JSTI\", Say as \"just speak it\", then add Word \"jsti\" with Say as \"just speak to it\". Then turn on Regular expression and try to add an invalid pattern such as \"(\"."
           - "Dictate or paste a transcript containing JSTI and tap Read aloud."
           - "Remove the entry, read aloud again, then add it back."
           - "Export settings with Vocabulary, pronunciation & corrections selected and import the file on the Mac or desktop app; then export there and import on the phone."
           - "With TalkBack on, move through the editor's fields, toggles and Remove buttons."
-        expected: "The entry is listed and the transcript is read as \"just speak to it\" while the text on screen stays JSTI; after removing it, JSTI is spelled out. The duplicate and the invalid expression each show their message and add nothing. The other app imports the entry and the phone gets it back unchanged, with no duplicate. TalkBack reads each field and toggle with its name and each Remove button with its word."
+        expected: "The entry is listed and the transcript is read as \"just speak to it\" while the text on screen stays JSTI; after removing it, JSTI is spelled out. Adding \"jsti\" updates the existing entry in place (one entry, now saying \"just speak to it\") rather than adding a second one. The invalid expression shows its message and adds nothing. The other app imports the entry and the phone gets it back unchanged, with no duplicate. TalkBack reads each field and toggle with its name and each Remove button with its word."
         final_gate: false
       - id: "android-downloaded-whisper-download"
         issues:

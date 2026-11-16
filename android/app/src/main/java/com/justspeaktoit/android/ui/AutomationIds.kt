@@ -220,6 +220,7 @@ object AutomationIds {
     /** One per correction, keyed by its position in the list, never by the user's own text. */
     fun correctionRemove(index: Int) = "settings.corrections.remove.$index"
     const val READ_ALOUD_VOICE = "settings.readAloudVoice"
+    const val READ_ALOUD_VOICE_CANCEL = "settings.readAloudVoice.cancel"
 
     /** One per voice in the read aloud picker, keyed by its saved `VoiceSelection` value. */
     fun readAloudVoiceOption(selection: String) = "settings.readAloudVoice.option.$selection"

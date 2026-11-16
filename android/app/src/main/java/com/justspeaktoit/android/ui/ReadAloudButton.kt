@@ -84,6 +84,7 @@ internal fun rememberReadAloudController(snackbar: SnackbarHostState): ReadAloud
 @Composable
 internal fun ReadAloudButton(
     text: String,
+    language: String?,
     voice: String,
     pronunciations: List<PronunciationEntry>,
     snackbar: SnackbarHostState,
@@ -93,7 +94,7 @@ internal fun ReadAloudButton(
     ReadAloudControls(
         state = state,
         tags = ReadAloudTags(AutomationIds.READ_ALOUD),
-        onRead = { controller.speak(text, VoiceSelection.parse(voice), pronunciations) },
+        onRead = { controller.speak(text, VoiceSelection.parse(voice), pronunciations, language) },
         controller = controller,
     )
 }
@@ -145,6 +146,7 @@ internal fun ReadAloudControls(
 @Composable
 private fun failureMessage(failure: ReadAloudFailure): String = when (failure) {
     is ReadAloudFailure.MissingKey -> stringResource(R.string.read_aloud_missing_key, failure.provider)
+    is ReadAloudFailure.KeyUnreadable -> stringResource(R.string.read_aloud_key_unreadable, failure.provider)
     is ReadAloudFailure.KeyRejected -> stringResource(R.string.read_aloud_key_rejected, failure.provider)
     is ReadAloudFailure.OutOfCredit -> stringResource(R.string.read_aloud_out_of_credit, failure.provider)
     is ReadAloudFailure.RateLimited -> stringResource(R.string.read_aloud_rate_limited, failure.provider)

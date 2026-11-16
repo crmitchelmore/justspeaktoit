@@ -11,11 +11,13 @@ import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.readaloud.PronunciationEntry
 import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RawConfigurationValues
 import com.justspeaktoit.android.settings.RecordingSoundProfile
 import com.justspeaktoit.android.settings.RecordingSoundSettings
+import com.justspeaktoit.android.transfer.TransferOutcome
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -25,6 +27,8 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
@@ -680,5 +684,25 @@ class DictationViewModelTest {
         h.onMain { applied = vm.applyConfiguration(mapOf("history_retention" to "Week")) }
         assertFalse(applied)
         assertEquals(before, h.prefs.retention)
+    }
+
+    @Test
+    fun testPronunciationEdit_dismissesAnImportPlannedAgainstTheOldDictionary() {
+        val vm = h.ready()
+        val exported = PronunciationEntry(PronunciationEntry.newId(), "SQL", "sequel", "sequel")
+        h.onMain { vm.setPronunciations(listOf(exported)) }
+        val archive = ByteArrayOutputStream()
+        h.onMain { vm.exportConfiguration({ archive }, {}) }
+        h.awaitState { it.transfer.outcome == TransferOutcome.Exported }
+        h.onMain { vm.setPronunciations(emptyList()) }
+        h.onMain { vm.inspectConfiguration { ByteArrayInputStream(archive.toByteArray()) } }
+        h.awaitState { !it.transfer.busy && it.transfer.preview != null }
+
+        val edited = listOf(PronunciationEntry(PronunciationEntry.newId(), "API", "A P I", "A P I"))
+        h.onMain { vm.setPronunciations(edited) }
+        h.onMain { vm.applyConfigurationImport() }
+
+        assertNull(vm.state.value.transfer.preview)
+        assertEquals(edited, h.prefs.pronunciations)
     }
 }

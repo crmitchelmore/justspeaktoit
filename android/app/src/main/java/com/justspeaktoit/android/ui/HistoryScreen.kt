@@ -145,9 +145,10 @@ fun HistoryScreen(
     val reader = rememberReadAloudController(snackbar)
     val readerState by reader.state.collectAsStateWithLifecycle()
     var readingId by rememberSaveable { mutableStateOf<String?>(null) }
-    // Reading aloud stops while the microphone records, or once its entry has gone.
-    LaunchedEffect(transcribe.sessionActive, entries) {
-        if (transcribe.sessionActive || entries.none { it.id == readingId }) reader.stop()
+    // Reading aloud stops while the microphone records, or once its entry, and so its controls, is no
+    // longer listed: deleted, or hidden by the search or a filter.
+    LaunchedEffect(transcribe.sessionActive, visible) {
+        if (transcribe.sessionActive || visible.none { it.id == readingId }) reader.stop()
     }
     val history = HistoryReader(
         controller = reader,

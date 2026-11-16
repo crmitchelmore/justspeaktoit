@@ -175,6 +175,11 @@ class ConfigTransferTest {
 
         assertNull(plan.pronunciations)
         assertTrue(plan.preview.notices.toString(), plan.preview.notices.any { "pronunciations" in it })
+        // The rejected entry is counted as skipped, never as an update; the correction still adds.
+        val vocabulary = plan.preview.categories.single { it.category == TransferCategory.Vocabulary }
+        assertEquals(1, vocabulary.added)
+        assertEquals(0, vocabulary.updated)
+        assertEquals(1, vocabulary.skipped)
     }
 
     @Test

@@ -5,6 +5,12 @@ import org.json.JSONException
 import org.json.JSONObject
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.regex.PatternSyntaxException
 
 /**
@@ -111,36 +117,121 @@ object PronunciationDictionary {
         return null
     }
 
+    /** How long one regular expression may run before it is skipped, so a pathological pattern cannot stall reading. */
+    const val ENTRY_BUDGET_MS = 500L
+
     /**
      * SpeakCore's `PronunciationRenderer.applyReplacements`: every entry with a non-empty replacement,
      * in order, each applied to the previous result. A case-sensitive word replaces every literal
-     * occurrence; otherwise it matches case-insensitively between word boundaries and the replacement
-     * is a template. A regular expression that does not compile leaves the text unchanged.
+     * occurrence; otherwise it matches case-insensitively between word boundaries. Only a regular
+     * expression's replacement is a template. A regular expression that does not compile, or that runs
+     * past [entryBudgetMs], leaves the text unchanged. Blocks, so call it off the main thread.
      */
-    fun apply(text: String, entries: List<PronunciationEntry>): String = entries.fold(text) { result, entry ->
+    fun apply(
+        text: String,
+        entries: List<PronunciationEntry>,
+        entryBudgetMs: Long = ENTRY_BUDGET_MS,
+        active: () -> Boolean = { true },
+    ): String = entries.fold(text) { result, entry ->
         val replacement = entry.replacement?.takeIf { it.isNotEmpty() } ?: return@fold result
+        if (!active()) return@fold result
         when {
-            entry.isRegex -> replace(result, compile(entry.word, entry.caseSensitive), replacement)
+            entry.isRegex -> {
+                val regex = compile(entry.word, entry.caseSensitive) ?: return@fold result
+                RegexWatchdog.run("${entry.caseSensitive}:${entry.word}", entryBudgetMs) {
+                    val deadline = System.nanoTime() + entryBudgetMs * NANOS_PER_MS
+                    replace(BoundedCharSequence(result, deadline, active), regex, replacement)
+                } ?: result
+            }
             entry.caseSensitive -> result.replace(entry.word, replacement)
-            else -> replace(result, compile("\\b${Regex.escape(entry.word)}\\b", caseSensitive = false), replacement)
+            else -> {
+                // An escaped word cannot backtrack badly, so it runs here; its replacement is literal.
+                val regex = compile("\\b${Regex.escape(entry.word)}\\b", caseSensitive = false) ?: return@fold result
+                replace(result, regex, Regex.escapeReplacement(replacement)) ?: result
+            }
         }
     }
 
-    private fun replace(text: String, regex: Regex?, template: String): String {
-        if (regex == null) return text
-        return try {
-            regex.replace(text, template)
-        } catch (_: IllegalArgumentException) {
-            // A template naming a group the pattern lacks; leave the text as it is.
-            text
-        } catch (_: IndexOutOfBoundsException) {
-            text
-        }
+    /** Null when [template] names a group the pattern lacks, or the time limit stopped the match. */
+    private fun replace(text: CharSequence, regex: Regex, template: String): String? = try {
+        regex.replace(text, template)
+    } catch (_: BoundedCharSequence.Expired) {
+        null
+    } catch (_: IllegalArgumentException) {
+        null
+    } catch (_: IndexOutOfBoundsException) {
+        null
     }
+
+    private const val NANOS_PER_MS = 1_000_000L
 
     private fun compile(pattern: String, caseSensitive: Boolean): Regex? = try {
         if (caseSensitive) Regex(pattern) else Regex(pattern, RegexOption.IGNORE_CASE)
     } catch (_: PatternSyntaxException) {
         null
+    }
+}
+
+/**
+ * Text that stops a regular expression reading it once [deadlineNanos] passes or [active] turns
+ * false, by throwing [Expired] from [get]. The JVM's java.util.regex reads input through it, so the
+ * match ends there; Android's ICU-backed regex copies the text first, so [RegexWatchdog] bounds it.
+ */
+internal class BoundedCharSequence(
+    private val text: CharSequence,
+    private val deadlineNanos: Long,
+    private val active: () -> Boolean,
+) : CharSequence {
+    class Expired : RuntimeException(null, null, false, false)
+
+    private var reads = 0
+
+    override val length: Int get() = text.length
+
+    override fun get(index: Int): Char {
+        if ((reads++ and CHECK_MASK) == 0 && (System.nanoTime() - deadlineNanos > 0 || !active())) throw Expired()
+        return text[index]
+    }
+
+    override fun subSequence(startIndex: Int, endIndex: Int): CharSequence = text.subSequence(startIndex, endIndex)
+
+    override fun toString(): String = text.toString()
+
+    private companion object {
+        const val CHECK_MASK = 0xFF
+    }
+}
+
+/**
+ * Runs a user regular expression on a background thread and gives up after a time limit. Android's
+ * regex engine cannot be interrupted, so a pattern that ran out of time is remembered and skipped
+ * from then on rather than started again on every reading.
+ */
+internal object RegexWatchdog {
+    private val slow: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val threads = Executors.newCachedThreadPool { task ->
+        Thread(task, "jsti-pronunciation").apply {
+            isDaemon = true
+            priority = Thread.MIN_PRIORITY
+        }
+    }
+
+    /** [block]'s result, or null when [key] timed out now or before, or [block] returned null. */
+    fun run(key: String, budgetMs: Long, block: () -> String?): String? {
+        if (key in slow) return null
+        val task = threads.submit(Callable { block() })
+        return try {
+            task.get(budgetMs, TimeUnit.MILLISECONDS)
+        } catch (_: TimeoutException) {
+            slow += key
+            task.cancel(true)
+            null
+        } catch (_: ExecutionException) {
+            null
+        } catch (_: InterruptedException) {
+            task.cancel(true)
+            Thread.currentThread().interrupt()
+            null
+        }
     }
 }

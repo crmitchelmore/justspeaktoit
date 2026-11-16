@@ -9,6 +9,7 @@ import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.dictation.SilenceSettings
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.readaloud.PronunciationEntry
 import org.json.JSONObject
 
 /** The non-secret choices the dictation screen reads and writes; [AppPreferences] in production. */
@@ -29,6 +30,12 @@ interface DictationPreferences {
     /** A `DictationLanguages` identifier; null until chosen, which means Automatic. */
     var languageId: String?
     var corrections: List<CorrectionRule>
+
+    /** The read-aloud pronunciation dictionary; null until edited, which means the shared defaults. */
+    var pronunciations: List<PronunciationEntry>?
+
+    /** A `VoiceSelection` encoding; null means the phone's default voice. */
+    var readAloudVoice: String?
 
     /** Whether the keyboard learns corrections from edits to text it inserted. */
     var learnCorrections: Boolean
@@ -125,6 +132,16 @@ class AppPreferences(context: Context) : DictationPreferences {
     override var corrections: List<CorrectionRule>
         get() = PersonalCorrections.decode(prefs.getString(KEY_CORRECTIONS, null))
         set(value) = prefs.edit { putString(KEY_CORRECTIONS, PersonalCorrections.encode(value)) }
+
+    override var pronunciations: List<PronunciationEntry>?
+        get() = prefs.getString(KEY_PRONUNCIATIONS, null)?.let(PronunciationEntry::decodeList)
+        set(value) = prefs.edit {
+            if (value == null) remove(KEY_PRONUNCIATIONS) else putString(KEY_PRONUNCIATIONS, PronunciationEntry.encodeList(value))
+        }
+
+    override var readAloudVoice: String?
+        get() = prefs.getString(KEY_READ_ALOUD_VOICE, null)
+        set(value) = prefs.edit { if (value == null) remove(KEY_READ_ALOUD_VOICE) else putString(KEY_READ_ALOUD_VOICE, value) }
 
     override var learnCorrections: Boolean
         get() = prefs.getBoolean(KEY_LEARN_CORRECTIONS, AutoCorrectionLearningPolicy.ENABLED_BY_DEFAULT)
@@ -241,6 +258,12 @@ class AppPreferences(context: Context) : DictationPreferences {
         /** The canonical cross-platform key; values are SpeakCore `TranscriptionLanguageCatalog` IDs. */
         private const val KEY_LANGUAGE = "preferredLocale"
         private const val KEY_CORRECTIONS = "personal_corrections"
+
+        /** The canonical cross-platform key (SpeakCore `DataMigrationVocabularyCatalog`), a JSON array. */
+        const val KEY_PRONUNCIATIONS = "pronunciationDictionary"
+
+        /** Android only: a `VoiceSelection`, since system voices differ from phone to phone. */
+        const val KEY_READ_ALOUD_VOICE = "readAloudVoice"
 
         /** Canonical cross-platform keys, shared with the Mac and desktop apps' correction learning. */
         private const val KEY_LEARN_CORRECTIONS = "autoCorrectionsEnabled"

@@ -136,7 +136,7 @@ internal fun ResultActions(state: DictationUiState, snackbar: SnackbarHostState,
             Text(stringResource(R.string.action_clear))
         }
     }
-    if (final && text.isNotBlank()) ReadAloudButton(text, snackbar)
+    if (final && text.isNotBlank()) ReadAloudButton(text, state.readAloudVoice, state.pronunciations, snackbar)
 }
 
 @Composable

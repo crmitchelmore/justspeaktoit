@@ -360,6 +360,8 @@
     "postRecordingTailDuration",
     "preferredAudioInputUID",
     "preferredLocaleIdentifier",
+    "pronunciationDictionary",
+    "readAloudVoice",
     "recordingsDirectory",
     "recoveredTranscriptionKeywords",
     "rememberedLocalTranscriptionSource",

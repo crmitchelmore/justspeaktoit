@@ -31,6 +31,10 @@ import com.justspeaktoit.android.history.AtomicHistoryFile
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.readaloud.PronunciationDictionary
+import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.readaloud.VoiceSelection
+import com.justspeaktoit.android.readaloud.readVoiceCatalog
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.security.KeystoreSecretStore
 import com.justspeaktoit.android.security.SecretStore
@@ -121,6 +125,8 @@ class DictationViewModel internal constructor(
     historySync: (SyncHistoryEntries) -> HistorySyncService? = { null },
     // Downloads OpenRouter's public model list for the browsers; tests pass a fake.
     openRouterFetch: (String) -> String = OpenRouterDiscovery::download,
+    // SpeakCore's shared pronunciation defaults, from voice_catalog.json.
+    private val pronunciationDefaults: List<PronunciationEntry> = emptyList(),
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     /** Hands-free dictation (#1632): its recordings take their audio from its microphone, pre-roll first. */
     private val handsFree = HandsFreeDictation(
@@ -168,6 +174,8 @@ class DictationViewModel internal constructor(
             handsFreeEnabled = prefs.handsFreeEnabled,
             keepRecordings = prefs.keepRecordings,
             corrections = prefs.corrections,
+            pronunciations = prefs.pronunciations ?: pronunciationDefaults,
+            readAloudVoice = VoiceSelection.parse(prefs.readAloudVoice).encoded,
             learnCorrections = prefs.learnCorrections,
             correctionPromotionThreshold = prefs.correctionPromotionThreshold,
             correctionCandidates = learner.pending(),
@@ -433,6 +441,19 @@ class DictationViewModel internal constructor(
     fun setCorrections(rules: List<CorrectionRule>) {
         prefs.corrections = rules
         _state.update { it.copy(corrections = rules) }
+    }
+
+    /** Saves the whole pronunciation dictionary; read aloud uses it from the next reading. */
+    fun setPronunciations(entries: List<PronunciationEntry>) {
+        if (PronunciationDictionary.validate(entries) != null) return
+        prefs.pronunciations = entries
+        _state.update { it.copy(pronunciations = entries) }
+    }
+
+    /** Saves the read-aloud voice; a cloud voice uses the provider key already saved for it. */
+    fun setReadAloudVoice(selection: VoiceSelection) {
+        prefs.readAloudVoice = selection.encoded
+        _state.update { it.copy(readAloudVoice = selection.encoded) }
     }
 
     /** Saves the shared start/stop sound settings; they apply from the next cue. */
@@ -925,7 +946,14 @@ class DictationViewModel internal constructor(
             val plan = withContext(transferIo) {
                 try {
                     val contents = transferFiles.read(open)
-                    ConfigImporter.plan(contents, prefs, history, secrets.names(), System.currentTimeMillis())
+                    ConfigImporter.plan(
+                        contents,
+                        prefs,
+                        history,
+                        secrets.names(),
+                        System.currentTimeMillis(),
+                        pronunciationDefaults,
+                    )
                 } catch (e: ConfigArchiveException) {
                     detail = e.message
                     null
@@ -987,6 +1015,7 @@ class DictationViewModel internal constructor(
                 retention = prefs.retention,
                 keepAudioOnCancel = prefs.keepAudioOnCancel,
                 corrections = prefs.corrections,
+                pronunciations = prefs.pronunciations ?: pronunciationDefaults,
                 cleanupPrompt = prefs.cleanupPrompt,
                 profiles = prefs.profiles,
             )
@@ -1099,7 +1128,19 @@ class DictationViewModel internal constructor(
                 historySync = { entries ->
                     AndroidHistorySync.create(application, KeystoreSecretStore.create(application), entries, Dispatchers.IO)
                 },
+                pronunciationDefaults = loadPronunciationDefaults(application),
             )
+        }
+
+        /** A missing or unreadable asset leaves the dictionary empty rather than stopping the app. */
+        private fun loadPronunciationDefaults(application: Application): List<PronunciationEntry> = try {
+            readVoiceCatalog(application).pronunciationDefaults
+        } catch (e: java.io.IOException) {
+            emptyList()
+        } catch (e: org.json.JSONException) {
+            emptyList()
+        } catch (e: IllegalStateException) {
+            emptyList()
         }
 
         /** A missing or unreadable asset hides balances rather than stopping the app. */

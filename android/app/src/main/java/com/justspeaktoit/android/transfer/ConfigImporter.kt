@@ -10,6 +10,8 @@ import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryPolicy
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.readaloud.PronunciationDictionary
+import com.justspeaktoit.android.readaloud.PronunciationEntry
 import com.justspeaktoit.android.settings.DictationPreferences
 import com.justspeaktoit.android.settings.DictationProfile
 import org.json.JSONObject
@@ -62,6 +64,8 @@ internal data class ImportPlan(
     val settings: SettingsChange,
     val profiles: List<DictationProfile>?,
     val corrections: List<CorrectionRule>?,
+    /** The whole dictionary to save, or null when the archive changes nothing in it. */
+    val pronunciations: List<PronunciationEntry>?,
     val history: List<HistoryEntry>,
     val audio: Map<String, File>,
     val credentials: Map<String, String>,
@@ -80,6 +84,8 @@ internal object ConfigImporter {
         history: List<HistoryEntry>,
         savedSecrets: Set<String>,
         nowMs: Long,
+        // The shared defaults a phone that never edited its dictionary is using.
+        pronunciationDefaults: List<PronunciationEntry> = emptyList(),
     ): ImportPlan {
         val notices = contents.notices.toMutableList()
         val previews = mutableListOf<CategoryPreview>()
@@ -88,7 +94,7 @@ internal object ConfigImporter {
         val settings = planner.settings(prefs, previews)
         val profiles = planner.profiles(prefs.profiles, previews)
         val activeProfile = planner.activeProfile(contents.androidSettings, profiles ?: prefs.profiles, prefs.activeProfileId)
-        val corrections = planner.corrections(prefs.corrections, previews)
+        val vocabulary = planner.vocabulary(prefs.corrections, prefs.pronunciations ?: pronunciationDefaults, previews)
         val retention = settings.retention ?: prefs.retention
         val historyPlan = planner.history(history, retention, nowMs, previews)
         val credentials = planner.credentials(savedSecrets, previews)
@@ -112,7 +118,8 @@ internal object ConfigImporter {
             preview = preview,
             settings = settings.copy(activeProfileId = activeProfile),
             profiles = profiles,
-            corrections = corrections,
+            corrections = vocabulary.corrections,
+            pronunciations = vocabulary.pronunciations,
             history = historyPlan.entries,
             audio = historyPlan.audio,
             credentials = credentials,
@@ -144,6 +151,11 @@ internal object ConfigImporter {
         val known = existing.mapTo(mutableSetOf()) { it.id.lowercase() }
         return merged + imported.filter { it.id.lowercase() !in known }.map { it.copy(audioPath = audio[it.id.lowercase()]) }
     }
+
+    private data class VocabularyPlan(
+        val corrections: List<CorrectionRule>?,
+        val pronunciations: List<PronunciationEntry>?,
+    )
 
     private data class HistoryPlan(val entries: List<HistoryEntry>, val audio: Map<String, File>)
 
@@ -305,46 +317,90 @@ internal object ConfigImporter {
             return result.takeIf { added + updated > 0 }
         }
 
-        fun corrections(existing: List<CorrectionRule>, previews: MutableList<CategoryPreview>): List<CorrectionRule>? {
+        fun vocabulary(
+            existing: List<CorrectionRule>,
+            dictionary: List<PronunciationEntry>,
+            previews: MutableList<CategoryPreview>,
+        ): VocabularyPlan {
             val category = TransferCategory.Vocabulary
-            val all = records(category) ?: return null
+            val all = records(category) ?: return VocabularyPlan(null, null)
             val records = inScope(category, all)
             val result = existing.toMutableList()
-            var added = 0
-            var updated = 0
-            var unchanged = 0
-            var unused = 0
-            var skipped = all.size - records.size
+            val entries = dictionary.toMutableList()
+            val counts = Counts(skipped = all.size - records.size)
+            var correctionsChanged = false
+            var pronunciationsChanged = false
             records.forEach { record ->
-                if (record.kind != RecordKinds.LEXICON) {
-                    unused++
-                    return@forEach
-                }
-                val rule = LexiconRecords.rule(record)
-                if (rule == null) {
-                    skipped++
-                    notices += invalid(category, record.id)
-                    return@forEach
-                }
-                val index = result.indexOfFirst { it.writeAs.equals(rule.writeAs, ignoreCase = true) }
-                if (index < 0) {
-                    added++
-                    result += rule
-                    return@forEach
-                }
-                // Aliases from both are kept, so importing never forgets a spelling the user taught.
-                val current = result[index]
-                val merged = PersonalCorrections.rule(current.writeAs, current.heardAs + rule.heardAs) ?: current
-                if (merged == current) {
-                    unchanged++
-                } else {
-                    updated++
-                    result[index] = merged
+                when (record.kind) {
+                    RecordKinds.LEXICON -> correctionsChanged = mergeCorrection(record, result, counts) || correctionsChanged
+                    RecordKinds.PRONUNCIATION -> pronunciationsChanged = mergePronunciation(record, entries, counts) || pronunciationsChanged
+                    else -> counts.unused++
                 }
             }
-            notUsed(category, unused)
-            previews += CategoryPreview(category, added, updated, unchanged, skipped + unused)
-            return result.takeIf { added + updated > 0 }
+            // The merged dictionary must still be valid; otherwise the phone's own is kept.
+            if (pronunciationsChanged && PronunciationDictionary.validate(entries) != null) {
+                notices += "${category.title}: the imported pronunciations conflict with this phone's and were skipped."
+                pronunciationsChanged = false
+            }
+            notUsed(category, counts.unused)
+            previews += CategoryPreview(category, counts.added, counts.updated, counts.unchanged, counts.skipped + counts.unused)
+            return VocabularyPlan(
+                corrections = result.takeIf { correctionsChanged },
+                pronunciations = entries.toList().takeIf { pronunciationsChanged },
+            )
+        }
+
+        private class Counts(var added: Int = 0, var updated: Int = 0, var unchanged: Int = 0, var unused: Int = 0, var skipped: Int)
+
+        /** True when [record] added or changed a rule. */
+        private fun mergeCorrection(record: ArchiveRecord, result: MutableList<CorrectionRule>, counts: Counts): Boolean {
+            val rule = LexiconRecords.rule(record)
+            if (rule == null) {
+                counts.skipped++
+                notices += invalid(TransferCategory.Vocabulary, record.id)
+                return false
+            }
+            val index = result.indexOfFirst { it.writeAs.equals(rule.writeAs, ignoreCase = true) }
+            if (index < 0) {
+                counts.added++
+                result += rule
+                return true
+            }
+            // Aliases from both are kept, so importing never forgets a spelling the user taught.
+            val current = result[index]
+            val merged = PersonalCorrections.rule(current.writeAs, current.heardAs + rule.heardAs) ?: current
+            if (merged == current) {
+                counts.unchanged++
+                return false
+            }
+            counts.updated++
+            result[index] = merged
+            return true
+        }
+
+        /** An imported entry replaces the one with its id or word; true when the dictionary changed. */
+        private fun mergePronunciation(record: ArchiveRecord, entries: MutableList<PronunciationEntry>, counts: Counts): Boolean {
+            val entry = PronunciationRecords.entry(record)
+            if (entry == null) {
+                counts.skipped++
+                notices += invalid(TransferCategory.Vocabulary, record.id)
+                return false
+            }
+            val index = entries.indexOfFirst {
+                it.id.equals(entry.id, ignoreCase = true) || it.word.equals(entry.word, ignoreCase = true)
+            }
+            if (index < 0) {
+                counts.added++
+                entries += entry
+                return true
+            }
+            if (entries[index] == entry) {
+                counts.unchanged++
+                return false
+            }
+            counts.updated++
+            entries[index] = entry
+            return true
         }
 
         fun credentials(saved: Set<String>, previews: MutableList<CategoryPreview>): Map<String, String> {

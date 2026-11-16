@@ -24,6 +24,7 @@ import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryFile
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.readaloud.PronunciationEntry
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.AppAppearance
@@ -379,6 +380,8 @@ internal class MemoryPrefs(
     override var keepRecordings: Boolean = false,
     override var languageId: String? = null,
     override var corrections: List<CorrectionRule> = emptyList(),
+    override var pronunciations: List<PronunciationEntry>? = null,
+    override var readAloudVoice: String? = null,
     override var learnCorrections: Boolean = true,
     override var correctionPromotionThreshold: Int = 2,
     override var correctionCandidates: List<AutoCorrectionCandidate> = emptyList(),

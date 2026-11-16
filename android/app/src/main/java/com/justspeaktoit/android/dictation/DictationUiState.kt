@@ -15,6 +15,8 @@ import com.justspeaktoit.android.corrections.AutoCorrectionLearningPolicy
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.readaloud.VoiceSelection
 import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.AppPreferences
@@ -86,6 +88,10 @@ data class DictationUiState(
     val transcribingEntryId: String? = null,
     /** Personal corrections, in the order they apply. */
     val corrections: List<CorrectionRule> = emptyList(),
+    /** The read-aloud pronunciation dictionary in effect, the shared defaults until edited. */
+    val pronunciations: List<PronunciationEntry> = emptyList(),
+    /** The read-aloud voice, a `VoiceSelection` encoding. */
+    val readAloudVoice: String = VoiceSelection.SYSTEM,
     /** Whether the keyboard learns corrections from the user's edits. */
     val learnCorrections: Boolean = AutoCorrectionLearningPolicy.ENABLED_BY_DEFAULT,
     /** Edits seen before one becomes a correction automatically. */

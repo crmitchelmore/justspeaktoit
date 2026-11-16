@@ -102,7 +102,8 @@ app/src/main/java/com/justspeaktoit/android/
 ├── telemetry/               # opt-in PostHog analytics and Sentry crash reports, consent gating
 ├── tips/                    # Google Play Billing tip jar
 ├── security/                # Keystore-backed AES-GCM secret store for BYOK keys
-├── output/                  # copy and share (Read aloud lives in ui/ReadAloudButton.kt)
+├── output/                  # copy and share
+├── readaloud/               # read aloud: voices, cloud synthesis, pronunciation, audio focus
 └── ui/                      # Compose screen and brand theme
 ```
 
@@ -116,7 +117,8 @@ Shared catalogues are generated from `Sources/SpeakCore`, never parsed from Swif
 `assets/settings_search.json` (settings search), `assets/settings_schema.json` (the raw configuration
 editor's fields), `assets/cloud_catalog.json` (cloud providers,
 credential IDs, the models Android offers with their wire fields, the cleanup model and prompt, the
-dictation languages and the vocabulary prompt limits), `assets/tip_catalog.json` (tip product IDs,
+dictation languages and the vocabulary prompt limits), `assets/voice_catalog.json` (cloud read-aloud voices
+with their request templates, and the default pronunciations), `assets/tip_catalog.json` (tip product IDs,
 names and emoji) and `assets/troubleshooting.json` (the phone Troubleshooting findings and fixes for each
 state, from `MobileTroubleshooting`). Regenerate them with `scripts/update-android-assets`; the Swift export tests fail when an asset is
 stale. The build's `generateCloudCatalog` task writes `GeneratedCloudCatalog.kt` from the cloud asset,

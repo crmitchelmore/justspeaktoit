@@ -11,10 +11,12 @@ import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.readaloud.PronunciationEntry
 import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.DictationProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -135,6 +137,45 @@ class ConfigTransferTest {
     }
 
     @Test
+    fun pronunciations_roundTripAndMergeByWordWithTheDefaults() = runBlocking {
+        val sql = PronunciationEntry(SQL_ID, "SQL", "sequel", "sequel", category = "Technical")
+        val regex = PronunciationEntry(REGEX_ID, """v(\d+)""", "version", "version $1", isRegex = true, caseSensitive = true)
+        val contents = export(prefs = sourcePrefs().apply { pronunciations = listOf(sql, regex) })
+        val records = contents.records.getValue(TransferCategory.Vocabulary).filter { it.kind == RecordKinds.PRONUNCIATION }
+        assertEquals(listOf(SQL_ID, REGEX_ID), records.map { it.id })
+        assertEquals(sql, PronunciationEntry.fromJson(records.first().value as JSONObject))
+
+        // A phone still on the shared defaults has its own "SQL" entry with another id.
+        val defaults = listOf(PronunciationEntry(PronunciationEntry.defaultId("SQL"), "SQL", "S Q L", "S Q L"))
+        val prefs = MemoryPrefs()
+        val store = HistoryStore(MemoryHistoryFile())
+        val plan = ConfigImporter.plan(contents, prefs, store.load(prefs.retention), emptySet(), nowMs, defaults)
+
+        assertEquals(listOf(sql, regex), plan.pronunciations)
+        assertTrue(applier(prefs, MemorySecrets(), store).applyPlan(plan, includeCredentials = false))
+        assertEquals(listOf(sql, regex), prefs.pronunciations)
+        val again = ConfigImporter.plan(contents, prefs, store.load(prefs.retention), emptySet(), nowMs, defaults)
+        assertNull(again.pronunciations)
+    }
+
+    @Test
+    fun conflictingPronunciations_areSkippedWithANotice() {
+        // Same id as the phone's entry but a word another phone entry already uses: the merge would duplicate it.
+        val contents = export(prefs = sourcePrefs().apply { pronunciations = listOf(PronunciationEntry(SQL_ID, "API", "a p i", "a p i")) })
+        val prefs = MemoryPrefs(
+            pronunciations = listOf(
+                PronunciationEntry(SQL_ID, "SQL", "sequel", "sequel"),
+                PronunciationEntry(REGEX_ID, "API", "A P I", "A P I"),
+            ),
+        )
+
+        val plan = ConfigImporter.plan(contents, prefs, emptyList(), emptySet(), nowMs)
+
+        assertNull(plan.pronunciations)
+        assertTrue(plan.preview.notices.toString(), plan.preview.notices.any { "pronunciations" in it })
+    }
+
+    @Test
     fun credentials_areExportedOnlyWhenChosen() {
         val withoutKeys = export(includeCredentials = false)
         assertNull(withoutKeys.records[TransferCategory.Credentials])
@@ -241,6 +282,8 @@ class ConfigTransferTest {
     private companion object {
         const val FIRST = "6f1c2a52-3b6e-4d7e-9a43-2f6a1b0c9d11"
         const val SECOND = "0b9e7c44-8d2f-4a15-b6e3-7c1d2e3f4a55"
+        const val SQL_ID = "6B1C1C9E-2D2C-4E36-9C1F-6F1B6C0E5A11"
+        const val REGEX_ID = "7A2D3E4F-5B6C-4D7E-8F90-A1B2C3D4E5F6"
         val PROFILE = DictationProfile(
             id = "2C4B6A10-9E8D-4F7C-A1B2-3C4D5E6F7A8B",
             name = "Meetings",

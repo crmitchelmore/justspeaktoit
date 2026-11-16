@@ -78,10 +78,13 @@ data class IssueContext(val model: ModelSelection, val mode: String) {
     )
 
     companion object {
-        /** Cloud dictation uploads a finished recording; the recognisers stream partial results. */
+        /**
+         * Cloud dictation uploads a finished recording and a downloaded model transcribes one on the phone;
+         * the recognisers stream partial results.
+         */
         fun mode(recorded: String): String = when (RecognitionMode.entries.firstOrNull { it.name == recorded }) {
             RecognitionMode.Cloud -> "batch"
-            RecognitionMode.OnDevice -> "local"
+            RecognitionMode.OnDevice, RecognitionMode.Downloaded -> "local"
             RecognitionMode.SpeechService -> "live"
             null -> "unknown"
         }
@@ -164,6 +167,9 @@ data class IssueFailure(
                 IssueFailure("unknown", "cancelled", "operatingSystem")
             DictationFailure.Unavailable -> IssueFailure("admission", "unavailable", "unknown")
             DictationFailure.LiveOnlyModel -> IssueFailure("admission", "unavailable", "application")
+            DictationFailure.ModelMissing -> IssueFailure("admission", "unavailable", "application")
+            DictationFailure.ModelCorrupt -> IssueFailure("admission", "invalidInput", "application")
+            DictationFailure.LocalModelFailed -> IssueFailure("request", "unavailable", "application")
             DictationFailure.InvalidKey -> IssueFailure("request", "authentication", "provider")
             DictationFailure.KeyUnavailable, DictationFailure.MissingKey ->
                 IssueFailure("admission", "authentication", "application")

@@ -47,8 +47,12 @@ internal class RecorderRetirement(
     /** Names this process's recordings; see [recordingFile]. */
     val processToken: String = UUID.randomUUID().toString().substringBefore('-')
 
-    /** A new recording's file in [dir]. */
-    fun recordingFile(dir: File): File = File(dir, "$PREFIX$processToken-${System.nanoTime()}.wav")
+    /**
+     * A new recording's file in [dir]. [onDevice] marks audio for a downloaded model, so a recording
+     * recovered after the app stopped is never sent to a Cloud provider.
+     */
+    fun recordingFile(dir: File, onDevice: Boolean = false): File =
+        File(dir, "$PREFIX$processToken-${System.nanoTime()}${if (onDevice) ON_DEVICE_SUFFIX else ""}.wav")
 
     /** Hands a stopped recording that no session will finish to the next History load. */
     fun abandon(file: File) {
@@ -97,6 +101,10 @@ internal class RecorderRetirement(
     companion object {
         private const val DEFAULT_MAX_PENDING_ORPHANS = 2
         private const val PREFIX = "dictation-"
+        private const val ON_DEVICE_SUFFIX = "-on-device"
+
+        /** Whether [file] was recorded for a downloaded model; see [recordingFile]. */
+        fun isOnDevice(file: File): Boolean = file.name.endsWith("$ON_DEVICE_SUFFIX.wav")
 
         /** The process-wide lane every production owner shares. */
         val shared: RecorderRetirement by lazy { RecorderRetirement(Dispatchers.IO) }

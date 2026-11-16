@@ -12,6 +12,7 @@ internal fun RecognitionMode.label(): Int = when (this) {
     RecognitionMode.OnDevice -> R.string.mode_on_device
     RecognitionMode.SpeechService -> R.string.mode_speech_service
     RecognitionMode.Cloud -> R.string.mode_cloud
+    RecognitionMode.Downloaded -> R.string.mode_downloaded
 }
 
 @StringRes
@@ -40,5 +41,8 @@ internal fun DictationFailure.message(): Int = when (this) {
     DictationFailure.AudioTooLarge -> R.string.failure_audio_too_large
     DictationFailure.UnsupportedAudio -> R.string.failure_unsupported_audio
     DictationFailure.LiveOnlyModel -> R.string.failure_live_only_model
+    DictationFailure.ModelMissing -> R.string.failure_model_missing
+    DictationFailure.ModelCorrupt -> R.string.failure_model_corrupt
+    DictationFailure.LocalModelFailed -> R.string.failure_local_model_failed
     DictationFailure.Unknown -> R.string.failure_unknown
 }

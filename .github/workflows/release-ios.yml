@@ -521,9 +521,9 @@ jobs:
           WIDGET_GROUP=$(/usr/libexec/PlistBuddy \
             -c 'Print :com.apple.security.application-groups:0' \
             "$RUNNER_TEMP/widget-entitlements.plist" 2>/dev/null || true)
-          APP_ICLOUD_CONTAINER=$(/usr/libexec/PlistBuddy \
-            -c 'Print :com.apple.developer.icloud-container-identifiers:0' \
-            "$RUNNER_TEMP/app-entitlements.plist" 2>/dev/null || true)
+          APP_ICLOUD_CONTAINERS=$(/usr/libexec/PlistBuddy \
+            -c 'Print :com.apple.developer.icloud-container-identifiers' \
+            "$RUNNER_TEMP/app-entitlements.plist" 2>/dev/null | sed -n 's/^ *\(iCloud\.[^ ]*\)$/\1/p' || true)
 
           [ "$APP_GROUP" = "$IOS_APP_GROUP" ] \
             || { echo "App group mismatch: expected '$IOS_APP_GROUP', got '${APP_GROUP:-missing}'"; exit 1; }
@@ -537,8 +537,11 @@ jobs:
             [ "$KEYBOARD_GROUP" = "$IOS_APP_GROUP" ] \
               || { echo "Keyboard group mismatch: expected '$IOS_APP_GROUP', got '${KEYBOARD_GROUP:-missing}'"; exit 1; }
           fi
-          [ "$APP_ICLOUD_CONTAINER" = "$IOS_CLOUD_CONTAINER" ] \
-            || { echo "iCloud container mismatch: expected '$IOS_CLOUD_CONTAINER', got '${APP_ICLOUD_CONTAINER:-missing}'"; exit 1; }
+          # The app carries the shared container and the legacy iOS one, in any order.
+          for container in "$IOS_CLOUD_CONTAINER" "$MAC_CLOUD_CONTAINER"; do
+            printf '%s\n' "$APP_ICLOUD_CONTAINERS" | grep -Fxq "$container" \
+              || { echo "iCloud container mismatch: expected '$container' in '${APP_ICLOUD_CONTAINERS:-missing}'"; exit 1; }
+          done
 
       - name: Export IPA
         if: steps.preflight.outputs.skip_upload != 'true'

@@ -186,7 +186,7 @@ final class DesktopTransportReceiverTests: XCTestCase {
     }
     #endif
 
-    #if canImport(Network)
+    #if canImport(Network) && !SPEAK_PORTABLE_CORE
     /// The iPhone's real client (Network.framework WebSocket plus CryptoKit)
     /// pairs with the desktop receiver and sends a transcript.
     func testAppleTransportChannel_pairsAndSendsToDesktopReceiver() async throws {

@@ -162,7 +162,7 @@ final class TransportReceiverSessionTests: XCTestCase {
         XCTAssertEqual(restored.pairedDevices.map(\.id), ["d"])
     }
 
-    #if canImport(CryptoKit)
+    #if canImport(CryptoKit) && !SPEAK_PORTABLE_CORE
     /// The shipping iPhone sender's CryptoKit handshake against the portable receiver.
     func testCryptoKitPhone_pairsWithPortableReceiver() throws {
         let store = TransportReceiverPairingStore()

@@ -94,9 +94,10 @@ PostHog replies.
 
 Manual fallback: if the purge still cannot run, delete events older than 12
 months through PostHog support or the PostHog UI before any event reaches 12
-months old. Deadline: **TBD: 12 months after the earliest Production event.**
-Find that date with the PostHog MCP or a HogQL query on the Production project
-(`SELECT min(timestamp) FROM events`), then replace this placeholder with it.
+months old. Deadline: **25 Aug 2027.** The earliest Production event is
+`2026-08-26T18:44:27Z` (HogQL `SELECT min(timestamp) FROM events` on project
+254700, checked 16 Nov 2026), so it reaches 12 months old on 26 Aug 2027.
+After that first deletion, keep deleting monthly, as the purge would.
 
 ## Location data (GeoIP)
 
@@ -121,3 +122,16 @@ manual fallback above covers it. The remaining gate (`owner-posthog-gates` in
 ingestion-key rotation drill and one Release-build network capture, followed by
 one clean phase-one inspection week. That week unblocks #814. EU hosting and
 IP-discard screenshots were added to #776 on 13 Nov 2026.
+
+Key rotation drill, 16 Nov 2026: an agent reset the Production project token
+(Settings → General → Project token → Reset token, which invalidates the old
+token at once) and stored the new one with
+`gh secret set POSTHOG_PROJECT_KEY` from stdin. That repository secret is the
+only copy: the macOS, Alpha, Android and desktop release builds all read it. A
+`/flags` probe, which writes no events, returned 401 for the old token and 200
+for the new one. Builds made before the drill send nothing until they update,
+so the next Alpha carries the new key; the drill is complete once opted-in
+events from that Alpha arrive (evidence on #776).
+
+To rotate again, follow the same steps, then confirm the next Alpha's opted-in
+events arrive. Keep the token out of logs, arguments and this repository.

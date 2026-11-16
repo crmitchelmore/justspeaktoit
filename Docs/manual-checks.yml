@@ -277,7 +277,7 @@ sessions:
         prerequisites:
           - "Steps: Docs/posthog-maintenance.md (Rollout gate and 12-month retention)"
         steps:
-          - "Rotate the PostHog project API key once, let an agent ship the new key in an Alpha, and confirm opted-in events still arrive."
+          - "The project key was rotated on 16 Nov 2026 (Docs/posthog-maintenance.md, Rollout gate). Confirm opted-in events from the first Alpha built after that still arrive."
           - "Approve one Release-build network capture with analytics opted in, for an agent to inspect."
           - "When PostHog support enables self-service deletion for project 254700, run the retention purge as a dry run. This does not block rollout."
         expected: "Rotation and capture evidence is on #776 (EU hosting and IP-discard screenshots were added on 13 Nov 2026). One clean inspection week then unblocks #814. Retention deletion does not block rollout; if self-service deletion is still unavailable, delete through PostHog support or the UI before the date in Docs/posthog-maintenance.md."

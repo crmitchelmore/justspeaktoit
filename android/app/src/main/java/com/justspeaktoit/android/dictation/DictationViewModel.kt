@@ -31,6 +31,10 @@ import com.justspeaktoit.android.history.AtomicHistoryFile
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.local.AndroidLocalModels
+import com.justspeaktoit.android.local.LocalModelSetup
+import com.justspeaktoit.android.local.LocalModelsState
+import com.justspeaktoit.android.local.ModelInstallState
 import com.justspeaktoit.android.readaloud.PronunciationDictionary
 import com.justspeaktoit.android.readaloud.PronunciationEntry
 import com.justspeaktoit.android.readaloud.VoiceSelection
@@ -104,7 +108,7 @@ class DictationViewModel internal constructor(
     recordingsDir: File,
     // The same context viewModelScope uses; closed with the ViewModel.
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
-    io: CoroutineDispatcher = Dispatchers.IO,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
     timings: DictationTimings = DictationTimings(),
     // Process-wide, so a recreated ViewModel shares the lane that releases its predecessor's microphone.
     retirement: RecorderRetirement = RecorderRetirement.shared,
@@ -127,6 +131,8 @@ class DictationViewModel internal constructor(
     openRouterFetch: (String) -> String = OpenRouterDiscovery::download,
     // SpeakCore's shared pronunciation defaults, from voice_catalog.json.
     private val pronunciationDefaults: List<PronunciationEntry> = emptyList(),
+    // Downloaded Whisper models (#1658); null leaves Downloaded mode out of the app.
+    localModelSetup: LocalModelSetup? = null,
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     /** Hands-free dictation (#1632): its recordings take their audio from its microphone, pre-roll first. */
     private val handsFree = HandsFreeDictation(
@@ -148,7 +154,14 @@ class DictationViewModel internal constructor(
         resources,
     )
     private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
-    private val historyRetry = HistoryRetry(cloud, secrets, capture, io, timings.transcribeMs)
+    private val localModels = localModelSetup?.manager(scope, io)
+
+    /** Transcribes with a downloaded model; never substitutes another engine. */
+    private val downloaded = localModelSetup?.let { setup ->
+        DownloadedTranscription({ id -> localModels?.installedFile(id) }, setup.transcriber)
+    } ?: DownloadedTranscription.Unavailable
+    private val localTranscriber = localModelSetup?.transcriber
+    private val historyRetry = HistoryRetry(cloud, secrets, capture, io, timings.transcribeMs, downloaded)
 
     /** Shares the keyboard's preferences, so edits it learned appear on [refreshLearnedCorrections]. */
     private val learner = AutoCorrectionLearner(prefs)
@@ -160,6 +173,15 @@ class DictationViewModel internal constructor(
         scope,
         timings,
         sessionActive = { session.state.dictation.isActive },
+        downloadedStatus = { id ->
+            localModels?.let {
+                val local = _state.value.localModels
+                RecognizerAvailability.downloadedStatus(
+                    local.runtimeAvailable,
+                    local.models.any { item -> item.model.catalogId == id && item.state == ModelInstallState.Installed },
+                )
+            }
+        },
         publish = ::onSelection,
     )
 
@@ -187,6 +209,10 @@ class DictationViewModel internal constructor(
             appearance = prefs.appearance,
             dynamicColor = prefs.dynamicColor,
             azureEndpoint = readAzureEndpoint(),
+            localModels = LocalModelsState(
+                downloadOnMobileData = prefs.downloadedModelsOnMobileData,
+                names = localModelSetup?.names.orEmpty(),
+            ),
         ).withSelection(selector.selection),
     )
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
@@ -299,6 +325,7 @@ class DictationViewModel internal constructor(
             override val silence: SilenceSettings
                 get() = _state.value.silence.let { if (handsFree.startingUtterance) it.copy(enabled = true) else it }
         },
+        downloaded = downloaded,
         cues = { cue ->
             val choice = _state.value.recordingSounds
             // Hands-free plays no cues, as on the desktop: they would be heard by the listening microphone.
@@ -359,10 +386,31 @@ class DictationViewModel internal constructor(
             resources.holds.collect { holds -> _state.update { it.copy(resourcesInUse = holds) } }
         }
         historyOwner.load(prefs.retention, capture::recoverable)
+        watchLocalModels()
         sync?.let { service ->
             scope.launch {
                 service.prepare()
                 service.sync()
+            }
+        }
+    }
+
+    /**
+     * Publishes the downloaded models and, when one is installed or removed or the runtime loads,
+     * rechecks availability so Downloaded mode's status follows.
+     */
+    private fun watchLocalModels() {
+        val manager = localModels ?: return
+        val transcriber = localTranscriber ?: return
+        scope.launch {
+            // Loading the native library reads the APK, so it happens off the main thread.
+            val runtime = withContext(io) { transcriber.available }
+            _state.update { it.copy(localModels = it.localModels.copy(runtimeAvailable = runtime)) }
+            manager.refresh()
+            manager.models.collect { items ->
+                val before = _state.value.localModels.installedIds
+                _state.update { it.copy(localModels = it.localModels.copy(models = items)) }
+                if (_state.value.localModels.installedIds != before) selector.refresh()
             }
         }
     }
@@ -577,6 +625,8 @@ class DictationViewModel internal constructor(
         changes.forEach { (key, value) ->
             when (key) {
                 "chosen_mode" -> selector.chooseMode((value as String?)?.let(RecognitionMode::valueOf))
+                "downloadedTranscriptionModel" -> selector.chooseDownloadedModel(value as String?)
+                "downloadedModelsOnMobileData" -> setDownloadModelsOnMobileData(value as Boolean)
                 "cloud_model" -> chooseCloudModel(CloudCatalog.transcriptionModel(value as String))
                 "preferredLocale" -> chooseLanguage(value as String)
                 "personal_corrections" ->
@@ -700,6 +750,32 @@ class DictationViewModel internal constructor(
     }
 
     fun downloadOnDeviceModel() = selector.downloadOnDeviceModel()
+
+    /** Chooses the downloaded model Downloaded mode uses; a running session keeps its own. */
+    fun chooseDownloadedModel(id: String?) {
+        if (id != null && localModels?.find(id) == null) return
+        selector.chooseDownloadedModel(id)
+    }
+
+    /** Starts or resumes a model download; on mobile data only when the user allows it. */
+    fun downloadLocalModel(id: String) {
+        localModels?.download(id, _state.value.localModels.downloadOnMobileData)
+    }
+
+    /** Stops a model download; what has arrived is kept so the next attempt resumes. */
+    fun cancelLocalModelDownload(id: String) {
+        localModels?.cancel(id)
+    }
+
+    /** Deletes a downloaded model; Downloaded mode then needs a model again if it was the chosen one. */
+    fun removeLocalModel(id: String) {
+        localModels?.remove(id)
+    }
+
+    fun setDownloadModelsOnMobileData(allowed: Boolean) {
+        prefs.downloadedModelsOnMobileData = allowed
+        _state.update { it.copy(localModels = it.localModels.copy(downloadOnMobileData = allowed)) }
+    }
 
     /** Records now or, with hands-free on in Cloud mode, starts listening for speech. */
     fun start() {
@@ -872,7 +948,8 @@ class DictationViewModel internal constructor(
     fun showOriginal() = session.showOriginal()
 
     /**
-     * Transcribes a cancelled recording kept in History with the current cloud model and saved key.
+     * Transcribes a recording kept in History with the current cloud model and saved key or, for a
+     * Downloaded recording, with the chosen downloaded model; that audio is never uploaded instead.
      * Success replaces the entry with the transcript and deletes the audio; a failure keeps both.
      */
     fun transcribeHistoryEntry(id: String) {
@@ -882,9 +959,20 @@ class DictationViewModel internal constructor(
         if (entry.audioPath == null) return
         val model = current.sessionCloudModel
         val language = current.languageTag
+        val local = HistoryRetry.usesDownloadedModel(entry, current.activeMode)
         _state.update { it.copy(transcribingEntryId = id) }
         scope.launch {
-            val updated = historyRetry.transcribe(entry, model, language, current.corrections, current.keepRecordings)
+            val updated = if (local) {
+                historyRetry.transcribeLocal(
+                    entry,
+                    current.localModels.selectedId,
+                    language,
+                    current.corrections,
+                    current.keepRecordings,
+                )
+            } else {
+                historyRetry.transcribe(entry, model, language, current.corrections, current.keepRecordings)
+            }
             val retention = _state.value.retention
             // Cleared with the updated entry, so Transcribe never reappears on the stale one.
             try {
@@ -1018,6 +1106,7 @@ class DictationViewModel internal constructor(
                 pronunciations = prefs.pronunciations ?: pronunciationDefaults,
                 cleanupPrompt = prefs.cleanupPrompt,
                 profiles = prefs.profiles,
+                localModels = it.localModels.copy(downloadOnMobileData = prefs.downloadedModelsOnMobileData),
             )
         }
         selector.reload()
@@ -1034,7 +1123,7 @@ class DictationViewModel internal constructor(
         if (capturing != watchingInterruptions) {
             watchingInterruptions = capturing
             if (capturing) {
-                interruptions.start(requestFocus = s.dictation.modeOrNull() == RecognitionMode.Cloud, ::onInterruption)
+                interruptions.start(requestFocus = s.dictation.modeOrNull()?.recordsAudio == true, ::onInterruption)
             } else {
                 interruptions.stop()
             }
@@ -1129,6 +1218,7 @@ class DictationViewModel internal constructor(
                     AndroidHistorySync.create(application, KeystoreSecretStore.create(application), entries, Dispatchers.IO)
                 },
                 pronunciationDefaults = loadPronunciationDefaults(application),
+                localModelSetup = AndroidLocalModels.setup(application, Dispatchers.IO),
             )
         }
 
@@ -1168,4 +1258,5 @@ private fun DictationUiState.withSelection(selection: EngineSelection) = copy(
     options = selection.options,
     checkingAvailability = selection.checking,
     profile = selection.profile,
+    localModels = localModels.copy(selectedId = selection.downloadedModelId),
 )

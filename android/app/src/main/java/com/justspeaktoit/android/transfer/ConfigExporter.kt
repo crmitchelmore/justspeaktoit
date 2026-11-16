@@ -79,6 +79,7 @@ internal object ConfigExporter {
             .put(AndroidSettings.RETENTION, prefs.retention.name)
             .put(AndroidSettings.PROMPT, prefs.cleanupPrompt?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
             .put(AndroidSettings.PROFILE, active ?: JSONObject.NULL)
+            .put(AndroidSettings.DOWNLOADED_MODEL, prefs.downloadedTranscriptionModel ?: JSONObject.NULL)
     }
 
     /** A kept recording that has gone (for example deleted meanwhile) is left out, not a failure. */

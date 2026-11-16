@@ -24,6 +24,7 @@ import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryFile
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.local.LocalTranscriber
 import com.justspeaktoit.android.readaloud.PronunciationEntry
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.security.SecretStore
@@ -291,6 +292,23 @@ internal class FakeLiveClient(
     }
 }
 
+/** A downloaded-model runtime that records each request instead of loading whisper.cpp. */
+internal class FakeLocalTranscriber : LocalTranscriber {
+    data class Call(val model: File, val audio: File, val languageTag: String?)
+
+    @Volatile override var available = true
+    val calls = CopyOnWriteArrayList<Call>()
+
+    /** May throw `LocalTranscriptionException`, as a model that fails to load does. */
+    @Volatile var onTranscribe: (Call) -> String = { "local words" }
+
+    override suspend fun transcribe(model: File, audio: File, languageTag: String?): String {
+        val call = Call(model, audio, languageTag)
+        calls += call
+        return onTranscribe(call)
+    }
+}
+
 internal class FakeCloud : CloudService {
     data class Transcription(
         val model: String,
@@ -394,6 +412,8 @@ internal class MemoryPrefs(
     override var handsFreeEnabled: Boolean = false,
     override var appearance: AppAppearance = AppAppearance.System,
     override var dynamicColor: Boolean = false,
+    override var downloadedTranscriptionModel: String? = null,
+    override var downloadedModelsOnMobileData: Boolean = false,
 ) : DictationPreferences
 
 internal class MemoryHistoryFile : HistoryFile {

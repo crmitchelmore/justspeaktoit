@@ -94,6 +94,19 @@ class DictationHistoryTest {
     }
 
     @Test
+    fun testLoad_recoversADownloadedModelRecordingAsDownloaded_soItIsNeverUploaded() = runBlocking {
+        val dir = folder.newFolder("cache")
+        val onDevice = RecorderRetirement(Dispatchers.IO).recordingFile(dir, onDevice = true)
+        onDevice.writeBytes(ByteArray(WavFormat.HEADER_BYTES + WavFormat.BYTES_PER_SECOND))
+
+        history().load(Retention.Month) { listOf(onDevice) }.join()
+
+        val entry = latest.single()
+        assertEquals(RecognitionMode.Downloaded.name, entry.mode)
+        assertTrue(HistoryRetry.usesDownloadedModel(entry, activeMode = RecognitionMode.Cloud))
+    }
+
+    @Test
     fun testRecoveredRecording_withHistoryOff_isDeleted() = runBlocking {
         val recording = unfinishedRecording("dictation-a.wav", WavFormat.BYTES_PER_SECOND)
         history().refresh(Retention.Off) { listOf(recording) }.join()

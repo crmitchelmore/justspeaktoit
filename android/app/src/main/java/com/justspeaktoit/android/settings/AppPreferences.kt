@@ -69,6 +69,12 @@ interface DictationPreferences {
 
     /** Wallpaper (Material You) colours instead of the brand palette; Android 12 and later only. */
     var dynamicColor: Boolean
+
+    /** The `local/whisperkit/...` model Downloaded mode uses; null until one is chosen. */
+    var downloadedTranscriptionModel: String?
+
+    /** Whether models may download over a metered connection; off means Wi-Fi (unmetered) only. */
+    var downloadedModelsOnMobileData: Boolean
 }
 
 /** The float's shortest decimal as a double, so a stored 0.05f reads back as 0.05, not 0.0500000007. */
@@ -120,6 +126,14 @@ class AppPreferences(context: Context) : DictationPreferences {
     override var keepRecordings: Boolean
         get() = prefs.getBoolean(KEY_KEEP_RECORDINGS, false)
         set(value) = prefs.edit { putBoolean(KEY_KEEP_RECORDINGS, value) }
+
+    override var downloadedTranscriptionModel: String?
+        get() = prefs.getString(KEY_DOWNLOADED_MODEL, null)
+        set(value) = prefs.edit { if (value == null) remove(KEY_DOWNLOADED_MODEL) else putString(KEY_DOWNLOADED_MODEL, value) }
+
+    override var downloadedModelsOnMobileData: Boolean
+        get() = prefs.getBoolean(KEY_DOWNLOADED_ON_MOBILE_DATA, false)
+        set(value) = prefs.edit { putBoolean(KEY_DOWNLOADED_ON_MOBILE_DATA, value) }
 
     override var audioInputId: String?
         get() = prefs.getString(KEY_AUDIO_INPUT, null)
@@ -251,6 +265,8 @@ class AppPreferences(context: Context) : DictationPreferences {
         private const val KEY_RETENTION = "history_retention"
         private const val KEY_MODE = "chosen_mode"
         private const val KEY_CLOUD_MODEL = "cloud_model"
+        private const val KEY_DOWNLOADED_MODEL = "downloadedTranscriptionModel"
+        private const val KEY_DOWNLOADED_ON_MOBILE_DATA = "downloadedModelsOnMobileData"
         private const val KEY_CLEANUP = "cleanup_enabled"
         private const val KEY_CLEANUP_MODEL = "cleanup_model"
         private const val KEY_CLEANUP_MODEL_DISCOVERY = "cleanupModelDiscoveryEnabled"

@@ -23,6 +23,16 @@ extension SettingsSearchCatalog {
             settingKeys: ["cloud_model"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.downloadedModels", title: "Downloaded models", section: .transcription,
+            systemImage: "arrow.down.circle",
+            summary: "Download Whisper models to transcribe recordings on the phone, without a key or network.",
+            keywords: [
+                "downloaded models", "local model", "whisper", "whisper.cpp", "ggml", "download", "offline",
+                "private", "on device", "remove model", "storage", "wi-fi", "mobile data"
+            ],
+            settingKeys: ["downloadedTranscriptionModel", "downloadedModelsOnMobileData"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.language", title: "Dictation language", section: .transcription,
             systemImage: "globe",
             summary: "The language you speak. Automatic uses the phone's language.",

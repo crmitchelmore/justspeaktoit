@@ -15,6 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.justspeaktoit.android.R
@@ -64,18 +65,28 @@ internal fun ModeSection(state: DictationUiState, actions: DictationActions) {
             Text(stringResource(R.string.action_download_model))
         }
     }
+    if (availability.status == ModeStatus.NeedsModel) {
+        OutlinedButton(
+            onClick = actions.onShowSettings,
+            modifier = Modifier.testTag(AutomationIds.MODE_CHOOSE_DOWNLOADED_MODEL),
+        ) {
+            Text(stringResource(R.string.action_choose_downloaded_model))
+        }
+    }
 }
 
 @Composable
 private fun ModeAvailability.explanation(languageName: String, state: DictationUiState): String = when (status) {
-    ModeStatus.Ready -> if (mode == RecognitionMode.Cloud) {
-        stringResource(
+    ModeStatus.Ready -> when (mode) {
+        RecognitionMode.Cloud -> stringResource(
             R.string.privacy_cloud,
             state.sessionCloudModel.provider.displayName,
             state.sessionCloudModel.displayName,
         )
-    } else {
-        stringResource(mode.privacyNote())
+        RecognitionMode.Downloaded -> state.localModels.displayName(state.localModels.selectedId)
+            ?.let { stringResource(R.string.privacy_downloaded, it) }
+            ?: stringResource(mode.privacyNote())
+        else -> stringResource(mode.privacyNote())
     }
     ModeStatus.NeedsKey -> stringResource(
         R.string.status_mode_needs_key,
@@ -87,11 +98,12 @@ private fun ModeAvailability.explanation(languageName: String, state: DictationU
     ModeStatus.Downloading -> stringResource(R.string.status_mode_downloading, languageName)
     ModeStatus.LanguageUnsupported -> stringResource(R.string.status_mode_language_unsupported, languageName)
     ModeStatus.RequiresNewerAndroid -> stringResource(R.string.status_mode_requires_android12)
+    ModeStatus.NeedsModel -> stringResource(R.string.status_mode_needs_model)
     ModeStatus.NotProvided -> stringResource(
-        if (mode == RecognitionMode.OnDevice) {
-            R.string.status_mode_not_provided_on_device
-        } else {
-            R.string.status_mode_not_provided_service
+        when (mode) {
+            RecognitionMode.OnDevice -> R.string.status_mode_not_provided_on_device
+            RecognitionMode.Downloaded -> R.string.status_mode_downloaded_unavailable
+            else -> R.string.status_mode_not_provided_service
         },
     )
 }
@@ -101,4 +113,5 @@ private fun RecognitionMode.privacyNote(): Int = when (this) {
     RecognitionMode.OnDevice -> R.string.privacy_on_device
     RecognitionMode.SpeechService -> R.string.privacy_speech_service
     RecognitionMode.Cloud -> R.string.privacy_cloud_generic
+    RecognitionMode.Downloaded -> R.string.privacy_downloaded_generic
 }

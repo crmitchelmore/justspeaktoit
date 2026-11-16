@@ -94,7 +94,12 @@ private class HistoryReader(
 )
 
 /** Whether kept audio can be transcribed now, and which entry is being transcribed. */
-data class HistoryTranscription(val sessionActive: Boolean = false, val entryId: String? = null) {
+data class HistoryTranscription(
+    val sessionActive: Boolean = false,
+    val entryId: String? = null,
+    /** Display names of the downloaded models, so their entries are named like cloud ones. */
+    val localModelNames: Map<String, String> = emptyMap(),
+) {
     val available: Boolean get() = !sessionActive && entryId == null
 }
 
@@ -124,7 +129,8 @@ fun HistoryScreen(
     )
     val modeLabels = RecognitionMode.entries.associate { it.name to stringResource(it.label()) }
     val modelName: (String) -> String = { key ->
-        modeLabels[key] ?: CloudCatalog.findTranscriptionModel(key)?.displayName ?: key
+        modeLabels[key] ?: CloudCatalog.findTranscriptionModel(key)?.displayName
+            ?: transcribe.localModelNames[key] ?: key
     }
     val models = remember(entries, modeLabels) { HistoryFilter.models(entries).sortedBy(modelName) }
     val visible = remember(entries, filter, modeLabels) { filter.matching(entries, modelName = modelName) }
@@ -310,7 +316,7 @@ private fun HistoryCard(
             Text(
                 text = listOfNotNull(
                     DateUtils.getRelativeTimeSpanString(entry.createdAtMs).toString(),
-                    sourceLabel(entry),
+                    sourceLabel(entry, transcribe.localModelNames),
                     if (entry.cleanedUp) stringResource(R.string.history_cleaned) else null,
                 ).joinToString(" · "),
                 style = MaterialTheme.typography.labelMedium,
@@ -461,7 +467,7 @@ private fun FilterSummary(shown: Int, total: Int) {
 }
 
 @Composable
-private fun sourceLabel(entry: HistoryEntry): String? {
+private fun sourceLabel(entry: HistoryEntry, localModelNames: Map<String, String>): String? {
     // Only entries received through History sync carry an origin.
     val origin = entry.originPlatform
     if (origin != null) {
@@ -471,6 +477,9 @@ private fun sourceLabel(entry: HistoryEntry): String? {
     if (mode == RecognitionMode.Cloud) {
         return CloudCatalog.findTranscriptionModel(entry.model)?.displayName
             ?: entry.model
+    }
+    if (mode == RecognitionMode.Downloaded) {
+        entry.model?.let(localModelNames::get)?.let { return it }
     }
     return stringResource(mode.label())
 }

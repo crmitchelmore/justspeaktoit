@@ -151,6 +151,12 @@ class SettingsActions(
     val onStartMacDiscovery: () -> Unit = {},
     val onStopMacDiscovery: () -> Unit = {},
     val onClearSendToMacActivity: () -> Unit = {},
+    /** Picks the downloaded Whisper model that Downloaded mode uses. */
+    val onChooseDownloadedModel: (String) -> Unit = {},
+    val onDownloadLocalModel: (String) -> Unit = {},
+    val onCancelModelDownload: (String) -> Unit = {},
+    val onRemoveLocalModel: (String) -> Unit = {},
+    val onDownloadModelsOnMobileDataChanged: (Boolean) -> Unit = {},
 )
 
 /** The app-wide theme choice: light, dark or the phone's, and wallpaper colours where supported. */
@@ -301,6 +307,12 @@ fun SettingsScreen(
                 }
             }
             OpenRouterTranscriptionRow(state, actions, discovery, anchor("android.cloudModel.openRouter"))
+
+            if (state.localModels.names.isNotEmpty()) {
+                HorizontalDivider()
+                SectionTitle(R.string.settings_downloaded_models_title, anchor("android.downloadedModels"))
+                DownloadedModelsSection(state.localModels, state.dictation.isActive, actions)
+            }
 
             HorizontalDivider()
             Row(

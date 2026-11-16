@@ -59,6 +59,32 @@
       "title" : "Browse OpenRouter models…"
     },
     {
+      "id" : "android.downloadedModels",
+      "keywords" : [
+        "downloaded models",
+        "local model",
+        "whisper",
+        "whisper.cpp",
+        "ggml",
+        "download",
+        "offline",
+        "private",
+        "on device",
+        "remove model",
+        "storage",
+        "wi-fi",
+        "mobile data"
+      ],
+      "section" : "transcription",
+      "sectionTitle" : "Transcription",
+      "settingKeys" : [
+        "downloadedTranscriptionModel",
+        "downloadedModelsOnMobileData"
+      ],
+      "summary" : "Download Whisper models to transcribe recordings on the phone, without a key or network.",
+      "title" : "Downloaded models"
+    },
+    {
       "id" : "android.language",
       "keywords" : [
         "language",

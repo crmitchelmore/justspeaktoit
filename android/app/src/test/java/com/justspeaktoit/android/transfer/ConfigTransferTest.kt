@@ -48,6 +48,7 @@ class ConfigTransferTest {
         cleanupPrompt = "Keep it short.",
         profiles = listOf(PROFILE),
         activeProfileId = PROFILE.id,
+        downloadedTranscriptionModel = "local/whisperkit/base",
     )
 
     private val keptAudio by lazy { folder.newFile("kept.wav").apply { writeBytes(ByteArray(2048) { it.toByte() }) } }
@@ -112,6 +113,7 @@ class ConfigTransferTest {
         assertEquals(expected.corrections, prefs.corrections)
         assertEquals(listOf(PROFILE), prefs.profiles.map { it.copy(source = null) })
         assertEquals(PROFILE.id, prefs.activeProfileId)
+        assertEquals(expected.downloadedTranscriptionModel, prefs.downloadedTranscriptionModel)
         assertEquals("sk-open", secrets.read(openAi))
         assertEquals("gsk-groq", secrets.read(groq))
 
@@ -276,7 +278,7 @@ class ConfigTransferTest {
 
     private fun MemoryPrefs.copyValues(): List<Any?> = listOf(
         chosenMode, cloudModelId, cleanupModelId, cleanupEnabled, retention, keepAudioOnCancel, languageId,
-        corrections, cleanupPrompt, profiles, activeProfileId,
+        corrections, cleanupPrompt, profiles, activeProfileId, downloadedTranscriptionModel,
     )
 
     private companion object {

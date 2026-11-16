@@ -1,0 +1,80 @@
+{
+  "models" : [
+    {
+      "allowedHosts" : [
+        ".hf.co",
+        ".huggingface.co",
+        "huggingface.co"
+      ],
+      "bytes" : 77691713,
+      "catalogId" : "local/whisperkit/tiny",
+      "displayName" : "Whisper Tiny",
+      "filename" : "ggml-tiny.bin",
+      "license" : "MIT",
+      "multilingual" : true,
+      "provenance" : "OpenAI Whisper weights converted to GGML by the whisper.cpp project (huggingface.co/ggerganov/whisper.cpp at revision 5359861c739e955e79d9a303bcbc70fb988958b1)",
+      "quantization" : "f16",
+      "sha256" : "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+      "summary" : "Smallest on-device Whisper model: fastest, lowest accuracy.",
+      "url" : "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.bin"
+    },
+    {
+      "allowedHosts" : [
+        ".hf.co",
+        ".huggingface.co",
+        "huggingface.co"
+      ],
+      "bytes" : 147951465,
+      "catalogId" : "local/whisperkit/base",
+      "displayName" : "Whisper Base",
+      "filename" : "ggml-base.bin",
+      "license" : "MIT",
+      "multilingual" : true,
+      "provenance" : "OpenAI Whisper weights converted to GGML by the whisper.cpp project (huggingface.co/ggerganov/whisper.cpp at revision 5359861c739e955e79d9a303bcbc70fb988958b1)",
+      "quantization" : "f16",
+      "sha256" : "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+      "summary" : "Balanced on-device Whisper model for everyday dictation.",
+      "url" : "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin"
+    },
+    {
+      "allowedHosts" : [
+        ".hf.co",
+        ".huggingface.co",
+        "huggingface.co"
+      ],
+      "bytes" : 487601967,
+      "catalogId" : "local/whisperkit/small",
+      "displayName" : "Whisper Small",
+      "filename" : "ggml-small.bin",
+      "license" : "MIT",
+      "multilingual" : true,
+      "provenance" : "OpenAI Whisper weights converted to GGML by the whisper.cpp project (huggingface.co/ggerganov/whisper.cpp at revision 5359861c739e955e79d9a303bcbc70fb988958b1)",
+      "quantization" : "f16",
+      "sha256" : "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+      "summary" : "Higher-accuracy on-device Whisper model; fastest with a Vulkan GPU.",
+      "url" : "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin"
+    },
+    {
+      "allowedHosts" : [
+        ".hf.co",
+        ".huggingface.co",
+        "huggingface.co"
+      ],
+      "bytes" : 574041195,
+      "catalogId" : "local/whisperkit/large-v3-turbo",
+      "displayName" : "Whisper Large v3 Turbo",
+      "filename" : "ggml-large-v3-turbo-q5_0.bin",
+      "license" : "MIT",
+      "minimumDeviceMemoryBytes" : 5368709120,
+      "multilingual" : true,
+      "provenance" : "OpenAI Whisper weights converted to GGML by the whisper.cpp project (huggingface.co/ggerganov/whisper.cpp at revision 5359861c739e955e79d9a303bcbc70fb988958b1)",
+      "quantization" : "q5_0",
+      "sha256" : "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+      "summary" : "Near-Large accuracy, 5-bit quantised to about 550 MB. Recommended with a Vulkan GPU.",
+      "url" : "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin"
+    }
+  ],
+  "repository" : "ggerganov/whisper.cpp",
+  "revision" : "5359861c739e955e79d9a303bcbc70fb988958b1",
+  "version" : 1
+}

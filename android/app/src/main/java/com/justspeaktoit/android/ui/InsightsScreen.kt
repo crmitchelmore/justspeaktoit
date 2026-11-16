@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -160,8 +161,10 @@ private fun PaceCard(summary: SpeechInsightsSummary) {
         if (pace.sessionsMeasured == 0) {
             Text(stringResource(R.string.insights_pace_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            StatRow(R.string.insights_pace_average, stringResource(R.string.insights_wpm, pace.averageWpm.roundToInt()))
-            StatRow(R.string.insights_pace_median, stringResource(R.string.insights_wpm, pace.medianWpm.roundToInt()))
+            val average = pace.averageWpm.roundToInt()
+            val median = pace.medianWpm.roundToInt()
+            StatRow(R.string.insights_pace_average, pluralStringResource(R.plurals.insights_wpm, average, average))
+            StatRow(R.string.insights_pace_median, pluralStringResource(R.plurals.insights_wpm, median, median))
             pace.distribution.forEach { bucket ->
                 Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
                     Text(stringResource(R.string.insights_pace_bucket, bucket.label), Modifier.weight(1f))
@@ -169,7 +172,7 @@ private fun PaceCard(summary: SpeechInsightsSummary) {
                 }
             }
             Text(
-                stringResource(R.string.insights_pace_note, pace.sessionsMeasured),
+                pluralStringResource(R.plurals.insights_pace_note, pace.sessionsMeasured, pace.sessionsMeasured),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -417,9 +417,15 @@
     <string name="insights_pace_empty">Record for at least 10 seconds to measure your pace.</string>
     <string name="insights_pace_average">Average</string>
     <string name="insights_pace_median">Median</string>
-    <string name="insights_wpm">%1$d words/min</string>
+    <plurals name="insights_wpm">
+        <item quantity="one">%1$d word/min</item>
+        <item quantity="other">%1$d words/min</item>
+    </plurals>
     <string name="insights_pace_bucket">%1$s words/min</string>
-    <string name="insights_pace_note">From %1$d sessions of 10 seconds or more.</string>
+    <plurals name="insights_pace_note">
+        <item quantity="one">From %1$d session of 10 seconds or more.</item>
+        <item quantity="other">From %1$d sessions of 10 seconds or more.</item>
+    </plurals>
     <string name="insights_records_title">Speech records</string>
     <string name="insights_words_all_time">Words all-time</string>
     <string name="insights_sessions_analysed">Sessions analysed</string>

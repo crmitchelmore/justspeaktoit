@@ -20,6 +20,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -35,7 +36,6 @@ import com.justspeaktoit.android.history.SpeechInsightsSummary
 import com.justspeaktoit.android.history.SpeechSession
 import com.justspeaktoit.android.history.TermCount
 import com.justspeaktoit.android.history.UsageInsights
-import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -130,10 +130,11 @@ private fun PhrasesCard(summary: SpeechInsightsSummary) {
 
 @Composable
 private fun FillersCard(summary: SpeechInsightsSummary) {
+    val locale = LocalConfiguration.current.locales[0]
     InsightsSection(R.string.insights_fillers_title, AutomationIds.INSIGHTS_FILLERS) {
         StatRow(
             R.string.insights_fillers_rate,
-            String.format(Locale.getDefault(), "%.1f", summary.fillerRatePer1kWords),
+            String.format(locale, "%.1f", summary.fillerRatePer1kWords),
         )
         Terms(summary.topFillers, R.string.insights_fillers_empty)
         if (summary.fillerTrend.size > 1) {
@@ -145,7 +146,7 @@ private fun FillersCard(summary: SpeechInsightsSummary) {
             summary.fillerTrend.forEach { point ->
                 Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}) {
                     Text(stringResource(R.string.insights_week_of, point.weekStart.toString()), Modifier.weight(1f))
-                    Text(String.format(Locale.getDefault(), "%.1f", point.ratePer1kWords))
+                    Text(String.format(locale, "%.1f", point.ratePer1kWords))
                 }
             }
         }

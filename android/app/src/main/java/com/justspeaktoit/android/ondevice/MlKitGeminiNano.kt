@@ -14,18 +14,21 @@ import com.google.mlkit.genai.prompt.generateContentRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 
 /**
  * [GeminiNanoModel] over the ML Kit GenAI Prompt API (`com.google.mlkit:genai-prompt`). The client is
- * created on first use, so phones that never choose Gemini Nano never bind to AICore.
+ * created on first use, so phones that never choose Gemini Nano never bind to AICore, and [close]
+ * releases it once no request is using it.
  */
 internal class MlKitGeminiNano : GeminiNanoModel {
-    private val client: GenerativeModel by lazy { Generation.getClient() }
+    private val client = ReleasableClient<GenerativeModel>(create = Generation::getClient, release = { it.close() })
 
     override suspend fun status(): GeminiNanoStatus =
         try {
-            statusFor(client.checkStatus())
+            statusFor(client.use { it.checkStatus() })
         } catch (e: CancellationException) {
             throw e
         } catch (e: GenAiException) {
@@ -35,24 +38,24 @@ internal class MlKitGeminiNano : GeminiNanoModel {
             }
             GeminiNanoStatus.Unavailable
         } catch (e: RuntimeException) {
-            // A phone without AICore can fail to bind with a platform exception.
+            // A phone without AICore can fail to bind with a platform exception; a closed client lands here too.
             GeminiNanoStatus.Unavailable
         }
 
     override suspend fun supportsSystemInstruction(): Boolean =
-        call { Feature.SYSTEM_PROMPT in client.getAvailableFeatures() }
+        call { Feature.SYSTEM_PROMPT in it.getAvailableFeatures() }
 
     override suspend fun countTokens(request: GeminiNanoRequest): Int =
-        call { client.countTokens(request.toMlKit()).totalTokens }
+        call { it.countTokens(request.toMlKit()).totalTokens }
 
     override suspend fun generate(request: GeminiNanoRequest): GeminiNanoReply =
         call {
-            val candidate = client.generateContent(request.toMlKit()).candidates.firstOrNull()
+            val candidate = it.generateContent(request.toMlKit()).candidates.firstOrNull()
             GeminiNanoReply(candidate?.text, candidate?.finishReason == Candidate.FinishReason.MAX_TOKENS)
         }
 
     override fun download(): Flow<GeminiNanoDownload> =
-        client.download()
+        flow { client.use { emitAll(it.download()) } }
             .map { status ->
                 when (status) {
                     is DownloadStatus.DownloadStarted -> GeminiNanoDownload.Started(status.bytesToDownload)
@@ -67,9 +70,11 @@ internal class MlKitGeminiNano : GeminiNanoModel {
                 emit(GeminiNanoDownload.Failed(failure))
             }
 
-    private suspend fun <T> call(block: suspend () -> T): T =
+    override fun close() = client.close()
+
+    private suspend fun <T> call(block: suspend (GenerativeModel) -> T): T =
         try {
-            block()
+            client.use(block)
         } catch (e: CancellationException) {
             throw e
         } catch (e: GenAiException) {

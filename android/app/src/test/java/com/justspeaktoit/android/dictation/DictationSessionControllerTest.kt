@@ -12,12 +12,8 @@ import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.ondevice.GeminiNanoCleanup
-import com.justspeaktoit.android.ondevice.GeminiNanoDownload
 import com.justspeaktoit.android.ondevice.GeminiNanoFailure
-import com.justspeaktoit.android.ondevice.GeminiNanoModel
 import com.justspeaktoit.android.ondevice.GeminiNanoReply
-import com.justspeaktoit.android.ondevice.GeminiNanoRequest
-import com.justspeaktoit.android.ondevice.GeminiNanoStatus
 import com.justspeaktoit.android.local.LocalTranscriptionException
 import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.resources.SystemResourceKind
@@ -29,10 +25,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
@@ -378,25 +372,6 @@ class DictationSessionControllerTest {
         assertEquals(DictationFailure.ModelCorrupt, failed.failure)
         val entry = await(history) { it.isNotEmpty() }.single()
         assertTrue(File(checkNotNull(entry.audioPath)).exists())
-    }
-
-    private class FakeGeminiNano : GeminiNanoModel {
-        var reply = GeminiNanoReply("", truncated = false)
-
-        @Volatile var generated = 0
-
-        override suspend fun status() = GeminiNanoStatus.Available
-
-        override suspend fun supportsSystemInstruction() = true
-
-        override suspend fun countTokens(request: GeminiNanoRequest) = 1
-
-        override suspend fun generate(request: GeminiNanoRequest): GeminiNanoReply {
-            generated++
-            return reply
-        }
-
-        override fun download(): Flow<GeminiNanoDownload> = emptyFlow()
     }
 
     private fun startLive(provider: CloudProvider, awaitListening: Boolean = true): FakeLiveClient {

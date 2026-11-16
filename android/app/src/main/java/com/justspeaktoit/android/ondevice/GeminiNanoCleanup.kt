@@ -76,6 +76,9 @@ interface GeminiNanoModel {
     suspend fun generate(request: GeminiNanoRequest): GeminiNanoReply
 
     fun download(): Flow<GeminiNanoDownload>
+
+    /** Releases the model's engine resources; later calls fail as unavailable. Safe to call more than once. */
+    fun close()
 }
 
 /** How one on-device cleanup ended. */

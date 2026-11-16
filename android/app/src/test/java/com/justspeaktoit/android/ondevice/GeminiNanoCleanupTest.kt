@@ -45,6 +45,8 @@ class GeminiNanoCleanupTest {
         }
 
         override fun download(): Flow<GeminiNanoDownload> = emptyFlow()
+
+        override fun close() = Unit
     }
 
     private fun clean(model: FakeModel, transcript: String = "hello world", isTopApp: () -> Boolean = { true }) =

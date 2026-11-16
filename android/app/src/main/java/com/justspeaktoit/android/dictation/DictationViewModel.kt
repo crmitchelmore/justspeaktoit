@@ -1215,6 +1215,7 @@ class DictationViewModel internal constructor(
         session.close()
         sounds?.close()
         inputWatch.close()
+        geminiNano?.close()
     }
 
     companion object {

@@ -31,18 +31,25 @@ object KeyboardPolicy {
             (imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
 
     /**
-     * The keyboard never uses the app's Cloud (BYOK) providers until their privacy UX is reviewed
-     * (see Docs/android-input-surfaces.md); a saved Cloud choice is treated as no choice. An explicit
-     * on-device or speech-service choice is honoured and never silently replaced if unusable.
+     * The keyboard uses only the platform recognisers, so a saved Cloud or Downloaded choice is treated as
+     * no choice. It never uses the app's Cloud (BYOK) providers until their privacy UX is reviewed (see
+     * Docs/android-input-surfaces.md). Downloaded Whisper models stay out of the keyboard until their
+     * load time, memory and transcription speed are measured on real phones (#1658,
+     * Docs/android-on-device-models.md): the keyboard's process has a tighter memory budget than the app
+     * and the user is waiting in another app's text field. An explicit on-device or speech-service choice
+     * is honoured and never silently replaced if unusable.
      */
     fun mode(chosen: RecognitionMode?, options: List<ModeAvailability>): RecognitionMode? {
-        val local = options.filter { it.mode != RecognitionMode.Cloud }
-        return if (chosen != null && chosen != RecognitionMode.Cloud) {
-            chosen.takeIf { mode -> local.any { it.mode == mode && it.usable } }
+        val platform = options.filter { it.mode !in APP_ONLY_MODES }
+        return if (chosen != null && chosen !in APP_ONLY_MODES) {
+            chosen.takeIf { mode -> platform.any { it.mode == mode && it.usable } }
         } else {
-            RecognizerAvailability.defaultMode(local)
+            RecognizerAvailability.defaultMode(platform)
         }
     }
+
+    /** Modes the app offers but the keyboard does not. */
+    private val APP_ONLY_MODES = setOf(RecognitionMode.Cloud, RecognitionMode.Downloaded)
 
     /**
      * The speech service may send audio to its provider, so it is disclosed before capture unless

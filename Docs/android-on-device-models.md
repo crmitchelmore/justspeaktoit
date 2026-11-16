@@ -4,9 +4,11 @@ Decision record for #1593, which feeds the Android half of #1650. Assessed on
 13 November 2026 against the primary sources linked below; re-check the device
 lists and API stages before implementing, as both change often.
 
-Today Android's private route is the platform recogniser
-(`SpeechRecognizer.createOnDeviceSpeechRecognizer`, Android 12+) and cleanup is
-cloud-only (see [android-parity-matrix.md](android-parity-matrix.md)). The Mac,
+Android's private routes are the platform recogniser
+(`SpeechRecognizer.createOnDeviceSpeechRecognizer`, Android 12+) and, since
+#1658, downloaded Whisper models run by whisper.cpp in the app (see
+[Downloaded Whisper on Android](#downloaded-whisper-on-android)). Cleanup is
+still cloud-only (see [android-parity-matrix.md](android-parity-matrix.md)). The Mac,
 Windows and Linux apps download Whisper, Parakeet and GGUF cleanup models under
 shared `local/...` identifiers (`Sources/SpeakCore/LocalModels/`).
 
@@ -181,6 +183,86 @@ the MediaPipe LLM Inference page now redirects to it ([LiteRT-LM][litert-lm],
 (Gemma Terms of Use, gated on Hugging Face). Adopting it would add a second
 artefact format and model list beside the shared GGUF catalogue, so it is not
 recommended unless llama.cpp proves too slow on phones.
+
+## Downloaded Whisper on Android
+
+Built in #1658 (code); the owner's device measurements (real-time factor,
+time-to-text, battery, the default model and the Turbo memory floor) are still
+open on that issue and listed in `Docs/manual-checks.yml`.
+
+### Native build
+
+- `android/app/src/main/cpp/` builds one shared library,
+  `libjsti_local_models.so`, holding a thin JNI bridge (`whisper_jni.cpp`,
+  called from `local/WhisperCppTranscriber.kt`) with whisper.cpp and ggml linked
+  statically. No prebuilt binaries are used.
+- **Source pin:** whisper.cpp v1.9.5 (commit
+  `d2a764c648779feb36d44363f212a29b00aad1af`). `cmake/whisper.cmake` fetches the
+  release archive with `FetchContent` and `URL_HASH SHA256=ff1a9053…dc1720`; a
+  mismatch fails the configure. The archive is downloaded once per build
+  directory into `build/native-sources` and shared by every ABI. Offline
+  builds pass a local copy of the same archive with
+  `-Pjsti.whisperCppArchive=/path/whisper.cpp-v1.9.5.tar.gz`; its hash is checked
+  the same way. To upgrade, change the version, commit comment and SHA-256
+  together and re-run the device checks.
+- **Shared ggml:** `cmake/ggml.cmake` adds the `ggml` target once (CPU backend
+  only, no OpenMP, Vulkan or llamafile). llama.cpp (#1660) must link that same
+  target, so both runtimes ship one ggml. It builds the ggml bundled with the
+  pinned whisper.cpp unless `JSTI_GGML_SOURCE_DIR` names a ggml both runtimes
+  are pinned against.
+- **ABIs:** arm64-v8a (phones), x86_64 (emulator, Chromebooks) and
+  armeabi-v7a (so 32-bit-only phones can still install the app now that it ships
+  native code; it is too slow for anything above Tiny). The runtimes are always
+  built with `-O3`, debug builds included, because unoptimised inference is
+  unusable. The library is linked for 16 KB pages.
+- **Toolchain:** `ndkVersion` 27.3.13750724 (r27d) and CMake 3.31.5, both
+  preinstalled on GitHub's `ubuntu-24.04` runners, so `scripts/ci-android.sh`
+  and the Android job need no extra install step. A machine without them needs
+  the SDK Manager's `ndk;27.3.13750724` and `cmake;3.31.5` packages.
+- **Unit tests** never load the library: Downloaded mode talks to the
+  `LocalTranscriber` interface, and JVM tests use a fake.
+
+### Models and downloads
+
+- `assets/whisper_models.json` is generated from SpeakCore's
+  `WhisperCppModels` pins by `WhisperCppAndroidExport`
+  (`scripts/update-android-assets`); `WhisperCppAndroidExportTests` fails when
+  the asset drifts. It carries each model's `local/whisperkit/*` ID, URL, bytes,
+  SHA-256, licence, allowed download hosts and Android memory floor.
+- Tiny, Base and Small are offered on every phone. Large v3 Turbo (q5_0) is
+  offered only when `ActivityManager.MemoryInfo.totalMem` is at least 5 GiB
+  (`WhisperCppAndroidExport.largeModelMinimumDeviceMemoryBytes`), an unmeasured
+  starting point the device checks must confirm. A model already downloaded stays
+  listed so it can be removed.
+- Settings › Downloaded models shows each model's size and state (not
+  downloaded, downloading with progress, paused, waiting for Wi-Fi, failed,
+  downloaded) with Download, Resume, Cancel and Remove. Downloads wait for an
+  unmetered network unless "Download on mobile data" is on.
+- `ModelDownloader` resumes a partial file with an HTTP range request, restarts
+  when the server ignores the range, follows at most five redirects, each of
+  which must be HTTPS to an allowed host, and installs the file only after its
+  size and SHA-256 match the pin. A mismatch deletes it. Downloads run while the
+  app is open (no foreground service); a stopped one resumes from its partial
+  file. Models live in the app's private files (`files/models/whisper`); the
+  app opts out of backup and device transfer, and configuration transfer carries
+  only the chosen model's ID, so another device downloads its own copy.
+
+### Transcription
+
+- Downloaded is its own mode beside Speech service, On device and Cloud, chosen
+  only by the user. It records the same 16 kHz mono 16-bit WAV as Cloud mode,
+  then whisper.cpp transcribes it after Stop (batch only, no partials). The
+  language follows the dictation language (Automatic uses the phone's).
+- A missing, partially downloaded or corrupt model, or a whisper.cpp failure,
+  is a visible error; the recording is kept in History for a retry. Nothing
+  falls back to Cloud or the platform recogniser, and a Downloaded History
+  entry is retried only with a downloaded model.
+- Hands-free and shared audio files stay on Cloud for now.
+- **Keyboard:** the dictation keyboard never offers Downloaded models
+  (`KeyboardPolicy.APP_ONLY_MODES`). There are no device measurements yet, the
+  keyboard must finish within its 10-second bound while the user waits in
+  another app, and an IME process has a tighter memory budget than the app.
+  Revisit once the measurements exist.
 
 ## Identifier mapping
 

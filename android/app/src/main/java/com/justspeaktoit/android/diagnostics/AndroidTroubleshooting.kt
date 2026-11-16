@@ -55,7 +55,7 @@ object AndroidTroubleshooting {
         val status = state.options.firstOrNull { it.mode == mode }?.status ?: return RecogniserState.Unknown
         return when (status) {
             ModeStatus.Ready -> RecogniserState.Ready
-            ModeStatus.NeedsDownload, ModeStatus.Downloading -> RecogniserState.NeedsDownload
+            ModeStatus.NeedsDownload, ModeStatus.Downloading, ModeStatus.NeedsModel -> RecogniserState.NeedsDownload
             ModeStatus.LanguageUnsupported -> RecogniserState.UnsupportedLanguage
             ModeStatus.RequiresNewerAndroid, ModeStatus.NotProvided -> RecogniserState.Unavailable
             ModeStatus.Unverified -> RecogniserState.Unknown

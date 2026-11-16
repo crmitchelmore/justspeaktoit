@@ -141,6 +141,9 @@ Reasoning to keep on record:
   retention is outside the app's control, so do not claim ephemeral processing.
 - **Speech service mode.** Audio is handled by the system `RecognitionService`,
   not transmitted by the app. On-device mode keeps audio on the phone.
+- **Downloaded mode.** whisper.cpp transcribes in the app, so audio stays on
+  the phone. Model downloads are plain HTTPS fetches of public files from
+  Hugging Face and send no user data.
 - **API keys** never leave the phone except as the provider's own
   authentication header.
 - **Analytics and crash reports are optional.** Both default to off and are
@@ -194,10 +197,11 @@ ClassInd rates apps with in-app purchases 14+.
   for reviewers that on-device and speech-service modes need no key, and cloud
   mode needs the reviewer's own provider key (supply a limited review key in the
   private App access instructions if Play asks).
-- **Permissions:** `RECORD_AUDIO`, `INTERNET`, `FOREGROUND_SERVICE`,
-  `FOREGROUND_SERVICE_MICROPHONE`, `POST_NOTIFICATIONS` and
-  `com.android.vending.BILLING` (merged from the Play Billing library for tips).
-  No accessibility service, SMS, call log or location permissions.
+- **Permissions:** `RECORD_AUDIO`, `INTERNET`, `ACCESS_NETWORK_STATE` (to
+  download Whisper models over Wi-Fi only unless mobile data is allowed),
+  `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MICROPHONE`, `POST_NOTIFICATIONS`
+  and `com.android.vending.BILLING` (merged from the Play Billing library for
+  tips). No accessibility service, SMS, call log or location permissions.
 
 ## Testing track and production access
 

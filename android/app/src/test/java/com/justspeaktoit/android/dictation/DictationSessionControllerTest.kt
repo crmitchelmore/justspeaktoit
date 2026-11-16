@@ -18,6 +18,7 @@ import com.justspeaktoit.android.ondevice.GeminiNanoModel
 import com.justspeaktoit.android.ondevice.GeminiNanoReply
 import com.justspeaktoit.android.ondevice.GeminiNanoRequest
 import com.justspeaktoit.android.ondevice.GeminiNanoStatus
+import com.justspeaktoit.android.local.LocalTranscriptionException
 import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
@@ -69,6 +70,10 @@ class DictationSessionControllerTest {
     private var cleanup: CleanupModel? = null
     private val nano = FakeGeminiNano()
     private var nanoInFront = true
+    private val localTranscriber = FakeLocalTranscriber()
+
+    /** Downloaded models on this fake phone, by catalogue ID. */
+    private val downloadedModels = mutableMapOf<String, File>()
 
     /** Each cue played, with how many times the Cloud recorder had been stopped when it played. */
     private val cues = CopyOnWriteArrayList<Pair<RecordingCue, Int>>()
@@ -114,6 +119,7 @@ class DictationSessionControllerTest {
             },
             publish = { states.value = it },
             liveSessions = live,
+            downloaded = DownloadedTranscription({ downloadedModels[it] }, localTranscriber),
         )
     }
 
@@ -315,6 +321,65 @@ class DictationSessionControllerTest {
         assertEquals(0, nano.generated)
     }
 
+    @Test
+    fun testDownloadedPlan_transcribesTheRecordingOnThePhone_andNeverUploadsIt() {
+        val model = folder.newFile("ggml-base.bin")
+        downloadedModels[BASE_MODEL] = model
+        onMain { controller.start(SessionPlan.Local(BASE_MODEL, "fr-FR")) }
+        await(states) { it.dictation is DictationState.Listening }
+        val microphone = holds(SystemResourceKind.Microphone).single()
+        assertEquals("Recording audio for a downloaded model on this phone", microphone.reason)
+
+        onMain { controller.stop() }
+
+        val done = await(states) { it.dictation is DictationState.Done }.dictation
+        assertEquals(DictationState.Done(RecognitionMode.Downloaded, "local words"), done)
+        val call = localTranscriber.calls.single()
+        assertEquals(model, call.model)
+        assertEquals("fr-FR", call.languageTag)
+        assertTrue("a downloaded model never falls back to the cloud", cloud.transcriptions.isEmpty())
+        val entry = await(history) { it.isNotEmpty() }.single()
+        assertEquals(RecognitionMode.Downloaded.name, entry.mode)
+        assertEquals(BASE_MODEL, entry.model)
+        assertFalse("the recording is deleted after a successful transcription", recorders.last.file.exists())
+    }
+
+    @Test
+    fun testDownloadedPlan_withAMissingModel_failsVisiblyAndKeepsTheRecordingInHistory() {
+        onMain { controller.start(SessionPlan.Local(BASE_MODEL, "en-GB")) }
+        await(states) { it.dictation is DictationState.Listening }
+
+        onMain { controller.stop() }
+
+        val failed = await(states) { it.dictation is DictationState.Failed }.dictation as DictationState.Failed
+        assertEquals(RecognitionMode.Downloaded, failed.mode)
+        assertEquals(DictationFailure.ModelMissing, failed.failure)
+        assertTrue(localTranscriber.calls.isEmpty())
+        assertTrue("nothing is substituted for the missing model", cloud.transcriptions.isEmpty())
+        assertTrue(engine.started.isEmpty())
+        val entry = await(history) { it.isNotEmpty() }.single()
+        assertEquals(HistoryStatus.Failed, entry.status)
+        assertEquals(BASE_MODEL, entry.model)
+        assertTrue("the recording is kept for a retry", File(checkNotNull(entry.audioPath)).exists())
+    }
+
+    @Test
+    fun testDownloadedPlan_whoseModelWillNotLoad_keepsTheRecordingInHistory() {
+        downloadedModels[BASE_MODEL] = folder.newFile("ggml-base.bin")
+        localTranscriber.onTranscribe = {
+            throw LocalTranscriptionException(DictationFailure.ModelCorrupt, "Model did not load")
+        }
+        onMain { controller.start(SessionPlan.Local(BASE_MODEL, "en-GB")) }
+        await(states) { it.dictation is DictationState.Listening }
+
+        onMain { controller.stop() }
+
+        val failed = await(states) { it.dictation is DictationState.Failed }.dictation as DictationState.Failed
+        assertEquals(DictationFailure.ModelCorrupt, failed.failure)
+        val entry = await(history) { it.isNotEmpty() }.single()
+        assertTrue(File(checkNotNull(entry.audioPath)).exists())
+    }
+
     private class FakeGeminiNano : GeminiNanoModel {
         var reply = GeminiNanoReply("", truncated = false)
 
@@ -437,5 +502,6 @@ class DictationSessionControllerTest {
 
     private companion object {
         const val CUE_MS = 150L
+        const val BASE_MODEL = "local/whisperkit/base"
     }
 }

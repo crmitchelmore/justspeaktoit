@@ -87,6 +87,10 @@ internal fun interface RecordingCues {
  *
  * [cues] play Start once capture is listening and Stop once it has ended normally, never on cancel or
  * failure, matching the desktop apps. Cloud capture records silence over the Start cue.
+ *
+ * A Downloaded session records the same file as a batch Cloud one, then transcribes it with the chosen
+ * downloaded model through [downloaded]. A missing or broken model fails visibly and the recording is
+ * kept with the failed History entry for a retry; no other engine is ever used instead.
  */
 internal class DictationSessionController(
     private val engine: SpeechEngine,
@@ -100,6 +104,7 @@ internal class DictationSessionController(
     private val cues: RecordingCues = RecordingCues.Silent,
     private val publish: (SessionState) -> Unit,
     private val liveSessions: LiveSessions = LiveSessions.Default,
+    private val downloaded: DownloadedTranscription = DownloadedTranscription.Unavailable,
 ) {
     var state = SessionState()
         private set
@@ -119,6 +124,9 @@ internal class DictationSessionController(
     /** The Cloud session's plan, so its upload uses the model and language the recording started with. */
     private var cloudPlan: SessionPlan.Cloud? = null
 
+    /** The Downloaded session's plan, so it uses the model and language the recording started with. */
+    private var localPlan: SessionPlan.Local? = null
+
     /** The live session streaming the current Cloud recording, when its model is live. */
     private var live: LiveRun? = null
 
@@ -134,10 +142,11 @@ internal class DictationSessionController(
     fun start(plan: SessionPlan) {
         change { it.copy(cleanup = CleanupStatus.None, originalTranscript = null) }
         cloudPlan = plan as? SessionPlan.Cloud
-        sessionModelId = cloudPlan?.model?.catalogId
+        localPlan = plan as? SessionPlan.Local
+        sessionModelId = cloudPlan?.model?.catalogId ?: localPlan?.modelId
         dispatch(DictationEvent.Start(plan.mode))
         when (plan) {
-            is SessionPlan.Cloud -> startCloud()
+            is SessionPlan.Cloud, is SessionPlan.Local -> startCloud()
             is SessionPlan.Recognizer ->
                 engine.start(plan.mode, plan.languageTag, onEvent = ::onEngineEvent, onLevel = { _level.value = it })
         }
@@ -147,7 +156,7 @@ internal class DictationSessionController(
         if (!isCapturing) return
         val mode = state.dictation.modeOrNull()
         dispatch(DictationEvent.StopRequested)
-        if (mode == RecognitionMode.Cloud) {
+        if (mode?.recordsAudio == true) {
             finishCloud()
         } else {
             engine.stop()
@@ -156,9 +165,9 @@ internal class DictationSessionController(
     }
 
     fun cancel() {
-        // Only a user cancel of a Cloud capture keeps audio: other modes never produce a file.
+        // Only a user cancel of a recorded capture keeps audio: the recognisers never produce a file.
         val keep = settings.keepAudioOnCancel && isCapturing &&
-            state.dictation.modeOrNull() == RecognitionMode.Cloud && capture.current != null
+            state.dictation.modeOrNull()?.recordsAudio == true && capture.current != null
         engine.cancel()
         work?.cancel()
         cancelLive()
@@ -181,7 +190,7 @@ internal class DictationSessionController(
      */
     fun interrupt(failure: DictationFailure) {
         if (!isCapturing) return
-        val rec = if (state.dictation.modeOrNull() == RecognitionMode.Cloud) capture.current else null
+        val rec = if (state.dictation.modeOrNull()?.recordsAudio == true) capture.current else null
         engine.cancel()
         cancelLive()
         dispatch(DictationEvent.Error(failure))
@@ -190,7 +199,7 @@ internal class DictationSessionController(
 
     /** Stops writing Cloud audio while another app briefly has audio focus; the microphone stays held. */
     fun pause() {
-        if (!isCapturing || state.paused || state.dictation.modeOrNull() != RecognitionMode.Cloud) return
+        if (!isCapturing || state.paused || state.dictation.modeOrNull()?.recordsAudio != true) return
         val rec = capture.current ?: return
         rec.recorder.setPaused(true)
         change { it.copy(paused = true) }
@@ -285,6 +294,7 @@ internal class DictationSessionController(
             onLimitReached = { rec -> scope.launch { if (capture.owns(rec)) stop() } },
             onCaptureFailed = { rec -> scope.launch { if (capture.owns(rec)) failCapture() } },
             onPcm = run?.let { it.client::append },
+            onDevice = localPlan != null,
         )
         if (!started) cancelLive()
         recording = capture.current.takeIf { started }
@@ -352,10 +362,13 @@ internal class DictationSessionController(
 
     private fun finishCloud() {
         val rec = capture.current ?: return
-        val plan = cloudPlan ?: return
+        val plan = cloudPlan
+        val local = localPlan
+        if (plan == null && local == null) return
         live?.let { return finishLive(rec, it) }
         val file = rec.file
         val modelId = sessionModelId
+        val mode = if (plan != null) RecognitionMode.Cloud else RecognitionMode.Downloaded
         work = scope.launch {
             var kept = false
             var settled = false
@@ -369,19 +382,22 @@ internal class DictationSessionController(
                 when {
                     bytes < 0 -> DictationEvent.Error(DictationFailure.Audio)
                     bytes < MIN_AUDIO_BYTES -> DictationEvent.Error(DictationFailure.NoSpeech)
-                    else -> requests.transcribe(
+                    plan != null -> requests.transcribe(
                         plan.model,
                         file,
                         plan.languageTag,
                         DictationFailure.InvalidKey,
                         vocabulary(),
                     ).also { keepForHistory = settings.keepRecordings }
+                    // A failed downloaded-model transcription keeps its recording for a retry from History.
+                    else -> downloaded.transcribe(local?.modelId, file, local?.languageTag)
+                        .also { keepForHistory = settings.keepRecordings || it is DictationEvent.Error }
                 }.also { settled = true }
             } catch (e: RequestReleasedException) {
                 // Releasing the upload is a cancel, so honour "Keep audio when a recording is cancelled".
                 if (settings.keepAudioOnCancel) {
                     kept = true
-                    history.keepRecording(file, modelId, settings.retention)
+                    history.keepRecording(file, modelId, settings.retention, mode)
                 }
                 DictationEvent.Cancelled
             } finally {
@@ -463,6 +479,7 @@ internal class DictationSessionController(
         val rec = capture.current ?: return
         val file = rec.file
         val modelId = sessionModelId
+        val mode = state.dictation.modeOrNull() ?: RecognitionMode.Cloud
         val retention = settings.retention
         change { it.copy(releasingMicrophone = true) }
         scope.launch {
@@ -477,7 +494,7 @@ internal class DictationSessionController(
                     capture.delete(file)
                     return@launch
                 }
-                history.keepRecording(file, modelId, retention)
+                history.keepRecording(file, modelId, retention, mode)
             } finally {
                 if (!handed) capture.abandon(file)
             }
@@ -514,6 +531,7 @@ internal class DictationSessionController(
                 title = "Dictation recording",
                 reason = when (dictation.modeOrNull()) {
                     RecognitionMode.Cloud -> "Recording audio to send to your cloud provider"
+                    RecognitionMode.Downloaded -> "Recording audio for a downloaded model on this phone"
                     RecognitionMode.SpeechService -> "Listening through the speech recognition service"
                     else -> "Listening with on-device recognition"
                 },

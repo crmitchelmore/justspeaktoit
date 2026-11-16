@@ -13,6 +13,11 @@ owner has configured the release secrets; see the
 - Android SDK with platform 37 (Android Studio installs it, or set `ANDROID_HOME`)
 - A phone or emulator running Android 10 (API 29) or newer. On-device recognition needs
   Android 12+ and a speech service that provides it.
+- NDK 27.3.13750724 and CMake 3.31.5 from the SDK Manager (`ndk;27.3.13750724`, `cmake;3.31.5`;
+  preinstalled on GitHub's Ubuntu runners) for the whisper.cpp library behind Downloaded mode. The
+  build fetches the pinned whisper.cpp source archive once and checks its SHA-256; offline, pass a
+  local copy with `-Pjsti.whisperCppArchive=/path/whisper.cpp-v1.9.5.tar.gz` (see
+  [android-on-device-models.md](../Docs/android-on-device-models.md#native-build)).
 
 ## Build and test
 
@@ -96,6 +101,7 @@ app/src/main/java/com/justspeaktoit/android/
 │   └── DictationViewModel.kt      # projects its owners into UI state; production wiring in Factory
 ├── cloud/                   # BYOK catalogue, WAV capture, OpenAI-compatible client, cleanup policy
 │   └── live/                # streaming clients (Deepgram, AssemblyAI, OpenAI Realtime) over OkHttp WebSockets
+├── local/                   # downloaded Whisper models: pinned catalogue, verified downloads, whisper.cpp JNI
 ├── corrections/             # personal corrections and the cloud vocabulary prompt
 ├── history/                 # transcript history, retention, atomic storage and usage insights
 ├── settings/                # non-secret preferences
@@ -104,6 +110,7 @@ app/src/main/java/com/justspeaktoit/android/
 ├── security/                # Keystore-backed AES-GCM secret store for BYOK keys
 ├── output/                  # copy and share (Read aloud lives in ui/ReadAloudButton.kt)
 └── ui/                      # Compose screen and brand theme
+app/src/main/cpp/            # whisper.cpp + shared ggml (pinned source, CMake) and the JNI bridge
 ```
 
 Policy lives in plain Kotlin so it is unit-tested on the JVM; Android classes stay in the
@@ -117,7 +124,8 @@ Shared catalogues are generated from `Sources/SpeakCore`, never parsed from Swif
 editor's fields), `assets/cloud_catalog.json` (cloud providers,
 credential IDs, the models Android offers with their wire fields, the cleanup model and prompt, the
 dictation languages and the vocabulary prompt limits), `assets/tip_catalog.json` (tip product IDs,
-names and emoji) and `assets/troubleshooting.json` (the phone Troubleshooting findings and fixes for each
+names and emoji), `assets/whisper_models.json` (the pinned downloaded Whisper models from
+`WhisperCppModels`, with Android's memory floor) and `assets/troubleshooting.json` (the phone Troubleshooting findings and fixes for each
 state, from `MobileTroubleshooting`). Regenerate them with `scripts/update-android-assets`; the Swift export tests fail when an asset is
 stale. The build's `generateCloudCatalog` task writes `GeneratedCloudCatalog.kt` from the cloud asset,
 so `CloudCatalog` and `CleanupPolicy` hold no hand-typed copy; only each provider's base URL and
@@ -132,8 +140,11 @@ values against the asset and that every provider has a transport.
   automatically. Without an explicit choice, a new session uses on-device recognition when it is
   ready and otherwise the speech service, and the screen always shows which mode will be used.
   Choose a mode explicitly to pin it.
-- The app itself does not store audio, except for Cloud mode's temporary upload file and
-  cancelled Cloud recordings kept in History (below).
+- **Downloaded** mode records the same temporary WAV as Cloud mode and transcribes it on the
+  phone with a downloaded Whisper model; nothing is uploaded. A failed transcription (for
+  example a missing model) keeps the recording in History to transcribe again.
+- The app itself does not store audio, except for Cloud and Downloaded modes' temporary
+  recording files, failed recordings and cancelled recordings kept in History (below).
 - **Cloud** mode uploads audio to the provider chosen in Settings with your key. The
   recording is a temporary file that is deleted after the request, whether it succeeds or fails.
 - **Keep audio when a recording is cancelled** (Settings, on by default; shared key

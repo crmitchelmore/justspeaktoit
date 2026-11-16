@@ -2027,6 +2027,50 @@ sessions:
           - "Update the Play Console Data safety form to match."
         expected: "The Play Console Data safety answers and the privacy page disclose ML Kit's diagnostics and identifiers for Gemini Nano, and say the transcript stays on the phone."
         final_gate: true
+      - id: "android-downloaded-whisper-download"
+        issues:
+          - 1658
+        title: "Downloaded models: Wi-Fi only by default, resume after a cancel, remove"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes Android downloaded Whisper models (#1658)"
+        steps:
+          - "Open Settings \u203a Downloaded models (or search Settings for \"whisper\"). Note the models listed and their sizes."
+          - "Turn Wi-Fi off so the phone is on mobile data, leave Download over mobile data off and tap Download on Whisper Base."
+          - "Turn Wi-Fi back on and tap Download again. Part-way through tap Cancel, then tap Resume; part-way through again, turn on flight mode for a few seconds, turn it off and tap Resume."
+          - "When Base shows Downloaded and verified, choose it, then tap Remove on it."
+          - "With TalkBack on, move through the section and download Whisper Tiny."
+        expected: "Tiny, Base and Small are listed with their sizes. On mobile data the model waits for Wi-Fi and nothing downloads. Resume carries on from the bytes already received rather than starting again, and the model shows Downloaded and verified only at the end. Remove returns it to Not downloaded and it can no longer be chosen. TalkBack names each model, its size and state, its Download, Cancel and Remove buttons and the mobile data switch, and announces progress changes."
+        final_gate: false
+      - id: "android-downloaded-whisper-transcribe"
+        issues:
+          - 1658
+        title: "Downloaded mode transcribes offline and fails visibly without a model"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes Android downloaded Whisper models (#1658)"
+        steps:
+          - "Download Whisper Base, choose it, then choose Downloaded on the main screen. Turn on flight mode and dictate a 15-second made-up sentence, then stop."
+          - "Open History and check the entry's mode and model name."
+          - "Remove Base in Settings, return to the main screen and note what Downloaded mode says. Download Tiny without choosing it, then remove it again."
+          - "Choose Downloaded with no model downloaded (or remove the chosen one mid-way), dictate and stop; open History and tap Transcribe on the failed entry after downloading the model again."
+          - "Open the dictation keyboard in a messaging app."
+        expected: "The text appears a little after Stop with no network, and History shows Downloaded with Whisper Base. Without a downloaded model the screen asks you to choose one and links to Settings; a recording made without one fails with a clear message, never a Cloud or speech-service transcript, and History keeps the audio so Transcribe works once the model is back. The keyboard never offers Downloaded and keeps using the phone's recogniser."
+        final_gate: false
+      - id: "owner-android-downloaded-whisper-measure"
+        issues:
+          - 1658
+        title: "Measure downloaded Whisper models on a mid-range and a flagship phone"
+        minutes: 30
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes Android downloaded Whisper models (#1658), on a mid-range and a flagship arm64 phone, plus an x86_64 emulator"
+        steps:
+          - "On each phone, note Settings \u203a About phone RAM, then download Tiny, Base and Small (and Large v3 Turbo where it is offered)."
+          - "For each model, dictate the same 30-second and 2-minute passages in flight mode and time from Stop to text; note the battery drop over ten 30-second dictations."
+          - "On a phone with 4 GB of RAM or less, check whether Large v3 Turbo is offered; on the largest phone, check that it transcribes without the app being closed."
+          - "On an x86_64 emulator, download Tiny and dictate one sentence."
+        expected: "Every listed model transcribes without the app closing or the phone stalling. Record time-to-text, real-time factor and battery per model and phone on #1658, choose the default model, confirm or change the 5 GiB Large v3 Turbo memory floor, and decide whether the keyboard can offer a downloaded model within its 10-second finish bound. The emulator returns text for Tiny."
+        final_gate: false
   - id: "windows"
     device: "Windows"
     title: "Windows"

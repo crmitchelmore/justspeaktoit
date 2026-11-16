@@ -152,10 +152,11 @@ private fun statusText(state: DictationUiState): String = when (val dictation = 
     is DictationState.Starting -> stringResource(R.string.state_starting)
     is DictationState.Listening ->
         stringResource(if (state.paused) R.string.state_paused else R.string.state_listening)
-    is DictationState.Finishing -> if (dictation.mode == RecognitionMode.Cloud) {
-        stringResource(R.string.state_transcribing, state.sessionCloudModel.provider.displayName)
-    } else {
-        stringResource(R.string.state_finishing)
+    is DictationState.Finishing -> when (dictation.mode) {
+        RecognitionMode.Cloud ->
+            stringResource(R.string.state_transcribing, state.sessionCloudModel.provider.displayName)
+        RecognitionMode.Downloaded -> stringResource(R.string.state_transcribing_on_phone)
+        else -> stringResource(R.string.state_finishing)
     }
     is DictationState.Done -> stringResource(R.string.state_done)
     is DictationState.Failed -> stringResource(dictation.failure.message())

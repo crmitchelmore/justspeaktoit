@@ -19,6 +19,10 @@ val cloudKitWebApiToken = providers.environmentVariable("CLOUDKIT_WEB_API_TOKEN"
 val cloudKitWebEnvironment = providers.environmentVariable("JSTI_CLOUDKIT_WEB_ENVIRONMENT").orNull?.trim()
     ?.takeIf { it == "development" || it == "production" }
     ?: "production"
+// A local copy of the pinned whisper.cpp release archive for offline builds; CMake still checks its
+// SHA-256 (src/main/cpp/cmake/whisper.cmake). Without it the archive is downloaded once per build
+// directory into build/native-sources.
+val whisperCppArchive = providers.gradleProperty("jsti.whisperCppArchive").orNull?.trim().orEmpty()
 
 plugins {
     // AGP 9 compiles Kotlin itself, so the separate Kotlin Android plugin is no longer applied.
@@ -30,6 +34,8 @@ android {
     namespace = "com.justspeaktoit.android"
     // AndroidX 1.19 core and Compose 1.12 require compiling against API 37.
     compileSdk = 37
+    // Preinstalled on GitHub's ubuntu-24.04 runners (NDK r27d), so CI needs no SDK install step.
+    ndkVersion = "27.3.13750724"
 
     defaultConfig {
         applicationId = "com.justspeaktoit.android"
@@ -40,6 +46,22 @@ android {
         buildConfigField("String", "POSTHOG_PROJECT_KEY", "\"$postHogProjectKey\"")
         buildConfigField("String", "CLOUDKIT_WEB_API_TOKEN", "\"$cloudKitWebApiToken\"")
         buildConfigField("String", "CLOUDKIT_WEB_ENVIRONMENT", "\"$cloudKitWebEnvironment\"")
+        // Downloaded Whisper models (Docs/android-on-device-models.md). arm64-v8a is every current
+        // phone, x86_64 the emulator and Chromebooks, and armeabi-v7a keeps 32-bit-only phones
+        // able to install the app now that it ships native code.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+        externalNativeBuild {
+            cmake {
+                arguments += listOf(
+                    "-DANDROID_STL=c++_static",
+                    "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON",
+                    "-DJSTI_NATIVE_SOURCE_CACHE=${layout.buildDirectory.dir("native-sources").get().asFile}",
+                )
+                if (whisperCppArchive.isNotEmpty()) arguments += "-DJSTI_WHISPER_CPP_ARCHIVE=$whisperCppArchive"
+            }
+        }
     }
 
     signingConfigs {
@@ -62,6 +84,14 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (uploadKeystore != null) signingConfig = signingConfigs.getByName("upload")
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            // Preinstalled on GitHub's ubuntu-24.04 runners alongside the NDK.
+            version = "3.31.5"
         }
     }
 

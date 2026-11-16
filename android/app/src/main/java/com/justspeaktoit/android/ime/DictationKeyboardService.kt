@@ -306,7 +306,7 @@ class DictationKeyboardService : InputMethodService() {
         if (!cloudEditDisclosed) {
             // Say where the selected text goes before sending anything; the next tap confirms.
             cloudEditDisclosed = true
-            showVoiceEditNotice(getString(R.string.keyboard_voice_edit_cloud_disclosure, model.provider.displayName))
+            showVoiceEditNotice(getString(R.string.keyboard_voice_edit_cloud_disclosure, model.cloudProvider.displayName))
             return
         }
         val run = VoiceEditRun(target, inputGeneration, model)

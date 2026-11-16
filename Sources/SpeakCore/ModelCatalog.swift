@@ -803,6 +803,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             return exact.displayName
         }
         if let removed = CleanupModelRemovals.removal(for: trimmed) { return removed.displayName }
+        if AndroidLocalModels.isGeminiNano(trimmed) { return AndroidLocalModels.geminiNano.displayName }
         if let local = localPostProcessing.first(where: { $0.id.lowercased() == trimmed.lowercased() }) {
             return local.displayName
         }

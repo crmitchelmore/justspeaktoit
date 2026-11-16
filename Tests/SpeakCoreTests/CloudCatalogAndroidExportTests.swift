@@ -169,6 +169,25 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         XCTAssertTrue(VoiceEditPolicy.userMessage(selection: "a", instruction: "b").hasPrefix(intro + "\n\n{"))
     }
 
+    func testDocumentCarriesGeminiNanoOutsideTheCloudCleanupModels() throws {
+        let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
+        let nano = try XCTUnwrap(object?["geminiNano"] as? [String: Any])
+        XCTAssertEqual(nano["selectionId"] as? String, AndroidLocalModels.geminiNanoID)
+        XCTAssertEqual(nano["displayName"] as? String, AndroidLocalModels.geminiNano.displayName)
+        XCTAssertEqual(nano["description"] as? String, AndroidLocalModels.geminiNano.description)
+        XCTAssertEqual(nano["inputTokenLimit"] as? Int, 4_000)
+        let cleanupIDs = (object?["cleanupModels"] as? [[String: String]] ?? []).compactMap { $0["selectionId"] }
+        XCTAssertFalse(cleanupIDs.contains(AndroidLocalModels.geminiNanoID))
+        // Android-only: no other platform's cleanup catalogue offers it, and a synced selection
+        // falls back to the cloud default there while History keeps its name.
+        XCTAssertFalse(ModelCatalog.postProcessing.contains { $0.id == AndroidLocalModels.geminiNanoID })
+        XCTAssertEqual(
+            ModelCatalog.normalizedPostProcessingModel(AndroidLocalModels.geminiNanoID),
+            ModelCatalog.defaultPostProcessingModel
+        )
+        XCTAssertEqual(ModelCatalog.friendlyName(for: AndroidLocalModels.geminiNanoID), "Gemini Nano (On-device)")
+    }
+
     func testCleanupModelsAreNativeRoutesThenOpenRouterSlugs() throws {
         let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
         let models = try XCTUnwrap(object?["cleanupModels"] as? [[String: String]])

@@ -122,18 +122,25 @@ data class LiveRoute(
     val finalizeBudgetMs: Long,
 )
 
-/** A cleanup route: a native provider's own API, or OpenRouter. */
+/** A cleanup route: a native provider's own API, OpenRouter, or Gemini Nano on the phone. */
 data class CleanupModel(
     /** The identifier saved in settings, shared with the Mac (`native/<provider>/<model>` or an OpenRouter slug). */
     val selectionId: String,
     val displayName: String,
-    val provider: CloudProvider,
+    /** The cloud provider, or null for on-device Gemini Nano ([CloudCatalog.geminiNano]). */
+    val provider: CloudProvider?,
     /** The model name the provider's `/chat/completions` endpoint expects. */
     val apiName: String,
     /** The provider name pickers sort by: the native provider, or the OpenRouter vendor. */
     val vendor: String,
 ) {
     val isOpenRouter: Boolean get() = provider == CloudProvider.OpenRouter
+
+    /** Gemini Nano through ML Kit: no key, no network and never a cloud fallback. */
+    val isOnDevice: Boolean get() = provider == null
+
+    /** The provider of a cloud route. Callers branch on [isOnDevice] first; Gemini Nano has none. */
+    val cloudProvider: CloudProvider get() = checkNotNull(provider) { "$selectionId runs on the device" }
 }
 
 /**
@@ -207,16 +214,29 @@ object CloudCatalog {
     }
 
     /**
+     * SpeakCore's `AndroidLocalModels.geminiNano`: cleanup with Gemini Nano through the ML Kit Prompt API.
+     * It is not in [cleanupModels] because only phones whose AICore reports it are offered it.
+     */
+    val geminiNano: CleanupModel = CleanupModel(
+        selectionId = GeneratedCloudCatalog.GEMINI_NANO_SELECTION_ID,
+        displayName = GeneratedCloudCatalog.GEMINI_NANO_DISPLAY_NAME,
+        provider = null,
+        apiName = GeneratedCloudCatalog.GEMINI_NANO_SELECTION_ID,
+        vendor = "Google",
+    )
+
+    /**
      * A saved choice; a removed model's successor on the same route; otherwise the default.
      */
     fun cleanupModel(selectionId: String?): CleanupModel =
         findCleanupModel(selectionId) ?: cleanupModels.first { it.selectionId == CLEANUP_MODEL }
 
     /**
-     * A bundled cleanup model (or a removed one's successor), or a saved discovered OpenAI model
+     * A bundled cleanup model (or a removed one's successor), Gemini Nano, or a saved discovered OpenAI model
      * (`openrouter/cleanup/openai/…`), which stays selected even when discovery is off or offline.
      */
     fun findCleanupModel(selectionId: String?): CleanupModel? {
+        if (selectionId == geminiNano.selectionId) return geminiNano
         val current = selectionId?.let { GeneratedCloudCatalog.cleanupModelSuccessors[it] } ?: selectionId
         cleanupModels.firstOrNull { it.selectionId == current }?.let { return it }
         val slug = OpenRouterCleanupSelection.modelId(current) ?: return null

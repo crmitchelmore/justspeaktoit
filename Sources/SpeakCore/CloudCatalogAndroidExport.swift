@@ -202,6 +202,7 @@ public enum CloudCatalogAndroidExport {
         let profiles: Profiles
         let openRouterBrowser: OpenRouterBrowser
         let voiceEdit: VoiceEdit
+        let geminiNano: OnDeviceCleanupModel
     }
 
     public static func json() throws -> Data {
@@ -236,7 +237,8 @@ public enum CloudCatalogAndroidExport {
                 quoteTerms: VoiceEditFormattingIntent.quoteTerms,
                 codeFenceTerms: VoiceEditFormattingIntent.codeFenceTerms,
                 whitespaceTerms: VoiceEditFormattingIntent.whitespaceTerms
-            )
+            ),
+            geminiNano: .geminiNano
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -349,5 +351,21 @@ extension CloudCatalogAndroidExport {
             || AzureTranscriptionModels.batchIDs.contains(catalogID)
             || AlibabaSpeechModels.batchIDs.contains(catalogID)
             || OpenRouterInlineAudioTranscriptionClient.requiresCanonicalPCM16WAV(model: catalogID)
+    }
+}
+
+extension CloudCatalogAndroidExport {
+    /// Android's on-device cleanup model; see `AndroidLocalModels` for the capability rule. It is kept
+    /// out of `cleanupModels`, whose rows are all cloud routes that need a key.
+    fileprivate struct OnDeviceCleanupModel: Encodable {
+        static let geminiNano = OnDeviceCleanupModel(
+            selectionId: AndroidLocalModels.geminiNano.id,
+            displayName: AndroidLocalModels.geminiNano.displayName,
+            description: AndroidLocalModels.geminiNano.description ?? "",
+            inputTokenLimit: AndroidLocalModels.geminiNanoInputTokenLimit
+        )
+
+        let selectionId, displayName, description: String
+        let inputTokenLimit: Int
     }
 }

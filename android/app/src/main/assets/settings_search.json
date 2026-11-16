@@ -146,7 +146,15 @@
         "discover models",
         "model discovery",
         "live models",
-        "newest models"
+        "newest models",
+        "gemini nano",
+        "nano",
+        "on-device cleanup",
+        "on this phone",
+        "offline cleanup",
+        "local cleanup",
+        "private cleanup",
+        "aicore"
       ],
       "section" : "postProcessing",
       "sectionTitle" : "Post-processing",

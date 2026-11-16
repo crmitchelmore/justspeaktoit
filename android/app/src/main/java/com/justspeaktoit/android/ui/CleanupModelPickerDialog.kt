@@ -34,7 +34,7 @@ import com.justspeaktoit.android.cloud.OpenRouterBrowserFilter
 import com.justspeaktoit.android.cloud.OpenRouterBrowserItem
 
 /**
- * Native cleanup models first, then a separate **Browse OpenRouter models…** button that opens a
+ * Gemini Nano on this phone where AICore offers it, then native cleanup models, then a separate **Browse OpenRouter models…** button that opens a
  * searchable OpenRouter browser with provider and price filters; each row opens a details page
  * where the model is chosen, matching the Mac and iPhone pickers. With live discovery on, the browser
  * also lists OpenAI models OpenRouter offers today.
@@ -45,8 +45,11 @@ fun CleanupModelPickerDialog(
     savedKeys: Set<CloudProvider>,
     onChoose: (CleanupModel) -> Unit,
     onDismiss: () -> Unit,
+    geminiNano: GeminiNanoUi,
     discovery: OpenRouterDiscoveryUi = OpenRouterDiscoveryUi(),
 ) {
+    // Asks AICore once per opening whether this phone offers Gemini Nano.
+    LaunchedEffect(Unit) { geminiNano.onCheck() }
     var browsing by remember { mutableStateOf(false) }
     var detail by remember { mutableStateOf<OpenRouterBrowserItem?>(null) }
     var filter by remember { mutableStateOf(OpenRouterBrowserFilter()) }
@@ -104,8 +107,11 @@ fun CleanupModelPickerDialog(
                 onOpen = { detail = it },
             )
             else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                item {
+                    GeminiNanoPickerSection(geminiNano, selected.isOnDevice) { onChoose(CloudCatalog.geminiNano) }
+                }
                 items(direct, key = { it.selectionId }) { model ->
-                    ModelRow(model, model == selected, model.provider in savedKeys) { onChoose(model) }
+                    ModelRow(model, model == selected, model.cloudProvider in savedKeys) { onChoose(model) }
                 }
                 item {
                     HorizontalDivider()

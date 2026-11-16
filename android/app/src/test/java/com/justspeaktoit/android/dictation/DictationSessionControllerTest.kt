@@ -11,6 +11,13 @@ import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.ondevice.GeminiNanoCleanup
+import com.justspeaktoit.android.ondevice.GeminiNanoDownload
+import com.justspeaktoit.android.ondevice.GeminiNanoFailure
+import com.justspeaktoit.android.ondevice.GeminiNanoModel
+import com.justspeaktoit.android.ondevice.GeminiNanoReply
+import com.justspeaktoit.android.ondevice.GeminiNanoRequest
+import com.justspeaktoit.android.ondevice.GeminiNanoStatus
 import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
@@ -21,8 +28,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
@@ -58,6 +67,8 @@ class DictationSessionControllerTest {
     private var keepAudio = false
     private var rules = emptyList<CorrectionRule>()
     private var cleanup: CleanupModel? = null
+    private val nano = FakeGeminiNano()
+    private var nanoInFront = true
 
     /** Each cue played, with how many times the Cloud recorder had been stopped when it played. */
     private val cues = CopyOnWriteArrayList<Pair<RecordingCue, Int>>()
@@ -69,12 +80,19 @@ class DictationSessionControllerTest {
         capture = CloudCapture(recorders, cacheDir, Dispatchers.IO, RecorderRetirement(Dispatchers.IO), resources)
         val secrets = MemorySecrets(
             "openai.apiKey" to "sk-test",
-            CloudCatalog.cleanupModels.first().provider.credentialId to "sk-cleanup",
+            CloudCatalog.cleanupModels.first().cloudProvider.credentialId to "sk-cleanup",
         )
         DictationSessionController(
             engine = engine,
             capture = capture,
-            requests = SessionRequests(cloud, secrets, capture, Dispatchers.IO, DictationTimings()) { _, _ -> },
+            requests = SessionRequests(
+                cloud,
+                secrets,
+                capture,
+                Dispatchers.IO,
+                DictationTimings(),
+                onDevice = GeminiNanoCleanup(nano, isTopApp = { nanoInFront }),
+            ) { _, _ -> },
             history = DictationHistory(
                 HistoryStore(MemoryHistoryFile(), deleteAudio = { File(it).delete() }),
                 File(folder.root, "recordings"),
@@ -268,6 +286,52 @@ class DictationSessionControllerTest {
         await(states) { it.cleanup == CleanupStatus.Applied }
         assertEquals("ship Kubernetes", cloud.cleanups.single())
         assertEquals("Ship Kubernetes.", states.value.dictation.text())
+    }
+
+    @Test
+    fun testOnDeviceCleanup_runsOnThePhoneAndNeverCallsTheCloud() {
+        cleanup = CloudCatalog.geminiNano
+        nano.reply = GeminiNanoReply("Ship it.", truncated = false)
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("ship it")) }
+
+        val state = await(states) { it.cleanup == CleanupStatus.Applied }
+        assertTrue(state.cleanupOnDevice)
+        assertEquals("Ship it.", state.dictation.text())
+        assertTrue(cloud.cleanups.isEmpty())
+    }
+
+    @Test
+    fun testOnDeviceCleanupFailure_keepsTheOriginalAndSaysWhyWithoutACloudFallback() {
+        cleanup = CloudCatalog.geminiNano
+        nanoInFront = false
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("ship it")) }
+
+        val state = await(states) { it.cleanup == CleanupStatus.Failed }
+        assertEquals(GeminiNanoFailure.NotInForeground, state.cleanupFailure)
+        assertEquals("ship it", state.dictation.text())
+        assertTrue(cloud.cleanups.isEmpty())
+        assertEquals(0, nano.generated)
+    }
+
+    private class FakeGeminiNano : GeminiNanoModel {
+        var reply = GeminiNanoReply("", truncated = false)
+
+        @Volatile var generated = 0
+
+        override suspend fun status() = GeminiNanoStatus.Available
+
+        override suspend fun supportsSystemInstruction() = true
+
+        override suspend fun countTokens(request: GeminiNanoRequest) = 1
+
+        override suspend fun generate(request: GeminiNanoRequest): GeminiNanoReply {
+            generated++
+            return reply
+        }
+
+        override fun download(): Flow<GeminiNanoDownload> = emptyFlow()
     }
 
     private fun startLive(provider: CloudProvider, awaitListening: Boolean = true): FakeLiveClient {

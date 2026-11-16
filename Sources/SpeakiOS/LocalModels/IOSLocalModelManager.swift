@@ -27,7 +27,7 @@ public final class IOSLocalModelManager: ObservableObject {
     public init(
         store: IOSImportedLocalModelStore = .shared,
         engine: @escaping () -> IOSLocalTranscriptionEngine? = { IOSLocalTranscriptionEngines.current },
-        freeSpaceBytes: @escaping () -> Int64? = IOSLocalModelManager.availableCapacity
+        freeSpaceBytes: @escaping () -> Int64? = { nil }
     ) {
         self.store = store
         engineProvider = engine

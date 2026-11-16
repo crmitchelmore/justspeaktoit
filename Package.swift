@@ -155,7 +155,10 @@ let portablePackage = Package(
         .testTarget(
             name: "SpeakDesktopTests",
             dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport", "SpeakFeedbackResources"]
-                + (windowsTargetBuild ? [.target(name: "SpeakWindowsPlatform")] : [])
+                + (windowsTargetBuild ? [.target(name: "SpeakWindowsPlatform")] : []),
+            // Lets interop tests skip the Apple transport client, which the
+            // portable SpeakCore excludes even on macOS.
+            swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
         ),
         .testTarget(
             name: "SpeakDesktopHostTests",

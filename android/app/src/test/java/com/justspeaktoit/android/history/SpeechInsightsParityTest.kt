@@ -67,9 +67,10 @@ class SpeechInsightsParityTest {
         if (longest == null) {
             assertNull(summary.longestSession)
         } else {
-            assertEquals(longest.getString("id"), summary.longestSession?.id)
-            assertEquals(longest.getDouble("durationSeconds"), summary.longestSession!!.durationSeconds, 1e-9)
-            assertEquals(longest.getInt("wordCount"), summary.longestSession!!.wordCount)
+            val actual = requireNotNull(summary.longestSession)
+            assertEquals(longest.getString("id"), actual.id)
+            assertEquals(longest.getDouble("durationSeconds"), actual.durationSeconds, 1e-9)
+            assertEquals(longest.getInt("wordCount"), actual.wordCount)
         }
     }
 

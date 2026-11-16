@@ -105,10 +105,10 @@ struct UsageInsightsView: View {
                     id: "usageInsightsNewWords"
                 )
             }
-            ForEach(summary.trendingTerms.prefix(5)) { term in
+            ForEach(Array(summary.trendingTerms.prefix(5).enumerated()), id: \.element.id) { index, term in
                 row(
                     "Trending: \(term.term)", "\(term.previousWeekCount) → \(term.currentWeekCount)",
-                    id: "usageInsightsTrending.\(term.term)"
+                    id: Self.termIdentifier("usageInsightsTrending", at: index)
                 )
             }
         }
@@ -190,10 +190,15 @@ struct UsageInsightsView: View {
         if terms.isEmpty {
             Text(empty).foregroundStyle(.secondary).accessibilityIdentifier("\(id).empty")
         } else {
-            ForEach(Array(terms)) { term in
-                row(term.term, "\(term.count)", id: "\(id).\(term.term)")
+            ForEach(Array(terms.enumerated()), id: \.element.id) { index, term in
+                row(term.term, "\(term.count)", id: Self.termIdentifier(id, at: index))
             }
         }
+    }
+
+    /// A term row's automation ID: its position in the list, never the dictated text it shows.
+    private static func termIdentifier(_ list: String, at index: Int) -> String {
+        "\(list).\(index)"
     }
 
     /// The History header's duration format, so the two screens read the same.

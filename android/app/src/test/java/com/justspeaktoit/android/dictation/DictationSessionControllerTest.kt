@@ -41,6 +41,7 @@ import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 /** Drives the session lifecycle directly, without a ViewModel, on a single test main thread. */
 class DictationSessionControllerTest {
@@ -60,6 +61,9 @@ class DictationSessionControllerTest {
     private var rules = emptyList<CorrectionRule>()
     private var cleanup: CleanupModel? = null
     private val localTranscriber = FakeLocalTranscriber()
+
+    /** The monotonic clock the session times its capture with, in milliseconds. */
+    private val clock = AtomicLong(1_000)
 
     /** Downloaded models on this fake phone, by catalogue ID. */
     private val downloadedModels = mutableMapOf<String, File>()
@@ -102,6 +106,7 @@ class DictationSessionControllerTest {
             publish = { states.value = it },
             liveSessions = live,
             downloaded = DownloadedTranscription({ downloadedModels[it] }, localTranscriber),
+            clockMs = clock::get,
         )
     }
 
@@ -141,6 +146,34 @@ class DictationSessionControllerTest {
         val entry = await(history) { it.isNotEmpty() }.single()
         assertEquals("bonjour", entry.text)
         assertNull("a recogniser session records no cloud model", entry.model)
+    }
+
+    @Test
+    fun testRecognizerSession_recordsHowLongItListened_fromReadyToTheResult() {
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        clock.addAndGet(700)
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Ready) }
+        clock.addAndGet(12_500)
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("twelve and a half seconds")) }
+
+        val entry = await(history) { it.isNotEmpty() }.single()
+        assertEquals(12.5, checkNotNull(entry.durationSeconds), 1e-9)
+    }
+
+    @Test
+    fun testCloudSession_recordsCaptureTimeWithoutPausesOrTheUpload() {
+        startCloud()
+        clock.addAndGet(4_000)
+        onMain { controller.pause() }
+        clock.addAndGet(9_000)
+        onMain { controller.resume() }
+        clock.addAndGet(2_000)
+        onMain { controller.stop() }
+        clock.addAndGet(30_000)
+        await(states) { it.dictation is DictationState.Done }
+
+        val entry = await(history) { it.isNotEmpty() }.single()
+        assertEquals(6.0, checkNotNull(entry.durationSeconds), 1e-9)
     }
 
     @Test
@@ -214,11 +247,13 @@ class DictationSessionControllerTest {
         keepAudio = true
         val rec = startCloud()
         val hold = holds(SystemResourceKind.Microphone).single()
+        clock.addAndGet(3_000)
 
         onMain { resources.release(hold.id) }
 
         val kept = await(history) { it.isNotEmpty() }.single()
         assertEquals(HistoryStatus.Cancelled, kept.status)
+        assertEquals(3.0, checkNotNull(kept.durationSeconds), 1e-9)
         assertTrue(File(checkNotNull(kept.audioPath)).exists())
         assertEquals(DictationState.Idle, states.value.dictation)
         assertEquals(1, rec.stops)

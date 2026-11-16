@@ -123,7 +123,8 @@ data class SpeechInsightsSummary(
  * prose: letters, digits and underscores form words; an apostrophe joins letters ("o'clock"), a full
  * stop joins letters or digits ("3.5", "x.io") and a comma joins digits ("1,000"); everything else
  * separates. Clitics split off as their own words, as NaturalLanguage does: "don't" is "do" + "n't"
- * and "it's" is "it" + "'s".
+ * and "it's" is "it" + "'s". Known gap: NaturalLanguage segments unspaced scripts (Chinese, Japanese)
+ * into dictionary words, but here such a run stays one word (see the feature map, F36).
  */
 object SpeechTokenizer {
     private val clitics = listOf("s", "re", "m", "ll", "ve", "d")

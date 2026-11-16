@@ -152,7 +152,8 @@ fun HistoryScreen(
                 item(key = "sendToMacStatus") { SendToMacStatus(sendToMac.activity, actions.onDismissSendToMac) }
             }
             val insights = HistoryInsights.of(entries, System.currentTimeMillis())
-            if (insights.dictations > 0) item { InsightsCard(insights, actions.onOpenInsights) }
+            // The dashboard covers all of History, so its entry stays even with no recent dictation.
+            if (entries.isNotEmpty()) item { InsightsCard(insights, actions.onOpenInsights) }
             item { RetentionPicker(retention, actions.onRetention) }
             item {
                 Text(
@@ -451,7 +452,11 @@ private fun InsightsCard(insights: HistoryInsights, onOpen: () -> Unit) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(stringResource(R.string.history_insights_title), style = MaterialTheme.typography.titleMedium)
             Text(
-                stringResource(R.string.history_insights_summary, dictations, words),
+                if (insights.dictations > 0) {
+                    stringResource(R.string.history_insights_summary, dictations, words)
+                } else {
+                    stringResource(R.string.history_insights_none)
+                },
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(

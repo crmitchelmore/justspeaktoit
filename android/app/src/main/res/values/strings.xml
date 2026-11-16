@@ -422,6 +422,7 @@
         <item quantity="other">%1$d words</item>
     </plurals>
     <string name="history_insights_summary">%1$s · %2$s</string>
+    <string name="history_insights_none">No dictations in the last 7 days</string>
     <string name="history_insights_note">Counted from History on this phone only.</string>
     <string name="history_insights_open">Open usage insights</string>
     <string name="insights_title">Usage insights</string>

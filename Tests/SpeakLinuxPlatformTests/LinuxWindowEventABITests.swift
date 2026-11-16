@@ -39,7 +39,8 @@ final class LinuxWindowEventABITests: XCTestCase {
             (.historyLoadMore, Int(JSTI_EVENT_HISTORY_LOAD_MORE)), (.settingsSearch, Int(JSTI_EVENT_SETTINGS_SEARCH)),
             (.settingsSearchOpen, Int(JSTI_EVENT_SETTINGS_SEARCH_OPEN)),
             (.systemResourceRelease, Int(JSTI_EVENT_SYSTEM_RESOURCE_RELEASE)),
-            (.systemResourcesReleaseAll, Int(JSTI_EVENT_SYSTEM_RESOURCES_RELEASE_ALL))
+            (.systemResourcesReleaseAll, Int(JSTI_EVENT_SYSTEM_RESOURCES_RELEASE_ALL)),
+            (.rawConfiguration, Int(JSTI_EVENT_RAW_CONFIGURATION))
         ]
         for (event, native) in pairs { XCTAssertEqual(Int(event.rawValue), native, "\(event)") }
         XCTAssertEqual(Int(Shared.vocabularyAction.rawValue), 70)

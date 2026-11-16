@@ -554,7 +554,10 @@ the Mac. Windows and Linux (#1608) serve the same tools through `speak` and MCP
 with their own field list, derived from the portable desktop preferences
 (`SettingsSchema+Desktop.swift`), so the keys there are the desktop preference
 names (`showHUD`, `preferredLocale`, `holdThreshold`). `get_configuration`
-reports which schema the host uses in `platform`.
+reports which schema the host uses in `platform`. Their Preferences › General ›
+**Edit raw configuration** window (#1670) edits the same document through
+`DesktopHostRawConfiguration.swift`, needs no automation grant, and keeps
+read-only keys with a warning.
 The iPhone has no automation server, but Settings › General › **Edit raw
 configuration** edits, validates, imports and exports the same document format
 over its own field list (`SettingsSchema+iOS.swift`, keyed by the iOS settings

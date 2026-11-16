@@ -8,19 +8,6 @@ import SpeakDesktop
 /// Preferences editor and only after the local "Allow automation to change
 /// settings" grant.
 extension DesktopHostController: AutomationConfigurationHost where Platform: DesktopHostAutomationPlatform {
-    package nonisolated static var settingsSchemaPlatform: SettingsSchemaPlatform {
-        switch Platform.nativeConfigurationPlatform {
-        case .windows: return .windows
-        case .linux: return .linux
-        case nil:
-            #if os(Windows)
-            return .windows
-            #else
-            return .linux
-            #endif
-        }
-    }
-
     package func automationConfiguration(keys: [String]?, prefix: String?) async throws -> AutomationResult {
         AutomationConfiguration.getResult(
             try automationSettingsDocument(), keys: keys, prefix: prefix, platform: Self.settingsSchemaPlatform
@@ -48,16 +35,43 @@ extension DesktopHostController: AutomationConfigurationHost where Platform: Des
             throw AutomationError(code: .invalidArgument, message: "Configuration not changed. \(error)")
         }
         if !dryRun, !report.changes.isEmpty {
-            guard !closed, !busy, recording == nil else {
+            guard settingsDocumentCanSave else {
                 throw AutomationError(
                     code: .invalidArgument, message: "Configuration not changed. Finish dictation first.")
             }
-            let reconciled = try await reconcilingPronunciationSelection(candidate, from: previous, editor: nil)
-            try await persistConfiguration(
-                reconciled, intent: .persistOnly, status: "Configuration changed by automation."
+            try await saveSettingsDocumentChanges(
+                candidate, from: previous, status: "Configuration changed by automation."
             )
         }
         return try AutomationConfiguration.setResult(report, dryRun: dryRun)
+    }
+}
+
+/// The settings document shared by automation and the raw configuration
+/// editor (Preferences › General › Edit raw configuration).
+extension DesktopHostController {
+    package nonisolated static var settingsSchemaPlatform: SettingsSchemaPlatform {
+        switch Platform.nativeConfigurationPlatform {
+        case .windows: return .windows
+        case .linux: return .linux
+        case nil:
+            #if os(Windows)
+            return .windows
+            #else
+            return .linux
+            #endif
+        }
+    }
+
+    /// False while a recording or other work would race a save.
+    var settingsDocumentCanSave: Bool { !closed && !busy && recording == nil }
+
+    /// Saves a validated candidate through the Preferences save path.
+    func saveSettingsDocumentChanges(
+        _ candidate: DesktopConfiguration, from previous: DesktopConfiguration, status: String
+    ) async throws {
+        let reconciled = try await reconcilingPronunciationSelection(candidate, from: previous, editor: nil)
+        try await persistConfiguration(reconciled, intent: .persistOnly, status: status)
     }
 
     /// The settings document automation reads: every desktop schema key with

@@ -118,6 +118,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_cloud_sync_self_test(error, capacity) != 0) return -1;
     if (jsti_phone_receiver_self_test(error, capacity) != 0) return -1;
     if (jsti_system_resources_self_test(error, capacity) != 0) return -1;
+    if (jsti_raw_configuration_self_test(error, capacity) != 0) return -1;
     if (jsti_history_filters_self_test(error, capacity) != 0) return -1;
     if (jsti_vocabulary_self_test(error, capacity) != 0) return -1;
     if (jsti_profiles_self_test(error, capacity) != 0) return -1;

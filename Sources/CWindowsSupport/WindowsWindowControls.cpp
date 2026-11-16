@@ -196,6 +196,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Allow &automation (speak command and MCP)", BS_PUSHBUTTON | WS_TABSTOP, automationID) &&
         add(L"BUTTON", L"CLI and MCP s&etup…", BS_PUSHBUTTON | WS_TABSTOP, automationSettingsID) &&
         add(L"BUTTON", L"System resources in &use…", BS_PUSHBUTTON | WS_TABSTOP, systemResourcesID) &&
+        add(L"BUTTON", L"Edit raw &configuration…", BS_PUSHBUTTON | WS_TABSTOP, rawConfigurationID) &&
         add(L"STATIC", L"Recording storage", 0, recordingsFolderLabelID) &&
         add(L"BUTTON", L"Open &folder", BS_PUSHBUTTON | WS_TABSTOP, recordingsFolderID) &&
         add(L"BUTTON", L"Delete all a&udio...", BS_PUSHBUTTON | WS_TABSTOP, audioCleanupID) &&
@@ -289,6 +290,7 @@ void updateSettingsButtons(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, phoneReceiverID), recording == 0 && jsti_phone_receiver_available());
     EnableWindow(GetDlgItem(window, azureID), recording == 0 && jsti_azure_resource_available());
     EnableWindow(GetDlgItem(window, automationSettingsID), recording == 0);
+    EnableWindow(GetDlgItem(window, rawConfigurationID), recording == 0);
     EnableWindow(GetDlgItem(window, apiKeysID), recording == 0 && jsti_api_keys_available());
     const GeneralSettings general = generalSettings();
     const bool automation = general.automationEnabled, loginPending = general.loginItemPending;

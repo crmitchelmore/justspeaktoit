@@ -7,8 +7,10 @@ lists and API stages before implementing, as both change often.
 Android's private routes are the platform recogniser
 (`SpeechRecognizer.createOnDeviceSpeechRecognizer`, Android 12+) and, since
 #1658, downloaded Whisper models run by whisper.cpp in the app (see
-[Downloaded Whisper on Android](#downloaded-whisper-on-android)). Cleanup is
-still cloud-only (see [android-parity-matrix.md](android-parity-matrix.md)). The Mac,
+[Downloaded Whisper on Android](#downloaded-whisper-on-android)). Since #1660,
+cleanup can also run on downloaded GGUF models through llama.cpp (see
+[Downloaded cleanup on Android](#downloaded-cleanup-on-android) and
+[android-parity-matrix.md](android-parity-matrix.md)). The Mac,
 Windows and Linux apps download Whisper, Parakeet and GGUF cleanup models under
 shared `local/...` identifiers (`Sources/SpeakCore/LocalModels/`).
 
@@ -164,10 +166,11 @@ open on that issue and listed in `Docs/manual-checks.yml`.
   the same way. To upgrade, change the version, commit comment and SHA-256
   together and re-run the device checks.
 - **Shared ggml:** `cmake/ggml.cmake` adds the `ggml` target once (CPU backend
-  only, no OpenMP, Vulkan or llamafile). llama.cpp (#1660) must link that same
-  target, so both runtimes ship one ggml. It builds the ggml bundled with the
-  pinned whisper.cpp unless `JSTI_GGML_SOURCE_DIR` names a ggml both runtimes
-  are pinned against.
+  only, no OpenMP, Vulkan or llamafile). llama.cpp (#1660) links that same
+  target, so both runtimes ship one ggml (see
+  [Downloaded cleanup on Android](#downloaded-cleanup-on-android)). It builds
+  the ggml bundled with the pinned whisper.cpp unless `JSTI_GGML_SOURCE_DIR`
+  names a ggml both runtimes are pinned against.
 - **ABIs:** arm64-v8a (phones), x86_64 (emulator, Chromebooks) and
   armeabi-v7a (so 32-bit-only phones can still install the app now that it ships
   native code; it is too slow for anything above Tiny). The runtimes are always
@@ -221,6 +224,81 @@ open on that issue and listed in `Docs/manual-checks.yml`.
   keyboard must finish within its 10-second bound while the user waits in
   another app, and an IME process has a tighter memory budget than the app.
   Revisit once the measurements exist.
+
+## Downloaded cleanup on Android
+
+Built in #1660 (code); the owner's device measurements (time to clean a
+transcript per model, peak memory, battery and the Qwen3 1.7B memory floor) are
+still open on that issue and listed in `Docs/manual-checks.yml`.
+
+### Native build
+
+- llama.cpp is compiled from source into the same `libjsti_local_models.so`
+  (`llama_jni.cpp`, called from `local/LlamaCppCleaner.kt`). No prebuilt
+  binaries are used.
+- **Source pin:** llama.cpp tag `b11425` (commit
+  `e117148a41d8e9bedb72e4c6c3f003ab0fe7f857`). `cmake/llama.cmake` fetches the
+  tag archive with `URL_HASH SHA256=3bf5a64c…c83c92a` through the same
+  `cmake/native-sources.cmake` helper as whisper.cpp; a mismatch fails the
+  configure. Offline builds pass
+  `-Pjsti.llamaCppArchive=/path/llama.cpp-b11425.tar.gz`.
+- **Why b11425:** llama.cpp and whisper.cpp each vendor a copy of ggml.
+  whisper.cpp v1.9.5 synced ggml at the point recorded as llama.cpp
+  `e117148a` (`scripts/sync-llama.last`), so b11425's ggml is source-identical
+  to the one the shared target builds (only the version line in
+  `ggml/CMakeLists.txt` differs). llama.cpp therefore compiles against and
+  links the one shared `ggml` target and never builds its own. The configure
+  compares the SHA-256 of every public ggml header in both archives and fails
+  if a later bump of either pin lets them drift; upgrade the two pins
+  together.
+- Only the `llama` library is built (no common, tools, server, examples or
+  tests). A host build of both runtimes linked with no duplicate ggml symbols.
+
+### Models and downloads
+
+- `assets/cleanup_models.json` is generated from SpeakCore's `LlamaCppModels`
+  pins by `LlamaCppAndroidExport` (`scripts/update-android-assets`);
+  `LlamaCppAndroidExportTests` fails when the asset drifts or when the pins and
+  `ModelCatalog.localPostProcessing` disagree. It carries each model's
+  `local/post-processing/*` ID, display name, URL (a Hugging Face revision, not
+  `main`), bytes, SHA-256, licence, allowed hosts and Android memory floor.
+- SmolLM2 360M Q4 and Qwen3 0.6B Q4 are offered on every phone. Qwen3 1.7B Q4
+  needs 5 GiB of `totalMem`, an unmeasured starting point the device checks
+  must confirm.
+- Settings › Clean up transcripts › Downloaded cleanup models lists each model
+  with its size and state and Download, Resume, Cancel and Remove, through the
+  same `ModelDownloader` (Wi-Fi by default, resumable, SHA-256 verified) as the
+  Whisper models. Weights live in `files/models/llm`.
+- Before every load, `PinnedWeightsVerifier` checks the file's size and SHA-256
+  against the pin again (cached per path, size and modification time for the
+  process), so a file changed after download is never loaded.
+
+### Cleanup
+
+- Choosing a downloaded model replaces the cloud cleanup model; the prompt
+  editor stays visible, and the cloud picker says it is unused. A profile's own
+  cloud cleanup model still wins for its sessions. Configuration transfer uses
+  the shared `postProcessingModel` key, so a desktop's `local/post-processing/*`
+  choice imports when Android offers that model.
+- The cleanup prompt (`CleanupPolicy.systemPrompt`, honouring
+  `postProcessingSystemPrompt`) is the SYSTEM message and the JSON-wrapped
+  transcript is the USER message, formatted with the model's own chat template
+  (Qwen3 gets its documented non-thinking prefill). Decoding is greedy.
+- Bounds: a 4,096-token context, at most 2,048 output tokens, at most four
+  threads, two minutes per transcript (`DictationTimings.localCleanupMs`), and
+  cancellation aborts decoding. One model is loaded at a time and freed after
+  each transcript.
+- An empty transcript stays empty and never loads the model. A missing or
+  unverified model, a load or decode failure, a timeout, an empty reply or a
+  reply that thinks aloud keeps the original transcript with a visible notice;
+  nothing falls back to the cloud or rules cleanup. A selected model that is not
+  downloaded turns cleanup off for the session and Settings says so.
+- Small models sometimes echo the `{"transcript": ...}` wrapper; Android
+  unwraps exactly that shape. The desktop runtimes do not.
+- **Keyboard:** the dictation keyboard keeps cloud cleanup for voice edits, for
+  the same latency and memory reasons as Downloaded transcription.
+- **Unit tests** never load the library: cleanup talks to the `LocalCleaner`
+  interface, and JVM tests use a fake.
 
 ## Identifier mapping
 

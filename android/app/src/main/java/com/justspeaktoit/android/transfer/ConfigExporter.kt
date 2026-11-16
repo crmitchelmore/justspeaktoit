@@ -64,7 +64,9 @@ internal object ConfigExporter {
         SharedSettings.KEEP_AUDIO to prefs.keepAudioOnCancel,
         SharedSettings.CLEANUP_ENABLED to prefs.cleanupEnabled,
         SharedSettings.LANGUAGE to DictationLanguages.normalized(prefs.languageId),
-        SharedSettings.CLEANUP_MODEL to CloudCatalog.cleanupModel(prefs.cleanupModelId).selectionId,
+        // The shared key holds a downloaded model's `local/post-processing/...` ID too, as the desktop's does.
+        SharedSettings.CLEANUP_MODEL to
+            (prefs.localCleanupModelId ?: CloudCatalog.cleanupModel(prefs.cleanupModelId).selectionId),
         SharedSettings.CLOUD_MODEL to CloudCatalog.transcriptionModel(prefs.cloudModelId).catalogId,
     ).map { (key, value) -> ArchiveRecord(id = key, kind = RecordKinds.SETTING, value = value) }
 

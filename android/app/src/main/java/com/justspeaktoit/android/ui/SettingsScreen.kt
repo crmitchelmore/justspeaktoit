@@ -153,6 +153,11 @@ class SettingsActions(
     val onCancelModelDownload: (String) -> Unit = {},
     val onRemoveLocalModel: (String) -> Unit = {},
     val onDownloadModelsOnMobileDataChanged: (Boolean) -> Unit = {},
+    /** Picks a downloaded cleanup model by catalogue ID, or null to clean up with the cloud model. */
+    val onChooseLocalCleanupModel: (String?) -> Unit = {},
+    val onDownloadCleanupModel: (String) -> Unit = {},
+    val onCancelCleanupModelDownload: (String) -> Unit = {},
+    val onRemoveCleanupModel: (String) -> Unit = {},
 )
 
 /** The app-wide theme choice: light, dark or the phone's, and wallpaper colours where supported. */
@@ -330,10 +335,26 @@ fun SettingsScreen(
             }
             Text(stringResource(R.string.settings_cleanup_note), style = MaterialTheme.typography.bodyMedium)
             CleanupModelRow(state, actions, discovery)
-            if (state.cleanupEnabled && state.cleanupModel.provider !in state.savedKeys) {
+            if (state.localCleanup.selectedId != null) {
+                Text(
+                    stringResource(R.string.settings_cleanup_model_unused),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag(AutomationIds.SETTINGS_CLEANUP_MODEL_UNUSED),
+                )
+            } else if (state.cleanupEnabled && state.cleanupModel.provider !in state.savedKeys) {
                 Text(
                     stringResource(R.string.settings_cleanup_needs_key, state.cleanupModel.provider.displayName),
                     color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (state.localCleanup.names.isNotEmpty()) {
+                SectionTitle(R.string.settings_downloaded_cleanup_title, anchor("android.downloadedCleanup"))
+                DownloadedCleanupSection(
+                    state.localCleanup,
+                    state.cleanupEnabled,
+                    state.dictation.isActive,
+                    actions,
                 )
             }
             CleanupPromptField(

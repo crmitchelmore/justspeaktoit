@@ -28,10 +28,12 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.justspeaktoit.android.R
+import com.justspeaktoit.android.local.CleanupModelsState
 import com.justspeaktoit.android.local.DownloadFailure
 import com.justspeaktoit.android.local.LocalModelItem
 import com.justspeaktoit.android.local.LocalModelsState
 import com.justspeaktoit.android.local.ModelInstallState
+import com.justspeaktoit.android.local.PinnedModel
 
 /**
  * Downloaded Whisper models: size, download state and progress, and Download, Cancel, Remove and Use.
@@ -63,17 +65,85 @@ internal fun DownloadedModelsSection(local: LocalModelsState, sessionActive: Boo
         Text(stringResource(R.string.settings_downloaded_models_mobile_data), modifier = Modifier.weight(1f))
         Switch(checked = local.downloadOnMobileData, onCheckedChange = null)
     }
+    val rowActions = DownloadedModelActions(
+        use = actions.onChooseDownloadedModel,
+        download = actions.onDownloadLocalModel,
+        cancel = actions.onCancelModelDownload,
+        remove = actions.onRemoveLocalModel,
+    )
     local.models.forEach { item ->
-        DownloadedModelRow(item, selected = item.model.catalogId == local.selectedId, sessionActive, actions)
+        DownloadedModelRow(item, selected = item.model.catalogId == local.selectedId, sessionActive, rowActions)
     }
 }
 
+/**
+ * Downloaded cleanup models (llama.cpp): the same rows as Whisper's, where Use makes the model clean up
+ * every recording in place of the cloud model, with the cleanup prompt as its instructions. There is no
+ * fallback: if the model fails, the original transcript is kept.
+ */
 @Composable
-private fun DownloadedModelRow(
-    item: LocalModelItem,
-    selected: Boolean,
+internal fun DownloadedCleanupSection(
+    local: CleanupModelsState,
+    cleanupEnabled: Boolean,
     sessionActive: Boolean,
     actions: SettingsActions,
+) {
+    Text(stringResource(R.string.settings_downloaded_cleanup_note), style = MaterialTheme.typography.bodyMedium)
+    if (!local.runtimeAvailable) {
+        Text(
+            stringResource(R.string.settings_downloaded_cleanup_unavailable),
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.testTag(AutomationIds.SETTINGS_DOWNLOADED_CLEANUP_UNAVAILABLE),
+        )
+        return
+    }
+    val rowActions = DownloadedModelActions(
+        use = { actions.onChooseLocalCleanupModel(it) },
+        download = actions.onDownloadCleanupModel,
+        cancel = actions.onCancelCleanupModelDownload,
+        remove = actions.onRemoveCleanupModel,
+    )
+    local.models.forEach { item ->
+        DownloadedModelRow(item, selected = item.model.catalogId == local.selectedId, sessionActive, rowActions)
+    }
+    val selected = local.selectedId ?: return
+    if (cleanupEnabled && !local.ready) {
+        Text(
+            stringResource(
+                R.string.settings_downloaded_cleanup_not_ready,
+                local.displayName(selected) ?: selected,
+            ),
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier
+                .testTag(AutomationIds.SETTINGS_DOWNLOADED_CLEANUP_NOT_READY)
+                .semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+    OutlinedButton(
+        onClick = { actions.onChooseLocalCleanupModel(null) },
+        enabled = !sessionActive,
+        modifier = Modifier.testTag(AutomationIds.SETTINGS_DOWNLOADED_CLEANUP_USE_CLOUD),
+    ) { Text(stringResource(R.string.settings_downloaded_cleanup_use_cloud)) }
+}
+
+/** What a [DownloadedModelRow]'s controls do, each given the model's catalogue ID. */
+internal class DownloadedModelActions(
+    val use: (String) -> Unit,
+    val download: (String) -> Unit,
+    val cancel: (String) -> Unit,
+    val remove: (String) -> Unit,
+)
+
+/**
+ * One pinned model (Whisper or cleanup): its name, size and state, download progress, and Use, Download,
+ * Cancel and Remove. Tags are keyed by the catalogue ID, which is unique across both lists.
+ */
+@Composable
+internal fun DownloadedModelRow(
+    item: LocalModelItem<PinnedModel>,
+    selected: Boolean,
+    sessionActive: Boolean,
+    actions: DownloadedModelActions,
 ) {
     val context = LocalContext.current
     val id = item.model.catalogId
@@ -90,7 +160,7 @@ private fun DownloadedModelRow(
                     selected = selected,
                     enabled = installed && !sessionActive,
                     role = Role.RadioButton,
-                    onClick = { actions.onChooseDownloadedModel(id) },
+                    onClick = { actions.use(id) },
                 ),
         ) {
             RadioButton(selected = selected, onClick = null, enabled = installed && !sessionActive)
@@ -124,18 +194,18 @@ private fun DownloadedModelRow(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             when (state) {
                 is ModelInstallState.Downloading -> OutlinedButton(
-                    onClick = { actions.onCancelModelDownload(id) },
+                    onClick = { actions.cancel(id) },
                     modifier = Modifier.testTag(AutomationIds.downloadedModelCancel(id)),
                 ) { Text(stringResource(R.string.action_cancel)) }
                 ModelInstallState.Installed -> Unit
                 else -> OutlinedButton(
-                    onClick = { actions.onDownloadLocalModel(id) },
+                    onClick = { actions.download(id) },
                     modifier = Modifier.testTag(AutomationIds.downloadedModelDownload(id)),
                 ) { Text(stringResource(downloadLabel(state))) }
             }
             if (installed || state.partialBytes() > 0) {
                 TextButton(
-                    onClick = { actions.onRemoveLocalModel(id) },
+                    onClick = { actions.remove(id) },
                     enabled = !(selected && sessionActive),
                     modifier = Modifier.testTag(AutomationIds.downloadedModelRemove(id)),
                 ) { Text(stringResource(R.string.action_remove)) }

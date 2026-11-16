@@ -13,21 +13,21 @@ import java.net.URL
 import java.security.MessageDigest
 
 /** Where downloaded models live: `<dir>/<filename>`, and `<filename>.part` while downloading. */
-class WhisperModelStore(val dir: File) {
-    fun file(model: WhisperModel) = File(dir, model.filename)
+class ModelStore(val dir: File) {
+    fun file(model: PinnedModel) = File(dir, model.filename)
 
-    fun partial(model: WhisperModel) = File(dir, model.filename + ".part")
+    fun partial(model: PinnedModel) = File(dir, model.filename + ".part")
 
     /**
      * A model is installed once its verified file is in place. Its SHA-256 is checked before it is moved
      * there, so later uses check only the size; a file damaged since fails to load and shows an error.
      */
-    fun isInstalled(model: WhisperModel): Boolean = file(model).let { it.isFile && it.length() == model.bytes }
+    fun isInstalled(model: PinnedModel): Boolean = file(model).let { it.isFile && it.length() == model.bytes }
 
-    fun partialBytes(model: WhisperModel): Long = partial(model).takeIf { it.isFile }?.length() ?: 0L
+    fun partialBytes(model: PinnedModel): Long = partial(model).takeIf { it.isFile }?.length() ?: 0L
 
     /** Removes the model and any partial download. */
-    fun remove(model: WhisperModel) {
+    fun remove(model: PinnedModel) {
         file(model).delete()
         partial(model).delete()
     }
@@ -59,7 +59,7 @@ fun interface ModelSource {
 }
 
 /**
- * Downloads a pinned model into a [WhisperModelStore], resuming a partial download with an HTTP range
+ * Downloads a pinned model into a [ModelStore], resuming a partial download with an HTTP range
  * request. Every hop, redirects included, must be HTTPS to a host the pin allows; the finished file
  * must match the pinned size and SHA-256 before it is moved into place.
  */
@@ -72,8 +72,8 @@ class ModelDownloader(
      * receives the bytes on disk; [cancelled] is polled between reads.
      */
     fun download(
-        model: WhisperModel,
-        store: WhisperModelStore,
+        model: PinnedModel,
+        store: ModelStore,
         progress: (Long) -> Unit = {},
         cancelled: () -> Boolean = { false },
     ): DownloadFailure? {
@@ -99,7 +99,7 @@ class ModelDownloader(
     }
 
     private fun fetch(
-        model: WhisperModel,
+        model: PinnedModel,
         part: File,
         offset: Long,
         progress: (Long) -> Unit,
@@ -128,7 +128,7 @@ class ModelDownloader(
         return if (failure == null) Fetched.Complete else Fetched.Failed(failure)
     }
 
-    private fun resolve(model: WhisperModel, offset: Long): ModelResponse {
+    private fun resolve(model: PinnedModel, offset: Long): ModelResponse {
         var url = model.url
         repeat(MAX_REDIRECTS + 1) {
             val uri = try {
@@ -185,7 +185,7 @@ class ModelDownloader(
         return if (written < expected) DownloadFailure.Network else null
     }
 
-    private fun install(model: WhisperModel, store: WhisperModelStore, part: File): DownloadFailure? {
+    private fun install(model: PinnedModel, store: ModelStore, part: File): DownloadFailure? {
         if (part.length() != model.bytes) {
             part.delete()
             return DownloadFailure.SizeMismatch

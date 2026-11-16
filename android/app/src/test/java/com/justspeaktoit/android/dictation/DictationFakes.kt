@@ -24,6 +24,8 @@ import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryFile
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.local.LocalCleaner
+import com.justspeaktoit.android.local.LocalModelSetup
 import com.justspeaktoit.android.local.LocalTranscriber
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.security.SecretStore
@@ -411,6 +413,7 @@ internal class MemoryPrefs(
     override var dynamicColor: Boolean = false,
     override var downloadedTranscriptionModel: String? = null,
     override var downloadedModelsOnMobileData: Boolean = false,
+    override var localCleanupModelId: String? = null,
 ) : DictationPreferences
 
 internal class MemoryHistoryFile : HistoryFile {
@@ -485,6 +488,8 @@ internal class ViewModelHarness(
     val foreground = FakeForeground()
     val audioInputs = FakeAudioInputs()
     val handsFreeMicrophone = FakeHandsFreeMicrophone()
+    /** Downloaded Whisper and cleanup models; set before the ViewModel is first used. */
+    var localModelSetup: LocalModelSetup? = null
     /** The (mode, model) pairs the ViewModel reported as successful transcriptions. */
     val successes = CopyOnWriteArrayList<Pair<RecognitionMode, CloudModel>>()
 
@@ -515,6 +520,7 @@ internal class ViewModelHarness(
                     onTranscriptionSucceeded = { mode, model -> successes += mode to model },
                     audioInputs = audioInputs,
                     handsFreeMicrophone = handsFreeMicrophone,
+                    localModelSetup = localModelSetup,
                 )
             }
         }
@@ -547,5 +553,18 @@ internal class ViewModelHarness(
         fun await(latch: CountDownLatch) {
             check(latch.await(TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "Timed out waiting" }
         }
+    }
+}
+
+/** A downloaded cleanup model that answers with [reply], recording each prompt it was given. */
+internal class FakeCleaner(var reply: suspend (String) -> String = { it }) : LocalCleaner {
+    data class Call(val model: File, val system: String, val user: String)
+
+    override var available = true
+    val calls = CopyOnWriteArrayList<Call>()
+
+    override suspend fun complete(model: File, system: String, user: String): String {
+        calls += Call(model, system, user)
+        return reply(user)
     }
 }

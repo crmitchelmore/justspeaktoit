@@ -14,9 +14,11 @@ owner has configured the release secrets; see the
 - A phone or emulator running Android 10 (API 29) or newer. On-device recognition needs
   Android 12+ and a speech service that provides it.
 - NDK 27.3.13750724 and CMake 3.31.5 from the SDK Manager (`ndk;27.3.13750724`, `cmake;3.31.5`;
-  preinstalled on GitHub's Ubuntu runners) for the whisper.cpp library behind Downloaded mode. The
-  build fetches the pinned whisper.cpp source archive once and checks its SHA-256; offline, pass a
-  local copy with `-Pjsti.whisperCppArchive=/path/whisper.cpp-v1.9.5.tar.gz` (see
+  preinstalled on GitHub's Ubuntu runners) for the whisper.cpp and llama.cpp library behind
+  Downloaded mode and downloaded cleanup models. The build fetches the pinned whisper.cpp and
+  llama.cpp source archives once and checks their SHA-256; offline, pass local copies with
+  `-Pjsti.whisperCppArchive=/path/whisper.cpp-v1.9.5.tar.gz` and
+  `-Pjsti.llamaCppArchive=/path/llama.cpp-b11425.tar.gz` (see
   [android-on-device-models.md](../Docs/android-on-device-models.md#native-build)).
 
 ## Build and test
@@ -101,7 +103,7 @@ app/src/main/java/com/justspeaktoit/android/
 │   └── DictationViewModel.kt      # projects its owners into UI state; production wiring in Factory
 ├── cloud/                   # BYOK catalogue, WAV capture, OpenAI-compatible client, cleanup policy
 │   └── live/                # streaming clients (Deepgram, AssemblyAI, OpenAI Realtime) over OkHttp WebSockets
-├── local/                   # downloaded Whisper models: pinned catalogue, verified downloads, whisper.cpp JNI
+├── local/                   # downloaded Whisper and GGUF cleanup models: pinned catalogues, verified downloads, JNI
 ├── corrections/             # personal corrections and the cloud vocabulary prompt
 ├── history/                 # transcript history, retention, atomic storage and usage insights
 ├── settings/                # non-secret preferences
@@ -110,7 +112,7 @@ app/src/main/java/com/justspeaktoit/android/
 ├── security/                # Keystore-backed AES-GCM secret store for BYOK keys
 ├── output/                  # copy and share (Read aloud lives in ui/ReadAloudButton.kt)
 └── ui/                      # Compose screen and brand theme
-app/src/main/cpp/            # whisper.cpp + shared ggml (pinned source, CMake) and the JNI bridge
+app/src/main/cpp/            # whisper.cpp, llama.cpp + shared ggml (pinned source, CMake) and the JNI bridges
 ```
 
 Policy lives in plain Kotlin so it is unit-tested on the JVM; Android classes stay in the
@@ -125,7 +127,8 @@ editor's fields), `assets/cloud_catalog.json` (cloud providers,
 credential IDs, the models Android offers with their wire fields, the cleanup model and prompt, the
 dictation languages and the vocabulary prompt limits), `assets/tip_catalog.json` (tip product IDs,
 names and emoji), `assets/whisper_models.json` (the pinned downloaded Whisper models from
-`WhisperCppModels`, with Android's memory floor) and `assets/troubleshooting.json` (the phone Troubleshooting findings and fixes for each
+`WhisperCppModels`, with Android's memory floor), `assets/cleanup_models.json` (the pinned downloaded
+GGUF cleanup models from `LlamaCppModels`) and `assets/troubleshooting.json` (the phone Troubleshooting findings and fixes for each
 state, from `MobileTroubleshooting`). Regenerate them with `scripts/update-android-assets`; the Swift export tests fail when an asset is
 stale. The build's `generateCloudCatalog` task writes `GeneratedCloudCatalog.kt` from the cloud asset,
 so `CloudCatalog` and `CleanupPolicy` hold no hand-typed copy; only each provider's base URL and
@@ -143,6 +146,9 @@ values against the asset and that every provider has a transport.
 - **Downloaded** mode records the same temporary WAV as Cloud mode and transcribes it on the
   phone with a downloaded Whisper model; nothing is uploaded. A failed transcription (for
   example a missing model) keeps the recording in History to transcribe again.
+- A **downloaded cleanup model** (Settings › Clean up transcripts) cleans the transcript on the
+  phone with llama.cpp; nothing is sent. If it fails, the original transcript is kept and no cloud
+  model is used instead.
 - The app itself does not store audio, except for Cloud and Downloaded modes' temporary
   recording files, failed recordings and cancelled recordings kept in History (below).
 - **Cloud** mode uploads audio to the provider chosen in Settings with your key. The

@@ -28,7 +28,7 @@ class LocalModelManagerTest {
     private val turbo = pinnedModel("local/whisperkit/large-v3-turbo", content, minimumDeviceMemoryBytes = 8L shl 30)
     private val source = FakeModelSource(content)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val store by lazy { WhisperModelStore(folder.newFolder("models")) }
+    private val store by lazy { ModelStore(folder.newFolder("models")) }
     private var onWifi = true
     private val gateChecks = CopyOnWriteArrayList<Boolean>()
 
@@ -45,7 +45,7 @@ class LocalModelManagerTest {
         io = Dispatchers.IO,
     )
 
-    private fun LocalModelManager.awaitState(id: String, predicate: (ModelInstallState) -> Boolean) = runBlocking {
+    private fun LocalModelManager<*>.awaitState(id: String, predicate: (ModelInstallState) -> Boolean) = runBlocking {
         withTimeout(TIMEOUT_MS) { models.first { items -> items.any { it.model.catalogId == id && predicate(it.state) } } }
     }
 

@@ -56,7 +56,7 @@ internal fun TranscriptCard(state: DictationUiState) {
             if (dictation is DictationState.Failed && text.isNotEmpty()) {
                 Text(stringResource(R.string.unfinished_label), style = MaterialTheme.typography.labelMedium)
             }
-            CleanupNote(state.cleanup)
+            CleanupNote(state.cleanup, state.cleanupOnDevice)
             Text(
                 text = text.ifEmpty { stringResource(R.string.transcript_placeholder) },
                 style = MaterialTheme.typography.bodyLarge,
@@ -72,10 +72,10 @@ internal fun TranscriptCard(state: DictationUiState) {
 }
 
 @Composable
-private fun CleanupNote(cleanup: CleanupStatus) {
+private fun CleanupNote(cleanup: CleanupStatus, onDevice: Boolean) {
     val text = when (cleanup) {
-        CleanupStatus.Running -> R.string.cleanup_running
-        CleanupStatus.Applied -> R.string.cleanup_applied
+        CleanupStatus.Running -> if (onDevice) R.string.cleanup_running_on_device else R.string.cleanup_running
+        CleanupStatus.Applied -> if (onDevice) R.string.cleanup_applied_on_device else R.string.cleanup_applied
         CleanupStatus.Failed -> R.string.cleanup_failed
         CleanupStatus.None -> return
     }

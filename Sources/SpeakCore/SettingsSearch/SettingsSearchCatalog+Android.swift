@@ -73,6 +73,16 @@ extension SettingsSearchCatalog {
             settingKeys: ["cleanup_enabled", "cleanup_model", "cleanupModelDiscoveryEnabled"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.downloadedCleanup", title: "Downloaded cleanup models", section: .postProcessing,
+            systemImage: "arrow.down.circle",
+            summary: "Download a small language model to clean up transcripts on the phone, without a key or network.",
+            keywords: [
+                "downloaded cleanup", "local cleanup", "local llm", "llama", "llama.cpp", "gguf", "qwen",
+                "smollm", "on device", "offline", "private", "post-processing", "remove model", "storage"
+            ],
+            settingKeys: ["localCleanupModel"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.cleanupPrompt", title: "Cleanup prompt", section: .postProcessing,
             systemImage: "text.quote",
             summary: "Replace the built-in cleanup instructions with your own system prompt.",

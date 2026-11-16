@@ -113,6 +113,8 @@
 
     <string name="cleanup_running">Cleaning up with OpenRouter…</string>
     <string name="cleanup_applied">Cleaned up with OpenRouter</string>
+    <string name="cleanup_running_on_device">Cleaning up on this phone…</string>
+    <string name="cleanup_applied_on_device">Cleaned up on this phone</string>
     <string name="cleanup_failed">Cleanup failed, so this is the original transcript.</string>
     <string name="action_skip_cleanup">Skip cleanup</string>
     <string name="action_show_original">Show original</string>
@@ -231,6 +233,12 @@
     <string name="settings_cleanup_note">Sends the final transcript to the chosen model\'s provider to fix punctuation and spelling. Needs that provider\'s key. If cleanup fails, the original transcript is kept.</string>
     <string name="settings_cleanup_needs_key">Add your %1$s key to use cleanup.</string>
     <string name="settings_cleanup_model">Cleanup model</string>
+    <string name="settings_cleanup_model_unused">Not used while a downloaded cleanup model is selected below.</string>
+    <string name="settings_downloaded_cleanup_title">Downloaded cleanup models</string>
+    <string name="settings_downloaded_cleanup_note">Small language models that clean up transcripts on this phone, with no key and nothing sent. The cleanup prompt below is the model\'s instructions. They are slower and less capable than cloud models, and if one fails the original transcript is kept. Downloads follow Download over mobile data under Downloaded models.</string>
+    <string name="settings_downloaded_cleanup_unavailable">Downloaded cleanup models can\'t run on this phone because the language model engine did not load.</string>
+    <string name="settings_downloaded_cleanup_not_ready">Download %1$s to use it for cleanup. Until then, recordings are not cleaned up.</string>
+    <string name="settings_downloaded_cleanup_use_cloud">Use the cloud cleanup model instead</string>
     <string name="settings_cleanup_prompt_title">Cleanup prompt</string>
     <string name="settings_cleanup_prompt_note">Replaces the built-in cleanup instructions, for example to set a tone or format. The transcript is still sent as data, and only the cleaned text is kept. Leave empty for the built-in prompt.</string>
     <string name="settings_cleanup_prompt_reset">Use the built-in prompt</string>

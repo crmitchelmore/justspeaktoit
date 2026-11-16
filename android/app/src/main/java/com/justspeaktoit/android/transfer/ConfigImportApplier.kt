@@ -132,6 +132,7 @@ internal class ConfigImportApplier(
         settings.cleanupEnabled?.let { prefs.cleanupEnabled = it }
         settings.languageId?.let { prefs.languageId = it }
         settings.cleanupModelId?.let { prefs.cleanupModelId = it }
+        settings.localCleanupModelId?.let { prefs.localCleanupModelId = it.value }
         settings.cloudModelId?.let { prefs.cloudModelId = it }
         settings.chosenMode?.let { prefs.chosenMode = it.value }
         settings.downloadedModelId?.let { prefs.downloadedTranscriptionModel = it.value }

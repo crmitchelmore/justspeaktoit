@@ -15,6 +15,7 @@ import com.justspeaktoit.android.corrections.AutoCorrectionLearningPolicy
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.local.CleanupModelsState
 import com.justspeaktoit.android.local.LocalModelsState
 import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.settings.AppAppearance
@@ -26,7 +27,7 @@ import java.util.Locale
 
 data class SharedAudioOffer(val uri: Uri, val mimeType: String?)
 
-/** Optional OpenRouter cleanup of a final transcript. A failure keeps the original text. */
+/** Optional cleanup of a final transcript by a cloud or downloaded model. A failure keeps the original text. */
 enum class CleanupStatus { None, Running, Applied, Failed }
 
 data class DictationUiState(
@@ -48,6 +49,8 @@ data class DictationUiState(
     /** Live OpenRouter models for the transcription and cleanup browsers. */
     val openRouterDiscovery: OpenRouterDiscoveryState = OpenRouterDiscoveryState(),
     val cleanup: CleanupStatus = CleanupStatus.None,
+    /** Whether [cleanup] describes a downloaded model on this phone rather than a cloud model. */
+    val cleanupOnDevice: Boolean = false,
     val originalTranscript: String? = null,
     /** Set when a key could not be saved or removed securely. */
     val keyStoreError: Boolean = false,
@@ -113,6 +116,8 @@ data class DictationUiState(
     val transfer: ConfigTransferState = ConfigTransferState(),
     /** Downloaded Whisper models, their state on this phone and the one Downloaded mode uses. */
     val localModels: LocalModelsState = LocalModelsState(),
+    /** Downloaded cleanup models (#1660) and the one cleanup uses instead of a cloud model. */
+    val localCleanup: CleanupModelsState = CleanupModelsState(),
 ) {
     val audioInputChoice: AudioInputChoice get() = AudioInputChoice.resolve(audioInputId, audioInputs)
 
@@ -122,6 +127,13 @@ data class DictationUiState(
     val sessionCleanupEnabled: Boolean get() = profile?.cleanupEnabled ?: cleanupEnabled
 
     val sessionCleanupModel: CleanupModel get() = profile?.cleanupModel ?: cleanupModel
+
+    /**
+     * The downloaded model a session's cleanup uses: the user's, unless the active profile names a cloud
+     * cleanup model. Null means cleanup uses [sessionCleanupModel].
+     */
+    val sessionLocalCleanupModelId: String?
+        get() = if (profile?.cleanupModel != null) null else localCleanup.selectedId
 
     /** The base cleanup prompt a session uses: the profile's, else the user's, else null for the built-in one. */
     val sessionCleanupPrompt: String?
@@ -156,15 +168,24 @@ data class DictationUiState(
     val armsHandsFree: Boolean
         get() = handsFreeEnabled && activeMode == RecognitionMode.Cloud
 
-    /** Cleanup runs only when switched on (by the profile or the user) and its model's provider has a key. */
+    /**
+     * Cleanup runs only when switched on (by the profile or the user) and its model can run: a downloaded
+     * model must be on the phone with its runtime, a cloud model's provider must have a key.
+     */
     val cleanupReady: Boolean
-        get() = sessionCleanupEnabled && sessionCleanupModel.provider in savedKeys
+        get() = sessionCleanupEnabled && if (sessionLocalCleanupModelId != null) {
+            localCleanup.ready
+        } else {
+            sessionCleanupModel.provider in savedKeys
+        }
 }
 
 /** Deadlines and polling for the session's blocking work; tests shorten them. */
 internal data class DictationTimings(
     val transcribeMs: Long = 180_000L,
     val cleanupMs: Long = 60_000L,
+    /** Loading and running a downloaded cleanup model on the phone, as the desktop's native deadline. */
+    val localCleanupMs: Long = 120_000L,
     val importMs: Long = 60_000L,
     val downloadCheckIntervalMs: Long = 5_000L,
     val downloadChecks: Int = 60,

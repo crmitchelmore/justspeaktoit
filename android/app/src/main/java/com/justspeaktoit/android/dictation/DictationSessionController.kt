@@ -12,6 +12,7 @@ import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.local.LocalCleanupPrompt
 import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.resources.SystemResourceToken
@@ -31,6 +32,8 @@ import java.io.IOException
 internal data class SessionState(
     val dictation: DictationState = DictationState.Idle,
     val cleanup: CleanupStatus = CleanupStatus.None,
+    /** Whether [cleanup] describes a downloaded model on this phone rather than a cloud model. */
+    val cleanupOnDevice: Boolean = false,
     /** The transcript before an applied cleanup, so the user can restore it. */
     val originalTranscript: String? = null,
     /** True until a cancelled Cloud recording has released the microphone. */
@@ -46,6 +49,12 @@ internal interface SessionSettings {
 
     /** The model for an optional cleanup, or null when cleanup is off or its provider has no key. */
     val cleanupModel: CleanupModel?
+
+    /**
+     * The downloaded model for an optional cleanup (#1660), or null when cleanup is off or uses
+     * [cleanupModel]. When set it wins, and no cloud request is made.
+     */
+    val localCleanupModelId: String? get() = null
 
     /** The user's base cleanup prompt for this session, or null for the built-in one. */
     val cleanupPrompt: String? get() = null
@@ -86,6 +95,9 @@ internal fun interface RecordingCues {
  * A Downloaded session records the same file as a batch Cloud one, then transcribes it with the chosen
  * downloaded model through [downloaded]. A missing or broken model fails visibly and the recording is
  * kept with the failed History entry for a retry; no other engine is ever used instead.
+ *
+ * Cleanup with a downloaded model runs through [downloadedCleanup] on the phone. Empty text is never
+ * sent to it, and a failure keeps the original transcript with no cloud or rules fallback.
  */
 internal class DictationSessionController(
     private val engine: SpeechEngine,
@@ -100,6 +112,7 @@ internal class DictationSessionController(
     private val publish: (SessionState) -> Unit,
     private val liveSessions: LiveSessions = LiveSessions.Default,
     private val downloaded: DownloadedTranscription = DownloadedTranscription.Unavailable,
+    private val downloadedCleanup: DownloadedCleanup = DownloadedCleanup.Unavailable,
 ) {
     var state = SessionState()
         private set
@@ -552,15 +565,26 @@ internal class DictationSessionController(
         dispatch(event)
         val done = state.dictation as? DictationState.Done ?: return
         if (event !is DictationEvent.Final) return
-        settings.cleanupModel?.let { runCleanup(done, it) }
+        val localModelId = settings.localCleanupModelId
+        if (localModelId != null) {
+            // Nothing to clean: the model is not loaded and the status does not change.
+            if (LocalCleanupPrompt.isEmpty(done.transcript)) return
+            val prompt = settings.cleanupPrompt
+            runCleanup(done, onDevice = true) { downloadedCleanup.cleanup(localModelId, done.transcript, prompt) }
+            return
+        }
+        settings.cleanupModel?.let { model ->
+            runCleanup(done, onDevice = false) {
+                requests.cleanup(model, done.transcript, CleanupPolicy.systemPrompt(settings.cleanupPrompt))
+            }
+        }
     }
 
-    private fun runCleanup(done: DictationState.Done, model: CleanupModel) {
-        change { it.copy(cleanup = CleanupStatus.Running) }
+    private fun runCleanup(done: DictationState.Done, onDevice: Boolean, clean: suspend () -> CleanupOutcome) {
+        change { it.copy(cleanup = CleanupStatus.Running, cleanupOnDevice = onDevice) }
         work = scope.launch {
             // Cleanup can restore a misheard word, so corrections run again on its output.
-            val systemPrompt = CleanupPolicy.systemPrompt(settings.cleanupPrompt)
-            val outcome = when (val cleaned = requests.cleanup(model, done.transcript, systemPrompt)) {
+            val outcome = when (val cleaned = clean()) {
                 is CleanupOutcome.Applied ->
                     CleanupOutcome.Applied(PersonalCorrections.apply(cleaned.text, settings.corrections))
                 else -> cleaned

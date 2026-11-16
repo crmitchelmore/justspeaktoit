@@ -32,14 +32,14 @@ sealed interface ModelInstallState {
     data object Installed : ModelInstallState
 }
 
-data class LocalModelItem(val model: WhisperModel, val state: ModelInstallState)
+data class LocalModelItem<out M : PinnedModel>(val model: M, val state: ModelInstallState)
 
 /** Downloaded models as Settings shows them. */
 data class LocalModelsState(
     /** False when the whisper.cpp runtime is missing; Downloaded mode is then unavailable. */
     val runtimeAvailable: Boolean = false,
     /** The models this phone offers, with their state. */
-    val models: List<LocalModelItem> = emptyList(),
+    val models: List<LocalModelItem<WhisperModel>> = emptyList(),
     /** The chosen model's catalogue ID, even when it is not offered or downloaded. */
     val selectedId: String? = null,
     val downloadOnMobileData: Boolean = false,
@@ -49,7 +49,7 @@ data class LocalModelsState(
     /** The friendly name for a model ID, or null when it is not a downloaded-model ID. */
     fun displayName(id: String?): String? = id?.let(names::get)
 
-    val selected: LocalModelItem?
+    val selected: LocalModelItem<WhisperModel>?
         get() = models.firstOrNull { it.model.catalogId == selectedId }
 
     /** Catalogue IDs of the models downloaded and verified on this phone. */
@@ -57,20 +57,59 @@ data class LocalModelsState(
         get() = models.filter { it.state == ModelInstallState.Installed }.mapTo(mutableSetOf()) { it.model.catalogId }
 }
 
-/** Everything [LocalModelManager] and Downloaded mode need, so tests can pass fakes. */
+/** Downloaded cleanup models (#1660) as Settings shows them. */
+data class CleanupModelsState(
+    /** False when the llama.cpp runtime is missing; downloaded cleanup is then unavailable. */
+    val runtimeAvailable: Boolean = false,
+    /** The models this phone offers, with their state. */
+    val models: List<LocalModelItem<LlamaModel>> = emptyList(),
+    /** The chosen model's catalogue ID; null means cleanup uses a cloud model. */
+    val selectedId: String? = null,
+    /** Display names for every catalogue ID, including models this phone does not offer. */
+    val names: Map<String, String> = emptyMap(),
+) {
+    fun displayName(id: String?): String? = id?.let(names::get)
+
+    val selected: LocalModelItem<LlamaModel>?
+        get() = models.firstOrNull { it.model.catalogId == selectedId }
+
+    /** The chosen model is downloaded and offered here, and the runtime loaded. */
+    val ready: Boolean
+        get() = runtimeAvailable && selected?.state == ModelInstallState.Installed
+}
+
+/** What downloaded cleanup adds to [LocalModelSetup]: its catalogue, its own store and the runtime. */
+class LocalCleanupSetup(
+    val catalog: List<LlamaModel>,
+    val store: ModelStore,
+    val cleaner: LocalCleaner,
+    val verifier: PinnedWeightsVerifier = PinnedWeightsVerifier(),
+) {
+    val names: Map<String, String>
+        get() = catalog.associate { it.catalogId to it.displayName }
+}
+
+/** Everything [LocalModelManager], Downloaded mode and downloaded cleanup need, so tests can pass fakes. */
 class LocalModelSetup(
     val catalog: List<WhisperModel>,
-    val store: WhisperModelStore,
+    val store: ModelStore,
     val downloader: ModelDownloader,
     val totalMemoryBytes: Long,
     val network: NetworkGate,
     val transcriber: LocalTranscriber,
+    /** Downloaded cleanup models; null leaves them out of the app. */
+    val cleanup: LocalCleanupSetup? = null,
 ) {
     val names: Map<String, String>
         get() = catalog.associate { it.catalogId to it.displayName }
 
     fun manager(scope: CoroutineScope, io: CoroutineDispatcher) =
         LocalModelManager(catalog, store, downloader, totalMemoryBytes, network, scope, io)
+
+    /** Cleanup models share the downloader, network rule and memory floor with Whisper models. */
+    fun cleanupManager(scope: CoroutineScope, io: CoroutineDispatcher) = cleanup?.let {
+        LocalModelManager(it.catalog, it.store, downloader, totalMemoryBytes, network, scope, io)
+    }
 }
 
 /** Whether a model download may start now. */
@@ -79,13 +118,13 @@ fun interface NetworkGate {
 }
 
 /**
- * Downloads, verifies and removes the pinned Whisper models. Each download runs in [scope] on [io]
- * while the app is open; a stopped one resumes from its partial file next time. State is published
- * through [models].
+ * Downloads, verifies and removes pinned models (Whisper for transcription, GGUF for cleanup). Each
+ * download runs in [scope] on [io] while the app is open; a stopped one resumes from its partial file
+ * next time. State is published through [models].
  */
-class LocalModelManager(
-    private val catalog: List<WhisperModel>,
-    private val store: WhisperModelStore,
+class LocalModelManager<M : PinnedModel>(
+    private val catalog: List<M>,
+    private val store: ModelStore,
     private val downloader: ModelDownloader,
     private val totalMemoryBytes: Long,
     private val network: NetworkGate,
@@ -96,14 +135,14 @@ class LocalModelManager(
 
     /** Orders a download's progress against [cancel], so a read that ends after Cancel cannot report. */
     private val publishLock = Any()
-    private val _models = MutableStateFlow<List<LocalModelItem>>(emptyList())
-    val models: StateFlow<List<LocalModelItem>> = _models.asStateFlow()
+    private val _models = MutableStateFlow<List<LocalModelItem<M>>>(emptyList())
+    val models: StateFlow<List<LocalModelItem<M>>> = _models.asStateFlow()
 
     /** Reads which models are on disk, off the main thread. */
     fun refresh(): Job = scope.launch {
         val states = withContext(io) { catalog.associate { it.catalogId to diskState(it) } }
         val installed = states.filterValues { it == ModelInstallState.Installed }.keys
-        _models.value = WhisperCatalog.offered(catalog, totalMemoryBytes, installed).map { model ->
+        _models.value = PinnedModels.offered(catalog, totalMemoryBytes, installed).map { model ->
             // A download under way keeps the state it is reporting.
             val running = _models.value.firstOrNull { it.model.catalogId == model.catalogId }
                 ?.takeIf { jobs[model.catalogId]?.isActive == true }
@@ -111,10 +150,13 @@ class LocalModelManager(
         }
     }
 
-    fun find(id: String?): WhisperModel? = WhisperCatalog.find(catalog, id)
+    fun find(id: String?): M? = PinnedModels.find(catalog, id)
 
     /** The verified file for [id], or null when that model is not downloaded. Reads the disk. */
-    fun installedFile(id: String): File? = find(id)?.takeIf(store::isInstalled)?.let(store::file)
+    fun installedFile(id: String): File? = installedModel(id)?.second
+
+    /** [id]'s model and file, or null when that model is not downloaded. Reads the disk. */
+    fun installedModel(id: String): Pair<M, File>? = find(id)?.takeIf(store::isInstalled)?.let { it to store.file(it) }
 
     fun isInstalled(id: String?): Boolean = find(id)?.let(store::isInstalled) == true
 
@@ -193,7 +235,7 @@ class LocalModelManager(
         }
     }
 
-    private fun diskState(model: WhisperModel): ModelInstallState = when {
+    private fun diskState(model: M): ModelInstallState = when {
         store.isInstalled(model) -> ModelInstallState.Installed
         else -> ModelInstallState.NotDownloaded(store.partialBytes(model))
     }

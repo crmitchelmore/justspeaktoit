@@ -19,10 +19,11 @@ val cloudKitWebApiToken = providers.environmentVariable("CLOUDKIT_WEB_API_TOKEN"
 val cloudKitWebEnvironment = providers.environmentVariable("JSTI_CLOUDKIT_WEB_ENVIRONMENT").orNull?.trim()
     ?.takeIf { it == "development" || it == "production" }
     ?: "production"
-// A local copy of the pinned whisper.cpp release archive for offline builds; CMake still checks its
-// SHA-256 (src/main/cpp/cmake/whisper.cmake). Without it the archive is downloaded once per build
-// directory into build/native-sources.
+// Local copies of the pinned whisper.cpp and llama.cpp release archives for offline builds; CMake
+// still checks their SHA-256 (src/main/cpp/cmake/whisper.cmake, llama.cmake). Without them each
+// archive is downloaded once per build directory into build/native-sources.
 val whisperCppArchive = providers.gradleProperty("jsti.whisperCppArchive").orNull?.trim().orEmpty()
+val llamaCppArchive = providers.gradleProperty("jsti.llamaCppArchive").orNull?.trim().orEmpty()
 
 plugins {
     // AGP 9 compiles Kotlin itself, so the separate Kotlin Android plugin is no longer applied.
@@ -46,7 +47,7 @@ android {
         buildConfigField("String", "POSTHOG_PROJECT_KEY", "\"$postHogProjectKey\"")
         buildConfigField("String", "CLOUDKIT_WEB_API_TOKEN", "\"$cloudKitWebApiToken\"")
         buildConfigField("String", "CLOUDKIT_WEB_ENVIRONMENT", "\"$cloudKitWebEnvironment\"")
-        // Downloaded Whisper models (Docs/android-on-device-models.md). arm64-v8a is every current
+        // Downloaded Whisper and cleanup models (Docs/android-on-device-models.md). arm64-v8a is every current
         // phone, x86_64 the emulator and Chromebooks, and armeabi-v7a keeps 32-bit-only phones
         // able to install the app now that it ships native code.
         ndk {
@@ -60,6 +61,7 @@ android {
                     "-DJSTI_NATIVE_SOURCE_CACHE=${layout.buildDirectory.dir("native-sources").get().asFile}",
                 )
                 if (whisperCppArchive.isNotEmpty()) arguments += "-DJSTI_WHISPER_CPP_ARCHIVE=$whisperCppArchive"
+                if (llamaCppArchive.isNotEmpty()) arguments += "-DJSTI_LLAMA_CPP_ARCHIVE=$llamaCppArchive"
             }
         }
     }

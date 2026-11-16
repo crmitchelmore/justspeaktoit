@@ -44,6 +44,10 @@ object AutomationIds {
     const val SETTINGS_DOWNLOADED_MOBILE_DATA = "settings.downloadedModels.mobileData"
     const val SETTINGS_DOWNLOADED_UNAVAILABLE = "settings.downloadedModels.unavailable"
     const val MODE_CHOOSE_DOWNLOADED_MODEL = "dictation.mode.chooseDownloadedModel"
+    const val SETTINGS_DOWNLOADED_CLEANUP_UNAVAILABLE = "settings.downloadedCleanup.unavailable"
+    const val SETTINGS_DOWNLOADED_CLEANUP_NOT_READY = "settings.downloadedCleanup.notReady"
+    const val SETTINGS_DOWNLOADED_CLEANUP_USE_CLOUD = "settings.downloadedCleanup.useCloud"
+    const val SETTINGS_CLEANUP_MODEL_UNUSED = "settings.cleanupModel.unused"
 
     /** One set per downloaded model, keyed by its catalogue ID such as `local/whisperkit/base`. */
     fun downloadedModelUse(id: String) = "settings.downloadedModels.use.$id"

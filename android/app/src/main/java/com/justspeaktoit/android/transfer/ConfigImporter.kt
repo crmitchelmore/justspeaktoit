@@ -45,6 +45,8 @@ internal data class SettingsChange(
     val cleanupEnabled: Boolean? = null,
     val languageId: String? = null,
     val cleanupModelId: String? = null,
+    /** A downloaded cleanup model, or null to use [cleanupModelId]'s cloud model. */
+    val localCleanupModelId: Assign<String?>? = null,
     val cloudModelId: String? = null,
     val chosenMode: Assign<RecognitionMode?>? = null,
     val retention: Retention? = null,
@@ -81,12 +83,14 @@ internal object ConfigImporter {
         history: List<HistoryEntry>,
         savedSecrets: Set<String>,
         nowMs: Long,
+        /** The downloaded cleanup models this phone has a pin for; another `local/` cleanup model is skipped. */
+        localCleanupIds: Set<String> = emptySet(),
     ): ImportPlan {
         val notices = contents.notices.toMutableList()
         val previews = mutableListOf<CategoryPreview>()
         val planner = Planner(contents, notices)
 
-        val settings = planner.settings(prefs, previews)
+        val settings = planner.settings(prefs, previews, localCleanupIds)
         val profiles = planner.profiles(prefs.profiles, previews)
         val activeProfile = planner.activeProfile(contents.androidSettings, profiles ?: prefs.profiles, prefs.activeProfileId)
         val corrections = planner.corrections(prefs.corrections, previews)
@@ -179,7 +183,11 @@ internal object ConfigImporter {
             previews += CategoryPreview(category, skipped = records.size)
         }
 
-        fun settings(prefs: DictationPreferences, previews: MutableList<CategoryPreview>): SettingsChange {
+        fun settings(
+            prefs: DictationPreferences,
+            previews: MutableList<CategoryPreview>,
+            localCleanupIds: Set<String>,
+        ): SettingsChange {
             val category = TransferCategory.Settings
             val all = records(category) ?: return SettingsChange()
             val records = inScope(category, all)
@@ -212,9 +220,16 @@ internal object ConfigImporter {
                         counted(it == DictationLanguages.normalized(prefs.languageId))
                         change = change.copy(languageId = it)
                     } ?: rejected(record.id)
-                    SharedSettings.CLEANUP_MODEL -> SharedSettings.cleanupModel(value)?.let {
-                        counted(it == CloudCatalog.cleanupModel(prefs.cleanupModelId).selectionId)
-                        change = change.copy(cleanupModelId = it)
+                    // A downloaded model this phone offers replaces the cloud one; a cloud model clears it.
+                    SharedSettings.CLEANUP_MODEL -> (value as? String)?.takeIf { it in localCleanupIds }?.let {
+                        counted(it == prefs.localCleanupModelId)
+                        change = change.copy(localCleanupModelId = Assign(it))
+                    } ?: SharedSettings.cleanupModel(value)?.let {
+                        counted(
+                            prefs.localCleanupModelId == null &&
+                                it == CloudCatalog.cleanupModel(prefs.cleanupModelId).selectionId,
+                        )
+                        change = change.copy(cleanupModelId = it, localCleanupModelId = Assign(null))
                     } ?: rejected(record.id)
                     SharedSettings.CLOUD_MODEL -> SharedSettings.cloudModel(value)?.let {
                         counted(it == CloudCatalog.transcriptionModel(prefs.cloudModelId).catalogId)

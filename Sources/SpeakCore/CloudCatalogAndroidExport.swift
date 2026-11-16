@@ -15,9 +15,10 @@ import Foundation
 /// so it never starts offering a model that is about to shut down.
 ///
 /// Android also streams the live routes whose protocols it implements natively (Deepgram,
-/// AssemblyAI Universal-3.6 Pro and OpenAI Realtime), with the canonical identifiers, sample rates,
-/// language-hint and vocabulary fields and post-stop finalise budgets, so the Kotlin clients never
-/// keep a second list. Retired live models are not offered, for the same reason as batch models.
+/// AssemblyAI Universal-3.6 Pro, OpenAI Realtime and ElevenLabs Scribe realtime), with the
+/// canonical identifiers, sample rates, language-hint and vocabulary fields and post-stop finalise
+/// budgets, so the Kotlin clients never keep a second list. Retired live models are not offered,
+/// for the same reason as batch models.
 ///
 /// `CloudCatalogAndroidExportTests` fails when the committed asset is stale; regenerate it with
 /// `UPDATE_CLOUD_CATALOG_ANDROID=1 swift test --filter CloudCatalogAndroidExportTests`.

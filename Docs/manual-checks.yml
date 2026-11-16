@@ -1657,6 +1657,21 @@ sessions:
           - "Save an invalid Deepgram key and dictate with Deepgram Nova-3 (Streaming)."
         expected: "Each model shows words while speaking and returns the full formatted text after Stop. The vocabulary word is spelt correctly. The invalid key fails with \"rejected the API key\" and shows under Errors on the API key filter."
         final_gate: true
+      - id: "owner-android-live-elevenlabs"
+        issues:
+          - 1667
+        title: "ElevenLabs live streaming with a real key"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1667"
+        steps:
+          - "Save an ElevenLabs key with speech-to-text (Scribe) access in Settings."
+          - "Dictate three sentences with ElevenLabs Scribe v3 Live (Streaming), pausing between them, then tap Stop mid-word. Repeat with ElevenLabs Scribe v2 (Streaming)."
+          - "Add a personal correction, write as \"Kubernetes\", and say \"Kubernetes\" with each model."
+          - "Start another dictation, say a sentence, then turn on flight mode while still talking."
+          - "Save an invalid ElevenLabs key and dictate with ElevenLabs Scribe v3 Live (Streaming)."
+        expected: "Words appear while speaking and each settled phrase replaces its partial, never duplicated. Stop returns the full text within a few seconds, including the last words. The vocabulary word is spelt correctly. Flight mode ends with a network failure and History keeps the words heard so far as unfinished, with no upload or other provider instead. The invalid key fails with \"rejected the API key\"."
+        final_gate: true
       - id: "android-first-run-setup"
         issues:
           - 1639

@@ -130,12 +130,12 @@ class DeepgramLiveSessionTest {
         sockets.last.queuedBytes = 3_200
         session.finish()
 
-        scheduler.advanceBy(3_000)
+        scheduler.advanceBy(1_000)
         assertNull(listener.outcome)
         sockets.last.queuedBytes = 0
-        scheduler.advanceBy(1_000)
+        scheduler.advanceBy(2_999)
         assertNull("the grace starts after the drain", listener.outcome)
-        scheduler.advanceBy(1_000)
+        scheduler.advanceBy(100)
 
         assertTrue(listener.outcome is LiveOutcome.Completed)
     }

@@ -55,7 +55,7 @@ Status key:
 | Audio / file transcription | **Android equivalent, done** | Share audio (MP3, M4A, WAV, OGG/Opus, WebM, FLAC; at most 25 MB) into the app; it is uploaded to the chosen cloud model after confirmation and recorded in History. |
 | Usage insights | **Launch, done (partial)** | History shows dictations and words in the last 7 days and opens a Usage insights screen: usage totals plus SpeakCore's phrases, filler words, speaking pace and records, from definitions exported to `speech_insights.json` and checked against the shared Swift fixture. Top words and vocabulary need a lemmatiser (#1623). |
 | Voice output (TTS) | **Launch, partial** | Read aloud on a finished transcript uses the phone's `TextToSpeech` engine. Cloud voices are not planned for launch. |
-| Downloaded local models (Parakeet, WhisperKit, etc.) | **Planned** | Assessed in [android-on-device-models.md](android-on-device-models.md) (#1593): whisper.cpp with the shared `local/whisperkit/*` pins for transcription (#1658), Gemini Nano through the ML Kit Prompt API on supported phones (#1659) and llama.cpp GGUF models (#1660) for cleanup. ML Kit GenAI speech recognition and sherpa-onnx are deferred. The platform recogniser covers launch. |
+| Downloaded local models (Parakeet, WhisperKit, etc.) | **Partial** (#1658) | Downloaded mode runs whisper.cpp in the app on the shared `local/whisperkit/*` pins (Tiny, Base, Small; Large v3 Turbo on phones with 5 GiB or more), batch only, from Settings › Downloaded models, which downloads over Wi-Fi by default, resumes and verifies size and SHA-256. A missing model fails visibly and History keeps the audio; nothing falls back to Cloud. The keyboard, hands-free and shared audio stay off it until device measurements exist. See [android-on-device-models.md](android-on-device-models.md#downloaded-whisper-on-android). Gemini Nano (#1659) and llama.cpp GGUF cleanup (#1660) are planned; ML Kit GenAI speech recognition and sherpa-onnx are deferred. |
 | Keyboard extension (iOS) | **Android equivalent, done** | Dictation keyboard (IME). |
 | Share extension | **Android equivalent, done (audio)** | Share target for audio. Text in is not needed, as cleanup runs on dictated text. |
 | Widgets / Live Activity | **Deferred** | The Quick Settings tile and shortcut cover quick start; a home-screen widget only if it adds value. |
@@ -83,6 +83,7 @@ Unit tests and CI cannot prove these; they gate closing the epic:
 10. Dictation keyboard in a messaging app, a browser field and a password field (disabled), including switching keyboards mid-dictation and denying the microphone permission.
 11. A chosen dictation language (for example French) in each mode and the keyboard, and Automatic following the phone language.
 12. Personal corrections fixing a misheard name in each mode, and Read aloud on a finished transcript.
+13. Downloaded Whisper models: download, resume and remove, offline transcription, the missing-model error with History retry, and time-to-text, real-time factor, battery and the Large v3 Turbo memory floor on a mid-range and a flagship phone (#1658).
 
 These checks are on the owner's QA page (`Docs/manual-checks.yml`, Android session).
 

@@ -1,6 +1,7 @@
 package com.justspeaktoit.android.dictation
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -111,5 +112,22 @@ class RecognizerAvailabilityTest {
             LanguageResolution(LanguageSupport.Installed, "EN-gb"),
             RecognizerAvailability.resolveLanguage("en-GB", listOf("EN-gb"), emptyList(), emptyList()),
         )
+    }
+
+    @Test
+    fun testDownloadedMode_isOfferedOnlyWithTheRuntime_needsAModel_andIsNeverTheDefault() {
+        assertEquals(ModeStatus.NotProvided, RecognizerAvailability.downloadedStatus(false, modelInstalled = true))
+        assertEquals(ModeStatus.NeedsModel, RecognizerAvailability.downloadedStatus(true, modelInstalled = false))
+        assertEquals(ModeStatus.Ready, RecognizerAvailability.downloadedStatus(true, modelInstalled = true))
+
+        val none = RecognizerCapabilities(34, speechServiceAvailable = false, onDeviceAvailable = false)
+        assertTrue(
+            RecognizerAvailability.evaluate(none, LanguageSupport.Unknown).none { it.mode == RecognitionMode.Downloaded },
+        )
+        val options = RecognizerAvailability.evaluate(none, LanguageSupport.Unknown, downloaded = ModeStatus.Ready)
+        assertTrue(options.single { it.mode == RecognitionMode.Downloaded }.usable)
+        assertNull(RecognizerAvailability.defaultMode(options))
+        val needsModel = RecognizerAvailability.evaluate(none, LanguageSupport.Unknown, downloaded = ModeStatus.NeedsModel)
+        assertFalse(needsModel.single { it.mode == RecognitionMode.Downloaded }.usable)
     }
 }

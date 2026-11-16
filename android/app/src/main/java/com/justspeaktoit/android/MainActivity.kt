@@ -188,6 +188,11 @@ class MainActivity : ComponentActivity() {
                                 onSaveAzureEndpoint = viewModel::saveAzureEndpoint,
                                 onClearAzureEndpoint = viewModel::clearAzureEndpoint,
                                 onChooseModel = viewModel::chooseCloudModel,
+                                onChooseDownloadedModel = viewModel::chooseDownloadedModel,
+                                onDownloadLocalModel = viewModel::downloadLocalModel,
+                                onCancelModelDownload = viewModel::cancelLocalModelDownload,
+                                onRemoveLocalModel = viewModel::removeLocalModel,
+                                onDownloadModelsOnMobileDataChanged = viewModel::setDownloadModelsOnMobileData,
                                 onCleanupChanged = viewModel::setCleanupEnabled,
                                 onKeepAudioOnCancelChanged = viewModel::setKeepAudioOnCancel,
                                 onSilenceChanged = viewModel::setSilence,
@@ -269,6 +274,7 @@ class MainActivity : ComponentActivity() {
                             transcribe = HistoryTranscription(
                                 sessionActive = state.dictation.isActive,
                                 entryId = state.transcribingEntryId,
+                                localModelNames = state.localModels.names,
                             ),
                             actions = HistoryActions(
                                 onBack = { screen = Screen.Dictation },

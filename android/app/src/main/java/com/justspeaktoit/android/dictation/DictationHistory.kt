@@ -123,7 +123,12 @@ internal class DictationHistory(
      * Moves a stopped recording into History as a cancelled entry, ready for [replace] after a later
      * transcription. If the audio cannot be moved it is deleted and History is left unchanged.
      */
-    fun keepRecording(file: File, modelId: String?, retention: Retention): Job {
+    fun keepRecording(
+        file: File,
+        modelId: String?,
+        retention: Retention,
+        mode: RecognitionMode = RecognitionMode.Cloud,
+    ): Job {
         val id = newId()
         return update {
             val kept = File(recordingsDir, "$id.wav")
@@ -134,7 +139,7 @@ internal class DictationHistory(
             val entry = HistoryEntry(
                 id = id,
                 createdAtMs = now(),
-                mode = RecognitionMode.Cloud.name,
+                mode = mode.name,
                 model = modelId,
                 status = HistoryStatus.Cancelled,
                 text = "",
@@ -287,7 +292,7 @@ internal class DictationHistory(
         id = newId(),
         createdAtMs = now(),
         mode = mode.name,
-        model = if (mode == RecognitionMode.Cloud) modelId else null,
+        model = if (mode.recordsAudio) modelId else null,
         status = status,
         text = text,
         failure = failure?.name,

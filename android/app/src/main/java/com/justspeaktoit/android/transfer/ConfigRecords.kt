@@ -97,7 +97,7 @@ internal object HistoryRecords {
     /** A recording's value carries no text, as SpeakCore's `DataMigrationHistoryValue` audio-only form. */
     fun value(entry: HistoryEntry, id: String, audioOnly: Boolean): JSONObject {
         val created = ArchiveDates.format(entry.createdAtMs)
-        val local = entry.mode == RecognitionMode.OnDevice.name
+        val local = entry.mode == RecognitionMode.OnDevice.name || entry.mode == RecognitionMode.Downloaded.name
         val usages = JSONArray()
         entry.model?.let { usages.put(JSONObject().put("modelIdentifier", it).put("phase", if (local) "local" else "batch")) }
         val errors = JSONArray()

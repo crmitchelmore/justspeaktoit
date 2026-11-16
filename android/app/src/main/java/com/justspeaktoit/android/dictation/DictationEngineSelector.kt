@@ -13,7 +13,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-/** How a new session recognises speech: by recording for a cloud model, or through the platform recogniser. */
+/**
+ * How a new session recognises speech: by recording for a cloud model or a downloaded model, or through
+ * the platform recogniser.
+ */
 internal sealed interface SessionPlan {
     val mode: RecognitionMode
     val languageTag: String
@@ -23,6 +26,11 @@ internal sealed interface SessionPlan {
     }
 
     data class Recognizer(override val mode: RecognitionMode, override val languageTag: String) : SessionPlan
+
+    /** [modelId] is a `local/whisperkit/...` catalogue ID; null when none is chosen, which fails visibly. */
+    data class Local(val modelId: String?, override val languageTag: String) : SessionPlan {
+        override val mode: RecognitionMode get() = RecognitionMode.Downloaded
+    }
 }
 
 /** The user's recognition choices and which modes can start now. */
@@ -41,6 +49,8 @@ internal data class EngineSelection(
     val checking: Boolean,
     /** The chosen profile, whose language and cloud model override the user's own for new sessions. */
     val profile: DictationProfile? = null,
+    /** The downloaded model Downloaded mode uses, as a shared catalogue ID. */
+    val downloadedModelId: String? = null,
 ) {
     /** The cloud model a new Cloud session uses. */
     val sessionCloudModel: CloudModel get() = profile?.cloudModel ?: cloudModel
@@ -60,6 +70,8 @@ internal class DictationEngineSelector(
     private val timings: DictationTimings,
     private val sessionActive: () -> Boolean,
     private val phoneLanguageTag: () -> String = { Locale.getDefault().toLanguageTag() },
+    /** Downloaded mode's status for a chosen model ID, or null where downloaded models are not offered. */
+    private val downloadedStatus: (String?) -> ModeStatus? = { null },
     private val publish: (EngineSelection) -> Unit,
 ) {
     private fun currentLanguageTag(profile: DictationProfile?): String =
@@ -77,6 +89,7 @@ internal class DictationEngineSelector(
             savedKeys = emptySet(),
             options = emptyList(),
             checking = true,
+            downloadedModelId = prefs.downloadedTranscriptionModel,
         )
     }
         private set
@@ -100,6 +113,7 @@ internal class DictationEngineSelector(
                         caps,
                         resolution.support,
                         cloudKeySaved = it.sessionCloudModel.provider in it.savedKeys,
+                        downloaded = downloadedStatus(it.downloadedModelId),
                     ),
                     onDeviceLanguageTag = resolution.languageTag,
                     checking = false,
@@ -116,8 +130,16 @@ internal class DictationEngineSelector(
                 chosenMode = prefs.chosenMode,
                 cloudModel = CloudCatalog.transcriptionModel(prefs.cloudModelId),
                 languageId = DictationLanguages.normalized(prefs.languageId),
+                downloadedModelId = prefs.downloadedTranscriptionModel,
             )
         }
+        refresh()
+    }
+
+    /** Chooses the downloaded model Downloaded mode uses; a running session keeps the one it started with. */
+    fun chooseDownloadedModel(id: String?) {
+        prefs.downloadedTranscriptionModel = id
+        change { it.copy(downloadedModelId = id) }
         refresh()
     }
 
@@ -176,6 +198,7 @@ internal class DictationEngineSelector(
         RecognitionMode.Cloud -> SessionPlan.Cloud(selection.sessionCloudModel, selection.languageTag)
         RecognitionMode.OnDevice -> SessionPlan.Recognizer(mode, selection.onDeviceLanguageTag)
         RecognitionMode.SpeechService -> SessionPlan.Recognizer(mode, selection.languageTag)
+        RecognitionMode.Downloaded -> SessionPlan.Local(selection.downloadedModelId, selection.languageTag)
     }
 
     private fun change(transform: (EngineSelection) -> EngineSelection) {

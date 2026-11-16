@@ -7,6 +7,7 @@ import com.justspeaktoit.android.history.HistoryStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -101,5 +102,69 @@ class HistoryRetryTest {
     fun testEntryWithoutAudio_isReturnedUnchanged() {
         val entry = kept(folder.newFile("a.wav")).copy(audioPath = null)
         assertSame(entry, transcribe(entry))
+    }
+
+    private val local = FakeLocalTranscriber()
+    private val localModels = mutableMapOf<String, File>()
+    private val localRetry by lazy {
+        HistoryRetry(
+            cloud,
+            secrets,
+            CloudCapture(FakeRecorders(), folder.root, Dispatchers.IO),
+            Dispatchers.IO,
+            1_000,
+            DownloadedTranscription({ localModels[it] }, local),
+        )
+    }
+
+    private fun downloaded(audio: File) = kept(audio).copy(
+        mode = RecognitionMode.Downloaded.name,
+        model = BASE_MODEL,
+        status = HistoryStatus.Failed,
+        failure = DictationFailure.ModelMissing.name,
+    )
+
+    @Test
+    fun testDownloadedRetry_transcribesOnThePhoneWithTheChosenModel() {
+        val model = folder.newFile("ggml-small.bin")
+        localModels[SMALL_MODEL] = model
+        local.onTranscribe = { " on the phone " }
+        val audio = folder.newFile("a.wav")
+
+        val updated = runBlocking { localRetry.transcribeLocal(downloaded(audio), SMALL_MODEL, "de-DE") }
+
+        assertEquals(HistoryStatus.Completed, updated.status)
+        assertEquals("on the phone", updated.text)
+        assertEquals(SMALL_MODEL, updated.model)
+        assertEquals(RecognitionMode.Downloaded.name, updated.mode)
+        assertNull(updated.audioPath)
+        assertEquals(FakeLocalTranscriber.Call(model, audio, "de-DE"), local.calls.single())
+        assertTrue("a downloaded retry never uploads", cloud.transcriptions.isEmpty())
+    }
+
+    @Test
+    fun testDownloadedRetry_withoutTheModel_keepsTheEntryAndItsAudio() {
+        val entry = downloaded(folder.newFile("a.wav")).copy(failure = DictationFailure.LocalModelFailed.name)
+
+        val updated = runBlocking { localRetry.transcribeLocal(entry, BASE_MODEL, "en-GB") }
+
+        assertEquals(entry.copy(failure = DictationFailure.ModelMissing.name), updated)
+        assertTrue(local.calls.isEmpty())
+        assertTrue(cloud.transcriptions.isEmpty())
+    }
+
+    @Test
+    fun testUsesDownloadedModel_onlyForDownloadedEntriesAndRecoveriesInDownloadedMode() {
+        val audio = folder.newFile("a.wav")
+        assertTrue(HistoryRetry.usesDownloadedModel(downloaded(audio), RecognitionMode.Cloud))
+        assertFalse(HistoryRetry.usesDownloadedModel(kept(audio), RecognitionMode.Downloaded))
+        val recovered = kept(audio).copy(model = null)
+        assertTrue(HistoryRetry.usesDownloadedModel(recovered, RecognitionMode.Downloaded))
+        assertFalse(HistoryRetry.usesDownloadedModel(recovered, RecognitionMode.Cloud))
+    }
+
+    private companion object {
+        const val BASE_MODEL = "local/whisperkit/base"
+        const val SMALL_MODEL = "local/whisperkit/small"
     }
 }

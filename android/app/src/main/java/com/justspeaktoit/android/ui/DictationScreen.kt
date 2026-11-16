@@ -33,6 +33,7 @@ import com.justspeaktoit.android.R
 import com.justspeaktoit.android.cloud.AudioInputChoice
 import com.justspeaktoit.android.dictation.DictationUiState
 import com.justspeaktoit.android.dictation.RecognitionMode
+import com.justspeaktoit.android.dictation.recordsAudio
 import kotlinx.coroutines.flow.StateFlow
 
 // The dictation screen: header, mode picker (ModeSection.kt), transcript and its
@@ -146,10 +147,10 @@ private fun SharedAudioDialog(state: DictationUiState, actions: DictationActions
     )
 }
 
-/** Says when a Cloud recording will use the system default because the chosen microphone is gone. */
+/** Says when a recording will use the system default because the chosen microphone is gone. */
 @Composable
 private fun MicrophoneFallbackNotice(state: DictationUiState) {
-    if (state.displayedMode != RecognitionMode.Cloud || state.audioInputChoice !is AudioInputChoice.Unavailable) return
+    if (state.displayedMode?.recordsAudio != true || state.audioInputChoice !is AudioInputChoice.Unavailable) return
     Text(
         stringResource(R.string.microphone_unavailable),
         color = MaterialTheme.colorScheme.error,

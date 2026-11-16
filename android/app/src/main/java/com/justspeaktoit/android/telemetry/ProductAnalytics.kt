@@ -74,6 +74,8 @@ enum class ProviderType(val raw: String, private val providerId: String = raw) {
     Meta("meta"),
     Smallest("smallest"),
     XAI("xai"),
+    /** A downloaded model running on the phone. */
+    Local("local"),
     Other("other"),
     ;
 

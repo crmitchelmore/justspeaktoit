@@ -32,16 +32,16 @@ internal sealed interface InterruptionAction {
 }
 
 /**
- * Decides what an interruption does to a capturing session. Only Cloud capture asks for audio focus,
- * because the platform recogniser manages its own and cannot pause, so only Cloud pauses on a
- * transient loss and resumes on gain. Calls and microphone route changes end any session: the audio
+ * Decides what an interruption does to a capturing session. Only a recording (Cloud or Downloaded) asks
+ * for audio focus, because the platform recogniser manages its own and cannot pause, so only a
+ * recording pauses on a transient loss and resumes on gain. Calls and microphone route changes end any session: the audio
  * after them would be silence or a different microphone, and a session never switches silently.
  */
 internal object InterruptionPolicy {
     fun decide(signal: InterruptionSignal, mode: RecognitionMode, paused: Boolean): InterruptionAction =
         when (signal) {
             InterruptionSignal.FocusLostTransient ->
-                if (mode == RecognitionMode.Cloud && !paused) InterruptionAction.Pause else InterruptionAction.None
+                if (mode.recordsAudio && !paused) InterruptionAction.Pause else InterruptionAction.None
             InterruptionSignal.FocusGained -> if (paused) InterruptionAction.Resume else InterruptionAction.None
             InterruptionSignal.FocusLost -> InterruptionAction.Stop(DictationFailure.AudioFocusLost)
             InterruptionSignal.CallStarted -> InterruptionAction.Stop(DictationFailure.InterruptedByCall)

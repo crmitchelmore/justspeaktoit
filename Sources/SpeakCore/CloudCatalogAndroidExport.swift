@@ -84,19 +84,6 @@ public enum CloudCatalogAndroidExport {
         return nil
     }
 
-    /// Live providers whose WebSocket protocol Android implements, in catalogue order.
-    static let liveProviderIDs: Set<LiveTranscriptionProviderID> = [.deepgram, .assemblyai, .openai]
-
-    /// The live models Android streams, in catalogue order: every current route of an Android live
-    /// provider. A new route of one of these providers appears on Android without edits here.
-    static var liveTranscriptionModels: [ModelCatalog.Option] {
-        ModelCatalog.liveTranscription.filter { option in
-            guard let route = LiveTranscriptionRouting.route(for: option.id),
-                  liveProviderIDs.contains(route.provider) else { return false }
-            return ModelRetirements.retirement(for: option.id) == nil
-        }
-    }
-
     /// Cleanup models Android offers, in catalogue order: native provider routes, then OpenRouter
     /// slugs. On-device and Apple cleanup engines are Mac-only.
     static var cleanupModels: [ModelCatalog.Option] { ModelCatalog.cloudPostProcessing }
@@ -132,18 +119,6 @@ public enum CloudCatalogAndroidExport {
         let languageHints: [String: String]?
         /// Whether the provider takes only the 16 kHz mono 16-bit WAV Android records (Meta, Inkling).
         let requiresPCM16WAV: Bool
-    }
-
-    private struct LiveModel: Encodable {
-        let catalogId, displayName, provider, apiName: String
-        let sampleRate: Int
-        /// The wire field for the spoken-language hint, or empty when the route takes none.
-        let languageField: String
-        /// The wire field for the vocabulary (`prompt`, `keyterm`, `keywords`, `keyterms_prompt`),
-        /// or empty when the route takes none.
-        let vocabularyField: String
-        /// `LiveModelCapabilities.postStopFinalizeBudget`, in milliseconds.
-        let postStopFinalizeBudgetMs: Int
     }
 
     private struct Language: Encodable {
@@ -305,42 +280,6 @@ public enum CloudCatalogAndroidExport {
         )
     }
 
-    private static func exportedLive(_ option: ModelCatalog.Option) -> LiveModel? {
-        guard let route = LiveTranscriptionRouting.route(for: option.id) else { return nil }
-        let capabilities = ModelCatalog.liveCapabilities(for: option.id)
-        let api = route.apiModelName
-        let languageField: String
-        let vocabularyField: String
-        switch route.provider {
-        case .openai:
-            languageField = OpenAITranscriptionModels.usesLanguageHintsArray(api) ? "languages" : "language"
-            vocabularyField = OpenAITranscriptionModels.supportsRealtimePrompt(api) ? "prompt" : ""
-        case .deepgram:
-            languageField = api == "flux-general-multi" ? "language_hint" : "language"
-            vocabularyField = TranscriptionKeywordPolicy.deepgramQuery(model: api, words: ["x"]).first?.name ?? ""
-        default:
-            languageField = ""
-            vocabularyField = "keyterms_prompt"
-        }
-        return LiveModel(
-            catalogId: option.id, displayName: option.displayName, provider: route.provider.rawValue,
-            apiName: api, sampleRate: route.sampleRate,
-            languageField: capabilities.supportsLanguageHint ? languageField : "",
-            vocabularyField: vocabularyField,
-            postStopFinalizeBudgetMs: Int((capabilities.postStopFinalizeBudget * 1000).rounded())
-        )
-    }
-
-    /// Models whose Android client reads the recording as canonical 16 kHz PCM16 WAV: Meta, Azure
-    /// (sent as Meta's WAV, as on the desktop hosts), Alibaba (whose duration and silence checks read
-    /// the samples) and OpenRouter's WAV-only audio models.
-    static func requiresPCM16WAV(_ catalogID: String) -> Bool {
-        catalogID == MetaMuseVoiceTranscribe.batchCatalogID
-            || AzureTranscriptionModels.batchIDs.contains(catalogID)
-            || AlibabaSpeechModels.batchIDs.contains(catalogID)
-            || OpenRouterInlineAudioTranscriptionClient.requiresCanonicalPCM16WAV(model: catalogID)
-    }
-
     private static func exportedCleanup(_ option: ModelCatalog.Option) -> CleanupModel {
         if let route = NativeTextModels.route(for: option.id) {
             return CleanupModel(
@@ -398,5 +337,17 @@ public enum CloudCatalogAndroidExport {
 
     private static func providerID(of catalogID: String) -> String {
         String(catalogID.prefix { $0 != "/" })
+    }
+}
+
+extension CloudCatalogAndroidExport {
+    /// Models whose Android client reads the recording as canonical 16 kHz PCM16 WAV: Meta, Azure
+    /// (sent as Meta's WAV, as on the desktop hosts), Alibaba (whose duration and silence checks read
+    /// the samples) and OpenRouter's WAV-only audio models.
+    static func requiresPCM16WAV(_ catalogID: String) -> Bool {
+        catalogID == MetaMuseVoiceTranscribe.batchCatalogID
+            || AzureTranscriptionModels.batchIDs.contains(catalogID)
+            || AlibabaSpeechModels.batchIDs.contains(catalogID)
+            || OpenRouterInlineAudioTranscriptionClient.requiresCanonicalPCM16WAV(model: catalogID)
     }
 }

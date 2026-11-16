@@ -309,10 +309,11 @@ sessions:
         prerequisites:
           - "Steps: Docs/windows-installer.md (Owner steps: Microsoft Store, step 4)"
           - "Deadline: the name reservation lapses unless a submission is made by 13 February 2027."
+          - "Submission 1 is drafted with pricing, properties, age rating, the en-GB listing and certification notes; only the package, capability justifications and submit remain."
         steps:
-          - "In GitHub Actions run Microsoft Store (windows-store.yml) on main with the newest Stable candidate or Alpha tag as manifest, then download the windows-store-bundle artifact."
-          - "In Partner Center open Apps and games \u203a Just Speak to It and start a submission; upload the .msixbundle under Packages."
-          - "Set pricing and markets, the privacy policy URL, the age rating questionnaire and the Store listing."
+          - "Email storeops@microsoft.com asking for the HeadlessAppBypass waiver for Store ID 9PDFKWGH31HP (the speak CLI has no Start menu entry); wait until it is granted."
+          - "In GitHub Actions run Microsoft Store (windows-store.yml) on main, then download the windows-store-bundle artifact."
+          - "In Partner Center open Apps and games \u203a Just Speak to It \u203a Submission 1 and upload the .msixbundle under Packages."
           - "Justify the restricted capabilities runFullTrust (inserts dictated text into other apps) and unvirtualizedResources (keeps History and settings in %LOCALAPPDATA%\\JustSpeakToIt)."
           - "Submit for certification and note the outcome on #1157."
         expected: "Store ID 9PDFKWGH31HP has a submission in certification or published, so later Stable releases can update it through the API."
@@ -327,11 +328,11 @@ sessions:
         prerequisites:
           - "Steps: Docs/windows-installer.md (Owner steps: Microsoft Store, step 5)"
         steps:
-          - "In Partner Center open Account settings \u203a User management \u203a Microsoft Entra applications and create (or add) an Entra application."
+          - "In Partner Center open Account settings \u203a Tenants and create or associate a Microsoft Entra tenant (the account currently has none), then sign in with its admin account."
+          - "Open Account settings \u203a User management \u203a Microsoft Entra applications and create (or add) an Entra application."
           - "Give it the Manager role, then copy its Tenant ID and Client ID and add a new key, copying the client secret."
-          - "Copy the Seller ID from Account settings \u203a Legal info \u203a Developer."
-          - "In GitHub create the environment microsoft-store, limited to the main branch only."
-          - "Add the environment secrets MICROSOFT_STORE_TENANT_ID, MICROSOFT_STORE_CLIENT_ID, MICROSOFT_STORE_CLIENT_SECRET and MICROSOFT_STORE_SELLER_ID."
+          - "The GitHub environment microsoft-store already exists, limited to main; the Seller ID is 97333940."
+          - "Add the environment secrets MICROSOFT_STORE_TENANT_ID, MICROSOFT_STORE_CLIENT_ID, MICROSOFT_STORE_CLIENT_SECRET and MICROSOFT_STORE_SELLER_ID together."
         expected: "After the first submission is live, the next Publish Stable run's submit-microsoft-store job submits the Store bundle instead of skipping with a notice."
         final_gate: false
       - id: "owner-android-apk-install"

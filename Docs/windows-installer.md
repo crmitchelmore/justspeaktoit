@@ -161,7 +161,11 @@ secrets, read only by the `submit` job:
 | `MICROSOFT_STORE_TENANT_ID` | Microsoft Entra tenant ID (Directory ID) |
 | `MICROSOFT_STORE_CLIENT_ID` | The Entra application's client ID |
 | `MICROSOFT_STORE_CLIENT_SECRET` | A client secret (key) of that application |
-| `MICROSOFT_STORE_SELLER_ID` | Partner Center Seller ID (Account settings > Legal info > Developer) |
+| `MICROSOFT_STORE_SELLER_ID` | Partner Center Seller ID (Account settings > Legal info > Developer): `97333940` |
+
+The environment exists with a `main`-only deployment branch policy. Its
+secrets stay empty until all four can be set together, because a partial set
+fails the `submit` job.
 
 **Limits.** The [submission API](https://learn.microsoft.com/windows/uwp/monetize/create-and-manage-submissions-using-windows-store-services)
 updates a product that already has a published submission, so the first
@@ -172,6 +176,13 @@ packages and keeps the listing. The package version is the Stable build's
 Store requires. `runFullTrust` and `unvirtualizedResources` are restricted
 capabilities: certification may refuse `unvirtualizedResources`, which would
 need a different data design ([File system](#file-system-and-user-data)).
+
+**Headless app waiver.** The CLI application (`JustSpeakToItCLI`, `speak.exe`)
+has `AppListEntry="none"`, so Partner Center rejects the package during
+upload validation as a headless app unless the product has the
+`HeadlessAppBypass` waiver. Microsoft grants it on request to
+`storeops@microsoft.com` (quote the Store ID); it must be in place before the
+bundle is uploaded.
 
 ## Identity and version
 
@@ -424,37 +435,53 @@ Done by the owner only; each step creates an account or accepts terms.
    [Microsoft Store package](#microsoft-store-package), and the Store bundle
    and submission job exist.
 4. **First submission, by hand** (`owner-microsoft-store-first-submission`).
-   Run **Microsoft Store** (`windows-store.yml`) from `main` with the newest
-   Stable candidate (or Alpha) tag as `manifest`, and download the
-   `windows-store-bundle` artifact. In Partner Center > Apps and games > Just
-   Speak to It, start a submission: upload the `.msixbundle` under Packages,
-   set pricing and markets, a privacy policy URL, the age rating
-   questionnaire and the Store listing, and justify the restricted
-   capabilities `runFullTrust` (a desktop app that inserts dictated text into
-   other apps) and `unvirtualizedResources` (keeps History and settings in
-   `%LOCALAPPDATA%\JustSpeakToIt`, shared with the portable build). Submit
-   before 13 February 2027.
+   Submission 1 is in draft. Done (16 November 2026): pricing (free, all
+   markets), properties (Productivity, privacy policy
+   <https://justspeaktoit.com/privacy>, support
+   <https://justspeaktoit.com/support>, generative AI declaration, microphone
+   required), age rating (IARC 3+ / ESRB Everyone), the English (United
+   Kingdom) Store listing with four 1920x1080 screenshots, and the
+   certification notes (Additional Testing Information) that explain the
+   restricted capabilities and the CLI alias. Remaining:
+   1. Email `storeops@microsoft.com` asking for the `HeadlessAppBypass`
+      waiver for Store ID `9PDFKWGH31HP` (see
+      [Microsoft Store package](#microsoft-store-package)). Without it the
+      upload is rejected.
+   2. Once granted, run **Microsoft Store** (`windows-store.yml`) from
+      `main` and download the `windows-store-bundle` artifact (a dispatch
+      without a manifest also builds it). Upload the `.msixbundle` under
+      Packages.
+   3. Under Submission options, justify the restricted capabilities
+      `runFullTrust` (a desktop app that inserts dictated text into other
+      apps) and `unvirtualizedResources` (keeps History and settings in
+      `%LOCALAPPDATA%\JustSpeakToIt`, shared with the portable build).
+   4. Submit for certification before 13 February 2027.
 5. **Automated submission** (`owner-microsoft-store-api`):
-   1. In Partner Center, open **Account settings** (gear icon) > **User
-      management** > **Microsoft Entra applications**, and choose **Create
+   1. The developer account signs in with a personal Microsoft account and
+      has no Microsoft Entra tenant, so Partner Center cannot create Entra
+      applications yet. In Partner Center open **Account settings** >
+      **Tenants** and choose **Create Microsoft Entra ID** (or **Associate
+      Microsoft Entra ID** with an existing tenant you are a global admin
+      of), then sign in to Partner Center with that tenant's admin account.
+   2. In **Account settings** (gear icon) > **User
+      management** > **Microsoft Entra applications**, choose **Create
       Microsoft Entra application** (or **Add Microsoft Entra application**
       to use an existing one). Name it, for example, "JustSpeakToIt Store
       submission".
-   2. Give it the **Manager** role and save.
-   3. Open the application, copy its **Tenant ID** and **Client ID**, and
+   3. Give it the **Manager** role and save.
+   4. Open the application, copy its **Tenant ID** and **Client ID**, and
       under **Keys** choose **Add new key**; copy the client secret at once
       (it is shown once) and note its expiry.
-   4. Copy the **Seller ID** from **Account settings** > **Legal info** >
-      **Developer**.
-   5. In GitHub, **Settings** > **Environments** > **New environment**
-      `microsoft-store`. Under **Deployment branches and tags** choose
-      **Selected branches and tags** and add only `main`.
-   6. Add the environment secrets `MICROSOFT_STORE_TENANT_ID`,
+   5. The **Seller ID** is `97333940` (**Account settings** > **Legal info**
+      > **Developer**).
+   6. Done (16 November 2026): the GitHub environment `microsoft-store`
+      exists, limited to `main`.
+   7. Add the environment secrets `MICROSOFT_STORE_TENANT_ID`,
       `MICROSOFT_STORE_CLIENT_ID`, `MICROSOFT_STORE_CLIENT_SECRET` and
-      `MICROSOFT_STORE_SELLER_ID`, for example
+      `MICROSOFT_STORE_SELLER_ID` together, for example
       `gh secret set MICROSOFT_STORE_CLIENT_SECRET --env microsoft-store`.
       Never add them as repository secrets.
-   7. After the first submission is live, the next **Publish Stable** submits
+   8. After the first submission is live, the next **Publish Stable** submits
       automatically. Renew the client secret before it expires.
 
 #### Owner steps: SignPath Foundation (direct download)

@@ -43,7 +43,7 @@ class KeyboardPolicyTest {
     }
 
     @Test
-    fun testMode_neverUsesCloudAndNeverReplacesAnUnusableChoice() {
+    fun testMode_withoutOptIn_neverUsesCloudAndNeverReplacesAnUnusableChoice() {
         val both = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = true)
         val options = RecognizerAvailability.evaluate(both, LanguageSupport.Installed, cloudKeySaved = true)
         assertEquals(RecognitionMode.OnDevice, KeyboardPolicy.mode(null, options))
@@ -56,6 +56,33 @@ class KeyboardPolicyTest {
 
         val none = RecognizerCapabilities(34, speechServiceAvailable = false, onDeviceAvailable = false)
         assertNull(KeyboardPolicy.mode(null, RecognizerAvailability.evaluate(none, LanguageSupport.Unknown, true)))
+    }
+
+    @Test
+    fun testMode_optedInWithLiveModel_usesChosenCloudOnly() {
+        val both = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = true)
+        val options = RecognizerAvailability.evaluate(both, LanguageSupport.Installed, cloudKeySaved = true)
+        assertEquals(RecognitionMode.Cloud, KeyboardPolicy.mode(RecognitionMode.Cloud, options, KeyboardCloud.Live))
+        // Automatic and explicit local choices never become Cloud, even when opted in.
+        assertEquals(RecognitionMode.OnDevice, KeyboardPolicy.mode(null, options, KeyboardCloud.Live))
+        assertEquals(
+            RecognitionMode.SpeechService,
+            KeyboardPolicy.mode(RecognitionMode.SpeechService, options, KeyboardCloud.Live),
+        )
+    }
+
+    @Test
+    fun testMode_optedInWithBatchModel_failsInsteadOfFallingBack() {
+        val both = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = true)
+        val options = RecognizerAvailability.evaluate(both, LanguageSupport.Installed, cloudKeySaved = true)
+        assertNull(KeyboardPolicy.mode(RecognitionMode.Cloud, options, KeyboardCloud.NotLive))
+    }
+
+    @Test
+    fun testCloud_requiresOptInAndALiveModel() {
+        assertEquals(KeyboardCloud.Off, KeyboardPolicy.cloud(optedIn = false, liveModel = true))
+        assertEquals(KeyboardCloud.Live, KeyboardPolicy.cloud(optedIn = true, liveModel = true))
+        assertEquals(KeyboardCloud.NotLive, KeyboardPolicy.cloud(optedIn = true, liveModel = false))
     }
 
     @Test

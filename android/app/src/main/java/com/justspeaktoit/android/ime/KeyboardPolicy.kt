@@ -31,17 +31,41 @@ object KeyboardPolicy {
             (imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
 
     /**
-     * The keyboard never uses the app's Cloud (BYOK) providers until their privacy UX is reviewed
-     * (see Docs/android-input-surfaces.md); a saved Cloud choice is treated as no choice. An explicit
-     * on-device or speech-service choice is honoured and never silently replaced if unusable.
+     * How long a stopped keyboard session may take to produce its final text, for every route. It
+     * matches the speech recogniser's own finalise deadline; a live Cloud stream that has not settled
+     * by then fails visibly.
      */
-    fun mode(chosen: RecognitionMode?, options: List<ModeAvailability>): RecognitionMode? {
+    const val FINISH_TIMEOUT_MS = 10_000L
+
+    /**
+     * Picks the keyboard's recogniser. A saved Cloud choice is used only after the user opted the
+     * keyboard in to live Cloud models in Settings, and only when the session's Cloud model streams
+     * live ([KeyboardCloud.Live]); a batch model is never uploaded instead and returns null, so the
+     * keyboard says why rather than switching route. Without the opt-in a Cloud choice is treated as
+     * no choice. Automatic never picks Cloud, and an explicit on-device or speech-service choice is
+     * honoured and never silently replaced if unusable.
+     */
+    fun mode(
+        chosen: RecognitionMode?,
+        options: List<ModeAvailability>,
+        cloud: KeyboardCloud = KeyboardCloud.Off,
+    ): RecognitionMode? {
+        if (chosen == RecognitionMode.Cloud && cloud != KeyboardCloud.Off) {
+            return RecognitionMode.Cloud.takeIf { cloud == KeyboardCloud.Live }
+        }
         val local = options.filter { it.mode != RecognitionMode.Cloud }
         return if (chosen != null && chosen != RecognitionMode.Cloud) {
             chosen.takeIf { mode -> local.any { it.mode == mode && it.usable } }
         } else {
             RecognizerAvailability.defaultMode(local)
         }
+    }
+
+    /** What the opt-in allows for a session, given whether the session's Cloud model streams live. */
+    fun cloud(optedIn: Boolean, liveModel: Boolean): KeyboardCloud = when {
+        !optedIn -> KeyboardCloud.Off
+        liveModel -> KeyboardCloud.Live
+        else -> KeyboardCloud.NotLive
     }
 
     /**
@@ -58,4 +82,16 @@ object KeyboardPolicy {
         val last = before?.lastOrNull() ?: return text
         return if (last.isWhitespace() || last in "([{\"'") text else " $text"
     }
+}
+
+/** Whether the keyboard may use the app's Cloud (BYOK) mode for a session. */
+enum class KeyboardCloud {
+    /** The user has not opted the keyboard in, so a Cloud choice is treated as no choice. */
+    Off,
+
+    /** Opted in, and the session's Cloud model streams live. */
+    Live,
+
+    /** Opted in, but the session's Cloud model is batch only, which the keyboard does not upload. */
+    NotLive,
 }

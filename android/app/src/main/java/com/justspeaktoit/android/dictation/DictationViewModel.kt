@@ -166,6 +166,7 @@ class DictationViewModel internal constructor(
             keepAudioOnCancel = prefs.keepAudioOnCancel,
             silence = prefs.silence,
             handsFreeEnabled = prefs.handsFreeEnabled,
+            keyboardLiveCloudEnabled = prefs.keyboardLiveCloudEnabled,
             keepRecordings = prefs.keepRecordings,
             corrections = prefs.corrections,
             learnCorrections = prefs.learnCorrections,
@@ -565,6 +566,7 @@ class DictationViewModel internal constructor(
                 "cleanupModelDiscoveryEnabled" -> setCleanupModelDiscovery(value as Boolean)
                 "keepAudioOnCancel" -> setKeepAudioOnCancel(value as Boolean)
                 "handsFreeDictationEnabled" -> setHandsFree(value as Boolean)
+                "keyboardLiveCloudEnabled" -> setKeyboardLiveCloud(value as Boolean)
                 "history_retention" -> setRetention(Retention.valueOf(value as String))
                 "keepRecordingsInHistory" -> setKeepRecordings(value as Boolean)
                 "silenceDetectionEnabled" -> setSilence(_state.value.silence.copy(enabled = value as Boolean))
@@ -605,6 +607,12 @@ class DictationViewModel internal constructor(
         prefs.handsFreeEnabled = enabled
         _state.update { it.copy(handsFreeEnabled = enabled) }
         if (!enabled) handsFree.disarm()
+    }
+
+    /** Lets the dictation keyboard stream to the live Cloud model; it reads this when a session starts. */
+    fun setKeyboardLiveCloud(enabled: Boolean) {
+        prefs.keyboardLiveCloudEnabled = enabled
+        _state.update { it.copy(keyboardLiveCloudEnabled = enabled) }
     }
 
     fun setAppearance(appearance: AppAppearance, dynamicColor: Boolean) {

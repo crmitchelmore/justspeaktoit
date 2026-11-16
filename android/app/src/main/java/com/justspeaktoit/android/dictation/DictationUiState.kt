@@ -79,6 +79,8 @@ data class DictationUiState(
     val silence: SilenceSettings = SilenceSettings(),
     /** Whether the record button arms hands-free dictation; Cloud mode only. */
     val handsFreeEnabled: Boolean = false,
+    /** Whether the dictation keyboard may stream to the live Cloud model; an explicit opt-in. */
+    val keyboardLiveCloudEnabled: Boolean = false,
     val handsFree: HandsFreeStatus = HandsFreeStatus.Off,
     /** Finished Cloud recordings stay in History to play back or transcribe again. */
     val keepRecordings: Boolean = false,

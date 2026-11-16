@@ -129,6 +129,16 @@ extension SettingsSearchCatalog {
             settingKeys: ["handsFreeDictationEnabled"], platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.keyboardLiveCloud", title: "Dictation keyboard", section: .general,
+            systemImage: "keyboard",
+            summary: "Let the keyboard stream to your live Cloud model, showing text as you speak.",
+            keywords: [
+                "keyboard", "IME", "live", "streaming", "cloud", "BYOK", "partial", "real-time",
+                "use live cloud models in the keyboard"
+            ],
+            settingKeys: ["keyboardLiveCloudEnabled"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.appearance", title: "Appearance", section: .general, systemImage: "paintpalette",
             summary: "Light, dark or the phone's theme, and wallpaper colours on Android 12 and later.",
             keywords: [

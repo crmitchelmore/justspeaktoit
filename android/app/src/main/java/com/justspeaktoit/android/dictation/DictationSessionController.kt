@@ -87,7 +87,7 @@ internal class DictationSessionController(
     private val engine: SpeechEngine,
     private val capture: CloudCapture,
     private val requests: SessionRequests,
-    private val history: DictationHistory,
+    private val history: SessionHistory,
     private val resources: SystemResourceRegistry,
     private val scope: CoroutineScope,
     private val cacheDir: File,
@@ -95,6 +95,8 @@ internal class DictationSessionController(
     private val cues: RecordingCues = RecordingCues.Silent,
     private val publish: (SessionState) -> Unit,
     private val liveSessions: LiveSessions = LiveSessions.Default,
+    /** Names the microphone's holder in Settings > System resources. */
+    private val microphoneOwner: String = "DictationViewModel",
 ) {
     var state = SessionState()
         private set
@@ -512,7 +514,7 @@ internal class DictationSessionController(
                     RecognitionMode.SpeechService -> "Listening through the speech recognition service"
                     else -> "Listening with on-device recognition"
                 },
-                owner = "DictationViewModel",
+                owner = microphoneOwner,
                 releaseTitle = "Stop recording",
                 release = { cancel() },
             )

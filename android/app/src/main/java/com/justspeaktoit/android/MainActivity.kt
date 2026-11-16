@@ -192,6 +192,7 @@ class MainActivity : ComponentActivity() {
                                 onKeepAudioOnCancelChanged = viewModel::setKeepAudioOnCancel,
                                 onSilenceChanged = viewModel::setSilence,
                                 onHandsFreeChanged = viewModel::setHandsFree,
+                                onKeyboardLiveCloudChanged = viewModel::setKeyboardLiveCloud,
                                 onKeepRecordingsChanged = viewModel::setKeepRecordings,
                                 onChooseCleanupModel = viewModel::chooseCleanupModel,
                                 onChooseTranscriptionId = viewModel::chooseTranscriptionModel,

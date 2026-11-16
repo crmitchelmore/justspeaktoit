@@ -58,6 +58,9 @@ interface DictationPreferences {
     /** Whether the record button arms hands-free dictation for Cloud recordings. */
     var handsFreeEnabled: Boolean
 
+    /** Whether the dictation keyboard may stream to the app's live Cloud model; off until the user opts in. */
+    var keyboardLiveCloudEnabled: Boolean
+
     var appearance: AppAppearance
 
     /** Wallpaper (Material You) colours instead of the brand palette; Android 12 and later only. */
@@ -196,6 +199,10 @@ class AppPreferences(context: Context) : DictationPreferences {
         get() = prefs.getBoolean(KEY_HANDS_FREE, false)
         set(value) = prefs.edit { putBoolean(KEY_HANDS_FREE, value) }
 
+    override var keyboardLiveCloudEnabled: Boolean
+        get() = prefs.getBoolean(KEY_KEYBOARD_LIVE_CLOUD, false)
+        set(value) = prefs.edit { putBoolean(KEY_KEYBOARD_LIVE_CLOUD, value) }
+
     /** Whether the first-run guide was finished or skipped; null on installs that never decided. */
     var hasCompletedOnboarding: Boolean?
         get() = if (prefs.contains(KEY_ONBOARDING)) prefs.getBoolean(KEY_ONBOARDING, false) else null
@@ -264,6 +271,9 @@ class AppPreferences(context: Context) : DictationPreferences {
 
         /** The canonical cross-platform key (SpeakCore `SharedApplicationPreference.handsFreeDictationEnabled`). */
         private const val KEY_HANDS_FREE = "handsFreeDictationEnabled"
+
+        /** Android only: the other platforms' keyboards have no live Cloud route. */
+        private const val KEY_KEYBOARD_LIVE_CLOUD = "keyboardLiveCloudEnabled"
 
         /** The Mac's onboarding key, so every platform records completion under one name. */
         private const val KEY_ONBOARDING = "hasCompletedOnboarding"

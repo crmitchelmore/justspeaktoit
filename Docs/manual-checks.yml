@@ -1700,6 +1700,22 @@ sessions:
           - "With TalkBack on, focus the Edit key with and without a selection."
         expected: "Edit is enabled only with a selection. The rewrite replaces only the selected words and the rest of the sentence is unchanged. Moving away or changing the selection leaves the text as it was with a message that it changed, Airplane mode leaves it unchanged with a network message, and a missing key names the provider without recording. TalkBack reads Edit with its state and a description of what it does."
         final_gate: false
+      - id: "owner-android-keyboard-live-cloud"
+        issues:
+          - 1668
+        title: "Dictation keyboard: opt-in live Cloud dictation shows words while speaking"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1668"
+        steps:
+          - "In the app choose Cloud mode with OpenAI GPT Live Transcribe (Streaming) and a saved OpenAI key. Leave Settings > Dictation keyboard > Use live Cloud models in the keyboard off, and dictate a sentence with the Just Speak to It keyboard in a notes app."
+          - "Turn the setting on, read its note, then dictate three sentences with the keyboard, pausing between them, and tap Stop mid-word."
+          - "Start another keyboard dictation, open Settings > System resources in use from the app and stop the microphone."
+          - "Start another one, say a sentence and turn on Airplane mode while still talking, then tap Stop."
+          - "Choose a batch Cloud model such as GPT Transcribe, then tap the keyboard's microphone. Choose the live model again, remove the OpenAI key and tap it again."
+          - "With TalkBack on, focus the new setting."
+        expected: "Off, the keyboard dictates on the phone as before. On, the note and status line name OpenAI, words appear underlined while speaking and Stop types the full text within 10 seconds. Stopping from System resources or Airplane mode removes the underlined words, shows why and types nothing. The batch model and the missing key each show a message and never dictate on the phone instead. Nothing from the keyboard appears in History. TalkBack reads the setting's name, state and switch role."
+        final_gate: false
       - id: "android-raw-configuration-editor"
         issues:
           - 1608

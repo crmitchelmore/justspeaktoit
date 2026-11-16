@@ -9,6 +9,7 @@ import com.justspeaktoit.android.history.Retention
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -46,11 +47,14 @@ class DictationHistoryTest {
     private val recordingsDir by lazy { folder.newFolder("recordings") }
     private val published = CopyOnWriteArrayList<Pair<List<HistoryEntry>, Boolean>>()
 
+    private val localChanges = AtomicInteger()
+
     private fun CoroutineScope.history() = DictationHistory(
         store,
         recordingsDir,
         scope = this,
         io = Dispatchers.IO,
+        onLocalChange = { localChanges.incrementAndGet() },
         publish = { entries, failed -> published += entries to failed },
         now = { clock.incrementAndGet() },
         newId = { "id-${ids.incrementAndGet()}" },
@@ -129,6 +133,46 @@ class DictationHistoryTest {
     }
 
     @Test
+    fun testCleanup_keepsTheOriginalTranscriptAsRawText() = runBlocking {
+        val history = history()
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "hello"), null, Retention.Month)
+        history.replaceSessionText("Hello.", cleanedUp = true, Retention.Month)
+        history.replaceSessionText("Hello!", cleanedUp = true, Retention.Month)?.join()
+        assertEquals("hello", latest.single().rawText)
+
+        history.replaceSessionText("hello", cleanedUp = false, Retention.Month)?.join()
+        assertNull(latest.single().rawText)
+    }
+
+    @Test
+    fun testSyncUpdate_publishesWithoutReportingALocalChange() = runBlocking {
+        val history = history()
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "hello"), null, Retention.Month)?.join()
+        assertEquals(1, localChanges.get())
+
+        val count = history.syncUpdate(Retention.Month) { entries ->
+            (entries + entries.single().copy(id = "remote", text = "from the mac")) to entries.size
+        }
+        // The publish is posted to this scope, so let it run.
+        yield()
+        assertEquals(1, count)
+        assertEquals(1, localChanges.get())
+        assertEquals(setOf("hello", "from the mac"), latest.map { it.text }.toSet())
+        assertEquals(2, history.syncSnapshot(Retention.Month).size)
+    }
+
+    @Test
+    fun testImportEntries_reportsALocalChangeSoSyncUploadsIt() = runBlocking {
+        val history = history()
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "hello"), null, Retention.Month)?.join()
+        assertEquals(1, localChanges.get())
+
+        history.importEntries(Retention.Month) { entries -> entries + entries.single().copy(id = "imported") }
+        assertEquals(2, localChanges.get())
+        assertEquals(2, latest.size)
+    }
+
+    @Test
     fun testOnDeviceSession_recordsNoModel_andFailureIsKeptWithItsText() = runBlocking {
         history().recordSession(
             DictationState.Failed(RecognitionMode.OnDevice, DictationFailure.Audio, "half a sen"),
@@ -145,9 +189,9 @@ class DictationHistoryTest {
     @Test
     fun testWritesApplyInCallOrder() = runBlocking {
         val history = history()
-        repeat(20) { history.recordSession(DictationState.Done(RecognitionMode.Cloud, "t$it"), null, Retention.Month) }
+        repeat(100) { history.recordSession(DictationState.Done(RecognitionMode.Cloud, "t$it"), null, Retention.Month) }
         history.clear().join()
-        assertEquals((1..20).toList() + 0, published.map { it.first.size })
+        assertEquals((1..100).toList() + 0, published.map { it.first.size })
     }
 
     @Test
@@ -170,6 +214,51 @@ class DictationHistoryTest {
         history().keepRecording(missing, null, Retention.Month).join()
         assertEquals(emptyList<HistoryEntry>(), latest)
         assertFalse(File(recordingsDir, "id-1.wav").exists())
+    }
+
+    @Test
+    fun testRecordSession_withAudio_keepsTheRecordingBesideTheEntry() = runBlocking {
+        val history = history()
+        val source = folder.newFile("dictation.wav").apply { writeText("audio") }
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "hello"), null, Retention.Month, source)
+        history.replaceSessionText("Hello.", cleanedUp = true, Retention.Month)?.join()
+
+        val entry = latest.single()
+        assertEquals("Hello.", entry.text)
+        assertEquals(File(recordingsDir, "id-1.wav").absolutePath, entry.audioPath)
+        assertEquals("audio", File(checkNotNull(entry.audioPath)).readText())
+        assertFalse(source.exists())
+    }
+
+    @Test
+    fun testRecordSession_withHistoryOffOrNoSession_deletesTheAudio() = runBlocking {
+        val history = history()
+        val off = folder.newFile("off.wav").apply { writeText("audio") }
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "hello"), null, Retention.Off, off)?.join()
+        val idle = folder.newFile("idle.wav").apply { writeText("audio") }
+        assertNull(history.recordSession(DictationState.Idle, null, Retention.Month, idle))
+
+        assertTrue(latest.isEmpty())
+        assertFalse(off.exists())
+        assertFalse(idle.exists())
+        assertTrue(recordingsDir.listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun testClearKeepingRecordings_keepsOnlyEntriesWithAudio() = runBlocking {
+        val history = history()
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "text only"), null, Retention.Month)
+        val source = folder.newFile("dictation.wav").apply { writeText("audio") }
+        history.recordSession(DictationState.Done(RecognitionMode.Cloud, "with audio"), null, Retention.Month, source)
+        history.clear(keepRecordings = true, Retention.Month).join()
+
+        val entry = latest.single()
+        assertEquals("with audio", entry.text)
+        assertTrue(File(checkNotNull(entry.audioPath)).exists())
+
+        history.clear().join()
+        assertTrue(latest.isEmpty())
+        assertTrue(recordingsDir.listFiles().orEmpty().isEmpty())
     }
 
     @Test

@@ -91,6 +91,9 @@ bool jsti_api_keys_self_test(HWND owner, std::string &error);
 bool jsti_cloud_sync_available();
 void jsti_show_cloud_sync_settings(HWND owner);
 bool jsti_cloud_sync_settings_self_test(HWND owner, std::string &error);
+bool jsti_phone_receiver_available();
+void jsti_show_phone_receiver_settings(HWND owner);
+bool jsti_phone_receiver_settings_self_test(HWND owner, std::string &error);
 int jsti_window_recording_state();
 void jsti_show_vocabulary(HWND owner, int kind, void (*emit)(int, const char *, int));
 void jsti_show_vocabulary_result(HWND owner, const char *record, void (*emit)(int, const char *, int));
@@ -102,6 +105,9 @@ bool jsti_system_resources_self_test(HWND owner, std::string &error);
 // General > App behaviour > Edit raw configuration; emit sends JSTI_EVENT_RAW_CONFIGURATION with the action.
 void jsti_show_raw_configuration(HWND owner, void (*emit)(HWND owner, int action, const char *text));
 bool jsti_raw_configuration_self_test(HWND owner, std::string &error);
+// Browse OpenRouter models… (#1618), modal. True with `chosen` set to the picked slot.
+bool jsti_show_openrouter_browser(HWND owner, int32_t purpose, int32_t selected, int32_t &chosen);
+bool jsti_openrouter_browser_self_test(HWND owner, std::string &error);
 
 int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t errorCapacity);
 // WindowsWindowBridge.cpp; also called by the action shortcuts and the self-test.
@@ -116,6 +122,8 @@ constexpr UINT audioCleanupMessage = WM_APP + 23;
 constexpr int hotkeyID = 1;
 constexpr int modelRefreshID = 140;
 constexpr int modelStatusID = 141;
+// Opens Browse OpenRouter models… for Remote Batch transcription models.
+constexpr int openRouterBrowseID = 142;
 enum Control {
     modelID = 100, keyID, saveID, recordID, importID, copyID, transcriptID, statusID,
     historyID, historyDetailID, retryID, exportID, openAudioID, processingID, microphoneID, modeID,
@@ -206,9 +214,11 @@ constexpr int setupMicrophoneID = 431, setupModelID = 432, setupShortcutID = 433
 // Settings that were menu commands: the automation switch emits
 // AUTOMATION_TOGGLED; the others open the same dialogs as before.
 constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, azureID = 443, cloudSyncID = 444,
-    shortcutValueID = 445, loginItemID = 449,
+    shortcutValueID = 445, phoneReceiverID = 446, loginItemID = 449,
     configurationID = 450;
 constexpr int aboutLinkBaseID = 480, aboutDetailsID = 490;
+// About's Support development row: its label and up to four web tip links.
+constexpr int tipJarLabelID = 454, tipLinkBaseID = 455, maximumTipLinks = 4;
 constexpr int setupGuideID = 451, permissionsID = 452, troubleshootingID = 453;
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
 constexpr UINT hudMessage = WM_APP + 21;
@@ -227,7 +237,7 @@ constexpr int settingsSearchLabelID = 494, settingsSearchID = 495, settingsResul
 // Results from jsti_window_set_settings_search_results, a field reveal from
 // jsti_window_reveal_configuration_field, and a deferred focus-loss check.
 constexpr UINT settingsSearchMessage = WM_APP + 120, revealFieldMessage = WM_APP + 121,
-    settingsLeaveMessage = WM_APP + 122;
+    settingsLeaveMessage = WM_APP + 122, actionRunMessage = WM_APP + 123;
 constexpr size_t maximumSettingsResults = 50;
 struct SidebarBindings {
     int digits[pageCount];
@@ -461,7 +471,7 @@ void emitSettingsSearch(HWND window);
 void closeSettingsSearch(HWND window, bool clear);
 void leaveSettingsSearch(HWND window);
 void applySettingsResults(HWND window);
-// What a screen reader hears after a settings search: the result count or "No settings match".
+// What a screen reader hears after a settings search: the result count or "No results".
 std::wstring settingsSearchSummary(size_t count);
 bool settingsSearchKeyMessage(HWND window, const MSG &message);
 bool settingsSearchMouseMessage(HWND window, MSG &message);
@@ -481,6 +491,8 @@ void importAudio(HWND window);
 int migrationBackupOptions(HWND window);
 void emitMigrationBackup(HWND window, const std::string &path, int options);
 void exportMigrationBackup(HWND window);
+// Chooses a ZIP and asks whether to restore its API keys, then asks the host for a preview.
+void restoreMigrationBackup(HWND window);
 void tourShow(HWND window, int step);
 // Starts the screenshot tour unless one is already running (WindowsWindowTour.cpp).
 bool tourBegin(HWND window, const std::wstring &directory);

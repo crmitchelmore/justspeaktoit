@@ -17,11 +17,14 @@ public struct ContentView: View {
     @StateObject var coordinator: TranscriberCoordinator
     @StateObject var handsFree: IOSHandsFreeDictationCoordinator
     @ObservedObject var settings = AppSettings.shared
+    @ObservedObject var microphoneStatus = PreferredAudioInputStatus.shared
     @State var showingError = false
     @State var issueReport: IOSIssueReportController?
     @State var issueErrorSnapshot = IOSIssueReporter.failedRequest()
     @State var errorMessage = ""
     @State var startFailureRecovery: CaptureStartFailureRecovery?
+    /// Titles the error alert; start failures without a recovery still count.
+    @State var errorIsStartFailure = false
     @State var recoveryDestination: CaptureStartFailureRecovery?
     /// The background session failure already alerted on, identified by its
     /// publication rather than its text, so the change observer and the
@@ -190,21 +193,23 @@ public struct ContentView: View {
         }
     }
 
-    var primaryActionSymbol: String {
-        if coordinator.state == .starting { return "xmark" }
-        if coordinator.state == .stopping { return "hourglass" }
-        if isAnyRecording { return "stop.fill" }
-        if handsFree.isArmed { return "mic.slash.fill" }
-        return "mic.fill"
-    }
-
-    var primaryActionLabel: String {
-        if coordinator.state == .starting { return "Cancel starting recording" }
-        if coordinator.state == .stopping { return "Finishing recording" }
-        if isAnyRecording { return "Stop recording" }
-        if handsFree.isArmed { return "Disarm hands-free dictation" }
-        if settings.handsFreeDictationActive { return "Arm hands-free dictation" }
-        return "Start recording"
+    /// The primary control's symbol, visible title and accessibility label.
+    var recordControl: ForegroundRecordControl {
+        let phase: ForegroundRecordControl.Phase
+        if coordinator.state == .starting {
+            phase = .starting
+        } else if coordinator.state == .stopping {
+            phase = .stopping
+        } else if isAnyRecording {
+            phase = .recording
+        } else {
+            phase = .idle
+        }
+        return ForegroundRecordControl(
+            phase: phase,
+            handsFreeArmed: handsFree.isArmed,
+            handsFreeEnabled: settings.handsFreeDictationActive
+        )
     }
 
     var currentText: String {

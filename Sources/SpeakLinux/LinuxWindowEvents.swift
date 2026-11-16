@@ -50,6 +50,7 @@ private func linuxHostEvent(
     if linuxReadAloudEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxLocalModelEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxCloudSyncEvent(event, value: value, slot: slot, holder: holder) { return }
+    if linuxPhoneReceiverEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxAppearanceEvent(event, slot: slot, holder: holder) { return }
     _ = linuxHostSettingsEvent(event, value: value, slot: slot, holder: holder)
 }
@@ -83,6 +84,8 @@ private func linuxHostActionEvent(
         linuxActionShortcutEdit(value, holder: holder)
     case .speakSelectedText:
         holder.speakSelectedText()
+    case .voiceEdit:
+        holder.toggleVoiceEdit()
     case .apiKeys:
         linuxRequestDialog(jsti_window_request_api_keys(),
                            refusal: "API Keys could not be opened. Try again when the app is idle.")
@@ -297,6 +300,7 @@ private func linuxReady(_ holder: LinuxEventContext) { // swiftlint:disable:this
             LinuxOnboarding.openIfNeeded(holder)
         }
         LinuxCloudSync.start(holder, after: ready)
+        LinuxPhoneReceiver.start(holder, after: ready)
         holder.shortcuts.start(holder)
         do { try holder.microphones.start() } catch {
             LinuxHostPlatform.update("Microphone changes will not be noticed: \(error.localizedDescription)")

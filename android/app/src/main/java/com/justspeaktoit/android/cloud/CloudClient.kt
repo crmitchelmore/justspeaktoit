@@ -1,9 +1,11 @@
 package com.justspeaktoit.android.cloud
 
+import com.justspeaktoit.android.corrections.PersonalCorrections
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -42,6 +44,7 @@ class RequestReleasedException(cause: Throwable? = null) : Exception("Request re
 
 /** Blocking cloud requests; [CloudClient] in production. [call] lets another thread abort them. */
 interface CloudService {
+    /** [vocabulary] is the personal dictionary's terms; each provider bounds and sends them its own way. */
     fun transcribe(
         model: CloudModel,
         apiKey: String,
@@ -49,21 +52,38 @@ interface CloudService {
         languageTag: String?,
         call: CallHandle,
         format: SharedAudio.Format = SharedAudio.Format("wav", "audio/wav"),
-        prompt: String? = null,
+        vocabulary: List<String> = emptyList(),
     ): String
 
     /** [systemPrompt] is the full cleanup instruction, built by [CleanupPolicy.systemPrompt]. */
     fun cleanup(model: CleanupModel, apiKey: String, transcript: String, systemPrompt: String, call: CallHandle): String
+
+    /** Sends a voice edit, built by [VoiceEditPolicy], to the cleanup model's route; returns the raw reply. */
+    fun rewriteSelection(
+        model: CleanupModel,
+        apiKey: String,
+        systemPrompt: String,
+        userMessage: String,
+        call: CallHandle,
+    ): String
 }
 
 /**
- * Blocking HTTPS client for OpenAI-compatible APIs; call from a background dispatcher. Keys are
- * only sent as bearer tokens and never logged.
+ * Blocking HTTPS client; call from a background dispatcher. OpenAI-compatible providers share one
+ * route; the other batch providers go through [BatchTranscriber]. Keys go only in each provider's
+ * auth header and are never logged.
  */
 class CloudClient(
     private val connectTimeoutMs: Int = 15_000,
     private val readTimeoutMs: Int = 120_000,
+    /** The saved Azure Speech resource endpoint ([AzureSpeechCredential.ENDPOINT_SECRET]); blank for none. */
+    azureEndpoint: () -> String = { "" },
 ) : CloudService {
+    private val batch = BatchTranscriber(
+        transport = { request, call -> exchange(request, call) },
+        azureEndpoint = azureEndpoint,
+    )
+
     override fun transcribe(
         model: CloudModel,
         apiKey: String,
@@ -71,8 +91,12 @@ class CloudClient(
         languageTag: String?,
         call: CallHandle,
         format: SharedAudio.Format,
-        prompt: String?,
+        vocabulary: List<String>,
     ): String {
+        if (!model.provider.isOpenAICompatible) {
+            return batch.transcribe(model, apiKey, audio, languageTag, call, format, vocabulary)
+        }
+        val prompt = PersonalCorrections.vocabularyPrompt(vocabulary)
         val multipart = CloudWire.multipart(
             fields = CloudWire.transcriptionFields(model, languageTag, prompt),
             fileField = "file",
@@ -101,13 +125,27 @@ class CloudClient(
         call: CallHandle,
     ): String {
         val json = CloudWire.cleanupBody(model.apiName, transcript, CloudWire.cleanupMaxTokens(model), systemPrompt)
-            .toByteArray()
-        val url = CloudWire.cleanupUrl(model)
-        val body = post(url, apiKey, "application/json", call) { conn ->
-            conn.setFixedLengthStreamingMode(json.size)
-            conn.outputStream.use { it.write(json) }
+        return CloudWire.cleanupText(chat(model, apiKey, json, call))
+    }
+
+    override fun rewriteSelection(
+        model: CleanupModel,
+        apiKey: String,
+        systemPrompt: String,
+        userMessage: String,
+        call: CallHandle,
+    ): String {
+        val json = CloudWire.chatBody(model.apiName, systemPrompt, userMessage, CloudWire.cleanupMaxTokens(model))
+        return CloudWire.rewriteText(chat(model, apiKey, json, call))
+    }
+
+    /** Posts a chat completion to the model's own route and returns the response body. */
+    private fun chat(model: CleanupModel, apiKey: String, json: String, call: CallHandle): String {
+        val bytes = json.toByteArray()
+        return post(CloudWire.cleanupUrl(model), apiKey, "application/json", call) { conn ->
+            conn.setFixedLengthStreamingMode(bytes.size)
+            conn.outputStream.use { it.write(bytes) }
         }
-        return CloudWire.cleanupText(body)
     }
 
     internal fun post(
@@ -134,6 +172,65 @@ class CloudClient(
                 throw CloudException(CloudWire.failureForStatus(status), "HTTP $status")
             }
             return conn.inputStream.use { CloudWire.readBody(it) }
+        } catch (e: IOException) {
+            if (call.released) throw RequestReleasedException(e)
+            throw CloudException(CloudWire.failureForIo(e), "Network error", e)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /**
+     * One request of a [BatchTranscriber] job. A non-2xx status comes back with an empty body, so
+     * the caller decides whether it ends the job; transport errors throw as in [post].
+     */
+    internal fun exchange(request: BatchWire.Request, call: CallHandle): BatchWire.Response {
+        val conn = URL(request.url).openConnection() as HttpURLConnection
+        call.attach(conn)
+        try {
+            conn.requestMethod = request.method
+            conn.instanceFollowRedirects = false
+            conn.connectTimeout = connectTimeoutMs
+            conn.readTimeout = readTimeoutMs
+            request.headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
+            when (val body = request.body) {
+                BatchWire.Body.None -> Unit
+                is BatchWire.Body.Json -> {
+                    val bytes = body.text.toByteArray()
+                    conn.doOutput = true
+                    conn.setFixedLengthStreamingMode(bytes.size)
+                    conn.outputStream.use { it.write(bytes) }
+                }
+                is BatchWire.Body.Audio -> {
+                    conn.doOutput = true
+                    conn.setFixedLengthStreamingMode(body.file.length())
+                    conn.outputStream.use { out -> body.file.inputStream().use { it.copyTo(out) } }
+                }
+                is BatchWire.Body.Form -> {
+                    conn.doOutput = true
+                    conn.setFixedLengthStreamingMode(body.multipart.contentLength(body.file.length()))
+                    conn.outputStream.use { out ->
+                        out.write(body.multipart.head)
+                        body.file.inputStream().use { it.copyTo(out) }
+                        out.write(body.multipart.tail)
+                    }
+                }
+                is BatchWire.Body.Base64Json -> {
+                    conn.doOutput = true
+                    conn.setFixedLengthStreamingMode(body.contentLength())
+                    conn.outputStream.use { body.writeTo(it) }
+                }
+            }
+            val status = conn.responseCode
+            if (status !in 200..299) {
+                conn.errorStream?.close()
+                return BatchWire.Response(status, "")
+            }
+            val headers = conn.headerFields.orEmpty().entries
+                .filter { (name, values) -> name != null && !values.isNullOrEmpty() }
+                .associate { (name, values) -> name.lowercase(Locale.ROOT) to values.first() }
+            val text = conn.inputStream.use { CloudWire.readBody(it, BatchWire.MAX_RESPONSE_BYTES) }
+            return BatchWire.Response(status, text, headers)
         } catch (e: IOException) {
             if (call.released) throw RequestReleasedException(e)
             throw CloudException(CloudWire.failureForIo(e), "Network error", e)

@@ -9,6 +9,8 @@
 typedef struct PolishPage {
     AdwSwitchRow *polish_row;
     AdwComboRow *polish_model_row;
+    /* Browse OpenRouter models… (#1618), shown for the Remote source. */
+    GtkWidget *polish_browse;
     GtkStringList *polish_models;
     AdwComboRow *polish_location_row;
     GPtrArray *polish_catalog;

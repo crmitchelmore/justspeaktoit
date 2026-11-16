@@ -64,7 +64,10 @@ enum JSTIAPIKeyAction {
     JSTI_API_KEY_VALIDATE = 3,
     /* Sent with an empty identifier as the dialog opens: keys saved from the
      * Transcription or Voice editors since the last refresh show at once. */
-    JSTI_API_KEY_REFRESH = 4
+    JSTI_API_KEY_REFRESH = 4,
+    /* Check balance on the selected row: sent without a key and without
+     * making the dialog busy, so key entry never waits on a billing check. */
+    JSTI_API_KEY_BALANCE = 5
 };
 typedef struct JSTIAPIKeyRow {
     const char *identifier;
@@ -83,6 +86,11 @@ typedef void (*JSTIAPIKeyCallback)(int action, const char *identifier, const cha
 int jsti_window_set_api_keys(const JSTIAPIKeyRow *rows, size_t count, const char *status,
                              JSTIAPIKeyCallback callback, void *context);
 void jsti_window_clear_api_keys(void);
+/* Balance text beside one row's key, kept apart from the rows so a slow
+ * billing check never holds key entry. Thread safe; the text is host-written
+ * and never carries key material. `refreshable` enables Check balance and
+ * `result` announces the text when that row is selected. */
+int jsti_window_set_api_key_balance(const char *identifier, const char *text, int refreshable, int result);
 /* Opens the dialog over the main window when idle (onboarding entry hook). */
 void jsti_window_request_api_keys(void);
 
@@ -142,6 +150,11 @@ int jsti_window_set_action_shortcuts(const JSTIActionShortcut *rows, size_t coun
                                      JSTIActionShortcutsRefresh refresh, void *context);
 /* Unregisters every action shortcut and drops the callbacks and context. */
 void jsti_window_clear_action_shortcuts(void);
+/* Runs one action as its shortcut would (JSTI_ACTION_RUN_*; `page` names the
+ * sidebar page for JSTI_ACTION_RUN_PAGE and may be NULL otherwise), on the UI
+ * thread after pending messages, for the command palette. Disabled controls
+ * stay disabled. Thread safe; -1 for an unknown run or no window. */
+int jsti_window_run_action(int run, const char *page);
 
 #ifdef __cplusplus
 }

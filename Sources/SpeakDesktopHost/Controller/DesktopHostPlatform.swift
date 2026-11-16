@@ -174,6 +174,11 @@ package protocol DesktopHostPlatform: Sendable {
     // report status. Holding a model touches only the local-model state.
     /// Why an on-device model cannot run now, or nil when it can.
     static func localReadiness(_ model: String, host: isolated some DesktopHostLocalModelHost<Self>) -> String?
+    /// On-device models for a backup: those this host can download, by
+    /// catalogue identifier, and those already installed.
+    static func migrationModels(
+        host: isolated some DesktopHostLocalModelHost<Self>
+    ) -> DesktopMigrationRestore.ConfigurationModels
     static func transcribeLocally(
         _ audio: URL, model: String, language: String?, host: isolated some DesktopHostLocalModelHost<Self>
     ) async throws -> TranscriptionResult

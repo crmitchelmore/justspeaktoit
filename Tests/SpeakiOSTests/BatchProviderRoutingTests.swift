@@ -23,7 +23,10 @@ final class BatchProviderRoutingTests: XCTestCase {
             ("google/gemini-3.1-flash-lite", .openRouter),
             ("openai/gpt-audio", .openRouter),
             ("openrouter/transcription/openai/gpt-transcribe", .openRouter),
-            ("elevenlabs/scribe_v2", .openRouter),
+            ("elevenlabs/scribe_v2", .shared(.elevenlabs)),
+            ("deepgram/nova-3", .shared(.deepgram)),
+            (SpeechmaticsBatchClient.enhancedCatalogID, .shared(.speechmatics)),
+            ("groq/whisper-large-v3-turbo", .shared(.groq)),
             ("OpenAI/whisper-1", .openRouter),
             ("/alibaba/unknown", .openRouter),
             ("alibaba", .openRouter),
@@ -57,6 +60,7 @@ final class BatchProviderRoutingTests: XCTestCase {
     private static func providerID(for route: IOSBatchTranscriptionRoute) -> String {
         switch route {
         case .appleSpeechAnalyzer: return "apple"
+        case .downloadedLocal: return "local"
         case .openAI: return "openai"
         case .metaMuse: return "meta"
         case .azure: return "azure"
@@ -66,6 +70,7 @@ final class BatchProviderRoutingTests: XCTestCase {
         case .gemini: return "google"
         case .xai: return "xai"
         case .fileSpeech(let provider): return provider.rawValue
+        case .shared(let provider): return provider.rawValue
         case .openRouter: return "openrouter"
         }
     }

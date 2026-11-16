@@ -50,10 +50,25 @@ class CloudCatalogParityTest {
                 it.getString("apiName"),
                 it.getString("languageField"),
                 it.getBoolean("supportsPrompt").toString(),
+                it.optJSONArray("languageCodes")?.let { codes -> (0 until codes.length()).map(codes::getString) }.toString(),
+                it.optJSONObject("languageHints")?.let { hints ->
+                    hints.keys().asSequence().toSortedSet().associateWith(hints::getString)
+                }.toString(),
+                it.getBoolean("requiresPCM16WAV").toString(),
             )
         }
         val actual = CloudCatalog.transcriptionModels.map {
-            listOf(it.catalogId, it.displayName, it.provider.id, it.apiName, it.languageField, it.supportsPrompt.toString())
+            listOf(
+                it.catalogId,
+                it.displayName,
+                it.provider.id,
+                it.apiName,
+                it.languageField,
+                it.supportsPrompt.toString(),
+                it.languageCodes.toString(),
+                it.languageHints?.toSortedMap().toString(),
+                it.requiresPCM16WAV.toString(),
+            )
         }
         assertEquals(expected, actual)
         assertEquals(CloudCatalog.transcriptionModels.first(), CloudCatalog.defaultTranscriptionModel)
@@ -110,5 +125,16 @@ class CloudCatalogParityTest {
         val prompt = asset.getJSONObject("keywordPrompt")
         assertEquals(prompt.getInt("maximumBytes"), GeneratedCloudCatalog.KEYWORD_PROMPT_MAX_BYTES)
         assertEquals(prompt.getInt("maximumTerms"), GeneratedCloudCatalog.KEYWORD_PROMPT_MAX_TERMS)
+    }
+
+    @Test
+    fun testVoiceEditPromptAndFormattingWords_matchTheGeneratedCatalogue() {
+        val edit = asset.getJSONObject("voiceEdit")
+        fun strings(name: String) = edit.getJSONArray(name).let { array -> (0 until array.length()).map(array::getString) }
+        assertEquals(edit.getString("systemPrompt"), VoiceEditPolicy.systemPrompt)
+        assertTrue(VoiceEditPolicy.userMessage("a", "b").startsWith(edit.getString("userMessageIntro") + "\n\n"))
+        assertEquals(strings("quoteTerms"), GeneratedCloudCatalog.VOICE_EDIT_QUOTE_TERMS)
+        assertEquals(strings("codeFenceTerms"), GeneratedCloudCatalog.VOICE_EDIT_CODE_FENCE_TERMS)
+        assertEquals(strings("whitespaceTerms"), GeneratedCloudCatalog.VOICE_EDIT_WHITESPACE_TERMS)
     }
 }

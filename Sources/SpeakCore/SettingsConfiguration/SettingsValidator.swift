@@ -237,7 +237,29 @@ public enum SettingsValidator {
                 path: "settings.postProcessingEnabled",
                 message: "Cleanup cannot run with Auto-Clean; set speedMode to \"instant\" or this to false."))
         }
+        issues += self.voiceOutputIssues(changes, merged: merged, platform: context.platform)
         return issues
+    }
+
+    /// A read aloud provider, model, voice and speed must form one usable
+    /// selection; checked on hosts whose schema stores the provider (iOS).
+    private static func voiceOutputIssues(
+        _ changes: [String: JSONValue],
+        merged: (String) -> JSONValue?,
+        platform: SettingsSchemaPlatform
+    ) -> [SettingsIssue] {
+        let keys: Set = ["ttsProvider", "ttsModel", "ttsVoice", "ttsSpeed"]
+        guard SettingsSchema.field(forKey: "ttsProvider", platform: platform) != nil,
+              !keys.isDisjoint(with: changes.keys),
+              case .string(let rawProvider)? = merged("ttsProvider"),
+              let provider = VoiceOutputProvider(rawValue: rawProvider),
+              case .string(let model)? = merged("ttsModel"),
+              case .string(let voice)? = merged("ttsVoice"),
+              let speed = merged("ttsSpeed").flatMap(self.number)
+        else { return [] }
+        let problems = provider.selectionProblems(model: model, voice: voice, speed: speed)
+        return [("ttsModel", problems.model), ("ttsVoice", problems.voice), ("ttsSpeed", problems.speed)]
+            .compactMap { key, message in message.map { SettingsIssue(path: "settings.\(key)", message: $0) } }
     }
 
     private static func kindName(_ kind: SettingsValueKind) -> String {

@@ -65,13 +65,14 @@ enum IOSSettingsPage: String, CaseIterable, Identifiable, Hashable {
     var sectionTitles: [String] {
         switch self {
         case .general: return ["Appearance", "Language", "Edit raw configuration"]
-        case .transcription: return ["Transcription"]
-        case .postProcessing: return ["Post-Processing"]
+        case .transcription: return ["Transcription", "Downloaded Models"]
+        case .postProcessing: return ["Post-Processing", "Auto-Corrections"]
         case .apiKeys: return ["Subscription", "API Keys"]
-        case .recording: return ["Hardware Trigger", "Behavior", "Just Speak Keyboard", "Focus Capture Overrides"]
+        case .recording:
+            return ["Hardware Trigger", "Microphone", "Behavior", "Just Speak Keyboard", "Focus Capture Overrides"]
         case .results: return ["Saved Results", "Recordings"]
-        case .sync: return ["Sync"]
-        case .privacy: return ["Capture Health", "Privacy & Debugging"]
+        case .sync: return ["Sync", "Send to Mac"]
+        case .privacy: return ["Troubleshooting", "Capture Health", "Privacy & Debugging"]
         case .about: return ["About"]
         }
     }

@@ -32,6 +32,9 @@ class RawConfigurationTest {
         // Consent is only ever given on its own screen, never by pasting a document.
         "analyticsConsent" to "Analytics opt-in is a consent choice.",
         "diagnosticsConsent" to "Crash-report consent is a consent choice.",
+        "autoCorrectionCandidates" to "Learned suggestions are app state, reviewed in Settings.",
+        "hasCompletedOnboarding" to "First-run state, reopened from Settings > Setup guide, not a preference.",
+        "preferredAudioInputUID" to "A device ID only means something on the phone that saved it.",
     )
 
     private fun validate(settings: String, current: Map<String, Any?> = fresh) =
@@ -57,6 +60,8 @@ class RawConfigurationTest {
         assertEquals(CloudCatalog.transcriptionModels.map { it.catalogId }, schema.field("cloud_model")?.allowedValues)
         assertEquals(CloudCatalog.cleanupModels.map { it.selectionId }, schema.field("cleanup_model")?.allowedValues)
         assertEquals(DictationLanguages.all.map { it.id }, schema.field("preferredLocale")?.allowedValues)
+        assertEquals(RecordingSoundProfile.entries.map { it.id }, schema.field("recordingSoundProfile")?.allowedValues)
+        assertEquals(AppAppearance.entries.map { it.rawValue }, schema.field("appearance")?.allowedValues)
     }
 
     @Test
@@ -82,7 +87,7 @@ class RawConfigurationTest {
     @Test
     fun reportsEveryProblemAndChangesNothingWhenInvalid() {
         val report = validate(
-            """{"cleanup_enabled": "yes", "cloud_model": "deepgram/nova-3", "history_retention": "Year",
+            """{"cleanup_enabled": "yes", "cloud_model": "acme/not-a-model", "history_retention": "Year",
                "keepAudioOnCancel": false, "colour": "blue"}""",
         )
         assertEquals(
@@ -102,6 +107,17 @@ class RawConfigurationTest {
         assertEquals(mapOf("chosen_mode" to "Cloud", "personal_corrections" to corrections), report.changes)
         val rules = RawConfigurationValues.corrections(report.changes["personal_corrections"] as Map<*, *>, emptyList())
         assertEquals(listOf(CorrectionRule("Ada", listOf("ada", "adder"))), rules)
+    }
+
+    @Test
+    fun aLiveOpenRouterModelTheAppHoldsStaysValid() {
+        val transcription = "openrouter/transcription/openai/whisper-large-v3"
+        val cleanup = "openrouter/cleanup/openai/gpt-future"
+        val held = fresh + mapOf("cloud_model" to transcription, "cleanup_model" to cleanup)
+        val report = validate("""{"cloud_model": "$transcription", "cleanup_model": "$cleanup"}""", held)
+        assertTrue(report.isValid)
+        assertEquals(emptyMap<String, Any?>(), report.changes)
+        assertFalse(validate("""{"cloud_model": "openrouter/transcription/openai/other"}""", held).isValid)
     }
 
     @Test

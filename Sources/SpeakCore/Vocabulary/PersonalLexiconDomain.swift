@@ -145,15 +145,7 @@ public final class PersonalLexiconDomain {
 
     for rule in snapshot {
       let eligibleForAutoApply = rule.shouldAutoApply(in: context)
-      let reasonBase: String?
-      switch rule.activation {
-      case .automatic:
-        reasonBase = nil
-      case .requireContextMatch:
-        reasonBase = eligibleForAutoApply ? nil : "Context tags did not match"
-      case .manual:
-        reasonBase = "Rule requires manual confirmation"
-      }
+      let reasonBase = suggestionReason(for: rule.activation, eligibleForAutoApply: eligibleForAutoApply)
 
       for alias in rule.aliases {
         let aliasPattern = alias.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -177,6 +169,13 @@ public final class PersonalLexiconDomain {
         } else {
           suggestions.append(record)
         }
+      }
+
+      // A recogniser that already writes the word in another case ("kubernetes") still gets the
+      // spelling the user entered ("Kubernetes"). Aliases never equal the canonical ignoring case.
+      if eligibleForAutoApply, let normalised = caseNormalisation(of: rule, in: workingText) {
+        workingText = normalised.text
+        applied.append(normalised.record)
       }
     }
 
@@ -251,18 +250,7 @@ public final class PersonalLexiconDomain {
   }
 
   private func apply(alias: String, with canonical: String, to text: String) -> (Int, String) {
-    let regex: NSRegularExpression
-    if let cached = regexCache[alias] {
-      regex = cached
-    } else {
-      let escapedAlias = NSRegularExpression.escapedPattern(for: alias)
-      let pattern = "(?i)\\b\(escapedAlias)\\b"
-      guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else {
-        return (0, text)
-      }
-      regexCache[alias] = compiled
-      regex = compiled
-    }
+    guard let regex = wholeWordRegex(for: alias) else { return (0, text) }
     let fullRange = NSRange(location: 0, length: text.utf16.count)
     let matches = regex.numberOfMatches(in: text, options: [], range: fullRange)
     guard matches > 0 else { return (0, text) }
@@ -275,6 +263,63 @@ public final class PersonalLexiconDomain {
       withTemplate: template
     )
     return (matches, replaced)
+  }
+}
+
+// MARK: - Matching
+
+extension PersonalLexiconDomain {
+  /// Bounded by adjacent word characters rather than `\b`, as on Android, so spellings that start
+  /// or end with punctuation match on their own ("c++", ".net") but not inside a word ("c++17").
+  /// Zero-width (non-)joiners count as word characters, as they do for `\b`, so Persian words
+  /// written with a non-joiner are not split.
+  private func wholeWordRegex(for term: String) -> NSRegularExpression? {
+    if let cached = regexCache[term] { return cached }
+    let word = "[\\p{L}\\p{M}\\p{N}_\\u200C\\u200D]"
+    let pattern = "(?i)(?<!\(word))\(NSRegularExpression.escapedPattern(for: term))(?!\(word))"
+    guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+    regexCache[term] = compiled
+    return compiled
+  }
+
+  private func suggestionReason(
+    for activation: PersonalLexiconRule.Activation, eligibleForAutoApply: Bool
+  ) -> String? {
+    switch activation {
+    case .automatic:
+      nil
+    case .requireContextMatch:
+      eligibleForAutoApply ? nil : "Context tags did not match"
+    case .manual:
+      "Rule requires manual confirmation"
+    }
+  }
+
+  /// Rewrites whole-word matches of the rule's canonical spelling whose case differs. Returns the
+  /// record naming the first differing variant and the new text, or nil when nothing changed.
+  private func caseNormalisation(
+    of rule: PersonalLexiconRule, in text: String
+  ) -> (record: PersonalLexiconCorrectionRecord, text: String)? {
+    let canonical = rule.canonical
+    guard !canonical.isEmpty, let regex = wholeWordRegex(for: canonical) else { return nil }
+    let source = text as NSString
+    let differing = regex.matches(in: text, options: [], range: NSRange(location: 0, length: source.length))
+      .filter { source.substring(with: $0.range) != canonical }
+    guard let first = differing.first else { return nil }
+    let result = NSMutableString(string: text)
+    for match in differing.reversed() {
+      result.replaceCharacters(in: match.range, with: canonical)
+    }
+    let record = PersonalLexiconCorrectionRecord(
+      ruleID: rule.id,
+      alias: source.substring(with: first.range),
+      canonical: canonical,
+      occurrences: differing.count,
+      wasApplied: true,
+      confidence: rule.confidence,
+      reason: nil
+    )
+    return (record, result as String)
   }
 }
 

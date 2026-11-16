@@ -100,6 +100,7 @@ void filter_models(gint32 keep) {
     adw_combo_row_set_selected(models_page()->model_row, position != GTK_INVALID_LIST_POSITION ? position :
                                (models_page()->model_slots->len > 0 ? 0 : GTK_INVALID_LIST_POSITION));
     refresh_azure_row();
+    if (models_page()->openrouter_browse != NULL) gtk_widget_set_visible(models_page()->openrouter_browse, !local && !live);
     ui.suppress = FALSE;
     refresh_setup();
 }
@@ -266,6 +267,24 @@ static void on_refresh(GtkButton *button, gpointer data) {
     emit(JSTI_EVENT_REFRESH_MODELS, "", 0);
 }
 
+/* A chosen OpenRouter route is a Remote Batch model: select it as the picker would. */
+static void on_openrouter_chosen(int32_t slot) {
+    if (jsti_model_filters_local() || jsti_model_filters_live()) jsti_model_filters_select(FALSE, FALSE);
+    models_page()->preferred_model_slots[model_mode(FALSE, FALSE)] = slot;
+    filter_models(slot);
+    if (selected_model_slot() != slot) {
+        jsti_window_update("That OpenRouter model is no longer listed. Refresh models and try again.", NULL, -1);
+        return;
+    }
+    emit(JSTI_EVENT_SELECT_MODEL, "", slot);
+}
+
+static void on_openrouter_browse(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    jsti_openrouter_browser_open(ui.window, JSTI_OPENROUTER_BROWSER_TRANSCRIPTION, selected_model_slot(),
+                                 on_openrouter_chosen);
+}
+
 GtkWidget *models_group(void) {
     GtkWidget *models = group("Model");
     jsti_model_filters_add(models, on_model_filter);
@@ -302,7 +321,13 @@ GtkWidget *models_group(void) {
     gtk_widget_add_css_class(GTK_WIDGET(models_page()->catalog_status), "dim-label");
     models_page()->catalog_refresh = GTK_BUTTON(gtk_button_new_with_label("Refresh models"));
     g_signal_connect(models_page()->catalog_refresh, "clicked", G_CALLBACK(on_refresh), NULL);
+    models_page()->openrouter_browse = gtk_button_new_with_label("Browse OpenRouter models…");
+    gtk_widget_set_name(models_page()->openrouter_browse, "settings.transcription.browseOpenRouter");
+    gtk_accessible_update_property(GTK_ACCESSIBLE(models_page()->openrouter_browse),
+        GTK_ACCESSIBLE_PROPERTY_DESCRIPTION, "Search OpenRouter's speech models, compare prices and choose one", -1);
+    g_signal_connect(models_page()->openrouter_browse, "clicked", G_CALLBACK(on_openrouter_browse), NULL);
     gtk_box_append(GTK_BOX(catalog), GTK_WIDGET(models_page()->catalog_status));
+    gtk_box_append(GTK_BOX(catalog), models_page()->openrouter_browse);
     gtk_box_append(GTK_BOX(catalog), GTK_WIDGET(models_page()->catalog_refresh));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(models), catalog);
     return models;
@@ -332,6 +357,7 @@ int32_t jsti_window_set_azure_resource(const char *endpoint) {
 
 void models_refresh_actions(gboolean idle) {
     gtk_widget_set_sensitive(GTK_WIDGET(models_page()->model_row), idle);
+    gtk_widget_set_sensitive(models_page()->openrouter_browse, idle);
     jsti_model_filters_set_idle(idle);
     gtk_widget_set_sensitive(GTK_WIDGET(models_page()->microphone_row), idle);
 }

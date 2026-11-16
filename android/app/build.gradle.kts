@@ -10,6 +10,15 @@ val ciVersionCode = providers.environmentVariable("JSTI_ANDROID_VERSION_CODE").o
 val postHogProjectKey = providers.environmentVariable("POSTHOG_PROJECT_KEY").orNull?.trim()
     ?.takeIf { Regex("[A-Za-z0-9_]+").matches(it) }
     .orEmpty()
+// CloudKit Web Services API token for History sync, from the CLOUDKIT_WEB_API_TOKEN secret that the
+// Windows and Linux builds use too (Docs/windows-cloudkit-sync.md). Without it the build reports that
+// iCloud sync is unavailable. JSTI_CLOUDKIT_WEB_ENVIRONMENT selects development for testing.
+val cloudKitWebApiToken = providers.environmentVariable("CLOUDKIT_WEB_API_TOKEN").orNull?.trim()
+    ?.takeIf { Regex("[A-Za-z0-9_-]+").matches(it) }
+    .orEmpty()
+val cloudKitWebEnvironment = providers.environmentVariable("JSTI_CLOUDKIT_WEB_ENVIRONMENT").orNull?.trim()
+    ?.takeIf { it == "development" || it == "production" }
+    ?: "production"
 
 plugins {
     // AGP 9 compiles Kotlin itself, so the separate Kotlin Android plugin is no longer applied.
@@ -29,6 +38,8 @@ android {
         versionCode = ciVersionCode ?: 1
         versionName = "0.1.0"
         buildConfigField("String", "POSTHOG_PROJECT_KEY", "\"$postHogProjectKey\"")
+        buildConfigField("String", "CLOUDKIT_WEB_API_TOKEN", "\"$cloudKitWebApiToken\"")
+        buildConfigField("String", "CLOUDKIT_WEB_ENVIRONMENT", "\"$cloudKitWebEnvironment\"")
     }
 
     signingConfigs {
@@ -111,12 +122,16 @@ abstract class GenerateCloudCatalog : DefaultTask() {
     @TaskAction
     fun generate() {
         @Suppress("UNCHECKED_CAST")
-        val json = JsonSlurper().parse(catalog.get().asFile) as Map<String, Any?>
+        val json = JsonSlurper().parse(catalog.get().asFile, "UTF-8") as Map<String, Any?>
         val version = json["version"] as Int
         check(version == 1) { "cloud_catalog.json version $version is not understood; update this generator" }
         fun lit(value: Any?): String = "\"" + value.toString()
             .replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$")
             .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\""
+        fun optLit(value: Any?): String = if (value == null) "null" else lit(value)
+        fun optInt(value: Any?): String = (value as Number?)?.toInt()?.toString() ?: "null"
+        @Suppress("UNCHECKED_CAST")
+        fun strings(value: Any?): String = (value as List<Any?>).joinToString(", ", "listOf(", ")") { lit(it) }
         @Suppress("UNCHECKED_CAST")
         fun objects(key: String) = json[key] as List<Map<String, Any?>>
         @Suppress("UNCHECKED_CAST")
@@ -124,6 +139,12 @@ abstract class GenerateCloudCatalog : DefaultTask() {
         val providers = objects("providers").joinToString("") {
             "        CloudProviderSpec(id = ${lit(it["id"])}, credentialId = ${lit(it["credentialId"])}),\n"
         }
+        @Suppress("UNCHECKED_CAST")
+        fun codes(value: Any?): String = (value as List<Any?>?)
+            ?.joinToString(", ", prefix = "listOf(", postfix = ")") { lit(it) } ?: "null"
+        @Suppress("UNCHECKED_CAST")
+        fun hints(value: Any?): String = (value as Map<String, Any?>?)?.toSortedMap()?.entries
+            ?.joinToString(", ", prefix = "mapOf(", postfix = ")") { "${lit(it.key)} to ${lit(it.value)}" } ?: "null"
         val models = objects("transcriptionModels").joinToString("") {
             "        CloudModelSpec(\n" +
                 "            catalogId = ${lit(it["catalogId"])},\n" +
@@ -132,6 +153,9 @@ abstract class GenerateCloudCatalog : DefaultTask() {
                 "            apiName = ${lit(it["apiName"])},\n" +
                 "            languageField = ${lit(it["languageField"])},\n" +
                 "            supportsPrompt = ${it["supportsPrompt"] as Boolean},\n" +
+                "            languageCodes = ${codes(it["languageCodes"])},\n" +
+                "            languageHints = ${hints(it["languageHints"])},\n" +
+                "            requiresPCM16WAV = ${it["requiresPCM16WAV"] as Boolean},\n" +
                 "        ),\n"
         }
         val cleanupModels = objects("cleanupModels").joinToString("") {
@@ -153,7 +177,35 @@ abstract class GenerateCloudCatalog : DefaultTask() {
                 "        ${lit(it.key)} to ${lit(it.value)},\n"
             }
         @Suppress("UNCHECKED_CAST")
+        val browser = json["openRouterBrowser"] as Map<String, Any?>
+        @Suppress("UNCHECKED_CAST")
+        fun browserModels(key: String) = (browser[key] as List<Map<String, Any?>>).joinToString("") {
+            "        OpenRouterBrowserModelSpec(\n" +
+                "            selectionId = ${lit(it["selectionId"])},\n" +
+                "            slug = ${lit(it["slug"])},\n" +
+                "            name = ${lit(it["name"])},\n" +
+                "            provider = ${lit(it["provider"])},\n" +
+                "            subtitle = ${lit(it["subtitle"])},\n" +
+                "            summary = ${lit(it["summary"])},\n" +
+                "            speed = ${lit(it["speed"])},\n" +
+                "            pricing = ${optLit(it["pricing"])},\n" +
+                "            contextLength = ${optInt(it["contextLength"])},\n" +
+                "            strengths = ${strings(it["strengths"])},\n" +
+                "            hasZeroPrices = ${it["hasZeroPrices"] as Boolean},\n" +
+                "            searchText = ${strings(it["searchText"])},\n" +
+                "            modelPageUrl = ${optLit(it["modelPageURL"])},\n" +
+                "        ),\n"
+        }
+        val browserModels = browserModels("cleanupModels")
+        val browserTranscriptionModels = browserModels("transcriptionModels")
+        @Suppress("UNCHECKED_CAST")
+        val vendorNames = (browser["vendorNames"] as Map<String, Any?>).toSortedMap().entries.joinToString("") {
+            "        ${lit(it.key)} to ${lit(it.value)},\n"
+        }
+        @Suppress("UNCHECKED_CAST")
         val profiles = json["profiles"] as Map<String, Any?>
+        @Suppress("UNCHECKED_CAST")
+        val voiceEdit = json["voiceEdit"] as Map<String, Any?>
         @Suppress("UNCHECKED_CAST")
         val profileFields = (profiles["fields"] as List<Any?>).joinToString("") { "        ${lit(it)},\n" }
         val source = """
@@ -198,6 +250,55 @@ abstract class GenerateCloudCatalog : DefaultTask() {
             |    val PROFILE_FIELDS: List<String> = listOf(
             |${profileFields.trimEnd('\n')}
             |    )
+            |
+            |    /** SpeakCore's `OpenRouterModelBrowserCatalog`: the shared browser copy and cleanup rows. */
+            |    const val OPENROUTER_BROWSE_TITLE = ${lit(browser["browseButtonTitle"])}
+            |    const val OPENROUTER_CLEANUP_TITLE = ${lit(browser["cleanupTitle"])}
+            |    const val OPENROUTER_CLEANUP_INTRO = ${lit(browser["cleanupIntro"])}
+            |    const val OPENROUTER_SEARCH_PLACEHOLDER = ${lit(browser["searchPlaceholder"])}
+            |    const val OPENROUTER_ALL_PROVIDERS = ${lit(browser["allProvidersTitle"])}
+            |    const val OPENROUTER_ZERO_PRICES = ${lit(browser["zeroPricesTitle"])}
+            |    const val OPENROUTER_PRICING_CAVEAT = ${lit(browser["pricingCaveat"])}
+            |    const val OPENROUTER_PRICING_UNLISTED = ${lit(browser["pricingUnlisted"])}
+            |    const val OPENROUTER_CLEANUP_USE = ${lit(browser["useTitle"])}
+            |    const val OPENROUTER_CLEANUP_SELECTED = ${lit(browser["selectedTitle"])}
+            |    const val OPENROUTER_CLEANUP_ROUTE_NOTE = ${lit(browser["routeNote"])}
+            |
+            |    val openRouterCleanupModels: List<OpenRouterBrowserModelSpec> = listOf(
+            |${browserModels.trimEnd('\n')}
+            |    )
+            |
+            |    const val OPENROUTER_TRANSCRIPTION_TITLE = ${lit(browser["transcriptionTitle"])}
+            |    const val OPENROUTER_TRANSCRIPTION_INTRO = ${lit(browser["transcriptionIntro"])}
+            |    const val OPENROUTER_TRANSCRIPTION_USE = ${lit(browser["transcriptionUseTitle"])}
+            |    const val OPENROUTER_TRANSCRIPTION_SELECTED = ${lit(browser["transcriptionSelectedTitle"])}
+            |    const val OPENROUTER_TRANSCRIPTION_ROUTE_NOTE = ${lit(browser["transcriptionRouteNote"])}
+            |    const val OPENROUTER_STREAMING_NOTE = ${lit(browser["streamingNote"])}
+            |    const val OPENROUTER_EMPTY_RESULTS = ${lit(browser["emptyResults"])}
+            |    const val OPENROUTER_UNQUALIFIED_WARNING = ${lit(browser["unqualifiedWarning"])}
+            |
+            |    /** Live discovery: the opt-in cleanup setting, its privacy note and both public endpoints. */
+            |    const val OPENROUTER_DISCOVERY_SETTING_TITLE = ${lit(browser["discoverySettingTitle"])}
+            |    const val OPENROUTER_DISCOVERY_NOTE = ${lit(browser["discoveryNote"])}
+            |    const val OPENROUTER_CLEANUP_MODELS_URL = ${lit(browser["cleanupModelsURL"])}
+            |    const val OPENROUTER_TRANSCRIPTION_MODELS_URL = ${lit(browser["transcriptionModelsURL"])}
+            |
+            |    /** SpeakCore's `ModelPickerGrouping.vendorNames`, keyed by lowercased slug prefix. */
+            |    val openRouterVendorNames: Map<String, String> = mapOf(
+            |${vendorNames.trimEnd('\n')}
+            |    )
+            |
+            |    /** Bundled OpenRouter batch models; live speech-to-text models are merged after them. */
+            |    val openRouterTranscriptionModels: List<OpenRouterBrowserModelSpec> = listOf(
+            |${browserTranscriptionModels.trimEnd('\n')}
+            |    )
+            |
+            |    /** SpeakCore's `VoiceEditPolicy`: the selection-rewrite prompt and the formatting words. */
+            |    const val VOICE_EDIT_SYSTEM_PROMPT = ${lit(voiceEdit["systemPrompt"])}
+            |    const val VOICE_EDIT_USER_MESSAGE_INTRO = ${lit(voiceEdit["userMessageIntro"])}
+            |    val VOICE_EDIT_QUOTE_TERMS: List<String> = ${strings(voiceEdit["quoteTerms"])}
+            |    val VOICE_EDIT_CODE_FENCE_TERMS: List<String> = ${strings(voiceEdit["codeFenceTerms"])}
+            |    val VOICE_EDIT_WHITESPACE_TERMS: List<String> = ${strings(voiceEdit["whitespaceTerms"])}
             |}
             |
         """.trimMargin()

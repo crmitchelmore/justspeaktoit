@@ -28,6 +28,7 @@ package extension DesktopNativeEventHolder {
         DesktopEventDispatcher(coalescing: DesktopHistoryEvent.coalesce) { event in
             switch event {
             case .selection(let identifier): await controller.selectHistory(identifier)
+            case .reveal(let identifier): await controller.revealHistory(identifier)
             case .version(let identifier, let variant):
                 await controller.selectTranscriptVariant(variant, identifier: identifier)
             case .playPause(let identifier): await controller.playbackToggle(identifier)

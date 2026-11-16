@@ -82,7 +82,11 @@ package enum DesktopHostModels {
     }
 
     package static func update(discovered: [OpenRouterAudioModel], retaining: [String]) throws {
-        try storage.lock.withLock { try storage.slots.update(discovered: discovered, retaining: retaining) }
+        let slots = try storage.lock.withLock {
+            try storage.slots.update(discovered: discovered, retaining: retaining)
+            return storage.slots
+        }
+        DesktopHostOpenRouterBrowser.publish(.transcription(discovered: discovered, slots: slots))
     }
 
     package static func provider(for model: String) -> TranscriptionProviderMetadata? {
@@ -106,16 +110,26 @@ package enum DesktopHostModels {
         }))
     }
 
+    /// A remote batch route through OpenRouter reads "OpenRouter › Model", as on Mac and iPhone.
     package static func label(for entry: DesktopModelSlots.Entry, localLabels: [String: String] = [:]) -> String {
-        let name = uiText(entry.option.displayName).trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = uiText(entry.option.displayName).trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = trimmed.isEmpty ? entry.option.id : trimmed
         let suffix = entry.isLocal ? localLabels[entry.option.id].map { " \u{2014} \($0)" } ?? ""
             : (entry.isAvailable ? "" : " (not in current catalogue)")
-        return (name.isEmpty ? entry.option.id : name) + suffix
+        return (isOpenRouterBatch(entry) ? OpenRouterModelBrowserCatalog.selectionLabel(name: name) : name) + suffix
     }
 
-    /// Picker position of each visible global slot.
+    /// Picker position of each visible global slot: direct routes first, then
+    /// OpenRouter routes, each in catalogue order.
     package static func displayOrder(_ state: DesktopModelSlots) -> [Int: Int] {
-        Dictionary(uniqueKeysWithValues: state.visibleIndices.enumerated().map { ($0.element, $0.offset) })
+        let direct = state.visibleIndices.filter { !isOpenRouterBatch(state.entries[$0]) }
+        let openRouter = state.visibleIndices.filter { isOpenRouterBatch(state.entries[$0]) }
+        return Dictionary(uniqueKeysWithValues: (direct + openRouter).enumerated().map { ($0.element, $0.offset) })
+    }
+
+    private static func isOpenRouterBatch(_ entry: DesktopModelSlots.Entry) -> Bool {
+        !entry.isLive && !entry.isLocal
+            && ModelPickerGrouping.isOpenRouter(entry.option.id, purpose: .batchTranscription)
     }
 }
 

@@ -50,6 +50,21 @@ static int32_t about_self_test(char *error, size_t capacity) {
     g_clear_object(&previous);
     if (!entered || !GTK_IS_BUTTON(focus))
         return fail(error, capacity, "About links take a second Tab stop before each button");
+    if (about_page()->tip_jar == NULL || about_page()->tip_links == NULL ||
+        !gtk_widget_get_visible(about_page()->tip_jar) || jsti_window_configure_tip_links(NULL, 0) != -1 ||
+        jsti_window_configure_tip_links(&invalid_about_link, 1) != -1)
+        return fail(error, capacity, "Support development card or invalid tip link refusal failed");
+    guint tip_count = 0;
+    for (GtkWidget *child = gtk_widget_get_first_child(GTK_WIDGET(about_page()->tip_links));
+         child != NULL; child = gtk_widget_get_next_sibling(child)) {
+        GtkWidget *button = gtk_flow_box_child_get_child(GTK_FLOW_BOX_CHILD(child));
+        const char *uri = g_object_get_data(G_OBJECT(button), "about-uri");
+        if (!GTK_IS_BUTTON(button) || uri == NULL || !g_str_has_prefix(uri, "https://") ||
+            gtk_widget_get_focusable(child))
+            return fail(error, capacity, "Support development link label, destination or Tab stop was not preserved");
+        ++tip_count;
+    }
+    if (tip_count != 2) return fail(error, capacity, "Support development links are missing");
     return 0;
 }
 
@@ -101,6 +116,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (!model_modes_self_test())
         return fail(error, capacity, "Model picker did not isolate and restore all four Source/Mode choices");
     if (jsti_cloud_sync_self_test(error, capacity) != 0) return -1;
+    if (jsti_phone_receiver_self_test(error, capacity) != 0) return -1;
     if (jsti_system_resources_self_test(error, capacity) != 0) return -1;
     if (jsti_raw_configuration_self_test(error, capacity) != 0) return -1;
     if (jsti_history_filters_self_test(error, capacity) != 0) return -1;
@@ -109,6 +125,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (jsti_troubleshooting_self_test(ui.window, error, capacity) != 0) return -1;
     if (jsti_api_keys_self_test(ui.window, error, capacity) != 0) return -1;
     if (jsti_permissions_self_test(ui.window, error, capacity) != 0) return -1;
+    if (jsti_openrouter_browser_self_test(ui.window, error, capacity) != 0) return -1;
     if (jsti_setup_self_test(ui.window, error, capacity) != 0) return -1;
     if (!cancel_key_self_test()) return fail(error, capacity, "Escape cancellation ownership or repeat guards failed");
     if (polish_prompt_self_test(error, capacity) != 0) return -1;

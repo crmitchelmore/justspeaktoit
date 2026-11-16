@@ -1,9 +1,11 @@
 import Foundation
 
 // The iPhone's persisted settings, keyed by `AppSettings` (SpeakiOS) property
-// name. API keys are never part of a document. SpeakiOS tests fail when a
-// persisted setting has no field here, a default differs from a fresh install
-// or an app enum's cases drift from `allowedValues`.
+// name, plus the Read aloud settings in `IOSVoiceOutputSettings`, whose
+// `sonioxRegion` uses the Mac's `sonioxTTSRegion` key. API keys are never part
+// of a document. SpeakiOS tests fail when a persisted setting has no field
+// here, a default differs from a fresh install or an app enum's cases drift
+// from `allowedValues`.
 extension SettingsSchema {
     private typealias Field = SettingsSchemaField
 
@@ -37,7 +39,9 @@ extension SettingsSchema {
                   defaultValue: .bool(false)),
             Field(key: "keepAudioOnCancel", kind: .boolean,
                   summary: "Keep a cancelled recording's audio in Saved Recordings.",
-                  defaultValue: .bool(Shared.keepAudioOnCancel.iOS.defaultValue))
+                  defaultValue: .bool(Shared.keepAudioOnCancel.iOS.defaultValue)),
+            Field(key: "preferredAudioInputUID", kind: .optionalString,
+                  summary: "Microphone device ID, or null for the system default.", defaultValue: .null)
         ]
         let recording: [Field] = [
             Field(key: "visualDensity", kind: .enumeration, summary: "Normal or compact layout.",
@@ -77,6 +81,32 @@ extension SettingsSchema {
             Field(key: "autoPostProcess", kind: .boolean, summary: "Clean up every transcript automatically.",
                   defaultValue: .bool(false))
         ]
-        return transcription + recording + cleanup
+        // Learned from edits to keyboard-inserted transcripts (#1651).
+        let learnedCorrections: [Field] = [
+            Field(key: "autoCorrectionsEnabled", kind: .boolean, summary: "Learn corrections from your edits.",
+                  defaultValue: .bool(AutoCorrectionLearningPolicy.enabledByDefault)),
+            Field(key: "autoCorrectionsPromotionThreshold", kind: .integer,
+                  summary: "Edits before a correction is learned.",
+                  defaultValue: .int(AutoCorrectionLearningPolicy.defaultPromotionThreshold),
+                  range: AutoCorrectionLearningPolicy.numericPromotionThresholdRange)
+        ]
+        return transcription + recording + cleanup + learnedCorrections + iOSReadAloudFields
     }()
+
+    /// SpeakiOS's `IOSVoiceOutputSettings`. The provider, model, voice and speed
+    /// must form a selection `VoiceOutputProvider.selectionProblems` accepts.
+    private static let iOSReadAloudFields: [Field] = [
+        Field(key: "ttsProvider", kind: .enumeration, summary: "Read aloud provider.",
+              defaultValue: .string(VoiceOutputProvider.defaultProvider.rawValue),
+              allowedValues: VoiceOutputProvider.allCases.map(\.rawValue)),
+        Field(key: "ttsModel", kind: .string,
+              summary: "Read aloud model for the provider (an OpenRouter speech selection for OpenRouter).",
+              defaultValue: .string(VoiceOutputProvider.defaultSelection.model)),
+        Field(key: "ttsVoice", kind: .string,
+              summary: "Read aloud voice for the model (soniox/<voice> for Soniox).",
+              defaultValue: .string(VoiceOutputProvider.defaultSelection.voice)),
+        ttsSpeedField,
+        ttsLanguageIdentifierField,
+        sonioxTTSRegionField
+    ]
 }

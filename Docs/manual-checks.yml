@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-13"
+updated: "2026-11-14"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -219,6 +219,23 @@ sessions:
           - "Open History."
         expected: "Every route transcribes the phrase once, streaming routes show words while you speak (Azure MAI Transcribe (Turn-based) shows each turn when you pause), and History names the model with its cost. Pulse refuses the non-English run before sending audio. Note any route that is unavailable to your account."
         final_gate: true
+      - id: "reson8-rumble-2"
+        issues:
+          - 1656
+        title: "Reson8 Rumble-2 batch and streaming, including Japanese"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Mac, first Alpha with Reson8 Rumble-2"
+        prerequisites:
+          - "A Reson8 API key saved in Settings \u203a API Keys"
+        steps:
+          - "Choose Reson8 Rumble-2 as the batch model, set the language to English, dictate \u201crumble two batch\u201d into TextEdit and stop."
+          - "Choose Reson8 Rumble-2 (Streaming) as the live model, dictate \u201crumble two live\u201d and stop."
+          - "Set the language to Japanese and repeat both runs with a short Japanese phrase, for example \u201c\u3053\u3093\u306b\u3061\u306f\u201d."
+          - "Choose Reson8 Resonant-1 with Japanese still selected and try once."
+          - "Open History."
+        expected: "All four Rumble-2 runs transcribe the phrase once, the streaming runs show words while you speak, and History names Reson8 Rumble-2 or Reson8 Rumble-2 (Streaming). Resonant-1 refuses Japanese before sending audio."
+        final_gate: false
       - id: "owner-stepfun-international-region"
         issues:
           - 1210
@@ -378,6 +395,36 @@ sessions:
           - "Name them Buy me a coffee, Buy me lunch and Generous support, price them like the App Store tiers and activate them."
           - "Update the Data safety form and the purchase digital goods answer from the guide."
         expected: "The three products are active and the Data safety form matches the guide."
+        final_gate: false
+      - id: "owner-desktop-posthog-key-workflows"
+        issues:
+          - 1624
+          - 1744
+        title: "Windows and Linux: stamp the PostHog project key in the release workflows"
+        minutes: 10
+        core: false
+        build: "GitHub repository settings and workflows"
+        steps:
+          - "Check the POSTHOG_PROJECT_KEY repository secret holds the public PostHog Production project key."
+          - "Apply the workflow patch and guard test from #1744 to windows-cross-proof.yml, windows-arm64.yml and linux-flatpak.yml."
+          - "Install the next Windows or Linux Alpha, turn on Share anonymous usage analytics in Settings \u203a General and look in PostHog Production for its analytics_opt_in event."
+        expected: "One analytics_opt_in event arrives from the Alpha, with the app version but no transcript text, file path or user name."
+        final_gate: false
+      - id: "owner-android-cloudkit-token"
+        issues:
+          - 1630
+          - 1741
+        title: "Android: give Android builds the CloudKit web API token"
+        minutes: 5
+        core: false
+        build: "GitHub repository settings and CloudKit Console"
+        prerequisites:
+          - "Steps: Docs/windows-cloudkit-sync.md (Android)"
+        steps:
+          - "Check the CloudKit Console API token for iCloud.com.justspeaktoit that the desktop builds use still lists http://127.0.0.1:47823/cloudkit-sign-in as its sign-in callback."
+          - "Save the token as the CLOUDKIT_WEB_API_TOKEN repository secret, add it to the Android build step in android.yml and alpha-release.yml as #1741 shows, and make sure the Production schema has the TranscriptionHistory record type."
+          - "Run the Android workflow on main, install the Alpha APK and open Settings \u203a History sync."
+        expected: "The next Android Alpha shows Sign in to iCloud under Settings \u203a History sync instead of saying sync is not set up for this build."
         final_gate: false
       - id: "android-play-tip-jar"
         issues:
@@ -594,6 +641,60 @@ sessions:
           - "Export preferences, turn the allow switch off, import the file: the switch stays off."
         expected: "Reads never show key material, writes are refused until the local switch is on and are all-or-nothing, Preferences shows the change at once, and importing a file never turns the switch on."
         final_gate: false
+      - id: "windows-provider-balances"
+        issues:
+          - 1621
+        title: "Windows: API keys shows provider balances beside saved keys"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Windows, the first Alpha build that includes #1621, with a funded OpenRouter key"
+        steps:
+          - "With Narrator running, open the API keys window, save an OpenRouter key and select OpenRouter."
+          - "Read the Balance line, then choose Check balance and keep typing in the key field while it checks."
+          - "Select OpenAI and read its Balance line. Then replace the OpenRouter key with an invalid one and choose Check balance."
+          - "Remove the OpenRouter key."
+        expected: "OpenRouter shows its credit in dollars with when it was checked, and Narrator reads the new line. Typing never stalls. OpenAI says why no figure is shown and gives its billing page. The invalid key shows Balance unknown with a reason and no key text; after removal the line asks for a key."
+        final_gate: false
+      - id: "linux-provider-balances"
+        issues:
+          - 1621
+        title: "Linux: API Keys shows provider balances beside saved keys"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Linux, the first Alpha build that includes #1621, with a funded OpenRouter key"
+        steps:
+          - "With Orca running, open the API Keys window, save an OpenRouter key and select OpenRouter."
+          - "Read the Balance line, then choose Check balance and keep typing in the key field while it checks."
+          - "Select OpenAI and read its Balance line. Then replace the OpenRouter key with an invalid one and choose Check balance."
+          - "Remove the OpenRouter key."
+        expected: "OpenRouter shows its credit in dollars with when it was checked, and Orca reads the new line. Typing never stalls. OpenAI says why no figure is shown and gives its billing page. The invalid key shows Balance unknown with a reason and no key text; after removal the line asks for a key."
+        final_gate: false
+      - id: "windows-tip-jar"
+        issues:
+          - 1625
+        title: "Windows: About's Support development opens the tip pages"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Windows, the first Alpha build that includes the #1625 desktop tip jar"
+        steps:
+          - "With Narrator running, open About and Tab to the Support development buttons."
+          - "Choose GitHub Sponsors, then return to the app and choose Ko-fi."
+          - "Search Settings for tip jar and choose the result."
+        expected: "Narrator reads each button's name. Each button opens its page (github.com/sponsors/crmitchelmore, ko-fi.com/crmitchelmore) in the default browser, nothing in the app changes or unlocks, and the search result opens About. At the smallest window size the row stays inside the About card."
+        final_gate: false
+      - id: "linux-tip-jar"
+        issues:
+          - 1625
+        title: "Linux: About's Support development opens the tip pages"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Linux, the first Alpha build that includes the #1625 desktop tip jar"
+        steps:
+          - "With Orca running, open About and Tab to the Support development card's buttons."
+          - "Choose GitHub Sponsors, then return to the app and choose Ko-fi."
+          - "Search Settings for tip jar and choose the result."
+        expected: "Orca reads each button's name and that tips are optional and unlock nothing. Each button opens its page (github.com/sponsors/crmitchelmore, ko-fi.com/crmitchelmore) in the default browser, nothing in the app changes or unlocks, and the search result opens About."
+        final_gate: false
       - id: "owner-desktop-raw-configuration-editor"
         issues:
           - 1670
@@ -624,6 +725,7 @@ sessions:
       - id: "iphone-raw-configuration-editor"
         issues:
           - 1608
+          - 1671
         title: "iPhone raw configuration editor validates, applies all or none, imports and exports"
         minutes: 5
         core: false
@@ -632,7 +734,8 @@ sessions:
           - "Open Settings \u203a General \u203a Edit raw configuration \u203a Raw configuration. Check no API key value appears; \"apiKeys\" lists only true or false."
           - "Change \"autoStopSilenceSeconds\" to 30 and tap Validate, then Apply: an error names settings.autoStopSilenceSeconds and nothing is saved."
           - "Set it to 5 and \"hardwareTriggerDestination\" to \"historyOnly\", tap Apply, go back to Recording & Shortcuts: both show the new values."
-          - "Tap Export, save to Files, tap Reset to Defaults and confirm, Apply, then Import the saved file and Apply: your values come back."
+          - "Check the document lists the Read aloud settings (\"ttsProvider\", \"ttsModel\", \"ttsVoice\", \"ttsSpeed\", \"ttsLanguageIdentifier\", \"sonioxTTSRegion\"). With \"ttsProvider\" \"deepgram\", set \"ttsSpeed\" to 3 and tap Validate: an error names settings.ttsSpeed. Set it to 1.5 and \"ttsLanguageIdentifier\" to \"en_GB\" and tap Apply: no error."
+          - "Tap Export, save to Files, tap Reset to Defaults and confirm, Apply, then Import the saved file and Apply: your values come back, including \"ttsSpeed\" 1.5 and \"ttsLanguageIdentifier\" \"en_GB\"."
           - "With VoiceOver on, tap Validate on an invalid document: VoiceOver reads the result and the first error."
           - "Search Settings for \"raw\" or \"json\": Edit raw configuration is a result and opens General."
         expected: "Errors name each bad key and nothing changes until every value is valid; applied values show on their Settings pages at once; export, reset and import round-trip; results are announced to VoiceOver."
@@ -650,6 +753,52 @@ sessions:
           - "Start a recording, open Settings \u203a System resources in use and read the Live Activity row."
           - "Repeat the Recommended setup and Live Activity checks on an iPhone."
         expected: "On iPad, copy says \"this iPad\" or \"your iPad\", the setup card suggests Control Center rather than the Action Button, and nothing mentions the Dynamic Island. On iPhone, copy says \"this iPhone\" and the Live Activity text says \"on supported iPhones, in the Dynamic Island\"."
+        final_gate: false
+      - id: "iphone-batch-provider-catalogue"
+        issues:
+          - 1636
+        title: "Recorded transcription: Deepgram, AssemblyAI, ElevenLabs, Groq and other providers"
+        minutes: 6
+        core: false
+        build: "TestFlight Just Speak to It Alpha, a build that includes the #1636 batch provider catalogue"
+        prerequisites:
+          - "A working API key for at least two of Deepgram, AssemblyAI, ElevenLabs, Groq, Mistral, Modulate, Rev.ai, Soniox or Speechmatics. Use made-up sentences only."
+        steps:
+          - "Open Settings, API Keys and save the keys. Groq now has its own card."
+          - "Open Settings, Transcription, choose Batch and open the model list."
+          - "Choose one of the providers you have a key for, record \"batch provider check one two three\" and stop."
+          - "Repeat with a second provider, then open History."
+        expected: "The batch list shows Deepgram, AssemblyAI, ElevenLabs, Groq, Mistral, Modulate, Rev.ai, Soniox and Speechmatics sections. Each recording returns the spoken words, History names the chosen provider and model, and no recording needs or uses the OpenRouter key."
+        final_gate: false
+      - id: "iphone-troubleshooting-page"
+        issues:
+          - 1634
+        title: "Troubleshooting lists what stops dictation and each fix works"
+        minutes: 4
+        core: false
+        build: "TestFlight Just Speak to It Alpha, a build that includes the #1634 Troubleshooting page"
+        steps:
+          - "Open Settings \u203a Privacy & Diagnostics \u203a Troubleshooting with a cloud model selected and its key saved."
+          - "In the system Settings app turn the microphone off for Just Speak, return to the app and read the page."
+          - "Tap Open Settings on the Microphone row, turn it back on and return."
+          - "Choose a cloud model whose key is not saved, then open Troubleshooting again and tap API keys."
+          - "With a saved Deepgram or ElevenLabs key selected, tap Check key."
+        expected: "With the microphone off, a red Microphone row is listed first and the summary says something is stopping dictation; after turning it back on and returning, the row turns green without reopening the page. The missing key row names the provider and opens API Keys. Check key reports whether the provider accepted the saved key, and a rejected key turns the row red."
+        final_gate: false
+      - id: "iphone-microphone-selection"
+        issues:
+          - 1637
+        title: "Recording uses the chosen microphone and falls back visibly"
+        minutes: 4
+        core: false
+        build: "TestFlight Just Speak to It Alpha, a build that includes #1637"
+        steps:
+          - "Connect a wired or Bluetooth headset (or a USB microphone)."
+          - "Settings \u203a Recording & Shortcuts \u203a Microphone: choose the built-in microphone, then dictate a sentence while speaking into the phone, not the headset."
+          - "Choose the headset microphone and dictate again into the headset."
+          - "Disconnect the headset, then dictate once more and look at the recording screen and the Microphone picker."
+          - "Choose System Default."
+        expected: "Each recording uses the chosen microphone. With the headset gone, recording still works on the built-in microphone, the recording screen says the chosen microphone isn't connected, and the picker shows Saved Microphone (Not Connected). Choosing System Default clears the notice."
         final_gate: false
       - id: "iphone-clipboard-e2e"
         issues:
@@ -1038,6 +1187,23 @@ sessions:
           - "Deny microphone access on a test installation and confirm the app explains how to recover without claiming it is recording."
         expected: "Both devices expose the recording control, complete local and review-provider transcription, show recording state, stop cleanly and save one item per completed recording. Denied access is recoverable. This supplies device evidence for the historical July review findings, not App Store approval."
         final_gate: false
+      - id: "ipad-transcribe-control-first-run"
+        issues:
+          - 1598
+        title: "iPad: Transcribe is visible in every layout and works with no API key"
+        minutes: 6
+        core: true
+        build: "TestFlight Just Speak to It Alpha that includes the App Review iPad fix (labelled Transcribe button)"
+        prerequisites:
+          - "An iPad on iPadOS 26 or later that is backed up or a spare test device, with a fresh installation (delete the app first so its local History goes too); no API keys entered."
+        steps:
+          - "Open the app in portrait and look at the bottom of the main screen, then rotate to landscape."
+          - "Open Safari beside it in Split View (or Stage Manager), then resize the app to one-third and to half width."
+          - "Tap Transcribe and allow the Microphone and Speech Recognition prompts; if Prepare Apple Model appears, tap it, wait until it is ready and tap Transcribe again. Say a fictional sentence and tap Stop."
+          - "Open Settings \u203a Recording & Shortcuts with Live Activities on, and Settings \u203a Transcription; read the footnotes."
+          - "In iOS Settings turn the app's Microphone access off, return and tap Transcribe."
+        expected: "A button labelled Transcribe with a microphone icon is visible at the bottom in portrait, landscape and every Split View width. With no API key the first recording uses on-device Apple Speech and produces text with no error (if Apple's speech assets are still downloading, the alert offers Prepare Apple Model, not a generic Error). No copy mentions this iPhone or the Dynamic Island. With access off, the alert is titled Can't Start Recording and offers Open Settings."
+        final_gate: true
       - id: "owner-iphone-store-privacy-and-review-metadata"
         issues:
           - 1468
@@ -1126,6 +1292,37 @@ sessions:
           - "With VoiceOver on, swipe through the Session details rows."
         expected: "Each entry lists its trigger (Button or Automation), friendly model names per phase, recording length, transcript and post-processing times and a total. The issue preview has relative timings but no transcript text or dates. VoiceOver reads each row's title and value."
         final_gate: true
+      - id: "iphone-history-filters"
+        issues:
+          - 1628
+        title: "History: search with model, errors-only and date filters"
+        minutes: 4
+        core: false
+        build: "TestFlight Just Speak to It Alpha, a build that includes the #1628 History filters change"
+        steps:
+          - "Make History entries over at least two days with two different models, including one that failed (for example with flight mode on)."
+          - "In History search for a word from one transcript, then for part of a model name."
+          - "Tap the filter button: turn on Errors only, then choose one model, then turn on Limit by date and set From and To to yesterday."
+          - "Choose filters that match nothing and tap Clear Search and Filters. Then close the app and reopen History."
+          - "With VoiceOver on, swipe through the filter sheet."
+        expected: "Search matches transcript text and model names. Errors only shows only failed entries, the model filter shows only that model, and the date range includes entries from the whole of each chosen day, early morning and late evening alike. No matches offers Clear Search and Filters, which restores every entry. Every entry is still there after reopening. VoiceOver reads each toggle, picker and date with its name and state."
+        final_gate: false
+      - id: "iphone-send-to-mac"
+        issues:
+          - 1640
+        title: "Send to Mac: pair the phone, send a History item, forget the Mac"
+        minutes: 5
+        core: false
+        build: "TestFlight Just Speak to It Alpha, the first build that includes the iOS Send to Mac sender, and a direct-download Mac Alpha"
+        steps:
+          - "On the Mac open Settings \u203a General \u203a Send to Mac, turn it on and note the pairing code. Click into a scratch note on the Mac."
+          - "On the phone open Settings \u203a Sync & Transfer \u203a Send to Mac, allow Local Network access, tap Pair with <your Mac>, enter the code and tap Pair."
+          - "In History long-press an entry and choose Send to Mac."
+          - "On the Mac tap Regenerate Code, then send another History item from the phone."
+          - "Tap Forget This Mac and confirm, then long-press a History item. Search Settings for \"send to mac\"."
+          - "With VoiceOver on, repeat one send and listen to the result."
+        expected: "Pairing shows the Mac as paired. The first send shows Sent to <your Mac> and the text is pasted once at the Mac's cursor. After regenerating the code the send fails with a message asking you to pair again, and the phone never re-pairs on its own. After forgetting, History no longer offers Send to Mac. Search finds Send to Mac and opens Sync & Transfer. VoiceOver announces sent and failed results."
+        final_gate: false
       - id: "owner-ios-upload-required-reason-apis"
         issues:
           - 1644
@@ -1138,6 +1335,40 @@ sessions:
           - "Confirm the build shows as ready to test rather than invalid."
           - "Check the Apple email for the build, or the build upload's errors."
         expected: "The build finishes processing and no ITMS-91053 (missing required-reason API declaration) is reported for the app, keyboard, widget or Share extension."
+        final_gate: false
+      - id: "iphone-learned-corrections"
+        issues:
+          - 1651
+        title: "The Just Speak Keyboard learns a correction you make twice"
+        minutes: 8
+        core: false
+        build: "TestFlight Just Speak to It, the first Alpha build that includes iOS learned corrections"
+        steps:
+          - "Settings \u203a Post-Processing \u203a Auto-Corrections: check Learn Corrections Automatically is on and the threshold reads 2 edits. The Just Speak Keyboard needs Full Access."
+          - "In Notes, dictate with the Just Speak Keyboard a made-up sentence containing a name it gets wrong, for example Suzy for Susie."
+          - "Switch to the system keyboard with the globe key, fix the wrong word, then switch back to the Just Speak Keyboard."
+          - "Open Just Speak to It, then Settings \u203a Post-Processing \u203a Auto-Corrections \u203a Learned Corrections."
+          - "Repeat the dictation and the same fix once more, open the app, then dictate the sentence a third time in the app and with the keyboard."
+          - "In Learned Corrections remove the new correction with its trash button, then dictate the sentence again."
+          - "Repeat the first dictation and fix in a password field, and once with Learn Corrections Automatically off."
+        expected: "After the first fix, Candidates shows the wrong word \u2192 the right one, seen once, with Add and Dismiss buttons. After the second it moves to Applied to Transcripts and the third dictation is spelt correctly in the app and the keyboard. Once removed, the wrong spelling comes back. Nothing is learned from the password field or with learning off. VoiceOver reads every button's label."
+        final_gate: false
+      - id: "ios-downloaded-local-models"
+        issues:
+          - 1650
+        title: "Downloaded Whisper models transcribe recordings on the device"
+        minutes: 10
+        core: false
+        build: "TestFlight Just Speak to It Alpha, the first build that includes #1650 iOS downloaded local transcription models, on an iPhone and an iPad"
+        steps:
+          - "Open Settings \u203a Transcription \u203a Downloaded Models. Check each model shows its size and whether it is recommended for this device, then tap Download on the smallest one."
+          - "Watch the progress bar, then tap Cancel on a second model part-way through: it returns to Download and its partial files are gone."
+          - "When the first finishes, set Where transcription runs = Local and Local Engine = Downloaded Model, and pick the downloaded model."
+          - "Turn on Airplane Mode, record a sentence and stop. Then record about five seconds of silence and stop."
+          - "Open History and the sentence's detail. Then pick a model you have not downloaded, record again, and remove the downloaded model with its Remove button."
+          - "Expand Import from Hugging Face, enter argmaxinc/whisperkit-coreml and openai_whisper-base.en, tap Add Model, then download it."
+          - "Turn VoiceOver on and move through a model row while it downloads."
+        expected: "The sentence is transcribed with Airplane Mode on and History names the model (for example WhisperKit Base), never a generic label or a cloud provider. The silent recording produces no text and no placeholder. The not-downloaded model fails with a message to download it rather than uploading. Removed models show Download again. The import appears in the list and downloads. VoiceOver reads each model's name, size, state and progress, and announces when a download finishes."
         final_gate: false
   - id: "watch"
     device: "Watch"
@@ -1260,9 +1491,100 @@ sessions:
         steps:
           - "Clear the app's permissions. Start dictation and deny the microphone, then deny it permanently, then recover through the Settings link."
           - "During a dictation, receive a call; during another, connect and then disconnect a Bluetooth headset."
-          - "During a dictation, leave the app."
-        expected: "Denial shows a rationale, then a Settings link, and dictation works once granted. A call or route change ends the session with a clear reason or carries on with correct text; leaving the app reports that dictation stopped and History keeps the unfinished words as unfinished."
+          - "During a Cloud dictation, say a first phrase, leave the app, say a second, different phrase, then come back and stop."
+        expected: "Denial shows a rationale, then a Settings link, and dictation works once granted. A call or route change ends the session with a clear reason or carries on with correct text; leaving the app does not stop dictation: it carries on with the recording notification showing, and stopping after you come back keeps both phrases."
         final_gate: true
+      - id: "android-silence-auto-stop"
+        issues:
+          - 1632
+        title: "Cloud recordings stop after the set silence"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1632 silence auto-stop change"
+        steps:
+          - "Settings: turn on Stop recording after silence, set Silence duration to 2 seconds and leave the threshold at 0.05."
+          - "Choose Cloud mode, start dictating, say a sentence and then stay quiet."
+          - "Start again and say nothing at all; then start once more, pause for 1 second mid-sentence and carry on."
+          - "Set the duration to 5 seconds and repeat the first dictation; then turn the setting off and stay quiet for 10 seconds."
+        expected: "With the setting on, the recording stops about the set time after you go quiet and the sentence is transcribed. Saying nothing stops after the set time with no invented text. A pause shorter than the duration does not stop it. With the setting off, the recording keeps going until you stop it."
+        final_gate: false
+      - id: "android-hands-free-dictation"
+        issues:
+          - 1632
+        title: "Hands-free starts a Cloud recording when you speak, including your first word"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1632 hands-free dictation change"
+        steps:
+          - "Settings: turn on Hands-free dictation and leave Silence duration at 2 seconds. Choose Cloud mode."
+          - "Tap the record button. Check the screen says it is listening, the microphone indicator is on and a Listening notification appears; stay quiet for 10 seconds."
+          - "Say a sentence that starts with a short word, such as \"So, the meeting is at three\", then stay quiet."
+          - "Say a second sentence. Then lock the screen, wait 5 seconds, say a third sentence, wait for it to finish and unlock."
+          - "Tap Turn off hands-free; then choose an on-device or speech-service mode and open Settings."
+        expected: "Nothing is recorded or sent while you stay quiet. Each sentence starts a recording on its own, keeps its first word, stops about 2 seconds after you go quiet, is transcribed and then listening resumes, including with the screen locked. TalkBack announces the listening and recording states. Turning hands-free off ends the notification and the microphone indicator. In other modes the button records at once and Settings says hands-free needs Cloud mode."
+        final_gate: false
+      - id: "android-learned-corrections"
+        issues:
+          - 1651
+        title: "The dictation keyboard learns a correction you make twice"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes learned corrections"
+        steps:
+          - "Settings > Learned corrections: check Learn corrections from your edits is on and Add automatically after 2 edits is shown."
+          - "In a notes app, dictate with the Just Speak to It keyboard a made-up sentence containing a name it gets wrong, for example Suzy for Susie."
+          - "Within ten seconds, without switching keyboards, delete the wrong word with the keyboard's delete key and dictate or paste the right spelling."
+          - "Wait fifteen seconds, open Settings > Learned corrections and check the suggestion; tap Dismiss on another suggestion if there is one."
+          - "Repeat the dictation and the same correction once more, then dictate the sentence a third time."
+          - "Repeat the first dictation and edit in a password field."
+        expected: "After the first edit, Learned corrections shows the wrong word → the right one, seen once, with Add and Dismiss. After the second, it leaves the suggestions and appears in Personal corrections, and the third dictation is spelt correctly. A dismissed suggestion does not come back. Nothing is learned from the password field."
+        final_gate: false
+      - id: "android-history-playback"
+        issues:
+          - 1629
+        title: "Android: play kept recordings from History"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes History playback"
+        steps:
+          - "In Settings turn on Keep recordings in History, then make two Cloud dictations of a few seconds each."
+          - "Open History, tap Play on the newest entry, then Stop before it ends. Play it again and start a dictation while it plays."
+          - "Tap Transcribe on one entry and check it keeps its Play button."
+          - "Turn the setting off, dictate once more, then tap Clear and choose Keep recordings."
+          - "Tap Clear again and choose Delete all."
+        expected: "Each recording plays your own voice and Stop ends it at once; starting a dictation stops playback. The entry made with the setting off has no Play button and Clear with Keep recordings removes only it. Delete all empties History."
+        final_gate: false
+      - id: "android-history-filters"
+        issues:
+          - 1628
+        title: "Android: search History and filter by model, errors and date"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1628 History filters change"
+        steps:
+          - "Make History entries over at least two days in Cloud mode with two models and in On-device mode, including one that fails (for example Cloud in flight mode)."
+          - "Open History and search for a word from one transcript, then for part of a model name such as \"Whisper\"."
+          - "Clear the search. Choose a model from the Model button, then tap Errors only, then set From and To to the same earlier day."
+          - "Open From again and tap Any day; then tap Clear filters."
+          - "Rotate the phone with a filter set, then close the app and reopen History."
+          - "With TalkBack on, move through the search field, filter buttons and the summary line."
+        expected: "Search matches transcript text and model names, ignoring case. Each filter narrows the list, and the summary reads \"Showing N of M dictations\" or that nothing matches. A one-day range includes entries from early morning to late evening of that day only. Any day removes that end of the range and Clear filters shows every entry again. Rotating keeps the filters, and every entry is still there after reopening. TalkBack names every control and announces the summary as it changes."
+        final_gate: false
+      - id: "android-microphone-selection"
+        issues:
+          - 1637
+        title: "Android: Cloud recordings use the chosen microphone and fall back visibly"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes microphone selection"
+        steps:
+          - "Connect a wired, USB or Bluetooth headset (Bluetooth needs Android 12 or later) and pick Cloud mode."
+          - "Settings > Microphone: choose the headset, then make a Cloud dictation speaking only into the headset with the phone held away."
+          - "Choose Built-in microphone and dictate again speaking only into the phone."
+          - "Choose the headset again, disconnect it, and open the dictation screen; dictate once."
+          - "Reconnect the headset and reopen Settings > Microphone."
+        expected: "Each dictation transcribes the voice from the chosen microphone. While the headset is disconnected, Settings and the dictation screen say the chosen microphone isn't connected and the dictation still records from the phone. After reconnecting, the headset is selected again with no warning. Ending a Bluetooth dictation returns call and media audio to normal."
+        final_gate: false
       - id: "android-foreground-long-dictation"
         issues:
           - 1592
@@ -1306,6 +1628,20 @@ sessions:
           - "Restore the key, turn on cleanup with an OpenRouter model and dictate."
         expected: "Both models return the words. The invalid key fails with \"rejected the API key\". Cleanup returns tidied text and Show original restores the raw transcript."
         final_gate: true
+      - id: "android-first-run-setup"
+        issues:
+          - 1639
+        title: "First-run setup guide: microphone, route, keyboard, tile and a test dictation"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1639 setup guide"
+        steps:
+          - "Uninstall the app (or clear its data) and install the Alpha. Open it from the launcher."
+          - "Walk the guide: allow the microphone on its step, pick a route, tap Open keyboard settings and turn on the keyboard, come back, then tap Add Dictate tile (Android 13+)."
+          - "On the test step, dictate a sentence; then finish with Start dictating."
+          - "Relaunch the app, then open Settings, Setup guide, Run setup again, and press system Back on the first step."
+        expected: "The guide opens only on the fresh install. Allowing the microphone does not start a recording. The keyboard step shows the keyboard as on after returning, and the tile is added from the system dialog (or instructions show on Android 12 and earlier). The test dictation shows the words. A relaunch opens the dictation screen, and the guide re-runs from Settings; Back on its first step returns to dictation."
+        final_gate: false
       - id: "android-entry-surfaces"
         issues:
           - 1328
@@ -1320,6 +1656,21 @@ sessions:
           - "Open a password field and check the keyboard's microphone; then deny the microphone permission and try the keyboard."
         expected: "The tile and shortcut open the app and start dictating (after unlocking when locked). Both shared files are transcribed into History. The keyboard inserts the final text, is disabled in the password field, and explains a denied permission. Switching keyboards stops dictation without inserting stray text."
         final_gate: true
+      - id: "android-keyboard-voice-edit"
+        issues:
+          - 1620
+        title: "Dictation keyboard: rewrite selected text by voice and never touch another field"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1620 keyboard voice edit"
+        steps:
+          - "With an OpenRouter key saved, open a notes app with the Just Speak to It keyboard and check Edit is greyed out with nothing selected."
+          - "Type or dictate a made-up sentence, select part of it, tap Edit, read the notice naming the provider and tap Edit again. Say make it more formal, then tap Done."
+          - "Select text again, tap Edit and while it says Rewriting switch to another field or move the selection; then repeat with Airplane mode on."
+          - "Turn Airplane mode off, remove the OpenRouter key in Settings, then select text and tap Edit."
+          - "With TalkBack on, focus the Edit key with and without a selection."
+        expected: "Edit is enabled only with a selection. The rewrite replaces only the selected words and the rest of the sentence is unchanged. Moving away or changing the selection leaves the text as it was with a message that it changed, Airplane mode leaves it unchanged with a network message, and a missing key names the provider without recording. TalkBack reads Edit with its state and a description of what it does."
+        final_gate: false
       - id: "android-raw-configuration-editor"
         issues:
           - 1608
@@ -1367,6 +1718,52 @@ sessions:
           - "Delete the Spanish profile in Settings."
         expected: "The first transcript is in capitals and the second is normal cleanup. With the profile, Cloud uses Groq, recognises Spanish and ends sentences with exclamation marks, and On-device stays on the phone in Spanish. The keyboard key cycles profiles, TalkBack announces the profile name, and the key is disabled while listening. Deleting the profile hides the chooser and restores your own settings."
         final_gate: true
+      - id: "android-report-issue"
+        issues:
+          - 1633
+        title: "Report an issue with privacy-safe diagnostics"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes Report an issue"
+        steps:
+          - "Turn on airplane mode, dictate one made-up sentence in Cloud mode so it fails, then open History and tap Report on that entry."
+          - "Read the draft: check it names the model, mode and failure but not your sentence, then turn off Include diagnostics and read it again."
+          - "Tap Copy draft and paste it into a note; then turn airplane mode off and tap Open in GitHub, and close the browser without submitting."
+          - "Settings \u203a Report an issue: open the draft and repeat Copy draft with TalkBack on."
+        expected: "The draft never contains the transcript, audio or keys. Turning off diagnostics leaves only the description and a userRemoved state. Copy puts the title and body on the clipboard, Open shows a prefilled GitHub draft labelled bug without submitting, and TalkBack announces the switch state and each status message."
+        final_gate: false
+      - id: "android-config-transfer"
+        issues:
+          - 1635
+        title: "Export and import the full configuration, with a preview and API keys only on request"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1635 configuration export and import"
+        steps:
+          - "Settings \u203a Export and import: leave Include API keys off, tap Export and save the file to Downloads."
+          - "Change the cleanup prompt, delete a correction and a History entry, then tap Import and choose the saved file."
+          - "Read the preview: counts for each category and no Import API keys switch. Tap Cancel and confirm nothing changed."
+          - "Import the file again and tap Apply import; check the prompt, correction and History entry (with its recording) are back."
+          - "Turn on Include API keys, read the warning and export again, then import that file on a second phone (or after clearing app data) with Import API keys on."
+          - "Import a Mac or iPhone export (Settings \u203a Data & Migration on the Mac) and read the preview's notices."
+        expected: "Nothing changes until Apply import. Applying restores settings, profiles, corrections, History and recordings in one step; API keys travel only when chosen on both export and import. A Mac or iPhone export imports what Android supports and lists what it skipped, without changing anything else."
+        final_gate: true
+      - id: "android-history-sync"
+        issues:
+          - 1630
+        title: "Android: History sync with your Mac through iCloud"
+        minutes: 12
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1630, and a Mac or Windows PC with History sync on, signed in to the same Apple Account"
+        steps:
+          - "Settings \u203a History sync: check the note, then tap Sign in to iCloud and finish signing in to Apple in the browser."
+          - "Return to Just Speak to It and wait for the status to say when it last synced."
+          - "Open History and check entries dictated on the Mac appear, marked Synced from Mac, with no audio."
+          - "Dictate a made-up sentence on the phone, tap Sync now, then check it reaches the Mac's History within a minute or two."
+          - "Delete one synced entry on the phone and one on the Mac, sync both, and check each disappears on the other device."
+          - "Tap Sign out, dictate again and check nothing more reaches the Mac. Search Settings for iCloud and check it opens History sync."
+        expected: "Sign-in completes and the status shows a sync time. Mac entries appear on the phone without audio and phone entries appear on the Mac without audio. Deletions on either side stay deleted and never come back. After signing out nothing more is sent, and TalkBack reads the status as it changes."
+        final_gate: false
       - id: "android-battery-latency"
         issues:
           - 1328
@@ -1380,6 +1777,382 @@ sessions:
           - "Note the battery percentage again and any heat."
         expected: "Battery use and latency are comparable to the phone's own voice typing; note the numbers in the result."
         final_gate: true
+      - id: "android-recording-sounds"
+        issues:
+          - 1638
+        title: "Recording start and stop sounds"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes recording sounds"
+        steps:
+          - "Settings › Recording sounds: check Play start and stop sounds is on, pick each profile and tap Play sample; drag Volume down and up."
+          - "In Cloud mode, record a sentence and stop. Then record again and tap Cancel."
+          - "In On-device mode, record a sentence and stop."
+          - "Turn Play start and stop sounds off and record once more."
+        expected: "Each profile sounds different and follows the volume. Start plays when recording begins and Stop when it ends; Cancel plays no stop sound. The Cloud transcript has no stray words from the start sound. With sounds off, nothing plays."
+        final_gate: false
+      - id: "android-appearance"
+        issues:
+          - 1652
+        title: "Appearance: light, dark, system and wallpaper colours"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Android, an Alpha APK that includes the #1652 appearance setting"
+        steps:
+          - "Settings: under Appearance choose Dark while the phone is in light mode, then Light while the phone is in dark mode, then System."
+          - "Check the status and navigation bar icons on each choice, then close and reopen the app."
+          - "On Android 12 or later turn on Wallpaper colours, change the wallpaper, and turn it off again."
+          - "Search settings for \"dark mode\" and open the result."
+        expected: "Each choice applies at once across Dictation, Settings and History, the bar icons stay readable, and the choice survives a restart. Wallpaper colours follow the wallpaper and turning them off restores the orange theme. The search opens Appearance."
+        final_gate: false
+      - id: "android-provider-balances"
+        issues:
+          - 1621
+        title: "API keys shows the OpenRouter balance and billing links"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1621, with a funded OpenRouter key"
+        steps:
+          - "Save an OpenRouter key, then open Settings \u203a API keys with TalkBack on."
+          - "Read the OpenRouter Balance line, tap Check balance and type in another key field while it checks."
+          - "Read the OpenAI Balance line and tap Open billing page."
+          - "Save an invalid OpenRouter key and tap Check balance, then remove the key."
+        expected: "OpenRouter shows its credit in dollars and when it was checked, and TalkBack reads the update. Typing never stalls. OpenAI explains why no figure is shown and opens its billing page. The invalid key shows Balance unknown with a reason and no key text; after removal the line asks for a key."
+        final_gate: false
+      - id: "android-openrouter-cleanup-browser"
+        issues:
+          - 1618
+        title: "Browse OpenRouter cleanup models, check details, then choose one"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1618 OpenRouter cleanup browser"
+        steps:
+          - "Settings \u203a Clean up transcripts: open the cleanup model picker. Check native-provider models are listed first, followed by a separate Browse OpenRouter models\u2026 row."
+          - "Tap Browse OpenRouter models\u2026, search for a made-up name, then clear it; choose a provider and turn on Zero listed prices, then turn it off and choose All providers."
+          - "Open a model: read its pricing, context, speed and strengths, then tap Use for cleanup. Reopen the picker and check the Browse row."
+          - "With TalkBack on, repeat the search and open a model's details, then use Back to return to the browser and to the picker."
+        expected: "The browser lists only OpenRouter models, the result count changes as you search and filter, and no matches shows a clear message. The details page shows pricing (or says it is not listed) before choosing. After choosing, the Browse row shows OpenRouter \u203a the model name and cleanup uses it. TalkBack reads every control's name and state, announces the result count, and Back goes details, browser, picker."
+        final_gate: false
+      - id: "android-openrouter-transcription-browser"
+        issues:
+          - 1618
+        title: "Browse live OpenRouter models for transcription and cleanup, then dictate with one"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes the #1618 OpenRouter transcription browser, with an OpenRouter key saved"
+        steps:
+          - "Settings: under Cloud transcription model, tap Browse OpenRouter models\u2026. Wait for the list to finish checking OpenRouter, then search, choose a provider and turn Zero listed prices on and off."
+          - "Open a model that is not one of the bundled Gemini, Voxtral or Inkling models, read its details, then tap Use for transcription."
+          - "Choose Cloud, record \"OpenRouter browser check one two three\" and stop, then open History."
+          - "Open Clean up transcripts \u203a the cleanup model picker \u203a Browse OpenRouter models\u2026, turn on Discover OpenAI cleanup models via OpenRouter, choose a newly listed model and dictate again."
+          - "Turn on flight mode, force-stop and reopen the app, then open both browsers again and tap Refresh."
+          - "With TalkBack on, open the transcription browser, a model's details and the Refresh button."
+        expected: "The transcription browser lists the bundled OpenRouter models first, then the other audio models OpenRouter lists today. After choosing, the row under the cloud models shows OpenRouter \u203a the model name, the recording returns the spoken words and History names that model. Cleanup lists newly discovered OpenAI models only after the switch is on, and uses the one chosen. Offline, both browsers keep the models found earlier and your choices, Refresh says discovery is unavailable, and nothing else breaks. TalkBack reads every control's name and state."
+        final_gate: false
+      - id: "android-batch-provider-catalogue"
+        issues:
+          - 1636
+        title: "Cloud transcription: Deepgram, AssemblyAI, ElevenLabs, Speechmatics and other providers"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, an Alpha APK that includes the #1636 batch provider catalogue"
+        prerequisites:
+          - "A working API key for at least two of AssemblyAI, Deepgram, ElevenLabs, Mistral, Modulate, Reson8, Rev.ai, Soniox or Speechmatics. Use made-up sentences only."
+        steps:
+          - "Settings: open API keys and save the keys. Each provider has its own row."
+          - "Tap Check balance on each Deepgram, ElevenLabs or Rev.ai key you saved."
+          - "Choose Cloud, open the cloud model list and pick a model from a provider you have a key for."
+          - "Under Personal corrections add \"Kubernetes\" (Vocabulary only), then record \"batch provider check one two three, Kubernetes\" and stop."
+          - "Repeat with a second provider, then open History."
+        expected: "The model list shows AssemblyAI, Deepgram, ElevenLabs, Mistral, Modulate, Reson8, Rev AI, Soniox and Speechmatics models after OpenAI and Groq. Each recording returns the spoken words with Kubernetes spelt correctly, History names the chosen model, and a missing or wrong key names that provider's key. Deepgram shows dollars of credit (or its unit left), ElevenLabs shows characters left of the plan's limit, and Rev AI shows seconds left with a note that the total is unknown."
+        final_gate: false
+      - id: "android-troubleshooting-page"
+        issues:
+          - 1634
+        title: "Troubleshooting lists what stops dictation and each fix works"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Android, an Alpha APK that includes the #1634 Troubleshooting page"
+        steps:
+          - "Settings: search for \"troubleshoot\" and open the result, with On-device mode chosen and the microphone allowed."
+          - "In the phone's Settings turn the microphone off for Just Speak, return to the app and open Settings › Troubleshooting again; tap Open app settings or Allow microphone, allow it and return."
+          - "Tap Keyboard settings, turn on the Just Speak keyboard and return."
+          - "On the Dictation screen choose Cloud with a model whose key is not saved, then return to Troubleshooting and tap API keys."
+          - "Turn on cleanup with a provider whose key is not saved and tap Turn off cleanup; then repeat with TalkBack on."
+        expected: "Problems are listed first with a matching summary line, and every row turns OK after its fix without reopening the page. The microphone fix opens the permission prompt or app settings, the keyboard fix opens the phone's keyboard list, the missing key row names the provider and jumps to API keys, and Turn off cleanup removes the cleanup key row. TalkBack reads each row with its severity, each fix button with its row, and announces the summary when it changes."
+        final_gate: false
+      - id: "android-raw-configuration-newer-settings"
+        issues:
+          - 1700
+        title: "Android raw configuration carries the newer Settings choices"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1700"
+        steps:
+          - "Open Settings \u203a Edit raw configuration and tap Show current. Check it lists appearance, dynamicColor, recordingSoundsEnabled, recordingSoundProfile, recordingSoundVolume, silenceDetectionEnabled, silenceThreshold, silenceDuration, autoCorrectionsEnabled, autoCorrectionsPromotionThreshold and keepRecordingsInHistory with the values Settings shows."
+          - "Set \"silenceDuration\" to 9 and tap Validate: an error says it must be between 0.5 and 5, and nothing changes."
+          - "Set \"appearance\" to \"dark\", \"recordingSoundProfile\" to \"soft\", \"silenceDetectionEnabled\" to true and \"autoCorrectionsPromotionThreshold\" to 4, then tap Apply: the app turns dark at once and Settings shows the Soft sounds, Stop recording after silence on and 4 edits."
+          - "Drag the recording-sound volume slider to its lowest point and tap Show current: recordingSoundVolume is 0.02, not 0."
+        expected: "Every listed setting appears with its current value, out-of-range values are refused, applied values show in Settings and the theme at once, and the volume never drops below the shared 2% floor."
+        final_gate: false
+      - id: "android-batch-remaining-providers"
+        issues:
+          - 1724
+        title: "Cloud transcription: Cartesia, Gladia, Gemini, Meta, Smallest, xAI and OpenRouter audio"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, an Alpha APK that includes #1724"
+        prerequisites:
+          - "A working API key for at least two of Cartesia, Gladia, Google (Gemini), Meta, Smallest AI, xAI or OpenRouter. Use made-up sentences only."
+        steps:
+          - "Settings: open API keys and save the keys. Each provider has its own row."
+          - "Choose Cloud, open the cloud model list and pick a model from a provider you have a key for (for OpenRouter, pick Inkling or a Gemini model marked OpenRouter; Smallest AI needs the dictation language set to English)."
+          - "Record \"remaining providers check one two three\" for about ten seconds and stop."
+          - "Repeat with a second provider, then open History."
+        expected: "The model list shows Cartesia, Gladia, Gemini 3.5 Transcribe, Meta Muse Voice, Smallest AI Pulse Pro, Grok Voice Transcribe and the OpenRouter audio models. Each recording returns the spoken words, History names the chosen model, and a missing or wrong key names that provider's key."
+        final_gate: false
+      - id: "android-batch-regional-providers"
+        issues:
+          - 1724
+        title: "Cloud transcription: Azure, Alibaba and StepFun with their region settings"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, an Alpha APK that includes the Azure, Alibaba and StepFun change for #1724"
+        prerequisites:
+          - "A key for at least one of an Azure Speech resource (with its region), an Alibaba Model Studio workspace (with its region and workspace ID) or StepFun (knowing which platform issued it). Use made-up sentences only."
+        steps:
+          - "Settings: open API keys. For Azure enter the resource's region, then save the key; for Alibaba choose the region and enter the workspace ID, then save the key; for StepFun choose International or China, then save the key."
+          - "With TalkBack on, move through the new region, endpoint and workspace fields and check each is read with its name."
+          - "Choose Cloud, pick Azure Fast Transcription (or an Azure MAI model), an Alibaba model or StepFun StepAudio 3 ASR Max, record \"regional providers check one two three\" for about ten seconds and stop."
+          - "For Azure, paste the HTTPS endpoint from the resource's Keys and Endpoint page, tap Save endpoint and record again; then clear it."
+          - "Save a StepFun key under the other region, or an Alibaba key with Fun-ASR in a region other than Beijing or Singapore, and record once more."
+        expected: "Each recording returns the spoken words and History names the chosen model. Azure works with the region alone and with the saved endpoint. A key saved under the wrong region, or Fun-ASR outside Beijing or Singapore, fails with a key error for that provider and never succeeds silently."
+        final_gate: false
+      - id: "android-send-to-mac"
+        issues:
+          - 1640
+        title: "Send to Mac: pair the Android phone, send a History item, forget the Mac"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes the Android Send to Mac sender, and the Stable Mac app from justspeaktoit.com on the same Wi-Fi"
+        steps:
+          - "On the Mac open Settings \u203a General \u203a Send to Mac, turn it on and note the pairing code. Click into a scratch note on the Mac."
+          - "On the phone open Settings \u203a Send to Mac. Wait for Pair with <your Mac>, tap it, enter the code and tap Pair."
+          - "Open History and tap Send to Mac on an entry. Then close and reopen the app and send another entry."
+          - "On the Mac tap Regenerate Code, then send another History item from the phone."
+          - "In Settings tap Forget This Mac and confirm, then open History. Search Settings for \"send to mac\"."
+          - "With TalkBack on, pair again and repeat one send, listening to the code field, the Pair button and the result."
+        expected: "The Mac appears under Send to Mac within a few seconds and pairing shows Paired Mac with its name. Each send shows Sent to <your Mac> and the text is pasted once at the Mac's cursor, including after reopening the app. After regenerating the code the send fails with the Mac's message asking you to pair again, and the phone never re-pairs on its own. After forgetting, History no longer offers Send to Mac. Search finds Send to Mac and opens its section. TalkBack names the code field and buttons and announces pairing, sent and failed results."
+        final_gate: false
+  - id: "windows"
+    device: "Windows"
+    title: "Windows"
+    setup:
+      - "A Windows 11 PC with the Just Speak to It Alpha for Windows installed and Narrator available, and at least two recordings in History."
+      - "Use made-up sentences only. Keep a second computer or phone handy to export settings from."
+    items:
+      - id: "windows-command-palette"
+        issues:
+          - 1619
+        title: "Search for anything: actions, History and settings from the keyboard"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Windows, an Alpha build that includes #1619"
+        steps:
+          - "With the main window focused, press Ctrl+K and check focus lands in the Search for anything box, and that Narrator reads it as Search for anything."
+          - "Without typing, press Down and check the list starts with actions such as Start or Stop Transcribing, then recent History, then suggested settings."
+          - "Type history and press Enter on Show History; check the History page opens."
+          - "Press Ctrl+K again, type a word from an older recording and choose its History result; check that recording is selected on the History page."
+          - "Press Ctrl+K, type silence, choose the setting and check its page opens with that preference highlighted. Press Ctrl+K, type zzqx and check No results is shown and announced, then press Escape."
+        expected: "Ctrl+K always focuses the search box. Results list actions first, then History, then settings, each read as its title then its kind (Action, History or the settings page). Choosing an action runs it, a History result selects that recording, and a setting opens and highlights its field. Escape restores the sidebar pages."
+        final_gate: true
+      - id: "windows-telemetry-consent"
+        issues:
+          - 1624
+        title: "Analytics and crash-report switches start off and only Settings changes them"
+        minutes: 6
+        core: true
+        build: "Just Speak to It for Windows, an Alpha build that includes the #1624 desktop telemetry change"
+        steps:
+          - "On a fresh install, open Settings \u203a General and find Share anonymous usage analytics and Send crash reports and diagnostics."
+          - "Import a settings file exported from a Mac or another desktop on which both are on, then reopen Settings."
+          - "Turn on only Send crash reports and diagnostics, apply, quit and reopen the app; then turn it off again."
+          - "With Narrator on, move focus to each switch and listen to what it announces."
+        expected: "Both switches are off on a fresh install and stay off after the import. Each switch changes only its own choice and keeps it after a restart. A screen reader reads each switch's name and on or off state."
+        final_gate: false
+      - id: "windows-crash-report-unclean-exit"
+        issues:
+          - 1624
+        title: "An unclean exit sends one crash report on the next launch"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Windows, a release Alpha build that includes the #1624 desktop telemetry change"
+        steps:
+          - "Turn on Send crash reports and diagnostics in Settings \u203a General and apply."
+          - "Dictate a made-up sentence, then end the app's process from the system's process manager instead of quitting."
+          - "Open the app, wait a minute, then quit normally and open it again."
+          - "Ask the owner to look in Sentry for a desktop.unclean_exit event from this build."
+        expected: "Exactly one unclean-exit report arrives, with the app version and OS but no transcript text, file path, user name or installation ID. A normal quit and relaunch sends nothing more."
+        final_gate: false
+      - id: "windows-config-transfer"
+        issues:
+          - 1635
+        title: "Back up and restore every setting, with a preview and API keys only on request"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Windows, an Alpha build that includes the #1635 desktop configuration backup"
+        steps:
+          - "Open Settings \u203a General \u203a Audio, output and backup, tick Saved audio, choose Save ZIP backup and answer No when asked to include API keys."
+          - "Change a setting (for example Voice commands), add a pronunciation and delete a History entry with audio, then choose Restore backup and pick the first ZIP."
+          - "Answer No when asked to restore API keys, read the preview, then cancel and confirm nothing changed."
+          - "Restore the ZIP again, choose Merge and check the setting, pronunciation and History entry (with its audio) are back."
+          - "Save a second backup with API keys included, change one key, then restore it with API keys included and choose Replace."
+          - "Restore a Mac export (Settings \u203a Data & Migration on the Mac) and read the preview's skipped items. With Narrator on, listen to each prompt and switch."
+        expected: "Nothing changes until Merge or Replace. The preview lists counts and conflicts for settings, connections, vocabulary, History and recordings, and says the backup's API keys were left out unless you chose them. Restoring brings everything back in one step; API keys move only when chosen on both save and restore. Model files are never copied: the preview names models to download from Local models. A Mac export restores what this device supports and lists what it skipped, without changing anything else."
+        final_gate: false
+      - id: "windows-openrouter-model-browser"
+        issues:
+          - 1618
+        title: "Browse OpenRouter models for transcription and cleanup, check details, then choose one"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Windows, an Alpha build that includes the #1618 desktop OpenRouter browser"
+        steps:
+          - "Settings \u203a Transcription: choose Remote and Batch. Check Browse OpenRouter models\u2026 appears beside Refresh models, then switch to Live or Local and check it disappears."
+          - "Back on Remote Batch, open Browse OpenRouter models\u2026. Search for a made-up name, then clear it; choose a provider and turn on Zero listed prices, then turn it off and choose All providers."
+          - "Select a model and read its pricing in the details pane, then choose it. Check the model picker now shows OpenRouter \u203a the model name."
+          - "Settings \u203a Post-processing, Clean-up: choose the Remote source, open Browse OpenRouter models\u2026, choose a cleanup model and press Apply. Reopen the browser and check that model is marked as selected."
+          - "With Narrator on, repeat the search and filters using only the keyboard, then press Escape to close the browser."
+        expected: "The browser lists only OpenRouter models the picker offers, narrows as you search and filter, and shows a clear message when nothing matches. The details pane shows pricing (or says it is not listed) before choosing. A chosen transcription model shows as OpenRouter \u203a name; a chosen cleanup model is kept after Apply. Narrator reads every control's name and the result count, and Escape closes the browser without changing the model."
+        final_gate: false
+      - id: "windows-send-from-phone"
+        issues:
+          - 1640
+        title: "Send from phone: pair an iPhone, receive a transcript, forget the phone"
+        minutes: 6
+        core: false
+        build: "Just Speak to It Alpha for Windows that includes the #1640 phone receiver, and a TestFlight Just Speak to It Alpha on an iPhone on the same Wi-Fi"
+        steps:
+          - "On the PC open Settings \u203a iCloud Sync, choose Send from phone, tick Receive transcripts from a phone and allow private networks if Windows Firewall asks. Note the pairing code."
+          - "On the phone open Settings \u203a Sync & Transfer \u203a Send to Mac, allow Local Network access, tap Pair with <this computer's name>, enter the code and tap Pair."
+          - "On the computer click into a scratch text editor, then on the phone long-press a History entry and choose Send to Mac."
+          - "On the computer choose New pairing code, then send another History item from the phone. Then on the phone forget the computer, pair again with the new code and send once more."
+          - "In Paired phones select the phone and choose Forget phone, then send again from the phone."
+          - "Turn receiving off and send once more. Then search Settings for \"send from phone\" and, with Narrator on, move through the receiver controls."
+        expected: "The phone shows the computer as paired and it appears under Paired phones. Each send shows Sent to <this computer> and types the text once at the cursor. A new pairing code empties Paired phones and the next send asks you to pair again; re-pairing works. After Forget the send asks you to pair again and never re-pairs on its own. With receiving off the send fails within ten seconds. Search finds Send from phone. Narrator reads each control's name and state and the code."
+        final_gate: false
+  - id: "linux"
+    device: "Linux"
+    title: "Linux"
+    setup:
+      - "A Linux desktop (GNOME on Wayland or X11) with the Just Speak to It Alpha for Linux installed and Orca available, and at least two recordings in History."
+      - "Use made-up sentences only. Keep a second computer or phone handy to export settings from."
+    items:
+      - id: "linux-command-palette"
+        issues:
+          - 1619
+        title: "Search for anything: actions, History and settings from the keyboard"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Linux, an Alpha build that includes #1619"
+        steps:
+          - "With the main window focused, press Ctrl+K and check focus lands in the Search for anything box, and that Orca reads it as Search for anything."
+          - "Without typing, press Down and check the list starts with actions such as Start or Stop Transcribing, then recent History, then suggested settings."
+          - "Type history and press Enter on Show History; check the History page opens."
+          - "Press Ctrl+K again, type a word from an older recording and choose its History result; check that recording is selected on the History page."
+          - "Press Ctrl+K, type silence, choose the setting and check its page opens with that preference highlighted. Press Ctrl+K, type zzqx and check No results is shown and announced, then press Escape."
+        expected: "Ctrl+K always focuses the search box. Results list actions first, then History, then settings, each read as its title then its kind (Action, History or the settings page). Choosing an action runs it, a History result selects that recording, and a setting opens and highlights its field. Escape restores the sidebar pages."
+        final_gate: true
+      - id: "linux-telemetry-consent"
+        issues:
+          - 1624
+        title: "Analytics and crash-report switches start off and only Settings changes them"
+        minutes: 6
+        core: true
+        build: "Just Speak to It for Linux, an Alpha build that includes the #1624 desktop telemetry change"
+        steps:
+          - "On a fresh install, open Settings \u203a General and find Share anonymous usage analytics and Send crash reports and diagnostics."
+          - "Import a settings file exported from a Mac or another desktop on which both are on, then reopen Settings."
+          - "Turn on only Send crash reports and diagnostics, apply, quit and reopen the app; then turn it off again."
+          - "With Orca on, move focus to each switch and listen to what it announces."
+        expected: "Both switches are off on a fresh install and stay off after the import. Each switch changes only its own choice and keeps it after a restart. A screen reader reads each switch's name and on or off state."
+        final_gate: false
+      - id: "linux-crash-report-unclean-exit"
+        issues:
+          - 1624
+        title: "An unclean exit sends one crash report on the next launch"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Linux, a release Alpha build that includes the #1624 desktop telemetry change"
+        steps:
+          - "Turn on Send crash reports and diagnostics in Settings \u203a General and apply."
+          - "Dictate a made-up sentence, then end the app's process from the system's process manager instead of quitting."
+          - "Open the app, wait a minute, then quit normally and open it again."
+          - "Ask the owner to look in Sentry for a desktop.unclean_exit event from this build."
+        expected: "Exactly one unclean-exit report arrives, with the app version and OS but no transcript text, file path, user name or installation ID. A normal quit and relaunch sends nothing more."
+        final_gate: false
+      - id: "linux-voice-edit-selection"
+        issues:
+          - 1620
+        title: "Edit Selection by Voice rewrites only the captured selection"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Linux, an Alpha build that includes the #1620 Linux voice edit change, with a cleanup model and its key set up"
+        steps:
+          - "Bind justspeaktoit --edit-selection-by-voice to a key in your desktop's keyboard settings (on X11 you can instead turn on Global for Edit Selection by Voice in Keyboard › Action shortcuts)."
+          - "Open Voice Output › Selection access, choose Allow and accept. In gedit or GNOME Text Editor, type a made-up sentence and select one word of it."
+          - "Press the binding, say make this uppercase, then press the binding again. Check only the selected word changes and the rest of the line is untouched."
+          - "Select another word and press the binding, then click elsewhere in the same document before pressing the binding again."
+          - "Press the binding with nothing selected, and once more after choosing Stop access in Voice Output."
+        expected: "The first edit replaces exactly the selected word once and the app reports the captured selection was replaced. Moving the caret or focus during dictation leaves the document unchanged and says the rewrite was copied instead; pasting shows the rewrite. With nothing selected or access stopped the app explains that it needs selected text it can read, then stops without listening or typing anywhere."
+        final_gate: false
+      - id: "linux-config-transfer"
+        issues:
+          - 1635
+        title: "Back up and restore every setting, with a preview and API keys only on request"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Linux, an Alpha build that includes the #1635 desktop configuration backup"
+        steps:
+          - "Open Settings \u203a General \u203a Data backup, turn on Include saved recording audio, leave Include API keys off and choose Save backup."
+          - "Change a setting (for example Voice commands), add a pronunciation and delete a History entry with audio, then choose Restore backup and pick the first ZIP."
+          - "Read the preview, then cancel and confirm nothing changed."
+          - "Restore the ZIP again, choose Merge and check the setting, pronunciation and History entry (with its audio) are back."
+          - "Save a second backup with API keys included, change one key, then restore it with API keys included and choose Replace."
+          - "Restore a Mac export (Settings \u203a Data & Migration on the Mac) and read the preview's skipped items. With Orca on, listen to each prompt and switch."
+        expected: "Nothing changes until Merge or Replace. The preview lists counts and conflicts for settings, connections, vocabulary, History and recordings, and says the backup's API keys were left out unless you chose them. Restoring brings everything back in one step; API keys move only when chosen on both save and restore. Model files are never copied: the preview names models to download from Local models. A Mac export restores what this device supports and lists what it skipped, without changing anything else."
+        final_gate: false
+      - id: "linux-openrouter-model-browser"
+        issues:
+          - 1618
+        title: "Browse OpenRouter models for transcription and cleanup, check details, then choose one"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Linux, an Alpha build that includes the #1618 desktop OpenRouter browser"
+        steps:
+          - "Settings \u203a Transcription: choose Remote and Batch. Check Browse OpenRouter models\u2026 appears beside Refresh models, then switch to Live or Local and check it disappears."
+          - "Back on Remote Batch, open Browse OpenRouter models\u2026. Search for a made-up name, then clear it; choose a provider and turn on Zero listed prices, then turn it off and choose All providers."
+          - "Select a model and read its pricing in the details pane, then choose it. Check the model picker now shows OpenRouter \u203a the model name."
+          - "Settings \u203a Post-processing: choose the Remote source, open Browse OpenRouter models\u2026, choose a cleanup model and press Apply. Reopen the browser and check that model is marked as selected."
+          - "With Orca on, repeat the search and filters using only the keyboard, then press Escape to close the browser."
+        expected: "The browser lists only OpenRouter models the picker offers, narrows as you search and filter, and shows a clear message when nothing matches. The details pane shows pricing (or says it is not listed) before choosing. A chosen transcription model shows as OpenRouter \u203a name; a chosen cleanup model is kept after Apply. Orca reads every control's name and the result count, and Escape closes the browser without changing the model."
+        final_gate: false
+      - id: "linux-send-from-phone"
+        issues:
+          - 1640
+        title: "Send from phone: pair an iPhone, receive a transcript, forget the phone"
+        minutes: 6
+        core: false
+        build: "Just Speak to It Alpha for Linux that includes the #1640 phone receiver, and a TestFlight Just Speak to It Alpha on an iPhone on the same Wi-Fi"
+        steps:
+          - "With avahi-daemon running and the native (not Flatpak) package installed, open Settings \u203a iCloud Sync, turn on Receive transcripts from a phone and note the pairing code."
+          - "On the phone open Settings \u203a Sync & Transfer \u203a Send to Mac, allow Local Network access, tap Pair with <this computer's name>, enter the code and tap Pair."
+          - "On the computer click into a scratch text editor, then on the phone long-press a History entry and choose Send to Mac."
+          - "On the computer choose New pairing code, then send another History item from the phone. Then on the phone forget the computer, pair again with the new code and send once more."
+          - "In Paired phones choose Forget next to the phone, then send again from the phone."
+          - "Turn receiving off and send once more. Then search Settings for \"send from phone\" and, with Orca on, move through the receiver controls."
+        expected: "The phone shows the computer as paired and it appears under Paired phones. Each send shows Sent to <this computer> and types the text once at the cursor. A new pairing code empties Paired phones and the next send asks you to pair again; re-pairing works. After Forget the send asks you to pair again and never re-pairs on its own. With receiving off the send fails within ten seconds. Search finds Send from phone. Orca reads each control's name and state and the code. Under Flatpak, or with avahi-daemon stopped, Status explains why phones cannot find the computer."
+        final_gate: false
   - id: "decisions"
     device: "Decision"
     title: "Decisions"

@@ -40,6 +40,8 @@ unsigned pagesOf(int identifier) {
     auto page = [](int value) { return 1u << value; };
     if (identifier >= navBaseID && identifier < navBaseID + pageCount) return all;
     if (identifier >= aboutLinkBaseID && identifier < aboutLinkBaseID + 8) return page(aboutPage);
+    if (identifier == tipJarLabelID || (identifier >= tipLinkBaseID && identifier < tipLinkBaseID + maximumTipLinks))
+        return page(aboutPage);
     switch (identifier) {
     case statusID: case recordID: case importID: return all;
     case settingsSearchLabelID: case settingsSearchID: case settingsResultsID: case settingsNoMatchID: return all;
@@ -71,7 +73,7 @@ unsigned pagesOf(int identifier) {
     case pronunciationID: return page(pronunciationPage);
     case comparisonID: return page(transcriptionPage);
     case shortcutValueID: case shortcutID: case actionShortcutsID: return page(keyboardPage);
-    case cloudSyncID: return page(cloudSyncPage);
+    case cloudSyncID: case phoneReceiverID: return page(cloudSyncPage);
     case aboutDetailsID: case setupGuideID: case permissionsID: case troubleshootingID: return page(aboutPage);
     default: return page(transcriptionPage);
     }
@@ -436,8 +438,8 @@ void layoutSettings(HWND window, const RECT &content) {
         const int cardTop = top;
         int y = layoutSettingsCard(window, top, content, 0xE720, L"Audio, output and backup",
             L"Finished text goes to the starting app or clipboard. "
-            L"ZIPs can include audio and app profiles with prompts; they are unencrypted. "
-            L"Settings and credentials are excluded.",
+            L"ZIPs hold settings and vocabulary, plus audio, app profiles and, if you choose, API keys. "
+            L"They are unencrypted.",
             2 * row + scale(window, 12));
         place(window, configurationID, box(right - scale(window, 220),
             cardTop + densitySpace(window, 16, visualDensity.card_padding), scale(window, 220), row));
@@ -486,7 +488,11 @@ void layoutSettings(HWND window, const RECT &content) {
         else place(window, sourceLabelID, box(left, y, 1, 1));
         if (mode) { label(95, y); control(modeID, y); y += row + scale(window, 12); }
         label(90, y); control(modelID, y); y += row + scale(window, 12);
-        place(window, modelStatusID, RECT{left, y, right - scale(window, 180), y + row + scale(window, 12)});
+        const bool browse = shown(openRouterBrowseID) && state.wanted.count(openRouterBrowseID) != 0;
+        const int browseWidth = scale(window, 232);
+        place(window, modelStatusID, RECT{left, y, right - scale(window, browse ? 180 + 12 + 232 : 180),
+                                          y + row + scale(window, 12)});
+        place(window, openRouterBrowseID, box(right - scale(window, 180) - browseWidth, y, browseWidth, row));
         button(modelRefreshID, y, scale(window, 168)); button(localModelsID, y, scale(window, 168));
         y += row + scale(window, 24);
         label(91, y);
@@ -547,6 +553,11 @@ void layoutSettings(HWND window, const RECT &content) {
             L"Sign in with your Apple ID to sync History with your Mac. Only transcripts sync; audio stays on the "
             L"device that recorded it. API keys can be imported from your Mac with its key-sync passphrase.", row);
         place(window, cloudSyncID, box(left, y, scale(window, 220), row));
+        top = y + row + densitySpace(window, 20, visualDensity.card_padding) + gap;
+        const int phone = layoutSettingsCard(window, top, content, 0xE8EA, L"Send from phone",
+            L"Dictate on your iPhone or iPad and have the transcript typed here, at the cursor. Off until you turn "
+            L"it on; phones pair with a six-digit code and the link between them is encrypted.", row);
+        place(window, phoneReceiverID, box(left, phone, scale(window, 220), row));
         break;
     }
     default: break;
@@ -568,8 +579,11 @@ void layoutAbout(HWND window, const RECT &content) {
     ReleaseDC(window, dc);
     const int gap = scale(window, 8);
     const int linkRows = (static_cast<int>(aboutState().aboutLinks.size()) + 2) / 3;
+    // Support development shares the link grid: its label takes the first cell, its links the next.
+    const int tipCount = static_cast<int>(aboutState().tipLinks.size());
+    const int tipRows = tipCount ? (tipCount + 3) / 3 : 0;
     int y = layoutSettingsCard(window, content.top, content, 0xE946, L"About", L"",
-        scale(window, 96) + noteHeight + detailsHeight + (linkRows + 2) * (row + gap));
+        scale(window, 96) + noteHeight + detailsHeight + (linkRows + tipRows + 2) * (row + gap));
     frame.icon = box(content.left + inset, y, scale(window, 72), scale(window, 72));
     frame.paragraphs.push_back({box(frame.icon.right + scale(window, 18), y + scale(window, 8), scale(window, 480),
                                     scale(window, 30)), L"Just Speak to It", jsti::chrome::Font::title, false});
@@ -587,6 +601,13 @@ void layoutAbout(HWND window, const RECT &content) {
             box(content.left + inset + static_cast<int>(i % 3) * (linkWidth + gap),
                 y + static_cast<int>(i / 3) * (row + gap), linkWidth, row));
     y += linkRows * (row + gap);
+    if (tipCount) {
+        place(window, tipJarLabelID, box(content.left + inset, y + scale(window, 7), linkWidth, scale(window, 20)));
+        for (int i = 0; i < tipCount; ++i)
+            place(window, tipLinkBaseID + i, box(content.left + inset + ((i + 1) % 3) * (linkWidth + gap),
+                                                 y + ((i + 1) / 3) * (row + gap), linkWidth, row));
+        y += tipRows * (row + gap);
+    }
     place(window, setupGuideID, box(content.left + inset, y, scale(window, 192), row));
     place(window, permissionsID, box(content.left + inset + scale(window, 200), y, scale(window, 208), row));
     place(window, troubleshootingID, box(content.left + inset, y + row + gap, scale(window, 240), row));
@@ -608,9 +629,9 @@ int layoutSettingsSearch(HWND window, int sidebarWidth, int bottom) {
     const UINT dpi = GetDpiForWindow(window);
     const int inner = sidebarWidth - scale(window, 44);
     HDC dc = GetDC(window);
-    const int captionHeight = jsti::chrome::measure(dc, L"Search settings", inner, jsti::chrome::Font::caption, dpi);
+    const int captionHeight = jsti::chrome::measure(dc, L"Search for anything", inner, jsti::chrome::Font::caption, dpi);
     const int lineHeight = jsti::chrome::measure(dc, L"Ag", inner, jsti::chrome::Font::body, dpi);
-    const int noMatchHeight = jsti::chrome::measure(dc, L"No settings match", inner, jsti::chrome::Font::caption, dpi);
+    const int noMatchHeight = jsti::chrome::measure(dc, L"No results", inner, jsti::chrome::Font::caption, dpi);
     ReleaseDC(window, dc);
     int y = scale(window, 58);
     const RECT label = box(scale(window, 22), y, inner, captionHeight);

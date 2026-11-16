@@ -29,10 +29,13 @@ final class APIKeyCredentialWriterTests: XCTestCase {
         writer.store("dg", for: "deepgram")
         writer.store("rev", for: "revai")
         writer.store("step", for: "stepfun")
+        writer.store("gq", for: "groq")
 
         XCTAssertEqual(settings.deepgramAPIKey, "dg")
         XCTAssertEqual(settings.revAIAPIKey, "rev")
         XCTAssertEqual(settings.stepfunAPIKey, "step")
+        XCTAssertEqual(settings.groqAPIKey, "gq")
+        XCTAssertEqual(settings.batchAPIKey(for: "groq/whisper-large-v3-turbo"), "gq")
         XCTAssertEqual(settings.openAIAPIKey, "")
         XCTAssertEqual(settings.gladiaAPIKey, "")
     }

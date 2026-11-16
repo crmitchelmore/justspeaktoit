@@ -43,12 +43,7 @@ public final class AppSettings: ObservableObject {
     /// The remote sub-mode the user last chose, remembered while they are in
     /// local mode so returning to remote restores streaming or batch.
     @Published public var rememberedRemoteTranscriptionMode: IOSTranscriptionMode {
-        didSet {
-            defaults.set(
-                rememberedRemoteTranscriptionMode.rawValue,
-                forKey: DefaultsKey.rememberedRemoteTranscriptionMode.rawValue
-            )
-        }
+        didSet { save(rememberedRemoteTranscriptionMode.rawValue, .rememberedRemoteTranscriptionMode) }
     }
 
     @Published public var batchTranscriptionModel: String {
@@ -109,6 +104,9 @@ public final class AppSettings: ObservableObject {
     @Published public var stepfunAPIKey: String = "" {
         didSet { secrets.persist(stepfunAPIKey, identifier: Self.stepfunKeyID) }
     }
+    @Published public var groqAPIKey: String = "" {
+        didSet { secrets.persist(groqAPIKey, identifier: Self.groqKeyID) }
+    }
     @Published public var speechmaticsAPIKey: String = "" {
         didSet { secrets.persist(speechmaticsAPIKey, identifier: Self.speechmaticsKeyID) }
     }
@@ -157,6 +155,11 @@ public final class AppSettings: ObservableObject {
     /// Whether a cancelled recording's audio stays in Saved Recordings to transcribe later.
     @Published public var keepAudioOnCancel: Bool {
         didSet { defaults.set(keepAudioOnCancel, forKey: DefaultsKey.keepAudioOnCancel.storageKey) }
+    }
+
+    /// The microphone to prefer while recording (`AVAudioSessionPortDescription.uid`); nil follows the system route.
+    @Published public var preferredAudioInputUID: String? {
+        didSet { defaults.set(preferredAudioInputUID, forKey: DefaultsKey.preferredAudioInputUID.storageKey) }
     }
 
     @Published public var liveActivitiesEnabled: Bool {
@@ -267,6 +270,13 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(autoPostProcess, forKey: DefaultsKey.autoPostProcess.rawValue) }
     }
 
+    /// Learn corrections from keyboard-inserted transcripts the user edits (#1651).
+    @Published public var autoCorrectionsEnabled: Bool { didSet { persistAutoCorrectionsEnabled() } }
+
+    @Published public var autoCorrectionsPromotionThreshold: Int {
+        didSet { persistAutoCorrectionsPromotionThreshold() }
+    }
+
     /// - Parameters:
     ///   - defaults: Backing store. Injectable so persistence behaviour (including
     ///     relaunch restoration) is testable without touching the user's defaults.
@@ -310,6 +320,7 @@ public final class AppSettings: ObservableObject {
         self.liveActivitiesEnabled = defaults.object(forKey: DefaultsKey.liveActivitiesEnabled.rawValue) as? Bool
             ?? true
         self.keepAudioOnCancel = Self.storedKeepAudioOnCancel(in: defaults)
+        self.preferredAudioInputUID = defaults.string(forKey: DefaultsKey.preferredAudioInputUID.storageKey)
         let clipboardPolicy = Self.storedClipboardPolicy(in: defaults)
         self.transcriptClipboardLifetime = clipboardPolicy.lifetime
         self.transcriptAllowsUniversalClipboard = clipboardPolicy.allowsUniversalClipboard
@@ -325,12 +336,9 @@ public final class AppSettings: ObservableObject {
         self.cleanupModelDiscoveryEnabled = Shared.cleanupModelDiscoveryEnabled.iOS.value(in: defaults)
         self.postProcessingModel = Self.storedPostProcessingModel(in: defaults)
         self.autoPostProcess = defaults.bool(forKey: DefaultsKey.autoPostProcess.rawValue)
-        // `didSet` never fires during init, so persist the seeded memory explicitly.
-        selection.persist(to: defaults)
-        defaults.set(
-            self.rememberedRemoteTranscriptionMode.rawValue,
-            forKey: DefaultsKey.rememberedRemoteTranscriptionMode.rawValue
-        )
+        self.autoCorrectionsEnabled = Self.storedAutoCorrectionsEnabled(in: defaults)
+        self.autoCorrectionsPromotionThreshold = Self.storedAutoCorrectionsPromotionThreshold(in: defaults)
+        persistSeededTranscriptionMemory(selection)
         if loadsSecureStorage { startLoadingCredentials() }
     }
 
@@ -339,6 +347,15 @@ public final class AppSettings: ObservableObject {
 extension AppSettings {
     private func save(_ value: Any, _ key: DefaultsKey) {
         defaults.set(value, forKey: key.storageKey)
+    }
+
+    // `didSet` never fires during init, so persist the seeded memory explicitly.
+    fileprivate func persistSeededTranscriptionMemory(_ selection: LiveTranscriptionSelection) {
+        selection.persist(to: defaults)
+        defaults.set(
+            rememberedRemoteTranscriptionMode.rawValue,
+            forKey: DefaultsKey.rememberedRemoteTranscriptionMode.rawValue
+        )
     }
 
     // Each credential is reloaded without overwriting a locked Keychain entry.

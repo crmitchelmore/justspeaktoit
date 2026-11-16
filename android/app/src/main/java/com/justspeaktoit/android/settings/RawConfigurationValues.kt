@@ -17,8 +17,21 @@ object RawConfigurationValues {
         "personal_corrections" to corrections(state.corrections),
         "cleanup_enabled" to state.cleanupEnabled,
         "cleanup_model" to state.cleanupModel.selectionId,
+        "cleanupModelDiscoveryEnabled" to state.cleanupModelDiscoveryEnabled,
         "keepAudioOnCancel" to state.keepAudioOnCancel,
+        "handsFreeDictationEnabled" to state.handsFreeEnabled,
         "history_retention" to state.retention.name,
+        "keepRecordingsInHistory" to state.keepRecordings,
+        "silenceDetectionEnabled" to state.silence.enabled,
+        "silenceThreshold" to state.silence.threshold,
+        "silenceDuration" to state.silence.durationSeconds,
+        "autoCorrectionsEnabled" to state.learnCorrections,
+        "autoCorrectionsPromotionThreshold" to state.correctionPromotionThreshold.toLong(),
+        "recordingSoundsEnabled" to state.recordingSounds.enabled,
+        "recordingSoundProfile" to state.recordingSounds.profile.id,
+        "recordingSoundVolume" to state.recordingSounds.volume.decimal(),
+        "appearance" to state.appearance.rawValue,
+        "dynamicColor" to state.dynamicColor,
     )
 
     /** Spelling to its comma-separated aliases; rules sharing a spelling are merged. */

@@ -158,7 +158,7 @@ enum LinuxWindow {
 
     static func postProcessing(_ options: DesktopPostProcessing.Options) {
         postProcessingPicker.publish([])
-        let models = DesktopPostProcessing.nativeModels(
+        let (models, browser) = DesktopPostProcessing.nativeChoices(
             selected: options.modelIdentifier, rememberedRemote: options.lastRemoteModelIdentifier
         )
         guard let local = models.firstIndex(where: { $0.id == LocalPostProcessingModel.builtInRulesModelID }) else {
@@ -190,6 +190,7 @@ enum LinuxWindow {
             return
         }
         postProcessingPicker.publish(models)
+        DesktopHostOpenRouterBrowser.publish(browser)
     }
 
     static func postProcessingModelIdentifier(forSelection index: Int) -> String? {

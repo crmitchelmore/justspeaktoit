@@ -118,16 +118,16 @@ bool createControls(HWND window) {
         return control != nullptr;
     };
     // The search label precedes its box, so the box's accessible name is
-    // "Search settings"; results are hidden until a search opens.
+    // "Search for anything"; results are hidden until a search opens.
     state.wanted[settingsResultsID] = false;
     state.wanted[settingsNoMatchID] = false;
-    bool okay = add(L"STATIC", L"Search settings", 0, settingsSearchLabelID) &&
+    bool okay = add(L"STATIC", L"Search for anything", 0, settingsSearchLabelID) &&
         add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, settingsSearchID) &&
         add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_VSCROLL |
             WS_TABSTOP, settingsResultsID) &&
-        add(L"STATIC", L"No settings match", 0, settingsNoMatchID);
+        add(L"STATIC", L"No results", 0, settingsNoMatchID);
     // The list follows the search box, not a label, so it is named directly.
-    if (okay) jsti::accessibility::name(GetDlgItem(window, settingsResultsID), L"Settings results");
+    if (okay) jsti::accessibility::name(GetDlgItem(window, settingsResultsID), L"Search results");
     for (int page = 0; page < pageCount && okay; ++page) {
         okay = add(L"BUTTON", pageInfo[page].title, BS_PUSHBUTTON | WS_TABSTOP, navBaseID + page);
     }
@@ -179,6 +179,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Configure &post-processing…", BS_PUSHBUTTON | WS_TABSTOP, processingID) &&
         add(L"STATIC", L"OpenRouter discovery not loaded.", 0, modelStatusID) &&
         add(L"BUTTON", L"Refresh &models", BS_PUSHBUTTON | WS_TABSTOP, modelRefreshID) &&
+        add(L"BUTTON", L"&Browse OpenRouter models…", BS_PUSHBUTTON | WS_TABSTOP, openRouterBrowseID) &&
         add(L"BUTTON", L"Local mo&dels…", BS_PUSHBUTTON | WS_TABSTOP, localModelsID) &&
         add(L"STATIC", L"&API key (Windows Credential Manager)", 0, 91) &&
         add(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP, keyID) &&
@@ -205,6 +206,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"&Inspect backup...", BS_PUSHBUTTON | WS_TABSTOP, backupInspectID) &&
         add(L"BUTTON", L"Restore backup...", BS_PUSHBUTTON | WS_TABSTOP, backupRestoreID) &&
         add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
+        add(L"BUTTON", L"Send from &phone…", BS_PUSHBUTTON | WS_TABSTOP, phoneReceiverID) &&
         add(L"STATIC", aboutState().aboutDetails.c_str(), 0, aboutDetailsID) &&
         add(L"BUTTON", L"Ru&n setup again…", BS_PUSHBUTTON | WS_TABSTOP, setupGuideID) &&
         add(L"BUTTON", L"&Windows permissions…", BS_PUSHBUTTON | WS_TABSTOP, permissionsID) &&
@@ -216,6 +218,10 @@ bool createControls(HWND window) {
     for (size_t i = 0; i < aboutState().aboutLinks.size() && okay; ++i)
         okay = add(L"BUTTON", aboutState().aboutLinks[i].title.c_str(), BS_PUSHBUTTON | WS_TABSTOP,
             aboutLinkBaseID + static_cast<int>(i));
+    if (!aboutState().tipLinks.empty()) okay = okay && add(L"STATIC", L"Support development", 0, tipJarLabelID);
+    for (size_t i = 0; i < aboutState().tipLinks.size() && okay; ++i)
+        okay = add(L"BUTTON", aboutState().tipLinks[i].title.c_str(), BS_PUSHBUTTON | WS_TABSTOP,
+            tipLinkBaseID + static_cast<int>(i));
     SendDlgItemMessageW(window, backupAudioID, BM_SETCHECK, BST_CHECKED, 0);
     for (int identifier : {chipSessionsID, chipTimeID, chipSpendID, insightSessionsID, insightTimeID, insightAverageID,
                            insightSpendID, historySessionsID, historyErrorsID, historyAverageID, historySpendID,
@@ -237,7 +243,7 @@ bool createControls(HWND window) {
     SendDlgItemMessageW(window, searchID, EM_SETCUEBANNER, TRUE,
                         reinterpret_cast<LPARAM>(L"Search transcripts, models and profiles"));
     SendDlgItemMessageW(window, settingsSearchID, EM_LIMITTEXT, 256, 0);
-    SendDlgItemMessageW(window, settingsSearchID, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Search settings"));
+    SendDlgItemMessageW(window, settingsSearchID, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Search for anything"));
     SendDlgItemMessageW(window, transcriptID, EM_LIMITTEXT, 4 * 1024 * 1024, 0);
     SetWindowPos(GetDlgItem(window, transcriptNameID), nullptr, 0, 0, 0, 0, SWP_NOZORDER | SWP_NOACTIVATE);
     refreshFont(window);
@@ -281,6 +287,7 @@ void updateSettingsButtons(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, localModelsID), recording == 0 && jsti_local_models_available());
     EnableWindow(GetDlgItem(window, cloudSyncID), recording == 0 && jsti_cloud_sync_available());
+    EnableWindow(GetDlgItem(window, phoneReceiverID), recording == 0 && jsti_phone_receiver_available());
     EnableWindow(GetDlgItem(window, azureID), recording == 0 && jsti_azure_resource_available());
     EnableWindow(GetDlgItem(window, automationSettingsID), recording == 0);
     EnableWindow(GetDlgItem(window, rawConfigurationID), recording == 0);

@@ -19,6 +19,39 @@ extension SettingsSearchCatalog {
             platforms: .iOS
         ),
         SettingsSearchEntry(
+            id: "ios.downloadedModels", title: "Downloaded Models", section: .transcription,
+            systemImage: "arrow.down.circle",
+            summary: "Download Whisper models to transcribe recordings on the device, or import one from Hugging Face.",
+            keywords: [
+                "downloaded models", "local model", "whisper", "whisperkit", "download", "hugging face", "import",
+                "offline", "private", "on device", "remove model", "storage"
+            ],
+            platforms: .iOS
+        ),
+        SettingsSearchEntry(
+            id: "ios.autoCorrections", title: "Auto-Corrections", section: .postProcessing,
+            systemImage: "text.badge.checkmark",
+            summary: "Learn corrections from edits to transcripts the Just Speak Keyboard inserted, "
+                + "and review or remove them.",
+            keywords: [
+                "learned corrections", "learn", "learning", "auto-correct", "autocorrect", "auto corrections",
+                "candidate corrections", "promotion threshold", "threshold", "personal corrections", "edits",
+                "keyboard edits", "dismiss", "suggestions"
+            ],
+            settingKeys: ["autoCorrectionsEnabled", "autoCorrectionsPromotionThreshold"],
+            platforms: .iOS
+        ),
+        SettingsSearchEntry(
+            id: "ios.microphone", title: "Microphone", section: .general, systemImage: "mic",
+            summary: "Choose the microphone recording uses, or follow the system default.",
+            keywords: [
+                "microphone", "input device", "audio input", "mic", "headset", "bluetooth", "usb microphone",
+                "external microphone", "system default"
+            ],
+            settingKeys: ["preferredAudioInputUID"],
+            platforms: .iOS
+        ),
+        SettingsSearchEntry(
             id: "ios.behavior", title: "Behavior", section: .general, systemImage: "slider.horizontal.3",
             summary: "Auto-start recording, hands-free dictation and Live Activities.",
             keywords: [
@@ -83,6 +116,24 @@ extension SettingsSearchCatalog {
             summary: "iCloud History sync, encrypted key sync and QR transfer.",
             keywords: [
                 "icloud", "history sync", "share to another device", "import from qr code", "transfer", "last sync"
+            ],
+            platforms: .iOS
+        ),
+        SettingsSearchEntry(
+            id: "ios.sendToMac", title: "Send to Mac", section: .dataMigration, systemImage: "desktopcomputer",
+            summary: "Pair with a Mac on your network and send it finished transcripts.",
+            keywords: [
+                "send to mac", "pair", "pairing code", "bonjour", "local network", "forget mac", "paste on mac"
+            ],
+            platforms: .iOS
+        ),
+        SettingsSearchEntry(
+            id: "ios.troubleshooting", title: "Troubleshooting", section: .troubleshooting,
+            systemImage: "wrench.and.screwdriver",
+            summary: "Find what's stopping dictation and fix it.",
+            keywords: [
+                "troubleshoot", "not working", "permissions", "microphone", "speech recognition", "api key",
+                "rejected key", "keyboard", "full access", "on-device model", "fix"
             ],
             platforms: .iOS
         ),

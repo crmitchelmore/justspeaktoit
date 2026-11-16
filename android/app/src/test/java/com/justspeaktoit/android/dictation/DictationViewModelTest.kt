@@ -1,5 +1,9 @@
 package com.justspeaktoit.android.dictation
 
+import com.justspeaktoit.android.cloud.AudioInput
+import com.justspeaktoit.android.cloud.AudioInputChoice
+import com.justspeaktoit.android.cloud.AudioInputKind
+import com.justspeaktoit.android.cloud.CaptureLevel
 import com.justspeaktoit.android.cloud.CleanupPolicy
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudException
@@ -7,8 +11,11 @@ import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RawConfigurationValues
+import com.justspeaktoit.android.settings.RecordingSoundProfile
+import com.justspeaktoit.android.settings.RecordingSoundSettings
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -71,6 +78,52 @@ class DictationViewModelTest {
     }
 
     @Test
+    fun testAudioInput_isSavedAndFallsBackVisiblyWhileDisconnected() {
+        val builtIn = AudioInput(AudioInput.id(15, "bottom", "Pixel"), AudioInputKind.BuiltIn, "bottom")
+        val usb = AudioInput(AudioInput.id(22, "card=1", "Yeti"), AudioInputKind.Usb, "Yeti")
+        h.audioInputs.connected = listOf(builtIn, usb)
+        val vm = h.ready()
+        assertTrue(h.audioInputs.watching)
+        assertEquals(AudioInputChoice.SystemDefault, vm.state.value.audioInputChoice)
+
+        h.onMain { vm.setAudioInput(usb.id) }
+        assertEquals(usb.id, h.prefs.audioInputId)
+        assertEquals(AudioInputChoice.Selected(usb), vm.state.value.audioInputChoice)
+
+        h.onMain { h.audioInputs.change(listOf(builtIn)) }
+        assertEquals(AudioInputChoice.Unavailable(usb.id), vm.state.value.audioInputChoice)
+        assertEquals("the saved choice survives a disconnect", usb.id, h.prefs.audioInputId)
+
+        h.onMain { h.audioInputs.change(listOf(builtIn, usb)) }
+        assertEquals(AudioInputChoice.Selected(usb), vm.state.value.audioInputChoice)
+
+        h.onMain { vm.setAudioInput(null) }
+        assertNull(h.prefs.audioInputId)
+        assertEquals(AudioInputChoice.SystemDefault, vm.state.value.audioInputChoice)
+
+        h.clear()
+        assertFalse("the device watch ends with the ViewModel", h.audioInputs.watching)
+    }
+
+    @Test
+    fun testKeepRecordings_movesTheTranscribedRecordingIntoHistory_untilHistoryIsCleared() {
+        h.prefs.keepRecordings = true
+        val rec = startCloud()
+        h.onMain { h.viewModel.stop() }
+        val done = h.awaitState { it.dictation is DictationState.Done && it.history.isNotEmpty() }
+
+        val entry = done.history.single()
+        assertEquals(HistoryStatus.Completed, entry.status)
+        val kept = File(checkNotNull(entry.audioPath))
+        assertTrue(kept.exists())
+        assertFalse(rec.file.exists())
+
+        h.onMain { h.viewModel.clearHistory() }
+        h.awaitState { it.history.isEmpty() }
+        assertFalse(kept.exists())
+    }
+
+    @Test
     fun testShortRecording_failsAsNoSpeechWithoutUploading() {
         h.recorders.bytes = 100
         startCloud()
@@ -91,6 +144,21 @@ class DictationViewModelTest {
 
         assertEquals(DictationFailure.InvalidKey, (failed.dictation as DictationState.Failed).failure)
         assertTrue(h.cloud.transcriptions.isEmpty())
+    }
+
+    @Test
+    fun testRejectedKey_isMarkedRejectedUntilTheKeyIsSavedAgain() {
+        h.cloud.onTranscribe = { throw CloudException(DictationFailure.InvalidKey, "401") }
+        startCloud()
+        h.onMain { h.viewModel.stop() }
+        val failed = h.awaitState { it.dictation is DictationState.Failed }
+
+        assertTrue(CloudProvider.OpenAI in failed.rejectedKeys)
+        assertTrue(CloudProvider.OpenAI in failed.keyErrors)
+
+        h.onMain { h.viewModel.saveKey(CloudProvider.OpenAI, "sk-new") }
+        val saved = h.awaitState { CloudProvider.OpenAI !in it.rejectedKeys }
+        assertFalse(CloudProvider.OpenAI in saved.keyErrors)
     }
 
     @Test
@@ -434,6 +502,36 @@ class DictationViewModelTest {
     }
 
     @Test
+    fun testSilenceAutoStop_stopsAndTranscribesOnceTheQuietLastsTheSetDuration() {
+        h.onMain { h.viewModel.setSilence(SilenceSettings(enabled = true, durationSeconds = 1.0)) }
+        assertEquals(SilenceSettings(enabled = true, durationSeconds = 1.0), h.prefs.silence)
+        val rec = startCloud()
+        rec.onLevel(CaptureLevel(0f, 0.01, 0.1))
+        rec.onLevel(CaptureLevel(0f, 0.5, 0.2))
+        rec.onLevel(CaptureLevel(0f, 0.01, 0.3))
+        rec.onLevel(CaptureLevel(0f, 0.01, 1.2))
+        h.onMain { }
+        h.onMain { }
+        assertTrue(h.viewModel.state.value.dictation is DictationState.Listening)
+
+        rec.onLevel(CaptureLevel(0f, 0.01, 1.3))
+        val done = h.awaitState { it.dictation is DictationState.Done }
+        assertEquals("hello world", (done.dictation as DictationState.Done).transcript)
+        assertEquals(1, rec.stops)
+    }
+
+    @Test
+    fun testSilenceAutoStop_isOffByDefault() {
+        val rec = startCloud()
+        rec.onLevel(CaptureLevel(0f, 0.0, 0.1))
+        rec.onLevel(CaptureLevel(0f, 0.0, 30.0))
+        h.onMain { }
+        h.onMain { }
+        assertTrue(h.viewModel.state.value.dictation is DictationState.Listening)
+        assertEquals(0, rec.stops)
+    }
+
+    @Test
     fun testRecordingLimit_stopsAndTranscribes() {
         startCloud().onLimitReached()
         val done = h.awaitState { it.dictation is DictationState.Done }
@@ -529,8 +627,21 @@ class DictationViewModelTest {
             "personal_corrections" to mapOf("Ada" to "ada, adder"),
             "cleanup_enabled" to true,
             "cleanup_model" to cleanup.selectionId,
+            "cleanupModelDiscoveryEnabled" to true,
             "keepAudioOnCancel" to false,
+            "handsFreeDictationEnabled" to true,
             "history_retention" to "Forever",
+            "keepRecordingsInHistory" to true,
+            "silenceDetectionEnabled" to true,
+            "silenceThreshold" to 0.1,
+            "silenceDuration" to 3.5,
+            "autoCorrectionsEnabled" to false,
+            "autoCorrectionsPromotionThreshold" to 5L,
+            "recordingSoundsEnabled" to false,
+            "recordingSoundProfile" to "soft",
+            "recordingSoundVolume" to 0.4,
+            "appearance" to "dark",
+            "dynamicColor" to true,
         )
         var applied = false
         h.onMain { applied = vm.applyConfiguration(changes) }
@@ -543,8 +654,17 @@ class DictationViewModelTest {
         assertEquals(listOf(CorrectionRule("Ada", listOf("ada", "adder"))), h.prefs.corrections)
         assertTrue(h.prefs.cleanupEnabled)
         assertEquals(cleanup.selectionId, h.prefs.cleanupModelId)
+        assertTrue(h.prefs.cleanupModelDiscoveryEnabled)
         assertFalse(h.prefs.keepAudioOnCancel)
+        assertTrue(h.prefs.handsFreeEnabled)
         assertEquals(Retention.Forever, h.prefs.retention)
+        assertTrue(h.prefs.keepRecordings)
+        assertEquals(SilenceSettings(enabled = true, threshold = 0.1, durationSeconds = 3.5), h.prefs.silence)
+        assertFalse(h.prefs.learnCorrections)
+        assertEquals(5, h.prefs.correctionPromotionThreshold)
+        assertEquals(RecordingSoundSettings(false, RecordingSoundProfile.Soft, 0.4f), h.prefs.recordingSounds)
+        assertEquals(AppAppearance.Dark, h.prefs.appearance)
+        assertTrue(h.prefs.dynamicColor)
     }
 
     @Test

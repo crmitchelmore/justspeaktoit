@@ -57,6 +57,17 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             !onPage(aboutLinkBaseID + static_cast<int>(i), aboutPage))
             return jsti::fail("About link labels or page scope failed.", error, errorCapacity);
     }
+    if (aboutState().tipLinks.size() != 2 || !GetDlgItem(window, tipJarLabelID) || !onPage(tipJarLabelID, aboutPage) ||
+        jsti_window_configure_tip_links(&lateAboutLink, 1) != -1 || jsti_window_configure_tip_links(nullptr, 0) != -1)
+        return jsti::fail("Support development links or late configuration refusal failed.", error, errorCapacity);
+    for (size_t i = 0; i < aboutState().tipLinks.size(); ++i) {
+        const int identifier = tipLinkBaseID + static_cast<int>(i);
+        HWND button = GetDlgItem(window, identifier);
+        if (!button || controlText(button) != aboutState().tipLinks[i].title ||
+            aboutState().tipLinks[i].url.compare(0, 8, L"https://") != 0 || onPage(identifier, dashboardPage) ||
+            !onPage(identifier, aboutPage))
+            return jsti::fail("Support development link labels, HTTPS targets or page scope failed.", error, errorCapacity);
+    }
     jsti_smoke_stage("window.settings-search.begin");
     if (!settingsSearchSelfTest(window))
         return jsti::fail("Settings search results, keyboard choice, empty state or input refusal failed.",
@@ -259,9 +270,11 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             jsti_voice_sources_self_test(window, failure) && jsti_voice_credentials_self_test(window, failure) &&
             jsti_local_models_self_test(window, failure) && jsti_api_keys_self_test(window, failure) &&
             jsti_cloud_sync_settings_self_test(window, failure) &&
+            jsti_phone_receiver_settings_self_test(window, failure) &&
             jsti_azure_resource_settings_self_test(window, failure) && jsti_configuration_self_test(window, failure)
             && jsti_comparison_self_test(window, failure) && jsti_automation_settings_self_test(window, failure) &&
-            jsti_system_resources_self_test(window, failure) && jsti_raw_configuration_self_test(window, failure);
+            jsti_system_resources_self_test(window, failure) && jsti_openrouter_browser_self_test(window, failure) &&
+            jsti_raw_configuration_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }

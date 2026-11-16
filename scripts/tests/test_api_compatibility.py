@@ -20,7 +20,8 @@ MANIFEST = "// swift-tools-version: 5.9\n// SpeakWatchCore is mentioned, but thi
 class APICompatibilityTests(unittest.TestCase):
     def run_gate(self, products=None, raw_json=None, dump_status=0, diagnose_status=0,
                  diagnostic="Compatible", title="fix: preserve API", missing_baseline=False,
-                 stream_before_release=False, logging_failure=None):
+                 stream_before_release=False, logging_failure=None, baseline_commit=False,
+                 apidiff_entries=(), inspect=None):
         with tempfile.TemporaryDirectory(prefix="api gate ") as directory:
             root = Path(directory)
             repository = root / "repository"
@@ -37,8 +38,16 @@ class APICompatibilityTests(unittest.TestCase):
                 ["git", "mktree"], cwd=repository,
                 input=f"100644 blob {blob}\tPackage.swift\n040000 tree {resources}\tResources\n", text=True
             ).strip()
+            if baseline_commit:
+                baseline = subprocess.check_output(
+                    ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit-tree", baseline, "-m", "base"],
+                    cwd=repository, text=True
+                ).strip()
             if missing_baseline:
                 baseline = "missing-baseline"
+            apidiff = repository / ".build" / "arm64-apple-macosx" / "apidiff"
+            for entry in apidiff_entries:
+                (apidiff / entry.replace("{baseline}", baseline) / "Package.swift").parent.mkdir(parents=True)
             # The working tree deliberately differs, so reading its manifest
             # instead of the baseline is detected by the Swift double.
             (repository / "Package.swift").write_text("wrong current manifest")
@@ -125,6 +134,8 @@ class APICompatibilityTests(unittest.TestCase):
                 if "directory" in call:
                     self.assertEqual(call["manifest"], MANIFEST, "must evaluate the actual baseline manifest")
                     self.assertFalse(Path(call["directory"]).exists(), "disposable manifest must be removed")
+            if inspect:
+                inspect(apidiff, baseline)
             return result, calls
 
     def observe_stream_before_release(self, repository, baseline, environment, release):
@@ -209,6 +220,23 @@ class APICompatibilityTests(unittest.TestCase):
         result, calls = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([call["entries"] for call in calls if "entries" in call], [["Resources"]])
+
+    def test_stale_baseline_builds_are_pruned_and_the_current_one_is_kept(self):
+        def inspect(apidiff, baseline):
+            self.assertEqual(sorted(path.name for path in apidiff.iterdir()), [baseline, f"{baseline}-checkout"])
+
+        result, _ = self.run_gate(
+            baseline_commit=True, inspect=inspect,
+            apidiff_entries=("{baseline}", "{baseline}-checkout", "0" * 40, "0" * 40 + "-checkout"),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unresolvable_baseline_prunes_nothing(self):
+        def inspect(apidiff, _baseline):
+            self.assertEqual(sorted(path.name for path in apidiff.iterdir()), ["0" * 40])
+
+        result, _ = self.run_gate(inspect=inspect, apidiff_entries=("0" * 40,))
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_present_product_is_compared(self):
         result, calls = self.run_gate(products=EXISTING_PRODUCTS + ["SpeakWatchCore"])

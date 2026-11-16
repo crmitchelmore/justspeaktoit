@@ -197,6 +197,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case settingsLeaveMessage:
         leaveSettingsSearch(window);
         return 0;
+    case actionRunMessage: {
+        std::unique_ptr<std::string> page(reinterpret_cast<std::string *>(lparam));
+        jsti_window_action_command(window, static_cast<int>(wparam), page ? page->c_str() : "");
+        return 0;
+    }
     case revealFieldMessage:
         // Search reveals a preference only where the Preferences button would open.
         if (idleControl(window, configurationID) && IsWindowEnabled(window))
@@ -233,11 +238,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         trayCommand(window, static_cast<UINT>(wparam));
         return 0;
     case WM_COMMAND:
-        if (LOWORD(wparam) >= aboutLinkBaseID && LOWORD(wparam) < aboutLinkBaseID + 8) {
-            const size_t index = LOWORD(wparam) - aboutLinkBaseID;
-            if (HIWORD(wparam) == BN_CLICKED && state.page == aboutPage && index < aboutState().aboutLinks.size()) {
+        if (const int command = LOWORD(wparam); (command >= aboutLinkBaseID && command < aboutLinkBaseID + 8) ||
+                                                 (command >= tipLinkBaseID && command < tipLinkBaseID + maximumTipLinks)) {
+            const bool tip = command >= tipLinkBaseID && command < tipLinkBaseID + maximumTipLinks;
+            const auto &links = tip ? aboutState().tipLinks : aboutState().aboutLinks;
+            const size_t index = static_cast<size_t>(command - (tip ? tipLinkBaseID : aboutLinkBaseID));
+            if (HIWORD(wparam) == BN_CLICKED && state.page == aboutPage && index < links.size()) {
                 const auto result = reinterpret_cast<INT_PTR>(
-                    ShellExecuteW(window, L"open", aboutState().aboutLinks[index].url.c_str(), nullptr, nullptr, SW_SHOWNORMAL)
+                    ShellExecuteW(window, L"open", links[index].url.c_str(), nullptr, nullptr, SW_SHOWNORMAL)
                 );
                 if (result <= 32) showFailure(window, "Could not open your browser. Check your default browser settings.");
             }
@@ -304,6 +312,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 jsti_show_cloud_sync_settings(window);
             }
             return 0;
+        case phoneReceiverID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, phoneReceiverID) && IsWindowEnabled(window)) {
+                jsti_show_phone_receiver_settings(window);
+            }
+            return 0;
         case automationSettingsID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, automationSettingsID) && IsWindowEnabled(window)) {
                 jsti_show_automation_settings(window, automationShownEnabled, requestAutomationToggle);
@@ -358,12 +371,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case permissionsID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_permissions(window); return 0;
         case troubleshootingID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_troubleshooting(window); return 0;
         case backupRestoreID:
-            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupRestoreID)) {
-                std::string failure;
-                const std::string selected = jsti::migrationRestore::choose(window, failure);
-                if (!failure.empty()) showFailure(window, failure);
-                else if (!selected.empty()) emit(window, JSTI_EVENT_MIGRATION_RESTORE, selected.c_str());
-            }
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupRestoreID)) restoreMigrationBackup(window);
             return 0;
         case appearanceID:
             if (HIWORD(wparam) == CBN_SELCHANGE) {
@@ -555,6 +563,25 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 const int selected = selection(window);
                 if (selected < 0) return 0;
                 modelsState().preferredModels[modelsState().activeMode] = selected;
+                SetDlgItemTextW(window, keyID, L"");
+                emit(window, JSTI_EVENT_MODEL_CHANGED);
+                refreshSetup(window);
+            }
+            return 0;
+        case openRouterBrowseID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, openRouterBrowseID) && IsWindowEnabled(window)) {
+                int32_t chosen = -1;
+                if (!jsti_show_openrouter_browser(window, JSTI_OPENROUTER_BROWSER_TRANSCRIPTION,
+                                                  modelsState().preferredModels[0], chosen)) return 0;
+                // Recording may have started while the browser was open.
+                if (!idleControl(window, modelID) || static_cast<size_t>(chosen) >= modelsState().modelModes.size() ||
+                    modelsState().modelModes[static_cast<size_t>(chosen)] != 0) {
+                    showFailure(window, "The chosen OpenRouter model can't be used right now.");
+                    return 0;
+                }
+                modelsState().activeMode = 0;
+                modelsState().preferredModels[0] = chosen;
+                if (!populateModels(window)) { showFailure(window, "Windows could not display the chosen model."); return 0; }
                 SetDlgItemTextW(window, keyID, L"");
                 emit(window, JSTI_EVENT_MODEL_CHANGED);
                 refreshSetup(window);

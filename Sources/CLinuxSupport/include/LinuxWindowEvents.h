@@ -51,6 +51,7 @@ enum {
     JSTI_EVENT_QUICK_VOICE = 110, /* index: canonical favorite slot 1...3 */
     JSTI_EVENT_PASTE_LAST_HISTORY = 111, /* capture the invocation target before queueing */
     JSTI_EVENT_SPEAK_CLIPBOARD = 113, /* captures through the owned Host speech task, not History */
+    JSTI_EVENT_VOICE_EDIT = 114, /* captures the admitted AT-SPI selection before queueing; toggles */
     JSTI_EVENT_ACTION_SHORTCUT_EDIT = 115, /* revision/request header, then percent-escaped draft rows */
     JSTI_EVENT_SPEECH_PAUSE = 116, /* exact active speech only; never starts History audio */
     JSTI_EVENT_API_KEYS = 117,

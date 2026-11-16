@@ -305,6 +305,35 @@ review. Current behaviour, by kind of record:
   fails the passphrase check, so import turns off and asks for that account's
   passphrase, or sync reports that the account has no synced keys.
 
+## Android
+
+Android syncs History with the same container, schema and protocol, ported to
+Kotlin in `android/app/src/main/java/com/justspeaktoit/android/sync/`:
+
+- **Configuration.** The API token comes from the `CLOUDKIT_WEB_API_TOKEN`
+  secret at build time; `android/app/build.gradle.kts` puts it in
+  `BuildConfig.CLOUDKIT_WEB_API_TOKEN`, and `JSTI_CLOUDKIT_WEB_ENVIRONMENT`
+  (`development` or `production`, the default) picks the environment. The
+  container is always `iCloud.com.justspeaktoit`. A build without a token
+  shows History sync as not set up, and everything else keeps working. The
+  release workflows don't pass the secret yet (#1741), so today every Android
+  build is one of those.
+- **Sign-in.** Opt-in from Settings › History sync. The app opens Apple's
+  sign-in page in the browser and listens on the same loopback callback,
+  `http://127.0.0.1:47823/cloudkit-sign-in`, for ten minutes, so the API
+  token needs no extra redirect. The request checks match the desktop's
+  (`GET`, `Host`, top-level navigation, Apple `Origin` and `Referer`), but
+  Android cannot tell which app opened the connection, so there is no peer
+  check. The web auth token, rotated from every response, is kept in the
+  Keystore-encrypted secret store with the API keys.
+- **Sync.** `HistorySyncCoordinator`, the record codec, the comparison pass,
+  fingerprints, deletion tickets and tombstones follow
+  `SpeakSync` and `DesktopHistorySyncStore`; state is in `history-sync.json`
+  in the app's files. A pass runs at launch, on return to the app, two
+  seconds after a local change and from Sync now. Records carry no audio, as
+  on every platform.
+- **Tests.** `android/app/src/test/java/com/justspeaktoit/android/sync/`.
+
 ## Limits
 
 | Capability | Status |

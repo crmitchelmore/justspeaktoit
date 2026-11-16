@@ -193,22 +193,18 @@ extension SettingsSchema {
               defaultValue: .string(RecordingFeedbackDefaults.profile.rawValue),
               allowedValues: names(RecordingFeedbackProfile.self)),
         Field(key: "recordingSoundVolume", kind: .number, summary: "Start and stop sound volume.",
-              defaultValue: .double(RecordingFeedbackDefaults.volume), range: 0.02...1)
+              defaultValue: .double(RecordingFeedbackDefaults.volume), range: RecordingFeedbackDefaults.volumeRange)
     ]
 
     private static let voiceOutputFields: [Field] = [
         Field(key: "defaultTTSVoice", kind: .string, summary: "Voice used to speak text (provider/voice).",
               defaultValue: .string("openai/alloy")),
-        Field(key: "ttsLanguageIdentifier", kind: .string, summary: "Voice language, or automatic.",
-              defaultValue: .string(VoiceOutputLanguageCatalog.normalizedIdentifier(nil))),
+        ttsLanguageIdentifierField,
         Field(key: "mistralTTSModel", kind: .enumeration, summary: "Mistral speech model.",
               defaultValue: .string(MistralTTSCatalog.defaultModel.rawValue),
               allowedValues: names(MistralTTSModel.self)),
-        Field(key: "sonioxTTSRegion", kind: .enumeration, summary: "Soniox speech region.",
-              defaultValue: .string(SonioxTTSRegion.migrated(from: nil).rawValue),
-              allowedValues: names(SonioxTTSRegion.self)),
-        Field(key: "ttsSpeed", kind: .number, summary: "Speaking rate; 1 is normal.", defaultValue: .double(1),
-              range: 0.5...2),
+        sonioxTTSRegionField,
+        ttsSpeedField,
         Field(key: "ttsPitch", kind: .number,
               summary: "Pitch in semitones.", defaultValue: .double(0), range: -12...12),
         Field(key: "ttsQuality", kind: .enumeration, summary: "Speech quality.",

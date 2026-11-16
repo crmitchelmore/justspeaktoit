@@ -1,6 +1,7 @@
 package com.justspeaktoit.android.ime
 
 import android.text.InputType
+import android.view.inputmethod.EditorInfo
 import com.justspeaktoit.android.dictation.LanguageSupport
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.dictation.RecognizerAvailability
@@ -22,6 +23,15 @@ class KeyboardPolicyTest {
         assertFalse(
             KeyboardPolicy.allowsDictation(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD),
         )
+    }
+
+    @Test
+    fun testLearning_onlyInOrdinaryTextFieldsThatAllowIt() {
+        assertTrue(KeyboardPolicy.allowsLearning(text or InputType.TYPE_TEXT_FLAG_MULTI_LINE, 0))
+        assertFalse(KeyboardPolicy.allowsLearning(text or InputType.TYPE_TEXT_VARIATION_PASSWORD, 0))
+        assertFalse(KeyboardPolicy.allowsLearning(text or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS, 0))
+        assertFalse(KeyboardPolicy.allowsLearning(text, EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING))
+        assertFalse(KeyboardPolicy.allowsLearning(InputType.TYPE_CLASS_NUMBER, 0))
     }
 
     @Test

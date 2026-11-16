@@ -9,6 +9,8 @@
 typedef struct AboutPage {
     GtkLabel *about_details;
     GtkFlowBox *about_links;
+    GtkWidget *tip_jar; /* Support development card; hidden until the host supplies tip links. */
+    GtkFlowBox *tip_links;
 } AboutPage;
 
 #pragma GCC visibility push(hidden)

@@ -41,6 +41,10 @@ struct PostProcessingSettingsPage: View {
                 )
             }
         }
+
+        SearchableSettingsSection("Auto-Corrections") {
+            AutoCorrectionsSettingsRows()
+        }
     }
 
     private var postProcessingModelName: String {
@@ -144,7 +148,7 @@ struct SyncSettingsPage: View {
             CloudKitKeySyncSettingsSection()
 
             // History remains local when its CloudKit lane is off/unavailable.
-            // Protocol support below does not imply a shipping iPhone sender.
+            // Sending a transcript to a Mac is the separate Send to Mac section.
             let syncStatus = historySync.isSyncEnabled
                 ? SyncStatus.current(iCloudCloudKitAvailable: historySync.state.isCloudAvailable)
                 : SyncStatus()
@@ -176,13 +180,16 @@ struct SyncSettingsPage: View {
 
             SettingsFootnote(
                 "History syncs through **iCloud** when it's on; otherwise it stays on \(DeviceCopy.thisDevice). "
-                    + "Settings don't sync: use **Share to Another Device** to copy them. "
-                    + "The iOS app has no Bonjour transcript sender."
+                    + "Settings don't sync: use **Share to Another Device** to copy them."
             )
+        }
+
+        SearchableSettingsSection("Send to Mac") {
+            SendToMacSettingsRows()
         }
     }
 
-    /// Display only: protocol support is not an iPhone History delivery lane.
+    /// Display only: Send to Mac is not a History delivery lane.
     private func historySyncBackend(_ status: SyncStatus) -> SyncBackend {
         historySync.isSyncEnabled && status.iCloudCloudKitAvailable ? .iCloud : .localOnly
     }
@@ -231,6 +238,20 @@ struct PrivacyDiagnosticsSettingsPage: View {
     @State private var debugLogging = SpeakLogger.isDebugMode
 
     var body: some View {
+        SearchableSettingsSection("Troubleshooting") {
+            NavigationLink {
+                IOSTroubleshootingView()
+            } label: {
+                Label("Find what's stopping dictation", systemImage: "wrench.and.screwdriver")
+            }
+            .accessibilityIdentifier("troubleshootingNavLink")
+
+            SettingsFootnote(
+                "Checks permissions, the on-device model, provider keys and the keyboard, "
+                    + "and offers the fix for each."
+            )
+        }
+
         SearchableSettingsSection("Capture Health") {
             NavigationLink {
                 CaptureHealthView()

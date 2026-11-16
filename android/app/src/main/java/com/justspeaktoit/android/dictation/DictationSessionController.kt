@@ -13,12 +13,14 @@ import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.resources.SystemResourceToken
+import com.justspeaktoit.android.settings.RecordingCue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
@@ -48,6 +50,21 @@ internal interface SessionSettings {
 
     /** Personal corrections applied to every final transcript, and sent to cloud models as vocabulary. */
     val corrections: List<CorrectionRule> get() = emptyList()
+
+    /** Read when a Cloud recording starts; the recognisers end on a pause by themselves. */
+    val silence: SilenceSettings get() = SilenceSettings()
+
+    /** Keeps a finished Cloud recording beside its History entry, to play or transcribe again. */
+    val keepRecordings: Boolean get() = false
+}
+
+/** Plays a recording cue when sounds are on; returns how long it lasts in milliseconds, or 0 if none plays. */
+internal fun interface RecordingCues {
+    fun play(cue: RecordingCue): Long
+
+    companion object {
+        val Silent = RecordingCues { 0L }
+    }
 }
 
 /**
@@ -56,6 +73,9 @@ internal interface SessionSettings {
  * microphone in [resources] while a session captures and until a Cloud recorder has really stopped;
  * provider requests are held by [CloudCapture.call] while they run. Every ended session is recorded in
  * [history]. Call from the main thread of [scope]; each change is handed to [publish].
+ *
+ * [cues] play Start once capture is listening and Stop once it has ended normally, never on cancel or
+ * failure, matching the desktop apps. Cloud capture records silence over the Start cue.
  */
 internal class DictationSessionController(
     private val engine: SpeechEngine,
@@ -66,6 +86,7 @@ internal class DictationSessionController(
     private val scope: CoroutineScope,
     private val cacheDir: File,
     private val settings: SessionSettings,
+    private val cues: RecordingCues = RecordingCues.Silent,
     private val publish: (SessionState) -> Unit,
 ) {
     var state = SessionState()
@@ -89,6 +110,9 @@ internal class DictationSessionController(
     /** Set by [close]: work cut short after it keeps its recording for recovery instead of deleting it. */
     private var closed = false
 
+    /** A finished Cloud recording waiting for its session's History entry; see [dispatch]. */
+    private var sessionAudio: File? = null
+
     val isCapturing: Boolean
         get() = state.dictation is DictationState.Starting || state.dictation is DictationState.Listening
 
@@ -108,7 +132,12 @@ internal class DictationSessionController(
         if (!isCapturing) return
         val mode = state.dictation.modeOrNull()
         dispatch(DictationEvent.StopRequested)
-        if (mode == RecognitionMode.Cloud) finishCloud() else engine.stop()
+        if (mode == RecognitionMode.Cloud) {
+            finishCloud()
+        } else {
+            engine.stop()
+            cues.play(RecordingCue.Stop)
+        }
     }
 
     fun cancel() {
@@ -224,11 +253,20 @@ internal class DictationSessionController(
     }
 
     private fun startCloud() {
+        val silence = settings.silence.takeIf { it.enabled }?.let { SilenceMonitor(it.threshold, it.durationSeconds) }
+        // Set before any level callback can reach the main thread, so a stop on silence ends only this recording.
+        var recording: CloudCapture.Recording? = null
         val started = capture.start(
-            onLevel = { _level.value = it },
+            onLevel = { level ->
+                _level.value = level.meter
+                if (silence?.observe(level.normalized, level.atSeconds) == true) {
+                    scope.launch { if (recording?.let(capture::owns) == true) stop() }
+                }
+            },
             onLimitReached = { rec -> scope.launch { if (capture.owns(rec)) stop() } },
             onCaptureFailed = { rec -> scope.launch { if (capture.owns(rec)) failCapture() } },
         )
+        recording = capture.current.takeIf { started }
         dispatch(if (started) DictationEvent.Ready else DictationEvent.Error(DictationFailure.Audio))
     }
 
@@ -245,10 +283,13 @@ internal class DictationSessionController(
         work = scope.launch {
             var kept = false
             var settled = false
+            var keepForHistory = false
             val event = try {
                 // The recorder stays owned (and releasable by close) until stop() has finished.
                 val bytes = capture.stop(rec)
                 reconcileMicrophoneHold()
+                // Played once the microphone has stopped, so the cue is never in the upload.
+                if (bytes >= 0 && state.dictation is DictationState.Finishing) cues.play(RecordingCue.Stop)
                 when {
                     bytes < 0 -> DictationEvent.Error(DictationFailure.Audio)
                     bytes < MIN_AUDIO_BYTES -> DictationEvent.Error(DictationFailure.NoSpeech)
@@ -258,7 +299,7 @@ internal class DictationSessionController(
                         plan.languageTag,
                         DictationFailure.InvalidKey,
                         vocabulary(),
-                    )
+                    ).also { keepForHistory = settings.keepRecordings }
                 }.also { settled = true }
             } catch (e: RequestReleasedException) {
                 // Releasing the upload is a cancel, so honour "Keep audio when a recording is cancelled".
@@ -274,12 +315,19 @@ internal class DictationSessionController(
                     kept -> Unit
                     // The screen went away mid-upload: keep the audio for the next History load.
                     closed && !settled -> capture.abandon(file)
+                    // Handed to the session's History entry below.
+                    keepForHistory && isActive -> sessionAudio = file
                     else -> capture.delete(file)
                 }
             }
             // A cancelled upload must not deliver a late result into a newer session.
             ensureActive()
             onEngineEvent(event)
+            // The event did not end the session, so no entry took the recording.
+            sessionAudio?.let {
+                sessionAudio = null
+                capture.delete(it)
+            }
         }
     }
 
@@ -363,7 +411,7 @@ internal class DictationSessionController(
         }
     }
 
-    private fun vocabulary(): String? = PersonalCorrections.vocabularyPrompt(settings.corrections)
+    private fun vocabulary(): List<String> = settings.corrections.map { it.writeAs }
 
     private fun onEngineEvent(received: DictationEvent) {
         // Corrected before the reducer sees it, so History, cleanup and the screen all get the same text.
@@ -415,11 +463,24 @@ internal class DictationSessionController(
             it.copy(dictation = dictation, paused = it.paused && capturing)
         }
         val after = state.dictation
+        playCue(before, after, event)
         if (!after.isActive) _level.value = 0f
         reconcileMicrophoneHold()
         if (!before.isActive || after.isActive) return
         // A session just ended: record it now, so it survives even if optional cleanup never finishes.
-        history.recordSession(after, sessionModelId, settings.retention)
+        val audio = sessionAudio
+        sessionAudio = null
+        history.recordSession(after, sessionModelId, settings.retention, audio)
+    }
+
+    private fun playCue(before: DictationState, after: DictationState, event: DictationEvent) {
+        if (before is DictationState.Starting && after is DictationState.Listening) {
+            val millis = cues.play(RecordingCue.Start)
+            if (millis > 0) capture.current?.recorder?.mute(millis)
+        } else if (before is DictationState.Listening && event is DictationEvent.Final) {
+            // The recogniser ended the capture itself, after a pause.
+            cues.play(RecordingCue.Stop)
+        }
     }
 
     private fun change(transform: (SessionState) -> SessionState) {

@@ -1,0 +1,43 @@
+{
+  "about": "OpenRouterBrowserFilter cases shared by Tests/SpeakDesktopTests/OpenRouterModelBrowserCatalogTests.swift and android/app/src/test/java/com/justspeaktoit/android/cloud/OpenRouterBrowserTest.kt.",
+  "items": [
+    {
+      "id": "openai/gpt-6-luna",
+      "provider": "OpenAI",
+      "searchText": ["GPT-6 Luna", "openai/gpt-6-luna", "Fast cleanup", "OpenAI"],
+      "hasZeroPrices": false
+    },
+    {
+      "id": "google/gemma-free",
+      "provider": "Google",
+      "searchText": ["Gemma Free", "google/gemma-free", "", "Google"],
+      "hasZeroPrices": true
+    },
+    {
+      "id": "anthropic/claude-haiku",
+      "provider": "Anthropic",
+      "searchText": ["Claude Haiku", "anthropic/claude-haiku", "Multilingual speed", "Anthropic"],
+      "hasZeroPrices": false
+    }
+  ],
+  "cases": [
+    { "query": "", "provider": "", "freeOnly": false,
+      "expected": ["openai/gpt-6-luna", "google/gemma-free", "anthropic/claude-haiku"] },
+    { "query": "  luna\n", "provider": "", "freeOnly": false, "expected": ["openai/gpt-6-luna"] },
+    { "query": "MULTILINGUAL", "provider": "", "freeOnly": false, "expected": ["anthropic/claude-haiku"] },
+    { "query": "", "provider": "OpenAI", "freeOnly": false, "expected": ["openai/gpt-6-luna"] },
+    { "query": "", "provider": "openai", "freeOnly": false, "expected": [] },
+    { "query": "", "provider": "", "freeOnly": true, "expected": ["google/gemma-free"] },
+    { "query": "gem", "provider": "Google", "freeOnly": true, "expected": ["google/gemma-free"] },
+    { "query": "luna", "provider": "", "freeOnly": true, "expected": [] },
+    { "query": "nothing like this", "provider": "", "freeOnly": false, "expected": [] }
+  ],
+  "audioZeroPrices": [
+    { "pricing": { "prompt": "0", "completion": "0" }, "zero": true },
+    { "pricing": { "audio": "0.000" }, "zero": true },
+    { "pricing": {}, "zero": false },
+    { "pricing": { "prompt": "0", "completion": "0.0001" }, "zero": false },
+    { "pricing": { "prompt": "free" }, "zero": false },
+    { "pricing": { "prompt": " 0" }, "zero": false }
+  ]
+}

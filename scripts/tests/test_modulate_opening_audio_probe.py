@@ -1,6 +1,5 @@
 """Real loopback sockets prove the HTTP101 barrier and exact synthetic receipt."""
 import base64
-import http.client
 import importlib.util
 import json
 import os
@@ -60,16 +59,19 @@ class HeldModulatePeerTests(unittest.TestCase):
         cls.thread.join(2)
 
     def control(self, identifier, action, body=None):
-        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
-        try:
-            connection.request("GET" if action == "state" else "POST", f"/control/{identifier}/{action}",
-                               body=json.dumps(body).encode() if body is not None else None,
-                               headers={"X-JSTI-Probe": "local-only"})
-            response = connection.getresponse()
-            self.assertEqual(response.status, 200)
-            return json.loads(response.read())
-        finally:
-            connection.close()
+        # Read to EOF: the server closes only after freeing the request's shared connection slot, so the
+        # next connection can never find it still taken and be dropped unanswered.
+        data = json.dumps(body).encode() if body is not None else b""
+        method = "GET" if action == "state" else "POST"
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as sock:
+            sock.sendall((f"{method} /control/{identifier}/{action} HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                          f"X-JSTI-Probe: local-only\r\nContent-Length: {len(data)}\r\n\r\n").encode() + data)
+            response = bytearray()
+            while chunk := sock.recv(4096):
+                response.extend(chunk)
+        head, _, payload = bytes(response).partition(b"\r\n\r\n")
+        self.assertTrue(head.startswith(b"HTTP/1.1 200 "), head)
+        return json.loads(payload)
 
     def held(self, ids=(1, 2), ack_after=1):
         identifier = str(uuid.uuid4())
@@ -168,7 +170,10 @@ class HeldModulatePeerTests(unittest.TestCase):
                 self.control(extra, "configure", {"ids": [99], "ackAfter": 1})
                 refused = self.connect_upgrade(extra)
                 sockets.append(refused)
-                self.assertTrue(refused.recv(4096).startswith(b"HTTP/1.1 503 "))
+                reply = bytearray()
+                while chunk := refused.recv(4096):  # EOF means the refusal's connection slot is free again.
+                    reply.extend(chunk)
+                self.assertTrue(reply.startswith(b"HTTP/1.1 503 "), bytes(reply))
                 self.assertEqual(self.control(extra, "state")["stage"], "configured")
                 for identifier, sock in held:
                     self.release(identifier, sock)  # Every accepted socket is releasable at capacity.

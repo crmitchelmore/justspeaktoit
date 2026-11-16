@@ -39,32 +39,16 @@ extension DesktopRecordingStore {
     ) throws -> [Record] {
         let files = try migrationRestoreFiles(expectedHistory: expectedHistory, digests: digests)
         try validateProfiles(false)
-        // swiftlint:disable:next large_tuple
-        var staged: [(url: URL, prior: Data?, record: Record)] = []
-        for write in writes {
-            try Task.checkCancellation()
-            try requireRetained(write.id)
-            guard (files[write.id] != nil) == write.replacing else {
-                throw DataMigrationError.invalid("History changed after the preview, so nothing was restored.")
-            }
-            let url = files[write.id] ?? directory.appendingPathComponent(write.id.uuidString + ".json")
-            var existing: Record?
-            if write.replacing {
-                let current = try loadRecord(at: url)
-                guard !current.isSyncedCopy else {
-                    throw DataMigrationError.invalid("History changed after the preview, so nothing was restored.")
-                }
-                existing = current
-            }
-            let prior = write.replacing ? try Data(contentsOf: url) : nil
-            staged.append((url, prior, try DesktopMigrationRestore.nativeHistory(write, existing: existing)))
-        }
+        let staged = try stageMigrationRestore(writes, files: files)
         var attempted = 0
         do {
             for (index, entry) in staged.enumerated() {
                 try checkpoint(.history(index))
                 try validateProfiles(false)
                 attempted = index + 1
+                if let audio = entry.audio {
+                    try FileManager.default.copyItem(at: audio.source, to: audio.target)
+                }
                 try writeMigrationRecord(entry.record, to: entry.url)
             }
             try checkpoint(.finished)
@@ -77,6 +61,9 @@ extension DesktopRecordingStore {
                         try prior.write(to: entry.url, options: .atomic)
                     } else if FileManager.default.fileExists(atPath: entry.url.path) {
                         try FileManager.default.removeItem(at: entry.url)
+                    }
+                    if let target = entry.audio?.target, FileManager.default.fileExists(atPath: target.path) {
+                        try FileManager.default.removeItem(at: target)
                     }
                 } catch {
                     failures.append("History item \(entry.url.lastPathComponent) (\(error.localizedDescription))")
@@ -122,6 +109,50 @@ extension DesktopRecordingStore {
             }
         }
         return files
+    }
+
+    private func stageMigrationRestore(
+        _ writes: [DesktopMigrationRestore.HistoryWrite], files: [UUID: URL]
+    ) throws -> [StagedRestore] {
+        var staged: [StagedRestore] = []
+        for write in writes {
+            try Task.checkCancellation()
+            try requireRetained(write.id)
+            guard (files[write.id] != nil) == write.replacing else {
+                throw DataMigrationError.invalid("History changed after the preview, so nothing was restored.")
+            }
+            let url = files[write.id] ?? directory.appendingPathComponent(write.id.uuidString + ".json")
+            var existing: Record?
+            if write.replacing {
+                let current = try loadRecord(at: url)
+                guard !current.isSyncedCopy else {
+                    throw DataMigrationError.invalid("History changed after the preview, so nothing was restored.")
+                }
+                existing = current
+            }
+            let prior = write.replacing ? try Data(contentsOf: url) : nil
+            var audio: (source: URL, target: URL)?
+            if let source = write.audio {
+                let target = directory.appendingPathComponent(write.id.uuidString + "." + source.pathExtension)
+                guard !write.replacing, !FileManager.default.fileExists(atPath: target.path) else {
+                    throw DataMigrationError.invalid("History changed after the preview, so nothing was restored.")
+                }
+                audio = (source.source, target)
+            }
+            staged.append(.init(
+                url: url, prior: prior, record: try DesktopMigrationRestore.nativeHistory(write, existing: existing),
+                audio: audio
+            ))
+        }
+        return staged
+    }
+
+    private struct StagedRestore {
+        let url: URL
+        let prior: Data?
+        let record: Record
+        /// Backup audio copied before the metadata that names it.
+        let audio: (source: URL, target: URL)?
     }
 
     private func writeMigrationRecord(_ record: Record, to url: URL) throws {

@@ -182,3 +182,14 @@ int jsti_window_show_page(int page) {
     std::lock_guard<std::mutex> lock(state.mutex);
     return state.window && PostMessageW(state.window, pageMessage, static_cast<WPARAM>(page), 0) ? 0 : -1;
 }
+
+// The command palette runs an action through the same path as its shortcut.
+int jsti_window_run_action(int run, const char *page) {
+    if (run < JSTI_ACTION_RUN_RECORD || run > JSTI_ACTION_RUN_VOICE_EDIT) return -1;
+    auto copy = std::make_unique<std::string>(page ? page : "");
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (!state.window || !PostMessageW(state.window, actionRunMessage, static_cast<WPARAM>(run),
+                                       reinterpret_cast<LPARAM>(copy.get()))) return -1;
+    copy.release();
+    return 0;
+}

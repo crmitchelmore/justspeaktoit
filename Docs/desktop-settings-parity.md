@@ -59,8 +59,9 @@ X11/GTK, keyboard lock/repeat/layout, failure and shutdown qualification remain
 outstanding. Physical keys held across re-registration and Xlib server-loss
 behavior also need native acceptance; no stronger guarantee is inferred from
 the synthetic fixture. See [Linux desktop support](linux-development.md#desktop-support).
-This is not full feature parity: Linux voice editing, Wayland automatic global
-actions and system-wide Escape remain open.
+This is not full feature parity: Wayland automatic global actions and
+system-wide Escape remain open, and Linux voice editing is limited to external
+editable AT-SPI fields.
 
 ## Core Journey qualification cache (source only)
 
@@ -243,8 +244,9 @@ X11/Wayland target guarantees or change ordinary Copy or recording output. Porta
 burst/expiry/concurrent-admission tests and Host queued-expiry/cancellation tests
 are authored but NOT_RUN locally, pending automatic native/portable qualification.
 
-Linux now has **26 of 27 source-wired action destinations**; voice editing and
-Wayland automatic global action registration remain open. X11 has the
+Linux now has **27 of 27 source-wired action destinations**; Wayland automatic
+global action registration remains open. Voice editing shares selected-text
+speech's session access and external AT-SPI field requirement. X11 has the
 source-only action group described above. Selected-text speech needs
 separate session access and an external focused control, not this app's window.
 Its saved window-local binding remains disabled with desktop-command guidance;
@@ -254,7 +256,8 @@ validation and busy/recording/parent/page-independent dispatch fixtures are
 authored but NOT_RUN locally. They need automatic qualification. Clipboard
 delivery alone is not evidence of external-field paste or global-shortcut parity.
 
-Linux also exposes `--speak-clipboard`, `--speak-selected-text`, `--paste-last-history`, `--stop-speech`,
+Linux also exposes `--speak-clipboard`, `--speak-selected-text`, `--edit-selection-by-voice`,
+`--paste-last-history`, `--stop-speech`,
 `--pause-resume-speech` and `--quick-voice-1` / `--quick-voice-2` /
 `--quick-voice-3` through the existing GApplication command-forwarding path.
 Quick Voice selects a saved favorite without reading text or starting speech.
@@ -611,6 +614,9 @@ privacy, releases, feature requests and the MIT licence. GTK links reflow at
 narrow widths; Win32 uses its existing themed keyboard-accessible buttons.
 Browser-launch failures are surfaced. Building or opening About never fetches
 release data, installs an updater, downloads code or changes an app.
+About also has Support development: the shared `TipWebLink` pages (GitHub
+Sponsors and Ko-fi, as on the direct-download Mac build) open in the browser.
+Tips are optional and unlock nothing (#1625).
 
 Automatic native Linux job `118172561007` failed to compile source `2bbc95b5`
 (synthetic merge `f7ef4c5558ff083f456d44d2aae12999f1c6e2bf`) because the
@@ -1186,14 +1192,14 @@ does not establish runtime, multi-DPI or installed-product acceptance.
 ## App shell, recordings folder and analytics (source only)
 
 `ShellPreference.fields` (`Sources/SpeakCore/Desktop/DesktopShellPreference.swift`)
-adds `appVisibility`, `compactStatusBarIcon` and `analyticsEnabled` to General
+adds `appVisibility` and `compactStatusBarIcon` to General
 with the Mac keys, defaults and strict values, so save, restart and portable
 JSON import/export round-trip them. `appVisibility` reuses the Mac's stored
 cases with native labels: `both` is **Taskbar and notification area**,
 `menuBarOnly` **Notification area only** and `dockOnly` **Taskbar only**.
-`showStatusBarIconInDockOnly`, `paidAccessRoutingEnabled` and
-`recordingsDirectory` stay opaque Apple-only keys: imports retain them for the
-Mac and never execute them.
+`showStatusBarIconInDockOnly`, `paidAccessRoutingEnabled`,
+`recordingsDirectory` and `analyticsEnabled` stay opaque Apple-only keys:
+imports retain them for the Mac and never execute them.
 
 - **Windows app visibility** applies before the window opens and live on save
   or import. Notification area only gives the window a hidden tool-window owner
@@ -1208,9 +1214,15 @@ Mac and never execute them.
 - **Linux** stores, shows and transfers both shell choices but does not apply
   them: GTK 4 has no portable tray or taskbar-hiding API, so the capability rule
   is persistence only until a StatusNotifier host exists.
-- **Analytics**: Windows and Linux send no analytics or crash reports, so the
-  switch has nothing to gate. It is stored and transferred so a Mac import keeps
-  its choice; absent is never treated as consent.
+- **Analytics and crash reports** (#1624): General shows two separate switches,
+  **Share anonymous usage analytics** and **Send crash reports and
+  diagnostics**, both off. They are native editor projections
+  (`DesktopTelemetryConsent`, keys `desktopAnalyticsConsent` and
+  `desktopDiagnosticsConsent`) of the device-local `telemetry.json`: only an
+  explicit Apply in Settings changes them, and they are never persisted in
+  settings, exported, imported or exposed to `speak config`/MCP. The Mac's
+  `analyticsEnabled` is retained opaque, so a Mac import keeps its choice but
+  never opts a desktop in.
 - **Paid-access routing and Dock-only icon** have no desktop journey (desktop
   providers are bring-your-own-key and there is no Dock); both are preserved
   only.
@@ -2670,12 +2682,12 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | visualDensity | Wired; native acceptance pending / Wired; native acceptance pending | General Normal/Compact choice; strict shared configuration, JSON transfer and native page/card/sidebar spacing |
 | transcriptionMode | Equivalent / Equivalent | Models; Remote Batch/Live; Local Batch, plus Local Live on Windows and Linux (source only, see local live transcription) |
 | liveTranscriptionModel | Partial / Partial | Models; implemented transport routes only; Apple Speech and unavailable providers are not substitutes |
-| batchTranscriptionModel | Equivalent / Equivalent | Models; independent remembered batch model |
+| batchTranscriptionModel | Equivalent / Equivalent | Models; independent remembered batch model; Remote Batch adds **Browse OpenRouter models…** (shared `DesktopOpenRouterBrowser`, #1618) |
 | localTranscriptionModel | Partial / Partial | Models; pinned whisper.cpp catalogue plus explicit Hugging Face GGML imports (`desktop-huggingface-import.md`); not the Mac WhisperKit/Core ML or sherpa-onnx runtimes |
 | localTranscriptionMode | Source wired, unqualified / Source wired, unqualified | Windows and Linux Local Batch and Live: Live streams a pinned downloaded whisper.cpp model in process with VAD-bounded windows and shares the remembered `localLiveModel` slot; native/runtime acceptance remains open |
 | localStreamingModelSource | Partial / Partial | Both hosts use the canonical Whisper live identity in `localLiveModel`; source-only JSON transfer maps offered inactive choices and preserves unavailable/active-mode changes without activation. Archive projection uses the correct live key; full settings restore and native acceptance remain open. No desktop sherpa-onnx or Parakeet runtime |
 | postProcessingEnabled | Equivalent / Equivalent | `DesktopHostPostProcessing.swift`; desktop default remains disabled. Source proposal adds explicit local rules opt-in without credential access; remote remains opt-in |
-| postProcessingModel | Partial / Partial | Shared remote catalogue, built-in Local Cleanup and downloaded GGUF LLMs through the native llama.cpp runtime (`desktop-local-llm-cleanup.md`, source only); Apple Foundation Models and MLX remain unavailable |
+| postProcessingModel | Partial / Partial | Shared remote catalogue, built-in Local Cleanup and downloaded GGUF LLMs through the native llama.cpp runtime (`desktop-local-llm-cleanup.md`, source only); the Remote source adds **Browse OpenRouter models…** (#1618); Apple Foundation Models and MLX remain unavailable |
 | postProcessingTemperature | Wired / Wired | Config; range 0...1, OpenRouter request |
 | postProcessingOutputLanguage | Wired / Wired | Config; remote cleanup system prompt; built-in rules explicitly ignore it |
 | postProcessingIncludeLexiconDirectives | Source wired / Source wired | Native post-processing switch, Mac default true, options/session snapshot and strict transfer; excludes saved directives from remote requests when false |
@@ -2755,12 +2767,12 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Partial native source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 26 action destinations and edits saved bindings with presets/reset; eligible X11 global actions use a separate native group with per-row refusals. Selected-text speech needs session access and an external editable AT-SPI field. Linux voice editing and Wayland automatic action registration remain open. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial native source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects all 27 action destinations and edits saved bindings with presets/reset; eligible X11 global actions use a separate native group with per-row refusals. Selected-text speech and voice editing need session access and an external editable AT-SPI field. Wayland automatic action registration remains open. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
 | rememberedRemoteTranscriptionMode | Equivalent / Equivalent | Models; native source/mode preferences |
-| analyticsEnabled | Wired; nothing to gate / Same | General switch, Mac default and strict transfer. Desktop sends no analytics or crash reports; absent is never consent |
+| analyticsEnabled | Apple-specific / Apple-specific | Retained opaque through import/export. Desktop consent is the device-local `desktopAnalyticsConsent`/`desktopDiagnosticsConsent` editor projection (#1624); an imported value is never consent |
 
 ## Beyond the enum and destinations
 
@@ -3150,7 +3162,9 @@ not run local actions. An imported duplicate retains its value and shows a
 conflict note; the first listed action owns that combination. Sidebar
 Ctrl+digit chords retain precedence and corresponding action notes disclose it.
 
-Linux voice editing remains unavailable. Paste Last History now uses its
+Linux voice editing (`--edit-selection-by-voice`) uses the same consented
+external AT-SPI path and replaces only the unchanged captured selection.
+Paste Last History now uses its
 existing bounded admission/target path, and selected-text speech uses the
 consented external AT-SPI path described above. The Permissions action
 opens its own Linux-specific recovery guidance, not an unrelated page.

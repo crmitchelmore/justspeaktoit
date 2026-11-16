@@ -60,6 +60,7 @@ final class DesktopSettingsSearchTests: XCTestCase {
         "Dictation preferences": "Container dialog; every DesktopConfiguration field is indexed.",
         "App profiles": "Dialog opened by Per-app profiles, which is indexed.",
         "Post-processing": "Dialog opened by Clean-up; the Post-processing page root is indexed.",
+        "Browse OpenRouter models": "Dialog opened from Model and Clean-up, whose keywords index it.",
         "Voice output": "Dialog opened by Read aloud; the Voice Output page root is indexed.",
         "Corrections": "Editor opened by Personal corrections, which is indexed.",
         "Pronunciation": "Editor opened by Pronunciation dictionary, which is indexed.",
@@ -113,6 +114,14 @@ final class DesktopSettingsSearchTests: XCTestCase {
         }
     }
 
+    func testTipJarSearchOpensAboutOnBothDesktops() throws {
+        for platform: SettingsSearchPlatforms in [.windows, .linux] {
+            let session = DesktopSettingsSearchSession(platform: platform)
+            XCTAssertEqual(session.results(for: "tip jar").first?.title, "Support development")
+            XCTAssertEqual(try XCTUnwrap(session.choose(0)).destination, .about)
+        }
+    }
+
     func testSessionRanksResultsAndRecordsRecents() throws {
         let session = DesktopSettingsSearchSession(platform: .linux)
         XCTAssertTrue(session.results(for: "").isEmpty)
@@ -122,6 +131,14 @@ final class DesktopSettingsSearchTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(session.choose(0)).destination, .general)
         XCTAssertEqual(session.results(for: "").first?.title, "Microphone")
         XCTAssertNil(session.choose(99))
+    }
+
+    func testBrowseOpenRouterModelsFindsBothPickers() {
+        for platform: SettingsSearchPlatforms in [.windows, .linux] {
+            let titles = Set(DesktopSettingsSearchSession(platform: platform)
+                .results(for: "browse openrouter models").map(\.title))
+            XCTAssertTrue(titles.isSuperset(of: ["Model", "Clean-up"]), "\(platform): \(titles)")
+        }
     }
 
     func testDesktopPagesHaveRootsAndTargets() {
@@ -145,7 +162,9 @@ final class DesktopSettingsSearchTests: XCTestCase {
             "deepgramStopGracePeriod": "Legacy key migrated to liveStopGracePeriod.",
             "mistralTTSModel": appleOnly, "ttsSpeed": appleOnly, "ttsPitch": appleOnly, "ttsAutoPlay": appleOnly,
             "ttsSaveToDirectory": appleOnly, "ttsUseSSML": appleOnly, "livePolishTailWindowChars": state,
-            "enableSendToMac": appleOnly,
+            "enableSendToMac": "Apple-only key; the desktop receiver keeps its switch in its sealed state, "
+                + "indexed as desktop.receiveFromPhone.",
+            "analyticsEnabled": "Apple-only switch; Windows and Linux consent is a local editor projection.",
             "paidAccessRoutingEnabled": appleOnly, "simpleModelChoices": appleOnly,
             "ttsPronunciationDictionary": "Edited on the Pronunciation page, whose page root is indexed.",
             "assemblyAIIgnoredPronunciationTerms": "Edited on the Pronunciation page, whose page root is indexed."

@@ -27,68 +27,23 @@ import Foundation
 // the code until the phone has proved it, so guessing against the Mac costs one
 // rate-limited attempt per guess. A device that impersonates the Mac to the
 // phone, however, receives the phone's "client finished" frame and can test
-// codes against it offline. Closing that needs a PAKE or a high-entropy key
-// issued at pairing.
-
-/// The peer refused the connection and said why, for example a wrong pairing
-/// code, a lockout or a protocol-version mismatch.
-public struct TransportRejection: LocalizedError, Equatable, Sendable {
-    public let message: String
-
-    public init(message: String) {
-        self.message = message
-    }
-
-    public var errorDescription: String? {
-        self.message
-    }
-}
-
-/// Failures of the encrypted channel itself.
-public enum TransportSecurityError: Error, Equatable, Sendable {
-    /// A message was sent or received before the encrypted session existed.
-    case notEncrypted
-    /// A frame failed authentication: wrong key, tampered, replayed or reordered.
-    case unauthenticatedFrame
-    /// The peer's handshake frame was not a valid key share.
-    case malformedHandshake
-}
-
-extension TransportSecurityError: LocalizedError {
-    public var errorDescription: String? {
-        switch self {
-        case .notEncrypted:
-            "The connection is not encrypted yet"
-        case .unauthenticatedFrame:
-            "Received a message that was not sealed with this session's key"
-        case .malformedHandshake:
-            "The peer sent an invalid encryption handshake"
-        }
-    }
-}
-
-/// The only plaintext frame each side sends in protocol v2.
-struct TransportKeyShare: Codable, Equatable {
-    var protocolVersion: Int
-    /// Raw X25519 public key, 32 bytes.
-    var keyShare: Data
-
-    static func decode(_ frame: Data) -> TransportKeyShare? {
-        guard let share = try? JSONDecoder().decode(TransportKeyShare.self, from: frame),
-              share.keyShare.count == 32 else { return nil }
-        return share
-    }
-
-    func encoded() throws -> Data {
-        try JSONEncoder().encode(self)
-    }
-}
+// codes against it offline.
+//
+// So the code is used once. A phone pairing with the code sets
+// `requestsCredential` in its key share, and the Mac's "server finished" frame
+// then carries a `TransportDeviceCredential`: a random 256-bit secret the Mac
+// stores for that phone. Every later session names the credential in its key
+// share and derives its keys from the secret in place of the code, so an
+// impostor that captures a later "client finished" frame has nothing it can
+// guess offline. A phone that holds a credential never falls back to the code
+// on its own; re-pairing takes the user (#1643). The first pairing is still
+// exposed to an impostor that is present at that moment.
 
 /// One direction of the sealed channel. The nonce is the frame counter, so
 /// frames must be opened in the order they were sealed, exactly once.
 struct TransportFrameCipher: Sendable {
-    private static let associatedData = Data("justspeaktoit.send-to-mac.v2.frame".utf8)
-    static let overhead = 16
+    private static let associatedData = TransportHandshakeLabel.frameAssociatedData
+    static let overhead = TransportHandshakeLabel.tagByteCount
 
     private let key: SymmetricKey
     private(set) var counter: UInt64 = 0
@@ -129,9 +84,9 @@ struct TransportFrameCipher: Sendable {
     }
 
     private static func nonce(_ counter: UInt64) throws -> ChaChaPoly.Nonce {
-        guard counter < UInt64.max else { throw TransportSecurityError.unauthenticatedFrame }
-        var bytes = Data(count: 4)
-        withUnsafeBytes(of: counter.bigEndian) { bytes.append(contentsOf: $0) }
+        guard let bytes = TransportHandshakeLabel.nonce(counter) else {
+            throw TransportSecurityError.unauthenticatedFrame
+        }
         return try ChaChaPoly.Nonce(data: bytes)
     }
 }
@@ -149,11 +104,13 @@ struct TransportKeySchedule: Sendable {
         case server
     }
 
-    static let clientFinished = Data("justspeaktoit.send-to-mac.v2 client finished".utf8)
-    static let serverFinished = Data("justspeaktoit.send-to-mac.v2 server finished".utf8)
+    static let clientFinished = TransportHandshakeLabel.clientFinished
+    static let serverFinished = TransportHandshakeLabel.serverFinished
 
-    private let sharedSecret: Data
-    private let transcriptHash: Data
+    /// The X25519 secret. Internal only so the Android test vectors can publish it.
+    let sharedSecret: Data
+    /// SHA-256 over both key-share frames. Internal for the same reason.
+    let transcriptHash: Data
 
     init(
         localKey: Curve25519.KeyAgreement.PrivateKey,
@@ -168,44 +125,49 @@ struct TransportKeySchedule: Sendable {
         guard secretBytes.contains(where: { $0 != 0 }) else { throw TransportSecurityError.malformedHandshake }
         self.sharedSecret = secretBytes
 
-        var transcript = SHA256()
-        transcript.update(data: Data("justspeaktoit.send-to-mac.v2".utf8))
-        for frame in [clientFrame, serverFrame] {
-            withUnsafeBytes(of: UInt32(frame.count).bigEndian) { transcript.update(bufferPointer: $0) }
-            transcript.update(data: frame)
-        }
-        self.transcriptHash = Data(transcript.finalize())
+        let transcript = TransportHandshakeLabel.transcript(clientFrame: clientFrame, serverFrame: serverFrame)
+        self.transcriptHash = Data(SHA256.hash(data: transcript))
     }
 
     /// The pre-shared key both devices hold once the user has entered the code.
     static func pairingKey(for pairingCode: String) -> SymmetricKey {
         HKDF<SHA256>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: Data(pairingCode.utf8)),
-            salt: Data("justspeaktoit.send-to-mac.pairing-key".utf8),
-            info: Data("v2".utf8),
+            salt: TransportHandshakeLabel.pairingKeySalt,
+            info: TransportHandshakeLabel.preSharedKeyInfo,
             outputByteCount: 32
         )
     }
 
     func sessionKeys(pairingCode: String, role: Role) -> TransportSessionKeys {
-        let pairingKey = Self.pairingKey(for: pairingCode).withUnsafeBytes { Data($0) }
-        let inputKeyMaterial = SymmetricKey(data: self.sharedSecret + pairingKey)
-        func key(_ label: String) -> SymmetricKey {
-            HKDF<SHA256>.deriveKey(
-                inputKeyMaterial: inputKeyMaterial,
-                salt: self.transcriptHash,
-                info: Data("justspeaktoit.send-to-mac.v2 \(label)".utf8),
-                outputByteCount: 32
-            )
-        }
-        let clientToServer = TransportFrameCipher(key: key("client to server"))
-        let serverToClient = TransportFrameCipher(key: key("server to client"))
+        self.sessionKeys(preSharedKey: Self.pairingKey(for: pairingCode), role: role)
+    }
+
+    func sessionKeys(preSharedKey: SymmetricKey, role: Role) -> TransportSessionKeys {
+        let keys = self.directionKeys(preSharedKey: preSharedKey)
+        let clientToServer = TransportFrameCipher(key: keys.clientToServer)
+        let serverToClient = TransportFrameCipher(key: keys.serverToClient)
         switch role {
         case .client:
             return TransportSessionKeys(outbound: clientToServer, inbound: serverToClient)
         case .server:
             return TransportSessionKeys(outbound: serverToClient, inbound: clientToServer)
         }
+    }
+
+    /// The raw key for each direction, before either has sealed a frame.
+    func directionKeys(preSharedKey: SymmetricKey) -> (clientToServer: SymmetricKey, serverToClient: SymmetricKey) {
+        let pairingKey = preSharedKey.withUnsafeBytes { Data($0) }
+        let inputKeyMaterial = SymmetricKey(data: self.sharedSecret + pairingKey)
+        func key(_ direction: String) -> SymmetricKey {
+            HKDF<SHA256>.deriveKey(
+                inputKeyMaterial: inputKeyMaterial,
+                salt: self.transcriptHash,
+                info: TransportHandshakeLabel.sessionKeyInfo(direction),
+                outputByteCount: TransportProtocolConstants.keyByteCount
+            )
+        }
+        return (key(TransportHandshakeLabel.clientToServer), key(TransportHandshakeLabel.serverToClient))
     }
 }
 
@@ -215,15 +177,52 @@ struct TransportKeySchedule: Sendable {
 struct TransportClientHandshake {
     private let privateKey = Curve25519.KeyAgreement.PrivateKey()
     let frame: Data
+    let secret: TransportPairingSecret
 
-    init(protocolVersion: Int = SpeakTransportProtocolVersion) throws {
-        self.frame = try TransportKeyShare(
+    /// Starts a handshake that proves `secret`. A code-based handshake asks the
+    /// Mac for a credential unless `requestsCredential` is false.
+    init(
+        protocolVersion: Int = SpeakTransportProtocolVersion,
+        secret: TransportPairingSecret,
+        requestsCredential: Bool = true
+    ) throws {
+        self.secret = secret
+        var share = TransportKeyShare(
             protocolVersion: protocolVersion,
             keyShare: self.privateKey.publicKey.rawRepresentation
-        ).encoded()
+        )
+        switch secret {
+        case .code:
+            share.requestsCredential = requestsCredential ? true : nil
+        case .credential(let credential):
+            share.credentialID = credential.id
+        }
+        self.frame = try share.encoded()
+    }
+
+    /// A code-based handshake that does not ask for a credential, as earlier builds send.
+    init(protocolVersion: Int = SpeakTransportProtocolVersion) throws {
+        try self.init(protocolVersion: protocolVersion, secret: .code(""), requestsCredential: false)
     }
 
     /// Derives the session from the Mac's key share and seals "client finished".
+    func finish(serverFrame: Data) throws -> (keys: TransportSessionKeys, finished: Data) {
+        guard let share = TransportKeyShare.decode(serverFrame) else {
+            throw TransportSecurityError.malformedHandshake
+        }
+        let schedule = try TransportKeySchedule(
+            localKey: self.privateKey,
+            peerShare: share,
+            clientFrame: self.frame,
+            serverFrame: serverFrame
+        )
+        let preSharedKey = TransportKeySchedule.preSharedKey(for: self.secret)
+        var keys = schedule.sessionKeys(preSharedKey: preSharedKey, role: .client)
+        let finished = try keys.outbound.seal(TransportKeySchedule.clientFinished)
+        return (keys, finished)
+    }
+
+    /// Derives the session from the Mac's key share with `pairingCode` and seals "client finished".
     func finish(serverFrame: Data, pairingCode: String) throws -> (keys: TransportSessionKeys, finished: Data) {
         guard let share = TransportKeyShare.decode(serverFrame) else {
             throw TransportSecurityError.malformedHandshake
@@ -242,26 +241,15 @@ struct TransportClientHandshake {
 
 /// The Mac's half of the handshake.
 struct TransportServerHandshake {
-    enum Refusal: Error, Equatable {
-        /// A plaintext `hello` from a peer that does not encrypt.
-        case plaintextHello(protocolVersion: Int)
-        case versionMismatch(protocolVersion: Int)
-        case malformed
-    }
+    typealias Refusal = TransportHandshakeRefusal
 
     let frame: Data
     let schedule: TransportKeySchedule
+    /// The phone's own key share, including any credential it named or asked for.
+    let clientShare: TransportKeyShare
 
     init(clientFrame: Data, protocolVersion: Int = SpeakTransportProtocolVersion) throws {
-        guard let share = TransportKeyShare.decode(clientFrame) else {
-            if case .hello(let hello)? = try? Self.plaintextDecoder.decode(TransportMessage.self, from: clientFrame) {
-                throw Refusal.plaintextHello(protocolVersion: hello.protocolVersion)
-            }
-            throw Refusal.malformed
-        }
-        guard share.protocolVersion == protocolVersion else {
-            throw Refusal.versionMismatch(protocolVersion: share.protocolVersion)
-        }
+        let share = try Refusal.keyShare(in: clientFrame, protocolVersion: protocolVersion)
         let privateKey = Curve25519.KeyAgreement.PrivateKey()
         let frame = try TransportKeyShare(
             protocolVersion: protocolVersion,
@@ -278,41 +266,6 @@ struct TransportServerHandshake {
             throw Refusal.malformed
         }
         self.frame = frame
-    }
-
-    private static let plaintextDecoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }()
-}
-
-/// The phone's "client finished" frame, checked against a candidate pairing code.
-///
-/// The Mac hands this to `PairingManager.attemptPairing(provingWith:)`, which
-/// supplies the current code under its lock and counts a failure against the
-/// attempt limit. A successful check keeps the session keys it derived.
-public final class TransportPairingProof: @unchecked Sendable {
-    private let schedule: TransportKeySchedule
-    private let clientFinished: Data
-    private let lock = NSLock()
-    private var verifiedKeys: TransportSessionKeys?
-
-    init(schedule: TransportKeySchedule, clientFinished: Data) {
-        self.schedule = schedule
-        self.clientFinished = clientFinished
-    }
-
-    /// Whether the phone sealed its handshake with `pairingCode`.
-    public func verifies(pairingCode: String) -> Bool {
-        var keys = self.schedule.sessionKeys(pairingCode: pairingCode, role: .server)
-        guard let opened = try? keys.inbound.open(self.clientFinished),
-              opened == TransportKeySchedule.clientFinished else { return false }
-        self.lock.withLock { self.verifiedKeys = keys }
-        return true
-    }
-
-    var acceptedKeys: TransportSessionKeys? {
-        self.lock.withLock { self.verifiedKeys }
+        self.clientShare = share
     }
 }

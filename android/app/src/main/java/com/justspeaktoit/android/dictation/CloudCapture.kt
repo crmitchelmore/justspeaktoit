@@ -2,6 +2,7 @@ package com.justspeaktoit.android.dictation
 
 import com.justspeaktoit.android.cloud.AudioRecorder
 import com.justspeaktoit.android.cloud.CallHandle
+import com.justspeaktoit.android.cloud.CaptureLevel
 import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.RecorderFactory
@@ -81,7 +82,7 @@ internal class CloudCapture(
      * that has since been replaced or stopped. Returns false (and leaves nothing behind) on failure.
      */
     fun start(
-        onLevel: (Float) -> Unit,
+        onLevel: (CaptureLevel) -> Unit,
         onLimitReached: (Recording) -> Unit,
         onCaptureFailed: (Recording) -> Unit,
     ): Boolean {

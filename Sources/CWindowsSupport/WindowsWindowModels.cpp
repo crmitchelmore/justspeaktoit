@@ -33,11 +33,16 @@ bool liveSelection(HWND window) {
 }
 
 // Remote shows OpenRouter discovery and Refresh models; Local shows the
-// on-device runtime and the Local models dialog.
+// on-device runtime and the Local models dialog. Remote Batch also offers
+// Browse OpenRouter models… (OpenRouter has no live transcription).
 void updateSourceControls(HWND window) {
-    const bool local = activeSource() == 1;
+    const bool local = activeSource() == 1, browse = modelsState().activeMode == 0;
+    const auto wanted = state.wanted.find(openRouterBrowseID);
+    const bool relayout = state.page == transcriptionPage && wanted != state.wanted.end() && wanted->second != browse;
     setShown(window, modelRefreshID, !local);
     setShown(window, localModelsID, local);
+    setShown(window, openRouterBrowseID, browse);
+    if (relayout) layout(window);
     const std::wstring text = local ? jsti_local_models_summary() : modelsState().remoteModelStatus;
     wchar_t shown[1100] = {};
     GetDlgItemTextW(window, modelStatusID, shown, 1100);
@@ -49,6 +54,7 @@ void updateModelAvailability(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, sourceID), recording == 0 && hasSourceChoice());
     EnableWindow(GetDlgItem(window, localModelsID), recording == 0 && jsti_local_models_available());
     EnableWindow(GetDlgItem(window, modelID), recording == 0);
+    EnableWindow(GetDlgItem(window, openRouterBrowseID), recording == 0);
     EnableWindow(GetDlgItem(window, importID), recording == 0 && selection(window) >= 0 && !liveSelection(window));
 }
 

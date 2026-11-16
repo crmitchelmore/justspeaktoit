@@ -7,9 +7,18 @@ import SpeakCore
 extension AppSettings {
     /// Where transcription currently runs, derived from the active model.
     var transcriptionLocation: IOSTranscriptionLocation {
-        ModelCatalog.isOnDeviceLiveTranscriptionModel(selectedModel) && transcriptionMode == .streaming
-            ? .local
-            : .remote
+        switch transcriptionMode {
+        case .streaming:
+            return ModelCatalog.isOnDeviceLiveTranscriptionModel(selectedModel) ? .local : .remote
+        case .batch:
+            return IOSLocalTranscriptionModels.isDownloadedModelID(batchTranscriptionModel) ? .local : .remote
+        }
+    }
+
+    /// The local sub-mode to show: Apple Speech streams, a downloaded model
+    /// transcribes the completed recording.
+    var localTranscriptionMode: IOSTranscriptionMode {
+        transcriptionLocation == .local ? transcriptionMode : .streaming
     }
 
     /// The remote sub-mode to show: the live value when remote is active,
@@ -24,19 +33,52 @@ extension AppSettings {
     func selectTranscriptionLocation(_ location: IOSTranscriptionLocation) {
         switch location {
         case .local:
+            selectLocalTranscriptionMode(IOSLocalModelSelectionMemory.localMode(defaults: defaults) ?? .streaming)
+        case .remote:
+            selectRemoteTranscriptionMode(rememberedRemoteTranscriptionMode)
+        }
+    }
+
+    /// Switches Local between Apple Speech (streaming) and a downloaded model
+    /// (batch), keeping the remote batch model to restore later.
+    func selectLocalTranscriptionMode(_ mode: IOSTranscriptionMode) {
+        IOSLocalModelSelectionMemory.rememberLocalMode(mode, defaults: defaults)
+        switch mode {
+        case .streaming:
             selectedModel = liveTranscriptionSelection.model(
                 for: .onDevice,
                 activeModel: selectedModel,
                 selectableModelIDs: Self.selectableLiveModelIDs
             )
             transcriptionMode = .streaming
-        case .remote:
-            selectRemoteTranscriptionMode(rememberedRemoteTranscriptionMode)
+        case .batch:
+            selectDownloadedTranscriptionModel(
+                IOSLocalModelSelectionMemory.localModel(defaults: defaults)
+                    ?? IOSLocalTranscriptionModels.all().first { IOSLocalTranscriptionModels.isReady($0.id) }?.id
+                    ?? ModelCatalog.iOSLocalTranscription.first?.id
+                    ?? batchTranscriptionModel
+            )
         }
+    }
+
+    /// Selects a downloaded model for batch transcription. The previous remote
+    /// batch model is remembered so Remote › Batch restores it.
+    func selectDownloadedTranscriptionModel(_ identifier: String) {
+        guard IOSLocalTranscriptionModels.isDownloadedModelID(identifier) else { return }
+        if !IOSLocalTranscriptionModels.isDownloadedModelID(batchTranscriptionModel) {
+            IOSLocalModelSelectionMemory.rememberRemoteModel(batchTranscriptionModel, defaults: defaults)
+        }
+        IOSLocalModelSelectionMemory.rememberLocalModel(identifier, defaults: defaults)
+        batchTranscriptionModel = identifier
+        transcriptionMode = .batch
     }
 
     func selectRemoteTranscriptionMode(_ mode: IOSTranscriptionMode) {
         rememberedRemoteTranscriptionMode = mode
+        if mode == .batch, IOSLocalTranscriptionModels.isDownloadedModelID(batchTranscriptionModel) {
+            batchTranscriptionModel = IOSLocalModelSelectionMemory.remoteModel(defaults: defaults)
+                ?? ModelCatalog.normalizedBatchTranscriptionModel(nil)
+        }
         if mode == .streaming {
             selectedModel = liveTranscriptionSelection.model(
                 for: .remote,
@@ -166,6 +208,10 @@ extension AppSettings {
 
     /// Refuses a run whose model cannot run, rather than substituting another.
     func requireTranscriptionAvailable(_ modelID: String, usesBatch: Bool) throws {
+        if usesBatch, IOSLocalTranscriptionModels.isDownloadedModelID(modelID) {
+            // Name the missing download or engine rather than a generic refusal.
+            _ = try IOSLocalTranscriptionModels.requireReady(modelID)
+        }
         let availability = transcriptionAvailability(for: modelID, usesBatch: usesBatch)
         guard !availability.isAvailable else { return }
         throw TranscriptionModelUnavailableError(

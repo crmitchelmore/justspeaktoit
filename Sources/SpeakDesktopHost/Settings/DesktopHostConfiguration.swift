@@ -9,7 +9,7 @@ package enum DesktopConfigurationSaveIntent: Equatable, Sendable {
 extension DesktopHostController {
     package func configuration() throws -> DesktopConfiguration {
         var values = settings.configuration?.values ?? [:]
-        values.removeValue(forKey: DesktopConnectionPreWarming.approvalProjectionKey)
+        for key in DesktopConfiguration.editorProjectionKeys { values.removeValue(forKey: key) }
         values[DesktopPostProcessingConfiguration.streamingKey] = AnyCodable(
             .bool((settings.postProcessing ?? .init()).streamingEnabled)
         )
@@ -32,6 +32,9 @@ extension DesktopHostController {
         let qualityKey = VoiceSynthesisPreference.quality.key.rawValue
         values[qualityKey] = projected.values[qualityKey]
         values[DesktopConnectionPreWarming.approvalProjectionKey] = AnyCodable(.bool(connectionWarm.approved))
+        let consent = telemetry.store.snapshot()
+        values[DesktopTelemetryConsent.analyticsKey] = AnyCodable(.bool(consent.analyticsConsent == .optedIn))
+        values[DesktopTelemetryConsent.diagnosticsKey] = AnyCodable(.bool(consent.diagnosticsConsent == .granted))
         if values[qualityKey] == nil, let voice = settings.voiceOutput as? DesktopVoiceOutputSettings {
             values[qualityKey] = AnyCodable(.string(voice.qualityForNativeEditor))
         }
@@ -67,6 +70,20 @@ extension DesktopHostController {
         )
         try await persistConfiguration(
             configuration, intent: intent, status: "Configuration saved. New recordings use these preferences."
+        )
+        if intent == .apply { await applyTelemetryConsent(configuration, previous: previous) }
+    }
+
+    /// Only an explicit change in the native editor moves consent: an unchanged
+    /// "off" keeps an undecided state undecided, and nothing else can grant it.
+    private func applyTelemetryConsent(_ configuration: DesktopConfiguration, previous: DesktopConfiguration) async {
+        func changed(_ key: String) -> Bool? {
+            let value = configuration.enabled(key)
+            return value == previous.enabled(key) ? nil : value
+        }
+        await telemetry.updateConsent(
+            analytics: changed(DesktopTelemetryConsent.analyticsKey),
+            diagnostics: changed(DesktopTelemetryConsent.diagnosticsKey)
         )
     }
 
@@ -137,7 +154,7 @@ extension DesktopHostController {
         let approved = configuration.enabled(DesktopConnectionPreWarming.approvalProjectionKey)
             && configuration.enabled(DesktopConnectionPreWarming.preferenceKey)
             && (intent == .apply || connectionWarm.approved)
-        let configuration = try DesktopConnectionPreWarming.removingApproval(from: configuration)
+        let configuration = try configuration.removingEditorProjections()
         var changed = settings
         var voice = changed.voiceOutput
         changed.configuration = try importingAutomationPreferences(
@@ -230,13 +247,7 @@ extension DesktopHostController {
     /// Retained cloud enable/model values do not grant permission to use them.
     package func exportConfiguration(path: String) throws {
         guard !closed else { throw DesktopHostError(message: "The app is closing.") }
-        let voice = try Platform.exportVoiceConfiguration(settings.voiceOutput, over: configuration())
-        let projected = try DesktopPostProcessingConfiguration.exportOptions(settings.postProcessing, over: voice)
-        var values = projected.values
-        values.removeValue(forKey: "automationLocalConsent")
-        values.removeValue(forKey: "automationEnabled")
-        values.removeValue(forKey: DesktopConnectionPreWarming.approvalProjectionKey)
-        let preferences = try DesktopConfiguration(values: values)
+        let preferences = try DesktopConfiguration(values: portableConfigurationValues())
         try DesktopConfigurationDocument(preferences: preferences).write(to: path)
         update("Portable preferences exported, including preserved imported values. Credential stores were not read.")
     }
@@ -254,6 +265,15 @@ extension DesktopHostController {
             }
             throw DesktopHostError(message: "Finish dictation before importing configuration.")
         }
+        let (changed, cleanup) = try await applyConfigurationDocument(document)
+        update(configurationImportStatus(document, settings: changed) + cleanup)
+    }
+
+    /// Applies a portable document as configuration import does. The caller
+    /// owns admission; backup restore calls this while it holds the busy slot.
+    func applyConfigurationDocument(
+        _ document: DesktopConfigurationDocument
+    ) async throws -> (settings: Settings, cleanup: String) {
         let changed = try prepareConfigurationImport(document)
         invalidateConnectionPreWarming(resetCapture: true)
         let previous = settings
@@ -268,7 +288,7 @@ extension DesktopHostController {
         Platform.applyShell(document.preferences.shellPreferences)
         Platform.hud(.hidden)
         try publishImportedLocalChoices(from: previous)
-        update(configurationImportStatus(document, settings: changed) + cleanup)
+        return (changed, cleanup)
     }
 
     private func prepareConfigurationImport(_ document: DesktopConfigurationDocument) throws -> Settings {
@@ -277,7 +297,7 @@ extension DesktopHostController {
         changed.configuration = try importingAutomationPreferences(
             Platform.importVoiceConfiguration(
                 from: keepingLocalAutomationWriteGrant(
-                    DesktopConnectionPreWarming.removingApproval(from: document.preferences)
+                    document.preferences.removingEditorProjections()
                 ),
                 into: &voice
             )
@@ -351,7 +371,7 @@ extension DesktopHostController {
             + (unknown.isEmpty ? "" : " Preserved but not applied: \(unknown.joined(separator: ", ")).")
     }
 
-    private func reconcileVoiceQualityChange(_ previous: Platform.VoiceOutputSettings?) {
+    func reconcileVoiceQualityChange(_ previous: Platform.VoiceOutputSettings?) {
         let oldVoice = previous as? DesktopVoiceOutputSettings
         let newVoice = settings.voiceOutput as? DesktopVoiceOutputSettings
         if oldVoice != newVoice { voiceSettingsRevision &+= 1 }

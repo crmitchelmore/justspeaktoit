@@ -77,7 +77,7 @@ void applySidebarBindings(HWND window) { applySidebarBindings(window, state.side
 
 // --------------------------------------------------------- settings search
 
-// The results (or "No settings match") replace the sidebar's pages while the
+// The results (or "No results") replace the sidebar's pages while the
 // search is open; choosing, Escape or leaving the search restores them.
 void refreshSettingsSearch(HWND window) {
     const bool open = settingsSearchOpen(window);
@@ -167,8 +167,8 @@ void applySettingsResults(HWND window) {
 }
 
 std::wstring settingsSearchSummary(size_t count) {
-    if (count == 0) return L"No settings match";
-    return std::to_wstring(count) + (count == 1 ? L" setting found" : L" settings found");
+    if (count == 0) return L"No results";
+    return std::to_wstring(count) + (count == 1 ? L" result found" : L" results found");
 }
 
 // Clears and closes the search, then reports the chosen row; the host opens its

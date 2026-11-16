@@ -24,9 +24,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.justspeaktoit.android.R
+import com.justspeaktoit.android.cloud.AudioInputChoice
 import com.justspeaktoit.android.dictation.DictationUiState
 import com.justspeaktoit.android.dictation.RecognitionMode
 import kotlinx.coroutines.flow.StateFlow
@@ -51,6 +55,8 @@ data class DictationActions(
     val onDismissSharedAudio: () -> Unit = {},
     /** Makes a profile active, or none with null; applies from the next session. */
     val onChooseProfile: (String?) -> Unit = {},
+    /** Stops hands-free listening; a hands-free recording under way is transcribed. */
+    val onTurnOffHandsFree: () -> Unit = {},
 )
 
 @Composable
@@ -75,6 +81,7 @@ fun DictationScreen(
             ModeSection(state, actions)
             TranscriptCard(state)
             PermissionNotice(permission, actions)
+            MicrophoneFallbackNotice(state)
             RecordControls(state, level, actions)
             ResultActions(state, snackbar, actions)
         }
@@ -136,6 +143,19 @@ private fun SharedAudioDialog(state: DictationUiState, actions: DictationActions
         dismissButton = {
             TextButton(onClick = actions.onDismissSharedAudio) { Text(stringResource(R.string.action_cancel)) }
         },
+    )
+}
+
+/** Says when a Cloud recording will use the system default because the chosen microphone is gone. */
+@Composable
+private fun MicrophoneFallbackNotice(state: DictationUiState) {
+    if (state.displayedMode != RecognitionMode.Cloud || state.audioInputChoice !is AudioInputChoice.Unavailable) return
+    Text(
+        stringResource(R.string.microphone_unavailable),
+        color = MaterialTheme.colorScheme.error,
+        modifier = Modifier
+            .testTag(AutomationIds.DICTATION_MICROPHONE_FALLBACK)
+            .semantics { liveRegion = LiveRegionMode.Polite },
     )
 }
 

@@ -29,7 +29,9 @@ func linuxMigrationEvent(
             await controller.beginMigrationExport(URL(fileURLWithPath: value), nativeFlags: slot)
         }
     case .migrationRestore:
-        holder.enqueueSettings { await controller.beginMigrationRestore(URL(fileURLWithPath: value)) }
+        holder.enqueueSettings {
+            await controller.beginMigrationRestore(URL(fileURLWithPath: value), nativeFlags: slot)
+        }
     case .migrationRestoreResponse:
         holder.enqueueSettings { await controller.answerMigrationRestore(value, choice: slot) }
     default: return false

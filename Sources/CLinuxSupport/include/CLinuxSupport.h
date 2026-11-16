@@ -9,6 +9,7 @@
 #include "../../CWindowsSupport/include/VoiceAudioCodec.h"
 #include "../../CWindowsSupport/include/VoiceCredentials.h"
 #include "../../CWindowsSupport/include/LocalCleanup.h"
+#include "../../CWindowsSupport/include/OpenRouterBrowser.h"
 
 /* Domain headers, in declaration order. */
 #include "LinuxComparison.h"
@@ -23,6 +24,7 @@
 #include "LinuxClipboard.h"
 #include "LinuxCredentials.h"
 #include "LinuxCloudSync.h"
+#include "LinuxPhoneReceiver.h"
 #include "LinuxSystemResources.h"
 #include "LinuxRawConfiguration.h"
 #include "LinuxAudioCapture.h"

@@ -7,6 +7,7 @@
 #include "VoiceAudioCodec.h"
 #include "VoiceCredentials.h"
 #include "LocalCleanup.h"
+#include "OpenRouterBrowser.h"
 #include "Onboarding.h"
 
 /* Domain headers, in declaration order. */
@@ -21,6 +22,7 @@
 #include "WindowsTextOutput.h"
 #include "WindowsPrivateStorage.h"
 #include "WindowsNetwork.h"
+#include "WindowsPhoneReceiver.h"
 #include "WindowsAudioPlayback.h"
 #include "WindowsDiagnostics.h"
 #include "WindowsLocalTranscription.h"

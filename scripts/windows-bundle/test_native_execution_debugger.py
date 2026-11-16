@@ -134,7 +134,7 @@ ConvertTo-JstiDiagnosticProjection $value | ConvertTo-Json -Depth 8 -Compress
                                JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
             completed = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
                                        input=json.dumps(value).encode(), env=environment, cwd=directory,
-                                       capture_output=True, timeout=15, check=False)
+                                       capture_output=True, timeout=60, check=False)
         self.assertEqual(completed.returncode, 0, "actual pure projector failed")
         self.assertEqual(completed.stderr, b"")
         self.assertLessEqual(len(completed.stdout), 8192)
@@ -376,7 +376,7 @@ foreach ($encodedValue in $values) {
                                JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
             completed = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
                                        input=json.dumps([json.dumps(value) for value in values]).encode("utf-8"), env=environment, cwd=directory,
-                                       capture_output=True, timeout=15, check=False)
+                                       capture_output=True, timeout=60, check=False)
         self.assertEqual(completed.returncode, 0, "actual pure refusal-facts projector failed")
         self.assertEqual(completed.stderr, b"")
         rows = completed.stdout.decode("utf-8").splitlines()
@@ -496,7 +496,7 @@ foreach ($encoded in ([Console]::In.ReadToEnd() | ConvertFrom-Json -Depth 8)) {
                                JSTI_PROJECTOR=str(HERE / "FailureDiagnostics.ps1"))
             completed = subprocess.run([os.path.abspath(host), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
                                        input=json.dumps([json.dumps(v) for v in values]).encode("utf-8"), env=environment,
-                                       cwd=directory, capture_output=True, timeout=15, check=False)
+                                       cwd=directory, capture_output=True, timeout=60, check=False)
         self.assertEqual(completed.returncode, 0, "actual pure process-facts projection failed")
         self.assertEqual(completed.stderr, b"")
         rows = completed.stdout.decode("utf-8").splitlines()

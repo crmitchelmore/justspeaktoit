@@ -48,12 +48,6 @@
 	<string>Copyright © 2024-2026 Chris Mitchelmore. All rights reserved.</string>
 	<key>NSInputMonitoringUsageDescription</key>
 	<string>Just Speak to It needs Input Monitoring access to detect your Fn key presses for shortcuts.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Just Speak to It uses your local network to connect iPhone and Mac for Send to Mac transcription transfer.</string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_speaktransport._tcp</string>
-	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Just Speak to It records your voice to turn it into text. Audio is sent to the transcription provider you choose in Settings, or stays on this Mac when you choose an on-device model.</string>
 	<key>NSUserActivityTypes</key>

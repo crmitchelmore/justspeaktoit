@@ -11,6 +11,9 @@ import SpeakCore
 /// overtaken by the Play or Read aloud it follows.
 public enum DesktopHistoryEvent: Equatable, Sendable {
     case selection(String)
+    /// A record chosen in the command palette: selected like a row, unless a
+    /// History search or filter hides it.
+    case reveal(String)
     case version(String, DesktopTranscriptVariant)
     case playPause(String)
     case stop
@@ -73,7 +76,7 @@ public enum DesktopHistoryEvent: Equatable, Sendable {
 
     private var kind: Kind {
         switch self {
-        case .selection: return .row
+        case .selection, .reveal: return .row
         case .version: return .version
         case .playPause, .readAloud, .voiceRead, .voiceExport, .voiceImport,
              .voiceGenerate, .voiceGeneratedPlay, .voiceGeneratedExport: return .action

@@ -9,14 +9,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,25 +21,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.justspeaktoit.android.R
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CleanupModelPicker
+import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.OpenRouterBrowser
+import com.justspeaktoit.android.cloud.OpenRouterBrowserFilter
+import com.justspeaktoit.android.cloud.OpenRouterBrowserItem
 
 /**
- * Native cleanup models first, then one OpenRouter row that opens a searchable OpenRouter list,
- * matching the Mac and iPhone pickers.
+ * Native cleanup models first, then a separate **Browse OpenRouter models…** button that opens a
+ * searchable OpenRouter browser with provider and price filters; each row opens a details page
+ * where the model is chosen, matching the Mac and iPhone pickers. With live discovery on, the browser
+ * also lists OpenAI models OpenRouter offers today.
  */
 @Composable
 fun CleanupModelPickerDialog(
@@ -50,75 +45,76 @@ fun CleanupModelPickerDialog(
     savedKeys: Set<CloudProvider>,
     onChoose: (CleanupModel) -> Unit,
     onDismiss: () -> Unit,
+    discovery: OpenRouterDiscoveryUi = OpenRouterDiscoveryUi(),
 ) {
-    var browsingOpenRouter by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
+    var browsing by remember { mutableStateOf(false) }
+    var detail by remember { mutableStateOf<OpenRouterBrowserItem?>(null) }
+    var filter by remember { mutableStateOf(OpenRouterBrowserFilter()) }
     val direct = remember { CleanupModelPicker.direct() }
-    val openRouter = remember { CleanupModelPicker.openRouter() }
+    val found = discovery.state.cleanupModels
+    val openRouterModels = remember(found, discovery.cleanupEnabled, selected.selectionId) {
+        OpenRouterBrowser.cleanupItems(found, discovery.cleanupEnabled, selected.selectionId)
+    }
+    val copy = OpenRouterBrowserCopy.Cleanup
+    // Opening the browser refreshes discovery when it is on and its cache is stale.
+    LaunchedEffect(browsing) { if (browsing) discovery.onRefreshCleanup(false) }
     val back: () -> Unit = {
-        if (browsingOpenRouter) {
-            browsingOpenRouter = false
-            query = ""
-        } else {
-            onDismiss()
+        when {
+            detail != null -> detail = null
+            browsing -> {
+                browsing = false
+                filter = OpenRouterBrowserFilter()
+            }
+            else -> onDismiss()
         }
     }
+    val title = when {
+        detail != null -> detail?.name.orEmpty()
+        browsing -> copy.title
+        else -> stringResource(R.string.cleanup_picker_title)
+    }
+    val choose: (OpenRouterBrowserItem) -> Unit = { item ->
+        CloudCatalog.findCleanupModel(item.selectionId)?.let(onChoose)
+    }
 
-    Dialog(onDismissRequest = back, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = back, modifier = Modifier.testTag(AutomationIds.CLEANUP_PICKER_BACK)) {
-                        Icon(painterResource(R.drawable.ic_arrow_back), stringResource(R.string.action_back))
-                    }
-                    Text(
-                        if (browsingOpenRouter) CloudProvider.OpenRouter.displayName
-                        else stringResource(R.string.cleanup_picker_title),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+    ModelPickerScaffold(title, copy.ids, back) {
+        val shown = detail
+        when {
+            shown != null -> OpenRouterModelDetail(
+                copy = copy,
+                item = shown,
+                isSelected = shown.selectionId == selected.selectionId,
+                hasKey = CloudProvider.OpenRouter in savedKeys,
+                needsKey = needsKeyText(CloudProvider.OpenRouter, cleanup = true),
+                onChoose = { choose(shown) },
+            )
+            browsing -> OpenRouterModelList(
+                copy = copy,
+                models = openRouterModels,
+                filter = filter,
+                isSelected = { it.selectionId == selected.selectionId },
+                discovery = OpenRouterDiscoveryControls(
+                    loading = discovery.state.cleanupLoading,
+                    failed = discovery.state.cleanupFailed,
+                    onRefresh = { discovery.onRefreshCleanup(true) },
+                    enabled = discovery.cleanupEnabled,
+                    onEnabledChanged = discovery.onCleanupEnabledChanged,
+                ),
+                onFilter = { filter = it },
+                onOpen = { detail = it },
+            )
+            else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(direct, key = { it.selectionId }) { model ->
+                    ModelRow(model, model == selected, model.provider in savedKeys) { onChoose(model) }
                 }
-                if (browsingOpenRouter) {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        label = { Text(stringResource(R.string.cleanup_picker_search)) },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp)
-                            .testTag(AutomationIds.CLEANUP_PICKER_SEARCH),
+                item {
+                    HorizontalDivider()
+                    BrowseOpenRouterRow(
+                        count = openRouterModels.size,
+                        selectedLabel = selected.takeIf { it.isOpenRouter }?.let(CleanupModelPicker::selectionLabel),
+                        onOpen = { browsing = true },
+                        modifier = Modifier.testTag(copy.ids.openRouter),
                     )
-                    val results = CleanupModelPicker.filter(openRouter, query)
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(results, key = { it.selectionId }) { model ->
-                            ModelRow(model, model == selected, model.provider in savedKeys) { onChoose(model) }
-                        }
-                        item {
-                            Text(
-                                stringResource(
-                                    if (results.isEmpty()) R.string.cleanup_picker_no_results
-                                    else R.string.cleanup_picker_openrouter_footer,
-                                ),
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(vertical = 12.dp),
-                            )
-                        }
-                    }
-                } else {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(direct, key = { it.selectionId }) { model ->
-                            ModelRow(model, model == selected, model.provider in savedKeys) { onChoose(model) }
-                        }
-                        item {
-                            HorizontalDivider()
-                            OpenRouterRow(
-                                count = openRouter.size,
-                                selected = selected.takeIf { it.isOpenRouter },
-                                onOpen = { browsingOpenRouter = true },
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -131,7 +127,7 @@ private fun ModelRow(model: CleanupModel, isSelected: Boolean, hasKey: Boolean, 
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .testTag(AutomationIds.cleanupPickerModel(model.selectionId))
+            .testTag(AutomationIds.CLEANUP_PICKER.model(model.selectionId))
             .selectable(selected = isSelected, role = Role.RadioButton, onClick = onClick)
             .padding(vertical = 8.dp),
     ) {
@@ -145,32 +141,5 @@ private fun ModelRow(model: CleanupModel, isSelected: Boolean, hasKey: Boolean, 
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
-}
-
-@Composable
-private fun OpenRouterRow(count: Int, selected: CleanupModel?, onOpen: () -> Unit) {
-    val detail = selected?.displayName ?: pluralStringResource(R.plurals.cleanup_picker_openrouter_note, count, count)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag(AutomationIds.CLEANUP_PICKER_OPENROUTER)
-            // Selected state lets screen readers say which choice is active when it is an OpenRouter model.
-            .selectable(selected = selected != null, role = Role.Button, onClick = onOpen)
-            .semantics { contentDescription = CloudProvider.OpenRouter.displayName + ", " + detail }
-            .padding(vertical = 12.dp),
-    ) {
-        RadioButton(selected = selected != null, onClick = null)
-        // The row's description already speaks this text; merging it too would read it twice.
-        Column(modifier = Modifier.padding(start = 12.dp).weight(1f).clearAndSetSemantics {}) {
-            Text(CloudProvider.OpenRouter.displayName, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Text("›", style = MaterialTheme.typography.titleLarge, modifier = Modifier.clearAndSetSemantics {})
     }
 }

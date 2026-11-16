@@ -8,7 +8,7 @@ import java.util.UUID
 
 /**
  * A product event. Names and property values come from SpeakCore's analytics taxonomy
- * (`Sources/SpeakCore/Analytics/Apple`); `AnalyticsTaxonomyParityTest` keeps them identical. Every value
+ * (`Sources/SpeakCore/Analytics`); `AnalyticsTaxonomyParityTest` keeps them identical. Every value
  * is from a closed set, so transcripts, audio, prompts, keys or other user content cannot be sent.
  */
 class AnalyticsEvent private constructor(val name: String, val properties: Map<String, String>) {
@@ -55,17 +55,31 @@ enum class OptInSurface(val raw: String) { Onboarding("onboarding"), Settings("s
 enum class EngineType(val raw: String) { OnDevice("on_device"), Cloud("cloud") }
 
 /** The members of SpeakCore's `AnalyticsProviderType` the Android app can report. */
-enum class ProviderType(val raw: String) {
+enum class ProviderType(val raw: String, private val providerId: String = raw) {
     OpenAI("openai"),
     Groq("groq"),
     Google("google"),
     Mistral("mistral"),
     OpenRouter("openrouter"),
+    AssemblyAI("assembly_ai", "assemblyai"),
+    Deepgram("deepgram"),
+    ElevenLabs("eleven_labs", "elevenlabs"),
+    Modulate("modulate"),
+    Reson8("reson8"),
+    RevAI("rev_ai", "revai"),
+    Soniox("soniox"),
+    Speechmatics("speechmatics"),
+    Cartesia("cartesia"),
+    Gladia("gladia"),
+    Meta("meta"),
+    Smallest("smallest"),
+    XAI("xai"),
     Other("other"),
     ;
 
     companion object {
-        fun forProviderId(id: String): ProviderType = entries.firstOrNull { it.raw == id } ?: Other
+        /** The type for a catalogue provider ID; a few analytics values spell the provider differently. */
+        fun forProviderId(id: String): ProviderType = entries.firstOrNull { it.providerId == id } ?: Other
     }
 }
 

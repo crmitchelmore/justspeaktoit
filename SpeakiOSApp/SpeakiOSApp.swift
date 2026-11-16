@@ -51,6 +51,9 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
         SentryManager.start()
         SentryManager.observeConsent()
         if HostedUnitTestLaunch.isActive { return true }
+        // Downloaded transcription models run in process; registering does no
+        // file or model work until a model is downloaded or used.
+        IOSLocalTranscriptionEngines.register(WhisperKitLocalTranscriptionEngine())
         iOSHistoryManager.resetSyncStateIfContainerChanged()
         UNUserNotificationCenter.current().delegate = self
         TranscriptReadyNotificationRoute.reconcileDisabledPreference()
@@ -178,9 +181,9 @@ struct SpeakiOSApp: App {
     }
 
     private var appContent: some View {
-        NavigationStack {
-            ContentView()
-        }
+        // ContentView owns its NavigationStack; a second one around it nests
+        // stacks, which SwiftUI does not support.
+        ContentView()
             .tint(.brandAccent)
             .environmentObject(deepLinkRouter)
             .environment(\.iOSKeyboardEnabled, FeatureFlags.iOSKeyboardEnabled)

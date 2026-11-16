@@ -37,6 +37,9 @@ extension DesktopHostController {
         Platform.historyFilters(
             models: historyFilterModels(), selection: historyFilterDraft
         )
+        paletteHistory.items = CommandPaletteHistoryItem.newest(history.values) { record in
+            historySearchText[record.id] ?? DesktopHistorySearch.searchText(for: record)
+        }
         let visible = visibleHistory()
         Platform.historyInsights(
             all: DesktopHistoryInsights(records: history.values), visible: DesktopHistoryInsights(records: visible)
@@ -86,6 +89,27 @@ extension DesktopHostController {
                 : "Saved transcript. Retry uses this recording’s original model.")
         transcriptVariant = .processed
         Platform.historyPresentation(record, variant: .processed, status: status + profileContext(record))
+    }
+
+    /// Selects a record chosen in the command palette, which has already shown
+    /// the History page. A History search or filter that hides it stays as the
+    /// user set it; the status says how to see the record instead.
+    package func revealHistory(_ identifier: String) {
+        guard !closed else { return }
+        guard let id = UUID(uuidString: identifier), history[id] != nil else {
+            update("That recording is no longer in History.")
+            return
+        }
+        guard canUseHistory else {
+            update("Finish the current recording or operation, then choose the recording again.")
+            return
+        }
+        guard isVisible(id) else {
+            update("That recording is hidden by the History search or filters. Clear them to see it.")
+            return
+        }
+        selectHistory(identifier)
+        refreshHistory(selectRecord: true)
     }
 
     /// A selection event for a record that a newer search has already hidden

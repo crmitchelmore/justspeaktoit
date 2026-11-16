@@ -58,9 +58,11 @@ extension ContentView {
         if let presentation = error as? CaptureStartFailurePresentation {
             self.errorMessage = presentation.message
             self.startFailureRecovery = presentation.recovery
+            self.errorIsStartFailure = true
         } else {
             self.errorMessage = description
             self.startFailureRecovery = nil
+            self.errorIsStartFailure = false
         }
         self.showingError = true
     }
@@ -202,6 +204,7 @@ extension ContentView {
         guard !backgroundService.isRunning else {
             self.issueErrorSnapshot = IOSIssueReporter.failedRequest()
             self.startFailureRecovery = nil
+            self.errorIsStartFailure = true
             errorMessage = "A background recording is already in progress. "
                 + "Use the Action Button to stop it."
             showingError = true
@@ -222,11 +225,17 @@ extension ContentView {
         }
     }
 
+    /// Names what went wrong instead of a bare "Error".
+    var errorAlertTitle: String {
+        errorIsStartFailure ? "Can't Start Recording" : "Recording Problem"
+    }
+
     func presentStartFailure(_ error: Error, snapshot: IOSIssueReportSnapshot? = nil) {
         self.issueErrorSnapshot = snapshot ?? IOSIssueReporter.failedRequest()
         let presentation = CaptureStartFailurePresentation.make(for: error)
         self.errorMessage = presentation.message
         self.startFailureRecovery = presentation.recovery
+        self.errorIsStartFailure = true
         self.showingError = true
     }
 

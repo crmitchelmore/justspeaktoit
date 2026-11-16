@@ -19,18 +19,19 @@ import XCTest
 @MainActor
 final class TransportLoopbackTests: XCTestCase {
     var server: TransportServer?
-    private let codeKey = "speakTransportPairingCode"
-    private let devicesKey = "speakTransportPairedDevices"
-    private var savedCode: String?
-    private var savedDevices: [String: String]?
+    /// Every key `PairingManager` keeps, restored after each test.
+    private let pairingKeys = [
+        "speakTransportPairingCode", "speakTransportPairedDevices", "speakTransportDeviceCredentials"
+    ]
+    private var savedValues: [String: Any] = [:]
 
     override func setUp() {
         super.setUp()
         let defaults = UserDefaults.standard
-        self.savedCode = defaults.string(forKey: self.codeKey)
-        self.savedDevices = defaults.dictionary(forKey: self.devicesKey) as? [String: String]
-        defaults.removeObject(forKey: self.codeKey)
-        defaults.removeObject(forKey: self.devicesKey)
+        for key in self.pairingKeys {
+            self.savedValues[key] = defaults.object(forKey: key)
+            defaults.removeObject(forKey: key)
+        }
         // Also clears the in-memory attempt limiter, so one test's wrong codes
         // cannot lock out the next.
         _ = PairingManager.shared.regeneratePairingCode()
@@ -41,15 +42,12 @@ final class TransportLoopbackTests: XCTestCase {
         self.server = nil
 
         let defaults = UserDefaults.standard
-        if let savedCode = self.savedCode {
-            defaults.set(savedCode, forKey: self.codeKey)
-        } else {
-            defaults.removeObject(forKey: self.codeKey)
-        }
-        if let savedDevices = self.savedDevices {
-            defaults.set(savedDevices, forKey: self.devicesKey)
-        } else {
-            defaults.removeObject(forKey: self.devicesKey)
+        for key in self.pairingKeys {
+            if let value = self.savedValues[key] {
+                defaults.set(value, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
         }
         super.tearDown()
     }
@@ -72,7 +70,6 @@ final class TransportLoopbackTests: XCTestCase {
 
         XCTAssertEqual(client.state, .connected, "Authentication must succeed over the shared framing")
         XCTAssertEqual(client.connectedMacName, "Test Mac")
-        XCTAssertEqual(server.connectedDevices.count, 1, "The Mac must list the paired device")
 
         try await client.sendSessionStart(sessionId: "session-1", model: "test-model")
         try await client.sendTranscript(sessionId: "session-1", text: "Hello Mac", isFinal: true)
@@ -80,6 +77,9 @@ final class TransportLoopbackTests: XCTestCase {
         await self.fulfillment(of: [delivery], timeout: 5)
         XCTAssertEqual(inbox.text, "Hello Mac")
         XCTAssertEqual(inbox.sessionId, "session-1")
+        // Auth sends its result before registering the device; the delivered
+        // transcript, handled after it on the same connection, is the barrier.
+        XCTAssertEqual(server.connectedDevices.count, 1, "The Mac must list the paired device")
 
         XCTAssertTrue(PairingManager.shared.isDevicePaired(id: DeviceIdentity.deviceId))
         client.disconnect()
@@ -249,9 +249,11 @@ final class TransportLoopbackTests: XCTestCase {
         let didClose = await self.waitForClosure(of: channel)
         XCTAssertTrue(didClose)
     }
+}
 
-    // MARK: - Helpers
+// MARK: - Helpers
 
+extension TransportLoopbackTests {
     func startServer(configuredServer: TransportServer? = nil) async throws -> NWEndpoint {
         let server = configuredServer ?? TransportServer()
         self.server = server
@@ -275,9 +277,12 @@ final class TransportLoopbackTests: XCTestCase {
     /// A channel that finished the encrypted handshake but has not authenticated.
     func securedChannel(to endpoint: NWEndpoint) async throws -> TransportChannel {
         let channel = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
+        let pairingCode = PairingManager.shared.pairingCode
         do {
-            try await channel.start()
-            try await channel.establishSecureSession(pairingCode: PairingManager.shared.pairingCode)
+            try await withHangGuard("secure session") {
+                try await channel.start()
+                try await channel.establishSecureSession(pairingCode: pairingCode)
+            }
             return channel
         } catch {
             channel.close()
@@ -290,7 +295,11 @@ final class TransportLoopbackTests: XCTestCase {
         do {
             try await channel.send(.hello(HelloMessage(deviceName: "Test Phone", deviceId: deviceId)))
             try await channel.send(.authenticate(AuthenticateMessage(pairingCode: PairingManager.shared.pairingCode)))
-            guard case .authResult(let result) = try await channel.receive(), result.success else {
+            let authenticated = try await withHangGuard("auth result") { () -> Bool in
+                guard case .authResult(let result) = try await channel.receive() else { return false }
+                return result.success
+            }
+            guard authenticated else {
                 throw NSError(domain: "TransportLoopbackTests", code: 1)
             }
             // Auth sends its result before registering the device; ping is a barrier.
@@ -302,9 +311,15 @@ final class TransportLoopbackTests: XCTestCase {
         }
     }
 
+    /// Every receive here is hang-guarded: a Network.framework receive can miss its completion, and an
+    /// unguarded await then stalls the whole test run instead of failing this test.
     func ping(_ channel: TransportChannel) async throws {
         try await channel.send(.ping)
-        guard case .pong = try await channel.receive() else {
+        let ponged = try await withHangGuard("pong") { () -> Bool in
+            guard case .pong = try await channel.receive() else { return false }
+            return true
+        }
+        guard ponged else {
             throw NSError(domain: "TransportLoopbackTests", code: 2)
         }
     }

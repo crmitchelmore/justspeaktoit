@@ -12,6 +12,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package nonisolated let directory: URL
     package let effects: any DesktopHostEffects<Platform>
     package nonisolated let store: DesktopRecordingStore
+    /// Inactive until the app entry point activates it for a real session.
+    package nonisolated let telemetry: DesktopTelemetry
     let uploadStaging: SharedMultipartUploadStaging
     package let modelCatalog: OpenRouterAudioCatalogStore
     var modelDiscovery = DesktopHostModelDiscoveryState()
@@ -107,6 +109,9 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     /// The one History Play or Read aloud request that may still start audio or report.
     package var playbackRequests = DesktopPlaybackRequests()
     package var history: [UUID: DesktopRecordingStore.Record] = [:]
+    /// The newest History records for the command palette, which searches on
+    /// the native UI thread without waiting for this actor.
+    package nonisolated let paletteHistory = CommandPaletteHistorySnapshot()
     var issueReportSession: DesktopHostIssueReportSession?
     /// Folded search text per record, refreshed only when a record is saved so
     /// each keystroke filters cached strings instead of re-normalising transcripts.
@@ -216,6 +221,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         self.ownedDictationCapability = ownedDictationCapability
         self.shutdownGrace = shutdownGrace
         self.store = try DesktopRecordingStore(directory: directory.appendingPathComponent("History"))
+        self.telemetry = DesktopTelemetry(directory: directory)
         self.uploadStaging = Platform.uploadStaging(directory: directory.appendingPathComponent("Uploads"))
         let profileStore = DesktopDictationProfileStore(directory: directory)
         self.profileStore = profileStore

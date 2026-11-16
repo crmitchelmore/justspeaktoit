@@ -16,7 +16,7 @@ enum MacSettingsSearch {
     /// left out so search never offers a destination that isn't there.
     static let catalogEntries: [SettingsSearchEntry] = {
         let paidAccessIDs: Set<String> = ["apiKeys.subscription", "transcription.modelsChosenForYou"]
-        return SettingsSearchCatalog.entries(for: .macOS).filter {
+        return SendToMacAvailability.filter(SettingsSearchCatalog.entries(for: .macOS)).filter {
             PaidAccessFeature.isEnabled || !paidAccessIDs.contains($0.id)
         }
     }()

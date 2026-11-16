@@ -87,10 +87,11 @@ internal class CloudCapture(
         onLimitReached: (Recording) -> Unit,
         onCaptureFailed: (Recording) -> Unit,
         onPcm: ((ByteArray) -> Unit)? = null,
+        onDevice: Boolean = false,
     ): Boolean {
         // Orphans are still holding microphones that have not been released.
         if (!retirement.admitsNewRecording()) return false
-        val file = retirement.recordingFile(cacheDir)
+        val file = retirement.recordingFile(cacheDir, onDevice)
         lateinit var recording: Recording
         val recorder = recorders.create(
             file = file,

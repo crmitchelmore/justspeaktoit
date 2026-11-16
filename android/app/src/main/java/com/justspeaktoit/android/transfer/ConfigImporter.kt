@@ -50,6 +50,7 @@ internal data class SettingsChange(
     val retention: Retention? = null,
     val cleanupPrompt: Assign<String?>? = null,
     val activeProfileId: Assign<String?>? = null,
+    val downloadedModelId: Assign<String?>? = null,
 )
 
 /**
@@ -252,6 +253,15 @@ internal object ConfigImporter {
                         change = change.copy(cleanupPrompt = Assign(saved))
                     } else {
                         rejected(AndroidSettings.PROMPT)
+                    }
+                }
+                if (android.has(AndroidSettings.DOWNLOADED_MODEL)) {
+                    val model = AndroidSettings.downloadedModel(android.opt(AndroidSettings.DOWNLOADED_MODEL))
+                    if (model != null) {
+                        counted(model.value == prefs.downloadedTranscriptionModel)
+                        change = change.copy(downloadedModelId = model)
+                    } else {
+                        rejected(AndroidSettings.DOWNLOADED_MODEL)
                     }
                 }
             }

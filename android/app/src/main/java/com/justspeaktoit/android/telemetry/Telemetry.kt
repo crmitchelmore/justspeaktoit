@@ -38,6 +38,7 @@ class Telemetry(
             RecognitionMode.OnDevice -> ProviderType.Other to EngineType.OnDevice
             RecognitionMode.SpeechService -> ProviderType.Other to EngineType.Cloud
             RecognitionMode.Cloud -> ProviderType.forProviderId(cloudModel.provider.id) to EngineType.Cloud
+            RecognitionMode.Downloaded -> ProviderType.Local to EngineType.OnDevice
         }
 
         fun create(context: Context): Telemetry {

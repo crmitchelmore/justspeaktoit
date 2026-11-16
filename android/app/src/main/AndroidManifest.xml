@@ -3,8 +3,10 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- Bring-your-own-key cloud transcription and cleanup, Play Billing, and opt-in analytics and crash reports. -->
+    <!-- Bring-your-own-key cloud transcription and cleanup, model downloads, Play Billing, and opt-in analytics and crash reports. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Downloaded transcription models use Wi-Fi only unless the user allows mobile data. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Keeps a dictation the user started running while another app is in front or the screen is off. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />

@@ -18,6 +18,9 @@ from pathlib import Path
 from test_paid_access_recovery import block
 from test_paid_access_session_boundaries import shared_flow
 
+# A hang guard, not a speed check: swiftc on a Mac loaded by parallel agents can take minutes.
+COMPILE_TIMEOUT = 600
+
 ROOT = Path(__file__).resolve().parents[2]
 PLATFORMS = [
     ('mac', 'Sources/SpeakApp/PaidAccess/PaidAccessManager.swift', 'isEnabled'),
@@ -91,7 +94,7 @@ class PaidAutomaticInactivityTests(unittest.TestCase):
             result = subprocess.run(['xcrun', 'swiftc', '-swift-version', '6', '-parse-as-library',
                                      '-module-cache-path', str(Path(temp) / 'cache'),
                                      str(source), '-o', str(binary)],
-                                    capture_output=True, text=True, timeout=60)
+                                    capture_output=True, text=True, timeout=COMPILE_TIMEOUT)
             self.assertEqual(result.returncode, 0, result.stderr)
             return subprocess.run([str(binary)], capture_output=True, text=True, timeout=30)
 

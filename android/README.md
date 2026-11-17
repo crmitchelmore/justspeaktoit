@@ -100,7 +100,7 @@ app/src/main/java/com/justspeaktoit/android/
 │   ├── SharedAudioSource.kt # reads audio shared by other apps (content:// only)
 │   └── DictationViewModel.kt      # projects its owners into UI state; production wiring in Factory
 ├── cloud/                   # BYOK catalogue, WAV capture, OpenAI-compatible client, cleanup policy
-│   └── live/                # streaming clients (Deepgram, AssemblyAI, OpenAI Realtime) over OkHttp WebSockets
+│   └── live/                # streaming clients (Deepgram, AssemblyAI, OpenAI Realtime, ElevenLabs) over OkHttp WebSockets
 ├── local/                   # downloaded Whisper models: pinned catalogue, verified downloads, whisper.cpp JNI
 ├── corrections/             # personal corrections and the cloud vocabulary prompt
 ├── history/                 # transcript history, retention, atomic storage and usage insights

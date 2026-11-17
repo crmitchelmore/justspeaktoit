@@ -123,7 +123,7 @@ object PronunciationDictionary {
     /**
      * SpeakCore's `PronunciationRenderer.applyReplacements`: every entry with a non-empty replacement,
      * in order, each applied to the previous result. A case-sensitive word replaces every literal
-     * occurrence; otherwise it matches case-insensitively between word boundaries. Only a regular
+     * occurrence; otherwise it matches case-insensitively as a whole word ([wordPattern]). Only a regular
      * expression's replacement is a template. A regular expression that does not compile, or that runs
      * past [entryBudgetMs], leaves the text unchanged. Blocks, so call it off the main thread.
      */
@@ -146,11 +146,33 @@ object PronunciationDictionary {
             entry.caseSensitive -> result.replace(entry.word, replacement)
             else -> {
                 // An escaped word cannot backtrack badly, so it runs here; its replacement is literal.
-                val regex = compile("\\b${Regex.escape(entry.word)}\\b", caseSensitive = false) ?: return@fold result
+                val regex = compile(wordPattern(entry.word), caseSensitive = false) ?: return@fold result
                 replace(result, regex, Regex.escapeReplacement(replacement)) ?: result
             }
         }
     }
+
+    /**
+     * SpeakCore's `PronunciationRenderer.wordPattern`: [word] as a literal that no word character may
+     * touch on a side whose edge is itself a word character, so "cat" stays whole-word while a
+     * symbol such as "@" still matches between spaces.
+     */
+    fun wordPattern(word: String): String {
+        if (word.isEmpty()) return NEVER
+        val before = if (isWordCodePoint(word.codePointAt(0))) "(?<!$WORD_CHARACTER)" else ""
+        val after = if (isWordCodePoint(word.codePointBefore(word.length))) "(?!$WORD_CHARACTER)" else ""
+        return before + Regex.escape(word) + after
+    }
+
+    /** Letters, marks, digits and underscore, spelt out so the JVM and Android's ICU agree. */
+    private const val WORD_CHARACTER = "[\\p{L}\\p{M}\\p{N}_]"
+
+    /** An empty word would match between every character, so it matches nothing. */
+    private const val NEVER = "(?!)"
+
+    private val wordCharacter = Regex(WORD_CHARACTER)
+
+    private fun isWordCodePoint(codePoint: Int): Boolean = wordCharacter.matches(String(Character.toChars(codePoint)))
 
     /** Null when [template] names a group the pattern lacks, or the time limit stopped the match. */
     private fun replace(text: CharSequence, regex: Regex, template: String): String? = try {

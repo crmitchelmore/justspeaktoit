@@ -23,4 +23,12 @@ class SpeechChunksTest {
     fun testUnbrokenText_isCutAtTheLimit() {
         assertEquals(listOf("abcd", "efgh", "ij"), speechChunks("abcdefghij", 4))
     }
+
+    @Test
+    fun testHardCut_neverSplitsASurrogatePair() {
+        val text = "a".repeat(3) + "\uD83D\uDE00" + "bc"
+
+        assertEquals(listOf("aaa", "\uD83D\uDE00bc"), speechChunks(text, 4))
+        assertEquals(listOf("\uD83D\uDE00", "b"), speechChunks("\uD83D\uDE00b", 1))
+    }
 }

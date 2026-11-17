@@ -6,9 +6,11 @@ import Foundation
 /// Linux and Windows.
 ///
 /// The expected outputs were captured from the dictionary manager before its
-/// replacement code moved into the shared renderer. They pin entry order,
-/// case-sensitive literal matching, case-insensitive word boundaries, Unicode
-/// (accented Latin, CJK, emoji), template replacement and skipped entries.
+/// replacement code moved into the shared renderer, except that a symbol word
+/// (such as "@" or an emoji) now also matches on its own between spaces. They
+/// pin entry order, case-sensitive literal matching, case-insensitive whole
+/// words, Unicode (accented Latin, CJK, emoji), template replacement and
+/// skipped entries.
 /// Plain data: this support target imports neither XCTest nor SpeakCore.
 public enum PronunciationParityFixture {
     public struct Rule: Sendable {
@@ -62,8 +64,8 @@ public enum PronunciationParityFixture {
         ),
         Sample(
             input: "email me@example.com or a @ b",
-            replaced: "email me at example.com or a @ b",
-            ssml: "email me\(tag("at", "@"))example.com or a @ b"
+            replaced: "email me at example.com or a  at  b",
+            ssml: "email me\(tag("at", "@"))example.com or a \(tag("at", "@")) b"
         ),
         Sample(
             input: "ZÜRICH and zürich",
@@ -102,8 +104,8 @@ public enum PronunciationParityFixture {
         ),
         Sample(
             input: "ok🙂ok and 🙂 alone",
-            replaced: "ok smile ok and 🙂 alone",
-            ssml: "ok\(tag("smile", "🙂"))ok and 🙂 alone"
+            replaced: "ok smile ok and  smile  alone",
+            ssml: "ok\(tag("smile", "🙂"))ok and \(tag("smile", "🙂")) alone"
         ),
         Sample(
             input: "KUBERNETES on Kubernetes",

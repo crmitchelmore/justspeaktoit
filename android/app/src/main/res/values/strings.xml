@@ -468,6 +468,15 @@
     <string name="read_aloud_voice_needs_key">needs a %1$s key</string>
     <string name="read_aloud_voice_picker_title">Choose a voice</string>
     <string name="read_aloud_voice_loading">Loading the phone\'s voices…</string>
+    <string name="read_aloud_invalid_voice_list">%1$s returned a voice list this phone cannot use, so no account voices are shown.</string>
+    <string name="read_aloud_not_a_reading">%1$s answered instead of reading the text word for word, so reading stopped.</string>
+    <string name="read_aloud_service_message">%1$s stopped reading aloud: %2$s</string>
+    <string name="read_aloud_timed_out">%1$s took too long to respond, so reading stopped.</string>
+    <string name="read_aloud_voice_realtime_group">%1$s Realtime</string>
+    <string name="read_aloud_voice_account_group">Your %1$s voices</string>
+    <string name="read_aloud_voice_account_loading">Loading your %1$s voices…</string>
+    <string name="read_aloud_voice_account_empty">Your %1$s account has no voices to offer.</string>
+    <string name="read_aloud_voice_account_needs_key">Add a %1$s key in Settings to list your account\'s voices.</string>
     <string name="settings_pronunciation_title">Pronunciation dictionary</string>
     <string name="settings_pronunciation_note">Words read aloud differently from how they are written. Each entry applies, in order, to the text before any voice reads it. Exports carry the dictionary to your other devices.</string>
     <string name="pronunciation_empty">No pronunciations yet.</string>

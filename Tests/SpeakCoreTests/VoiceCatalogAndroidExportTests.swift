@@ -50,7 +50,8 @@ final class VoiceCatalogAndroidExportTests: XCTestCase {
         let text = try XCTUnwrap(String(bytes: data, encoding: .utf8))
         for token in [
             VoiceCatalogAndroidExport.textToken, VoiceCatalogAndroidExport.keyToken,
-            VoiceCatalogAndroidExport.regionToken
+            VoiceCatalogAndroidExport.regionToken, VoiceCatalogAndroidExport.voiceToken,
+            VoiceCatalogAndroidExport.voiceToken.lowercased(), VoiceCatalogAndroidExport.nameToken
         ] {
             XCTAssertFalse(text.contains(token), token)
         }
@@ -87,5 +88,67 @@ final class VoiceCatalogAndroidExportTests: XCTestCase {
         let exported = VoiceCatalogAndroidExport.pronunciationDefaults
         XCTAssertEqual(exported.map(\.word), defaults.map(\.word))
         XCTAssertEqual(exported.map(\.replacement), defaults.map(\.replacement))
+    }
+
+    func testAccountProvidersListAndSpeakWithTheSavedKey() throws {
+        let accounts = try VoiceCatalogAndroidExport.accountProviders()
+        XCTAssertEqual(accounts.map(\.provider), ["mistral", "xai", "soniox"])
+        XCTAssertEqual(Set(accounts.map(\.provider)), Set(VoiceAccountProvider.all.map(\.id)))
+        let stored = Set(CloudCatalogAndroidExport.providerCredentialIdentifiers)
+        for account in accounts {
+            XCTAssertTrue(stored.contains(account.credentialID), account.provider)
+            XCTAssertNil(ModelRetirements.retirement(for: account.modelID), account.provider)
+            XCTAssertTrue(account.keyTemplate.hasPrefix("\(account.modelID)|"), account.provider)
+            XCTAssertTrue(account.keyTemplate.hasSuffix(account.idTemplate), account.provider)
+            XCTAssertTrue(account.idTemplate.contains("{voice}"), account.provider)
+            XCTAssertTrue(account.labelTemplate.contains("{name}"), account.provider)
+            XCTAssertTrue(account.list.headers.values.contains { $0.contains("{key}") }, account.provider)
+            XCTAssertEqual(account.list.method, "GET", account.provider)
+            let request = try XCTUnwrap(String(bytes: JSONEncoder().encode(account.request), encoding: .utf8))
+            for placeholder in ["{text}", "{key}", "{voice}"] {
+                XCTAssertTrue(request.contains(placeholder), "\(account.provider) \(placeholder)")
+            }
+        }
+        XCTAssertEqual(accounts.map(\.lowercaseVoiceID), [false, true, false])
+        XCTAssertEqual(accounts.first { $0.provider == "mistral" }?.response, "base64Wav")
+        XCTAssertEqual(accounts.first { $0.provider == "soniox" }?.readyModel, SonioxTTSModel.realtimeV2.rawValue)
+    }
+
+    /// Android adds the page parameter to the exported first-page URL; it must equal the builder's own.
+    func testLaterPageURLsMatchTheSharedBuilders() throws {
+        let accounts = try VoiceCatalogAndroidExport.accountProviders()
+        let mistral = try XCTUnwrap(accounts.first { $0.provider == "mistral" })
+        let mistralPage = try MistralTTSAPI.voiceListRequest(apiKey: "k", offset: MistralTTSAPI.voicePageSize)
+        XCTAssertEqual(mistral.list.pageParameter, "offset")
+        XCTAssertEqual(
+            mistralPage.url?.absoluteString, "\(mistral.list.url)&offset=\(MistralTTSAPI.voicePageSize)"
+        )
+        let soniox = try XCTUnwrap(accounts.first { $0.provider == "soniox" })
+        let sonioxPage = try SonioxTTSAPI.voiceListRequest(apiKey: "k", region: .unitedStates, cursor: "abc_123")
+        XCTAssertEqual(soniox.list.pageParameter, "cursor")
+        XCTAssertEqual(sonioxPage.url?.absoluteString, "\(soniox.list.url)&cursor=abc_123")
+        let xai = try XCTUnwrap(accounts.first { $0.provider == "xai" })
+        XCTAssertNil(xai.list.pageParameter)
+        XCTAssertEqual(xai.list.url, XAITTSAPI.voiceListRequest(apiKey: "k").url?.absoluteString)
+    }
+
+    func testRealtimeVoicesMatchTheSharedRealtimeSpeech() throws {
+        let realtime = try VoiceCatalogAndroidExport.realtime()
+        XCTAssertEqual(realtime.voices.map(\.voice), OpenAIRealtimeSpeech.voices.map(\.id))
+        XCTAssertEqual(
+            realtime.voices.map(\.key),
+            OpenAIRealtimeSpeech.voices.map { voice in
+                let desktop = DesktopSpeechVoice.openaiRealtime(voice.id)
+                return "\(desktop.modelID)|\(desktop.id)"
+            }
+        )
+        XCTAssertNil(ModelRetirements.retirement(for: realtime.modelID))
+        XCTAssertTrue(Set(CloudCatalogAndroidExport.providerCredentialIdentifiers).contains(realtime.credentialID))
+        XCTAssertTrue(realtime.url.hasPrefix("wss://"))
+        XCTAssertTrue(realtime.headers.values.contains { $0.contains("{key}") })
+        let session = try XCTUnwrap(String(bytes: JSONEncoder().encode(realtime.sessionUpdate), encoding: .utf8))
+        let response = try XCTUnwrap(String(bytes: JSONEncoder().encode(realtime.responseCreate), encoding: .utf8))
+        XCTAssertTrue(session.contains("{voice}"))
+        XCTAssertTrue(response.contains("{text}"))
     }
 }

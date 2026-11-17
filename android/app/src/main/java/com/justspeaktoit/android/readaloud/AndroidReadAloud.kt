@@ -13,10 +13,13 @@ import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.view.textclassifier.TextClassificationManager
 import android.view.textclassifier.TextLanguage
+import com.justspeaktoit.android.security.KeystoreSecretStore
 import com.justspeaktoit.android.security.SecretStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +34,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.ByteString
 import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.ProviderException
@@ -51,29 +57,49 @@ internal class AndroidReadAloudEngines(
     private val secrets: SecretStore,
     private val system: SystemSpeech,
     private val http: SpeechHttp = OkHttpSpeechHttp(),
+    private val realtimeConnector: RealtimeConnector = OkHttpRealtimeConnector(),
 ) : (VoiceSelection) -> ReadAloudEngine {
     private val catalog by lazy { readVoiceCatalog(context) }
     private val detector = TextLanguageDetector(context)
 
     override fun invoke(selection: VoiceSelection): ReadAloudEngine = when (selection) {
         is VoiceSelection.System -> SystemReadAloudEngine(system, selection.voiceName)
-        is VoiceSelection.Cloud -> {
-            val voice = catalog.voice(selection.key) ?: throw ReadAloudException(ReadAloudFailure.VoiceUnavailable)
-            val key = readKey(voice)?.takeIf { it.isNotBlank() }
-                ?: throw ReadAloudException(ReadAloudFailure.MissingKey(voice.providerName))
-            CloudReadAloudEngine(voice, key, CloudSpeechSynthesizer(http), AudioTrackOutput()) { text ->
-                ReadAloudLanguage.resolve(null, detector(text), Locale.getDefault().language)
-            }
+        is VoiceSelection.Cloud -> cloud(selection.key)
+    }
+
+    /** A catalogue voice, an OpenAI Realtime voice or an account voice; never a substitute for a missing one. */
+    private fun cloud(key: String): ReadAloudEngine {
+        catalog.voice(key)?.let { return cloudEngine(it) }
+        val realtime = catalog.realtime
+        realtime?.voice(key)?.let { voice ->
+            val credential = savedKey(realtime.credentialId, realtime.providerName)
+            return RealtimeReadAloudEngine(
+                realtime, voice, credential, RealtimeSpeechSynthesizer(realtime, realtimeConnector), AudioTrackOutput(),
+            )
+        }
+        val (provider, apiId) = catalog.accountVoice(key) ?: throw ReadAloudException(ReadAloudFailure.VoiceUnavailable)
+        // The provider refuses a voice the account no longer has, and that refusal is what the user sees.
+        return cloudEngine(provider.voice(apiId, apiId))
+    }
+
+    private fun cloudEngine(voice: CloudVoice): ReadAloudEngine {
+        val key = savedKey(voice.credentialId, voice.providerName)
+        return CloudReadAloudEngine(voice, key, CloudSpeechSynthesizer(http), AudioTrackOutput()) { text ->
+            ReadAloudLanguage.resolve(null, detector(text), Locale.getDefault().language)
         }
     }
 
+    private fun savedKey(credentialId: String, provider: String): String =
+        readKey(credentialId, provider)?.takeIf { it.isNotBlank() }
+            ?: throw ReadAloudException(ReadAloudFailure.MissingKey(provider))
+
     /** A Keystore or cipher fault is reported as an unreadable key rather than escaping the tap. */
-    private fun readKey(voice: CloudVoice): String? = try {
-        secrets.read(voice.credentialId)
+    private fun readKey(credentialId: String, provider: String): String? = try {
+        secrets.read(credentialId)
     } catch (_: GeneralSecurityException) {
-        throw ReadAloudException(ReadAloudFailure.KeyUnreadable(voice.providerName))
+        throw ReadAloudException(ReadAloudFailure.KeyUnreadable(provider))
     } catch (_: ProviderException) {
-        throw ReadAloudException(ReadAloudFailure.KeyUnreadable(voice.providerName))
+        throw ReadAloudException(ReadAloudFailure.KeyUnreadable(provider))
     }
 }
 
@@ -91,6 +117,22 @@ internal class TextLanguageDetector(private val context: Context) : (String) -> 
         const val SAMPLE_CHARS = 2000
     }
 }
+
+/**
+ * The voices of [provider]'s account, listed with the saved key, or null when no key is saved.
+ * Throws [ReadAloudException] with why the listing failed.
+ */
+internal suspend fun listAccountVoices(context: Context, provider: AccountVoiceProvider): List<CloudVoice>? =
+    withContext(Dispatchers.IO) {
+        val key = try {
+            KeystoreSecretStore.create(context).read(provider.credentialId)
+        } catch (_: GeneralSecurityException) {
+            throw ReadAloudException(ReadAloudFailure.KeyUnreadable(provider.providerName))
+        } catch (_: ProviderException) {
+            throw ReadAloudException(ReadAloudFailure.KeyUnreadable(provider.providerName))
+        }
+        if (key.isNullOrBlank()) null else AccountVoiceDirectory(OkHttpSpeechHttp()).voices(provider, key)
+    }
 
 internal fun readVoiceCatalog(context: Context): VoiceCatalog =
     context.assets.open(VoiceCatalog.ASSET).bufferedReader().use { VoiceCatalog.parse(it.readText()) }
@@ -181,6 +223,77 @@ internal class OkHttpSpeechHttp(private val client: OkHttpClient = sharedClient)
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
                 .callTimeout(120, TimeUnit.SECONDS)
+                .build()
+        }
+    }
+}
+
+/** Opens OpenAI Realtime sockets with OkHttp, never following a redirect that would carry the key elsewhere. */
+internal class OkHttpRealtimeConnector(private val client: OkHttpClient = sharedClient) : RealtimeConnector {
+    override fun open(url: String, headers: Map<String, String>): RealtimeSocket {
+        val frames = Channel<String>(Channel.UNLIMITED)
+        val builder = Request.Builder().url(url)
+        headers.forEach { (name, value) -> builder.header(name, value) }
+        val socket = client.newWebSocket(
+            builder.build(),
+            object : WebSocketListener() {
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    frames.trySend(text)
+                }
+
+                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    frames.trySend(bytes.utf8())
+                }
+
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    webSocket.close(NORMAL_CLOSURE, null)
+                    frames.close(IOException("WebSocket closed ($code)"))
+                }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    frames.close(IOException("WebSocket closed ($code)"))
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    val status = response?.code
+                    response?.close()
+                    frames.close(
+                        if (status != null && status != SWITCHING_PROTOCOLS) {
+                            RealtimeHandshakeRefused(status)
+                        } else {
+                            t as? IOException ?: IOException(t)
+                        },
+                    )
+                }
+            },
+        )
+        return object : RealtimeSocket {
+            override suspend fun send(text: String) {
+                if (!socket.send(text)) throw IOException("WebSocket is closed")
+            }
+
+            override suspend fun receive(): String = try {
+                frames.receive()
+            } catch (_: ClosedReceiveChannelException) {
+                throw IOException("WebSocket closed")
+            }
+
+            override fun close() {
+                if (!socket.close(NORMAL_CLOSURE, null)) socket.cancel()
+                frames.close()
+            }
+        }
+    }
+
+    companion object {
+        private const val NORMAL_CLOSURE = 1000
+        private const val SWITCHING_PROTOCOLS = 101
+
+        val sharedClient: OkHttpClient by lazy {
+            OkHttpSpeechHttp.sharedClient.newBuilder()
+                .readTimeout(0, TimeUnit.SECONDS)
+                .callTimeout(0, TimeUnit.SECONDS)
+                .pingInterval(20, TimeUnit.SECONDS)
                 .build()
         }
     }

@@ -1,0 +1,459 @@
+{
+  "expected" : {
+    "fillerRatePer1kWords" : 93.4065934065934,
+    "fillerTrend" : [
+      {
+        "fillerCount" : 6,
+        "totalWords" : 45,
+        "weekStart" : "2025-03-03"
+      },
+      {
+        "fillerCount" : 5,
+        "totalWords" : 47,
+        "weekStart" : "2025-03-10"
+      },
+      {
+        "fillerCount" : 6,
+        "totalWords" : 90,
+        "weekStart" : "2025-03-17"
+      }
+    ],
+    "longestSession" : {
+      "durationSeconds" : 90,
+      "id" : "0A1B2C3D-0000-4000-8000-000000000007",
+      "wordCount" : 28
+    },
+    "pace" : {
+      "averageWPM" : 38.238095238095234,
+      "distribution" : [
+        {
+          "count" : 6,
+          "label" : "<60"
+        },
+        {
+          "count" : 1,
+          "label" : "60–89"
+        },
+        {
+          "count" : 0,
+          "label" : "90–119"
+        },
+        {
+          "count" : 0,
+          "label" : "120–149"
+        },
+        {
+          "count" : 0,
+          "label" : "150–179"
+        },
+        {
+          "count" : 0,
+          "label" : "180+"
+        }
+      ],
+      "medianWPM" : 34.666666666666664,
+      "sessionsMeasured" : 7
+    },
+    "sessionsAnalyzed" : 9,
+    "tokens" : [
+      [
+        "so",
+        "um",
+        "i",
+        "think",
+        "we",
+        "should",
+        "you",
+        "know",
+        "ship",
+        "the",
+        "new",
+        "build",
+        "on",
+        "monday",
+        "um",
+        "it",
+        "'s",
+        "basically",
+        "done"
+      ],
+      [
+        "hey",
+        "sarah",
+        "can",
+        "you",
+        "send",
+        "me",
+        "the",
+        "q3",
+        "report",
+        "i",
+        "'d",
+        "like",
+        "to",
+        "review",
+        "it",
+        "before",
+        "the",
+        "3",
+        "30",
+        "meeting",
+        "i",
+        "mean",
+        "there",
+        "'s",
+        "no",
+        "rush"
+      ],
+      [
+        "uh",
+        "the",
+        "server",
+        "'s",
+        "down",
+        "again",
+        "ca",
+        "n't",
+        "reach",
+        "it",
+        "from",
+        "home",
+        "or",
+        "the",
+        "office",
+        "like",
+        "literally",
+        "nothing",
+        "works"
+      ],
+      [
+        "i",
+        "'ve",
+        "been",
+        "sort",
+        "of",
+        "thinking",
+        "about",
+        "this",
+        "all",
+        "morning",
+        "and",
+        "i",
+        "'m",
+        "not",
+        "sure",
+        "it",
+        "'s",
+        "right",
+        "kind",
+        "of",
+        "a",
+        "weird",
+        "one",
+        "but",
+        "the",
+        "build",
+        "passes",
+        "locally"
+      ],
+      [
+        "hmm",
+        "ship",
+        "the",
+        "new",
+        "build"
+      ],
+      [
+        "the",
+        "total",
+        "came",
+        "to",
+        "1,250.75",
+        "which",
+        "is",
+        "like",
+        "20",
+        "more",
+        "than",
+        "last",
+        "year",
+        "and",
+        "we",
+        "need",
+        "about",
+        "3.5",
+        "hours",
+        "for",
+        "the",
+        "cost",
+        "benefit",
+        "review"
+      ],
+      [
+        "they",
+        "’ll",
+        "probably",
+        "say",
+        "no",
+        "but",
+        "we",
+        "wo",
+        "n’t",
+        "know",
+        "unless",
+        "we",
+        "ask",
+        "you",
+        "know",
+        "what",
+        "ship",
+        "the",
+        "new",
+        "build",
+        "anyway",
+        "you",
+        "know",
+        "the",
+        "kids",
+        "toys",
+        "can",
+        "wait"
+      ],
+      [
+        "erm",
+        "well",
+        "um",
+        "send",
+        "it",
+        "to",
+        "the",
+        "team",
+        "at",
+        "9",
+        "a.m.",
+        "tomorrow",
+        "e.g.",
+        "sarah",
+        "and",
+        "dr.",
+        "lee"
+      ],
+      [
+        "rock'n'roll",
+        "at",
+        "o'clock",
+        "nine",
+        "snake_case",
+        "x86_64",
+        "and",
+        "well",
+        "known",
+        "50",
+        "50",
+        "odds",
+        "ship",
+        "the",
+        "new",
+        "build"
+      ]
+    ],
+    "topBigrams" : [
+      {
+        "count" : 4,
+        "term" : "new build"
+      },
+      {
+        "count" : 4,
+        "term" : "ship the"
+      },
+      {
+        "count" : 4,
+        "term" : "the new"
+      },
+      {
+        "count" : 3,
+        "term" : "you know"
+      },
+      {
+        "count" : 2,
+        "term" : "it 's"
+      },
+      {
+        "count" : 1,
+        "term" : "'d like"
+      },
+      {
+        "count" : 1,
+        "term" : "'m not"
+      },
+      {
+        "count" : 1,
+        "term" : "'s basically"
+      },
+      {
+        "count" : 1,
+        "term" : "'s down"
+      },
+      {
+        "count" : 1,
+        "term" : "'s no"
+      }
+    ],
+    "topFillers" : [
+      {
+        "count" : 3,
+        "term" : "like"
+      },
+      {
+        "count" : 3,
+        "term" : "um"
+      },
+      {
+        "count" : 3,
+        "term" : "you know"
+      },
+      {
+        "count" : 1,
+        "term" : "basically"
+      },
+      {
+        "count" : 1,
+        "term" : "erm"
+      },
+      {
+        "count" : 1,
+        "term" : "hmm"
+      }
+    ],
+    "topTrigrams" : [
+      {
+        "count" : 4,
+        "term" : "ship the new"
+      },
+      {
+        "count" : 4,
+        "term" : "the new build"
+      },
+      {
+        "count" : 1,
+        "term" : "'d like to"
+      },
+      {
+        "count" : 1,
+        "term" : "'m not sure"
+      },
+      {
+        "count" : 1,
+        "term" : "'s basically done"
+      },
+      {
+        "count" : 1,
+        "term" : "'s down again"
+      },
+      {
+        "count" : 1,
+        "term" : "'s no rush"
+      },
+      {
+        "count" : 1,
+        "term" : "'s right kind"
+      },
+      {
+        "count" : 1,
+        "term" : "'ve been sort"
+      },
+      {
+        "count" : 1,
+        "term" : "1,250.75 which is"
+      }
+    ],
+    "totalFillers" : 17,
+    "totalWords" : 182,
+    "usage" : {
+      "averageSessionSeconds" : 12.375,
+      "recordingSeconds" : 49.5,
+      "sessions" : 4,
+      "sessionsWithErrors" : 1,
+      "words" : 12
+    }
+  },
+  "sessions" : [
+    {
+      "durationSeconds" : 30,
+      "id" : "0A1B2C3D-0000-4000-8000-000000000001",
+      "startedAt" : "2025-03-03T09:00:00Z",
+      "text" : "So um I think we should, you know, ship the new build on Monday. Um, it's basically done."
+    },
+    {
+      "durationSeconds" : 45,
+      "id" : "0A1B2C3D-0000-4000-8000-000000000002",
+      "startedAt" : "2025-03-04T14:30:00Z",
+      "text" : "Hey Sarah, can you send me the Q3 report? I'd like to review it before the 3:30 meeting. I mean, there's no rush."
+    },
+    {
+      "durationSeconds" : 20,
+      "id" : "0A1B2C3D-0000-4000-8000-000000000003",
+      "startedAt" : "2025-03-11T08:15:00Z",
+      "text" : "Uh, the server's down again. Can't reach it from home or the office. Like, literally nothing works."
+    },
+    {
+      "durationSeconds" : 60,
+      "id" : "0A1B2C3D-0000-4000-8000-000000000004",
+      "startedAt" : "2025-03-16T23:30:00Z",
+      "text" : "I've been sort of thinking about this all morning and I'm not sure it's right. Kind of a weird one, but the build passes locally."
+    },
+    {
+      "durationSeconds" : 8,
+      "id" : "0A1B2C3D-0000-4000-8000-000000000005",
+      "startedAt" : "2025-03-17T00:10:00Z",
+      "text" : "Hmm, ship the new build."
+    },
+    {
+      "durationSeconds" : 0,
+      "id" : "0A1B2C3D-0000-4000-8000-000000000006",
+      "startedAt" : "2025-03-18T10:00:00Z",
+      "text" : "The total came to $1,250.75, which is like 20% more than last year, and we need about 3.5 hours for the cost-benefit review."
+    },
+    {
+      "durationSeconds" : 90,
+      "id" : "0A1B2C3D-0000-4000-8000-000000000007",
+      "startedAt" : "2025-03-19T12:00:00Z",
+      "text" : "They’ll probably say no, but we won’t know unless we ask. You know what, ship the new build anyway, you know? The kids' toys can wait."
+    },
+    {
+      "durationSeconds" : 90,
+      "id" : "0A1B2C3D-0000-4000-8000-000000000008",
+      "startedAt" : "2025-03-19T13:00:00Z",
+      "text" : "Erm, well, um, send it to the team at 9 a.m. tomorrow, e.g. Sarah and Dr. Lee."
+    },
+    {
+      "durationSeconds" : 12,
+      "id" : "0A1B2C3D-0000-4000-8000-000000000009",
+      "startedAt" : "2025-03-20T07:45:00Z",
+      "text" : "Rock'n'roll at o'clock nine: snake_case, x86_64 and well-known 50/50 odds. Ship the new build."
+    }
+  ],
+  "usageEntries" : [
+    {
+      "durationSeconds" : 30,
+      "failed" : false,
+      "rawText" : "um ship the new build on monday",
+      "text" : "Ship the new build on Monday."
+    },
+    {
+      "durationSeconds" : 12.5,
+      "failed" : true,
+      "rawText" : "partial words here",
+      "text" : ""
+    },
+    {
+      "durationSeconds" : 7,
+      "failed" : false,
+      "text" : ""
+    },
+    {
+      "failed" : false,
+      "text" : "  Hello\nthere  world "
+    }
+  ]
+}

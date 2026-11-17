@@ -27,6 +27,12 @@ import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.local.LocalCleaner
 import com.justspeaktoit.android.local.LocalModelSetup
 import com.justspeaktoit.android.local.LocalTranscriber
+import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.ondevice.GeminiNanoDownload
+import com.justspeaktoit.android.ondevice.GeminiNanoModel
+import com.justspeaktoit.android.ondevice.GeminiNanoReply
+import com.justspeaktoit.android.ondevice.GeminiNanoRequest
+import com.justspeaktoit.android.ondevice.GeminiNanoStatus
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.security.SecretStore
 import com.justspeaktoit.android.settings.AppAppearance
@@ -37,6 +43,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -399,6 +407,8 @@ internal class MemoryPrefs(
     override var keepRecordings: Boolean = false,
     override var languageId: String? = null,
     override var corrections: List<CorrectionRule> = emptyList(),
+    override var pronunciations: List<PronunciationEntry>? = null,
+    override var readAloudVoice: String? = null,
     override var learnCorrections: Boolean = true,
     override var correctionPromotionThreshold: Int = 2,
     override var correctionCandidates: List<AutoCorrectionCandidate> = emptyList(),
@@ -409,6 +419,7 @@ internal class MemoryPrefs(
     override var audioInputId: String? = null,
     override var silence: SilenceSettings = SilenceSettings(),
     override var handsFreeEnabled: Boolean = false,
+    override var keyboardLiveCloudEnabled: Boolean = false,
     override var appearance: AppAppearance = AppAppearance.System,
     override var dynamicColor: Boolean = false,
     override var downloadedTranscriptionModel: String? = null,
@@ -464,6 +475,31 @@ internal object NoSharedAudio : SharedAudioSource {
     override fun open(uri: Uri): InputStream? = null
 }
 
+internal class FakeGeminiNano : GeminiNanoModel {
+    var reply = GeminiNanoReply("", truncated = false)
+
+    @Volatile var generated = 0
+
+    @Volatile var closes = 0
+
+    override suspend fun status() = GeminiNanoStatus.Available
+
+    override suspend fun supportsSystemInstruction() = true
+
+    override suspend fun countTokens(request: GeminiNanoRequest) = 1
+
+    override suspend fun generate(request: GeminiNanoRequest): GeminiNanoReply {
+        generated++
+        return reply
+    }
+
+    override fun download(): Flow<GeminiNanoDownload> = emptyFlow()
+
+    override fun close() {
+        closes++
+    }
+}
+
 /**
  * Builds a real [DictationViewModel] with fakes. Its main thread is a single test thread; the
  * ViewModel is owned by a [ViewModelStore] so [clear] runs the production `onCleared` path.
@@ -493,6 +529,9 @@ internal class ViewModelHarness(
     /** The (mode, model) pairs the ViewModel reported as successful transcriptions. */
     val successes = CopyOnWriteArrayList<Pair<RecognitionMode, CloudModel>>()
 
+    /** Gemini Nano for on-device cleanup; set before [viewModel] is first read. */
+    var geminiNano: GeminiNanoModel? = null
+
     private val executor = Executors.newSingleThreadExecutor { Thread(it, "test-main") }
     private val main = executor.asCoroutineDispatcher()
     private val store = ViewModelStore()
@@ -520,6 +559,7 @@ internal class ViewModelHarness(
                     onTranscriptionSucceeded = { mode, model -> successes += mode to model },
                     audioInputs = audioInputs,
                     handsFreeMicrophone = handsFreeMicrophone,
+                    geminiNano = geminiNano,
                     localModelSetup = localModelSetup,
                 )
             }

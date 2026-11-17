@@ -128,8 +128,12 @@ final class VoiceCatalogAndroidExportTests: XCTestCase {
         XCTAssertEqual(soniox.list.pageParameter, "cursor")
         XCTAssertEqual(sonioxPage.url?.absoluteString, "\(soniox.list.url)&cursor=abc_123")
         let xai = try XCTUnwrap(accounts.first { $0.provider == "xai" })
-        XCTAssertNil(xai.list.pageParameter)
-        XCTAssertEqual(xai.list.url, XAITTSAPI.voiceListRequest(apiKey: "k").url?.absoluteString)
+        let xaiPage = XAITTSAPI.customVoiceListRequest(apiKey: "k", paginationToken: "t_1")
+        XCTAssertEqual(xai.list.pageParameter, "pagination_token")
+        XCTAssertEqual(xai.list.pageSize, XAITTSAPI.customVoicePageSize)
+        XCTAssertEqual(xaiPage.url?.absoluteString, "\(xai.list.url)&pagination_token=t_1")
+        XCTAssertEqual(Set(xai.list.absentStatuses), XAITTSAPI.customVoicesUnavailableStatuses)
+        XCTAssertEqual(mistral.list.absentStatuses, [])
     }
 
     func testRealtimeVoicesMatchTheSharedRealtimeSpeech() throws {

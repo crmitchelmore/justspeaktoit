@@ -48,7 +48,7 @@ class AccountVoiceDirectory(
         var listed = 0
         var cursor: String? = null
         for (page in 0 until provider.list.maxPages) {
-            val body = fetch(provider, key, page, cursor)
+            val body = fetch(provider, key, page, cursor) ?: return voices
             val parsed = AccountVoiceListing.parse(provider, body) ?: throw invalid(provider)
             val entries = parsed.entries
             val pageSize = provider.list.pageSize
@@ -64,25 +64,26 @@ class AccountVoiceDirectory(
             voices += entries.filter { it.usable }.map { it.voice }
             when (provider.list.pageParameter) {
                 OFFSET -> if (entries.size < checkNotNull(pageSize)) return voices
-                CURSOR -> {
+                null -> return voices
+                else -> {
                     val next = parsed.nextCursor?.takeIf { it.isNotEmpty() } ?: return voices
                     if (!AccountVoiceListing.validText(next, MAX_CURSOR_BYTES) || !cursors.add(next)) {
                         throw invalid(provider)
                     }
                     cursor = next
                 }
-                else -> return voices
             }
         }
         // Every page was full: the account holds more than this bounded listing reads.
         throw invalid(provider)
     }
 
-    private suspend fun fetch(provider: AccountVoiceProvider, key: String, page: Int, cursor: String?): ByteArray {
+    /** The page's body, or null when the status says the account has no such library. */
+    private suspend fun fetch(provider: AccountVoiceProvider, key: String, page: Int, cursor: String?): ByteArray? {
         val list = provider.list
         val url = when {
             list.pageParameter == OFFSET && page > 0 -> "${list.url}&$OFFSET=${page * checkNotNull(list.pageSize)}"
-            list.pageParameter == CURSOR && cursor != null -> "${list.url}&$CURSOR=${queryValue(cursor)}"
+            list.pageParameter != null && cursor != null -> "${list.url}&${list.pageParameter}=${queryValue(cursor)}"
             else -> list.url
         }
         val values = mapOf("key" to key)
@@ -99,6 +100,7 @@ class AccountVoiceDirectory(
         } catch (_: IOException) {
             throw ReadAloudException(ReadAloudFailure.Unreachable(provider.providerName))
         }
+        if (response.status in list.absentStatuses) return null
         if (response.status !in 200..299) {
             throw ReadAloudException(
                 when (response.status) {
@@ -119,7 +121,6 @@ class AccountVoiceDirectory(
     companion object {
         private const val MILLIS = 1000L
         private const val OFFSET = "offset"
-        private const val CURSOR = "cursor"
         private const val XAI = "xai"
         private const val MAX_CURSOR_BYTES = 4096
         private val PLACEHOLDER = Regex("""\{key\}""")
@@ -198,7 +199,8 @@ internal object AccountVoiceListing {
     }
 
     private fun xai(provider: AccountVoiceProvider, text: String): ParsedPage? {
-        val array = JSONObject(text).optJSONArray("voices") ?: return null
+        val root = JSONObject(text)
+        val array = root.optJSONArray("voices") ?: return null
         val fixed = provider.fixedVoiceIds.map { it.lowercase(Locale.ROOT) }.toSet()
         val entries = (0 until array.length()).map { index ->
             val item = array.optJSONObject(index) ?: return null
@@ -211,7 +213,7 @@ internal object AccountVoiceListing {
             }
             Listed(AccountVoice(id, name), usable = id.lowercase(Locale.ROOT) !in fixed)
         }
-        return ParsedPage(entries, null)
+        return cursor(root, "pagination_token")?.let { ParsedPage(entries, it.value) }
     }
 
     private fun soniox(provider: AccountVoiceProvider, text: String): ParsedPage? {
@@ -235,10 +237,16 @@ internal object AccountVoiceListing {
             }?.optString("status")?.lowercase(Locale.ROOT) == READY
             Listed(AccountVoice(id, name), usable = ready)
         }
-        // A cursor that is present but not a string is invalid, as SpeakCore's decoder rejects it.
-        val cursor = root.opt("next_page_cursor")
-        if (cursor != null && cursor != JSONObject.NULL && cursor !is String) return null
-        return ParsedPage(entries, cursor as? String)
+        return cursor(root, "next_page_cursor")?.let { ParsedPage(entries, it.value) }
+    }
+
+    private class Cursor(val value: String?)
+
+    /** The next page's cursor; null when it is present but not a string, as SpeakCore's decoder rejects it. */
+    private fun cursor(root: JSONObject, field: String): Cursor? = when (val value = root.opt(field)) {
+        null, JSONObject.NULL -> Cursor(null)
+        is String -> Cursor(value)
+        else -> null
     }
 
     private fun languagesValid(languages: JSONArray?): Boolean {

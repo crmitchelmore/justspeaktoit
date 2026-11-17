@@ -8,7 +8,9 @@ import FoundationNetworking
 /// `XAIAccountVoiceInventory`, `SonioxAccountVoiceInventory` and `OpenAIRealtimeSpeechSynthesizer`).
 extension VoiceCatalogAndroidExport {
     /// A bodyless listing request; `pageParameter` is the query item later pages add: `offset`
-    /// (a multiple of `pageSize`) or `cursor` (the previous page's `next_page_cursor`).
+    /// (a multiple of `pageSize`), or a cursor query item (`cursor` with Soniox's `next_page_cursor`,
+    /// `pagination_token` with xAI's). A status in `absentStatuses` means the account has no such
+    /// library, so the listing ends with what it has rather than failing.
     struct ListRequest: Encodable, Equatable {
         let method: String
         let url: String
@@ -18,6 +20,7 @@ extension VoiceCatalogAndroidExport {
         let maxPages: Int
         let maxResponseBytes: Int
         let timeoutSeconds: Int
+        let absentStatuses: [Int]
     }
 
     /// A provider whose voices come from the user's account. `listing` names the response shape
@@ -59,7 +62,8 @@ extension VoiceCatalogAndroidExport {
 
     /// One WebSocket per reading: send `sessionUpdate` (`{voice}`), wait for `session.updated`, then
     /// for each chunk of at most `chunkCharacters` send `responseCreate` (`{text}`) and keep its audio
-    /// only when the transcript is a verbatim reading (`spokenWordsPerNumeral`, as SpeakCore checks).
+    /// only when the transcript is a verbatim reading, as `RealtimeReadingCheck` decides: a numeral
+    /// may take up to `spokenWordsPerNumeral` words and each symbol `spokenWordsPerSymbol`.
     struct Realtime: Encodable, Equatable {
         let provider: String
         let providerName: String
@@ -73,6 +77,7 @@ extension VoiceCatalogAndroidExport {
         let sampleRate: Int
         let chunkCharacters: Int
         let spokenWordsPerNumeral: Int
+        let spokenWordsPerSymbol: Int
         let responseTimeoutSeconds: Int
         let voices: [RealtimeVoice]
     }
@@ -115,8 +120,12 @@ extension VoiceCatalogAndroidExport {
         return try account(
             voice, provider: .xai, request: request,
             list: listRequest(
-                XAITTSAPI.voiceListRequest(apiKey: keyToken), pageParameter: nil, pageSize: nil, maxPages: 1,
-                maxResponseBytes: XAIAccountVoiceInventory.maximumResponseBytes
+                // Built-in voices are the fixed presets; the account's own come only from custom voices.
+                XAITTSAPI.customVoiceListRequest(apiKey: keyToken, paginationToken: nil),
+                pageParameter: "pagination_token", pageSize: XAITTSAPI.customVoicePageSize,
+                maxPages: XAITTSAPI.maximumCustomVoicePages,
+                maxResponseBytes: XAIAccountVoiceInventory.maximumResponseBytes,
+                absentStatuses: XAITTSAPI.customVoicesUnavailableStatuses.sorted()
             ),
             fixedVoiceIDs: XAITTSCatalog.voices.map(\.apiVoiceID), readyModel: nil,
             maxVoices: XAIAccountVoiceInventory.maximumVoices, maxCharacters: XAITTSAPI.maximumTextCharacters
@@ -194,7 +203,8 @@ extension VoiceCatalogAndroidExport {
     }
 
     static func listRequest(
-        _ request: URLRequest, pageParameter: String?, pageSize: Int?, maxPages: Int, maxResponseBytes: Int
+        _ request: URLRequest, pageParameter: String?, pageSize: Int?, maxPages: Int, maxResponseBytes: Int,
+        absentStatuses: [Int] = []
     ) throws -> ListRequest {
         guard let url = request.url?.absoluteString, request.httpBody == nil else {
             throw ExportError.unsupportedRequest(request.url?.absoluteString ?? "")
@@ -203,7 +213,8 @@ extension VoiceCatalogAndroidExport {
             method: request.httpMethod ?? "GET", url: placeholders(url),
             headers: (request.allHTTPHeaderFields ?? [:]).mapValues(placeholders),
             pageParameter: pageParameter, pageSize: pageSize, maxPages: maxPages,
-            maxResponseBytes: maxResponseBytes, timeoutSeconds: accountListingTimeoutSeconds
+            maxResponseBytes: maxResponseBytes, timeoutSeconds: accountListingTimeoutSeconds,
+            absentStatuses: absentStatuses
         )
     }
 
@@ -229,7 +240,8 @@ extension VoiceCatalogAndroidExport {
             url: placeholders(url), headers: (request.allHTTPHeaderFields ?? [:]).mapValues(placeholders),
             sessionUpdate: realtimeFrame(session), responseCreate: realtimeFrame(response),
             sampleRate: OpenAIRealtimeSpeech.sampleRate, chunkCharacters: OpenAIRealtimeSpeech.chunkCharacters,
-            spokenWordsPerNumeral: OpenAIRealtimeSpeech.spokenWordsPerNumeral,
+            spokenWordsPerNumeral: RealtimeReadingCheck.maximumNumeralWords,
+            spokenWordsPerSymbol: RealtimeReadingCheck.wordsPerSymbol,
             responseTimeoutSeconds: realtimeResponseTimeoutSeconds, voices: voices
         )
     }

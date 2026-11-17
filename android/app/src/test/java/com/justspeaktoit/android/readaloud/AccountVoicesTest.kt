@@ -96,18 +96,41 @@ class AccountVoicesTest {
     }
 
     @Test
-    fun testXai_skipsBuiltInVoicesAndNamesUnnamedOnes() = runBlocking {
+    fun testXai_listsCustomVoicesByPaginationTokenAndNamesUnnamedOnes() = runBlocking {
         val xai = provider("xai")
         val fixed = xai.fixedVoiceIds.first()
-        val body = JSONObject().put(
+        val first = JSONObject().put(
             "voices",
             JSONArray().put(JSONObject().put("voice_id", fixed)).put(JSONObject().put("voice_id", "my voice")),
-        ).toString()
+        ).put("pagination_token", "next page").toString()
+        val second = JSONObject().put("voices", JSONArray().put(JSONObject().put("voice_id", "v2").put("name", "Two")))
+            .put("pagination_token", JSONObject.NULL).toString()
+        val http = FakeHttp(first, second)
 
-        val voices = directory(FakeHttp(body)).voices(xai, "k")
+        val voices = directory(http).voices(xai, "k")
 
-        assertEquals(listOf("My Voice"), voices.map { it.name })
-        assertEquals("my voice", xai.apiVoiceId(voices.single().key))
+        assertEquals(listOf("My Voice", "Two"), voices.map { it.name })
+        assertEquals("my voice", xai.apiVoiceId(voices.first().key))
+        assertTrue(http.sent[0].url.startsWith("https://api.x.ai/v1/custom-voices?"))
+        assertTrue(http.sent[1].url.endsWith("&pagination_token=next%20page"))
+    }
+
+    @Test
+    fun testXai_noCustomLibraryIsAnEmptyListingButOtherRefusalsFail() = runBlocking {
+        val xai = provider("xai")
+        assertEquals(emptyList<CloudVoice>(), directory(FakeHttp("{}", status = 404)).voices(xai, "k"))
+        assertEquals(emptyList<CloudVoice>(), directory(FakeHttp("{}", status = 403)).voices(xai, "k"))
+        assertEquals(
+            ReadAloudFailure.KeyRejected(xai.providerName),
+            failureOf { directory(FakeHttp("{}", status = 401)).voices(xai, "k") },
+        )
+        val endless = (0..xai.list.maxPages).map { page ->
+            JSONObject().put("voices", JSONArray()).put("pagination_token", "t$page").toString()
+        }
+        assertEquals(
+            ReadAloudFailure.InvalidVoiceList(xai.providerName),
+            failureOf { directory(FakeHttp(*endless.toTypedArray())).voices(xai, "k") },
+        )
     }
 
     @Test

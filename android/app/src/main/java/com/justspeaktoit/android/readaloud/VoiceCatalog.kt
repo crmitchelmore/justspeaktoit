@@ -54,12 +54,17 @@ data class AccountListRequest(
     val method: String,
     val url: String,
     val headers: Map<String, String>,
-    /** `offset` (a multiple of [pageSize]), `cursor` (the previous page's `next_page_cursor`) or null. */
+    /**
+     * `offset` (a multiple of [pageSize]), a cursor query item (`cursor` for Soniox's `next_page_cursor`,
+     * `pagination_token` for xAI's) or null.
+     */
     val pageParameter: String?,
     val pageSize: Int?,
     val maxPages: Int,
     val maxResponseBytes: Int,
     val timeoutSeconds: Int,
+    /** Statuses meaning the account has no such library: the listing ends with what it has. */
+    val absentStatuses: Set<Int>,
 )
 
 /** A provider whose voices are discovered from the user's account with the saved key. */
@@ -149,6 +154,7 @@ data class RealtimeSpeechSpec(
     val sampleRate: Int,
     val chunkCharacters: Int,
     val spokenWordsPerNumeral: Int,
+    val spokenWordsPerSymbol: Int,
     val responseTimeoutSeconds: Int,
     val voices: List<RealtimeVoice>,
 ) {
@@ -257,6 +263,9 @@ class VoiceCatalog(
                     maxPages = list.getInt("maxPages"),
                     maxResponseBytes = list.getInt("maxResponseBytes"),
                     timeoutSeconds = list.getInt("timeoutSeconds"),
+                    absentStatuses = list.getJSONArray("absentStatuses").let { array ->
+                        (0 until array.length()).map(array::getInt).toSet()
+                    },
                 ),
                 sampleRate = item.getInt("sampleRate"),
                 maxCharacters = item.getInt("maxCharacters"),
@@ -280,6 +289,7 @@ class VoiceCatalog(
             sampleRate = item.getInt("sampleRate"),
             chunkCharacters = item.getInt("chunkCharacters"),
             spokenWordsPerNumeral = item.getInt("spokenWordsPerNumeral"),
+            spokenWordsPerSymbol = item.getInt("spokenWordsPerSymbol"),
             responseTimeoutSeconds = item.getInt("responseTimeoutSeconds"),
             voices = item.getJSONArray("voices").objects().map { voice ->
                 RealtimeVoice(

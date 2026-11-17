@@ -10,6 +10,9 @@
       "keyTemplate" : "mistral/voxtral-mini-tts-2603|mistral/{voice}",
       "labelTemplate" : "{name} — Mistral Voxtral TTS 26.03",
       "list" : {
+        "absentStatuses" : [
+
+        ],
         "headers" : {
           "Authorization" : "Bearer {key}"
         },
@@ -56,14 +59,20 @@
       "keyTemplate" : "xai|xai/{voice}",
       "labelTemplate" : "{name} — xAI Speech",
       "list" : {
+        "absentStatuses" : [
+          403,
+          404
+        ],
         "headers" : {
           "Authorization" : "Bearer {key}"
         },
-        "maxPages" : 1,
+        "maxPages" : 10,
         "maxResponseBytes" : 65536,
         "method" : "GET",
+        "pageParameter" : "pagination_token",
+        "pageSize" : 100,
         "timeoutSeconds" : 20,
-        "url" : "https://api.x.ai/v1/tts/voices"
+        "url" : "https://api.x.ai/v1/custom-voices?limit=100"
       },
       "listing" : "xai",
       "lowercaseVoiceID" : true,
@@ -129,6 +138,9 @@
       "keyTemplate" : "tts-rt-v2|soniox/{voice}",
       "labelTemplate" : "{name} — Soniox TTS v2",
       "list" : {
+        "absentStatuses" : [
+
+        ],
         "headers" : {
           "Authorization" : "Bearer {key}"
         },
@@ -473,6 +485,7 @@
       "type" : "session.update"
     },
     "spokenWordsPerNumeral" : 8,
+    "spokenWordsPerSymbol" : 2,
     "url" : "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini",
     "voices" : [
       {

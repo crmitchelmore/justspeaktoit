@@ -119,12 +119,39 @@ class RealtimeSpeechTest {
         )
     }
 
+    private fun faithful(expected: String, spoken: String) =
+        RealtimeReading.isFaithful(expected, spoken, spec.spokenWordsPerNumeral, spec.spokenWordsPerSymbol)
+
     @Test
-    fun testFaithfulReading_allowsNumeralsReadAsWordsButNotAnswers() {
-        val words = spec.spokenWordsPerNumeral
-        assertTrue(RealtimeReading.isFaithful("Call me at 5pm.", "Call me at five p m.", words))
-        assertTrue(RealtimeReading.isFaithful("Café au lait", "café au lait", words))
-        assertFalse(RealtimeReading.isFaithful("Read this", "Read", words))
-        assertFalse(RealtimeReading.isFaithful("Yes", "Yes and here is a long answer you did not ask for", words))
+    fun testFaithfulReading_requiresEveryWordButToleratesPunctuationAndSpokenNumerals() {
+        assertTrue(faithful("Hello, world!", "hello world"))
+        assertTrue(faithful("The year is 2026.", "The year is two thousand and twenty six."))
+        assertTrue(faithful("Café au lait", "café au lait"))
+        assertFalse(faithful("Do not open the door.", "Do open the door."))
+        assertFalse(faithful("Is it raining?", "Is it raining? I can't check the weather, sorry."))
+        assertFalse(faithful("Hello", ""))
+    }
+
+    @Test
+    fun testFaithfulReading_rejectsAChangedNumberOrAnInsertedNegation() {
+        assertFalse(faithful("Take 5 tablets", "Take six tablets"))
+        assertFalse(faithful("Take 5 tablets", "Take 6 tablets"))
+        assertFalse(faithful("Take 5 tablets", "Take no tablets"))
+        assertFalse(faithful("Payment is approved", "Payment is not approved"))
+        assertFalse(faithful("The year is 2026.", "The year is twenty twenty five."))
+    }
+
+    @Test
+    fun testFaithfulReading_acceptsCommonReadingsOfNumbersAndSymbols() {
+        assertTrue(faithful("The year is 2026.", "The year is twenty twenty-six."))
+        assertTrue(faithful("We sold 2,026 units.", "We sold two thousand and twenty-six units."))
+        assertTrue(faithful("Add 3.5 cups", "Add three point five cups"))
+        assertTrue(faithful("Meet at 10:30", "Meet at ten thirty"))
+        assertTrue(faithful("100 times", "a hundred times"))
+        assertTrue(faithful("It costs $5", "It costs five dollars"))
+        assertTrue(faithful("Salt & pepper", "Salt and pepper"))
+        assertTrue(faithful("Finish 1st", "Finish first"))
+        assertTrue(faithful("Call me at 5pm.", "Call me at five p m."))
+        assertTrue(faithful("Es kostet 5 Euro", "Es kostet fünf Euro"))
     }
 }

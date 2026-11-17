@@ -15,6 +15,7 @@ import com.justspeaktoit.android.ondevice.GeminiNanoCleanup
 import com.justspeaktoit.android.ondevice.GeminiNanoFailure
 import com.justspeaktoit.android.ondevice.GeminiNanoReply
 import com.justspeaktoit.android.local.LocalTranscriptionException
+import com.justspeaktoit.android.local.pinnedModel
 import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
@@ -72,6 +73,8 @@ class DictationSessionControllerTest {
 
     /** Downloaded models on this fake phone, by catalogue ID. */
     private val downloadedModels = mutableMapOf<String, File>()
+    private var localCleanupId: String? = null
+    private val localCleaner = FakeCleaner()
 
     /** Each cue played, with how many times the Cloud recorder had been stopped when it played. */
     private val cues = CopyOnWriteArrayList<Pair<RecordingCue, Int>>()
@@ -109,6 +112,7 @@ class DictationSessionControllerTest {
                 override val retention = Retention.Month
                 override val keepAudioOnCancel get() = keepAudio
                 override val cleanupModel get() = cleanup
+                override val localCleanupModelId get() = localCleanupId
                 override val corrections get() = rules
             },
             cues = { cue ->
@@ -118,6 +122,13 @@ class DictationSessionControllerTest {
             publish = { states.value = it },
             liveSessions = live,
             downloaded = DownloadedTranscription({ downloadedModels[it] }, localTranscriber),
+            downloadedCleanup = DownloadedCleanup(
+                installed = { id -> downloadedModels[id]?.let { pinnedModel(id) to it } },
+                verify = { _, _ -> true },
+                cleaner = localCleaner,
+                io = Dispatchers.IO,
+                timeoutMs = ViewModelHarness.TIMEOUT_MS,
+            ),
             clockMs = clock::get,
         )
     }
@@ -324,6 +335,50 @@ class DictationSessionControllerTest {
         await(states) { it.cleanup == CleanupStatus.Applied }
         assertEquals("ship Kubernetes", cloud.cleanups.single())
         assertEquals("Ship Kubernetes.", states.value.dictation.text())
+        assertFalse(states.value.cleanupOnDevice)
+    }
+
+    @Test
+    fun testDownloadedCleanupModel_cleansUpOnThePhone_insteadOfTheCloudModel() {
+        rules = listOf(CorrectionRule("Kubernetes", listOf("cooper netties")))
+        cleanup = CloudCatalog.cleanupModels.first()
+        localCleanupId = CLEANUP_MODEL
+        downloadedModels[CLEANUP_MODEL] = folder.newFile("model.gguf")
+        localCleaner.reply = { "Ship Cooper Netties." }
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("ship cooper netties")) }
+
+        await(states) { it.cleanup == CleanupStatus.Applied }
+        assertEquals("Ship Kubernetes.", states.value.dictation.text())
+        assertEquals("ship Kubernetes", states.value.originalTranscript)
+        assertTrue(localCleaner.calls.single().user.contains("ship Kubernetes"))
+        assertTrue("No cloud request is made", cloud.cleanups.isEmpty())
+        assertTrue("The note says the cleanup ran on this phone", states.value.cleanupOnDevice)
+    }
+
+    @Test
+    fun testDownloadedCleanupFailure_keepsTheOriginal_withNoCloudFallback() {
+        cleanup = CloudCatalog.cleanupModels.first()
+        localCleanupId = CLEANUP_MODEL
+        localCleaner.reply = { "Never used: the model is not downloaded." }
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("ship it")) }
+
+        await(states) { it.cleanup == CleanupStatus.Failed }
+        assertEquals("ship it", states.value.dictation.text())
+        assertTrue(localCleaner.calls.isEmpty())
+        assertTrue(cloud.cleanups.isEmpty())
+    }
+
+    @Test
+    fun testDownloadedCleanup_skipsEmptyText_withoutLoadingTheModel() {
+        localCleanupId = CLEANUP_MODEL
+        downloadedModels[CLEANUP_MODEL] = folder.newFile("model.gguf")
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("[BLANK_AUDIO]")) }
+
+        assertEquals(CleanupStatus.None, onMain { states.value.cleanup })
+        assertTrue(localCleaner.calls.isEmpty())
     }
 
     @Test
@@ -410,6 +465,21 @@ class DictationSessionControllerTest {
         assertEquals(DictationFailure.ModelCorrupt, failed.failure)
         val entry = await(history) { it.isNotEmpty() }.single()
         assertTrue(File(checkNotNull(entry.audioPath)).exists())
+    }
+
+    @Test
+    fun testDownloadedPlan_thatHearsNothing_failsAsNoSpeechAndKeepsTheRecordingInHistory() {
+        downloadedModels[BASE_MODEL] = folder.newFile("ggml-base.bin")
+        localTranscriber.onTranscribe = { "  " }
+        onMain { controller.start(SessionPlan.Local(BASE_MODEL, "en-GB")) }
+        await(states) { it.dictation is DictationState.Listening }
+
+        onMain { controller.stop() }
+
+        val failed = await(states) { it.dictation is DictationState.Failed }.dictation as DictationState.Failed
+        assertEquals(DictationFailure.NoSpeech, failed.failure)
+        val entry = await(history) { it.isNotEmpty() }.single()
+        assertTrue("the recording is kept for a retry", File(checkNotNull(entry.audioPath)).exists())
     }
 
     private fun startLive(provider: CloudProvider, awaitListening: Boolean = true): FakeLiveClient {
@@ -516,5 +586,6 @@ class DictationSessionControllerTest {
     private companion object {
         const val CUE_MS = 150L
         const val BASE_MODEL = "local/whisperkit/base"
+        const val CLEANUP_MODEL = "local/post-processing/smollm2-360m-instruct-q4"
     }
 }

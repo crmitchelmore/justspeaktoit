@@ -78,6 +78,9 @@ interface DictationPreferences {
 
     /** Whether models may download over a metered connection; off means Wi-Fi (unmetered) only. */
     var downloadedModelsOnMobileData: Boolean
+
+    /** The `local/post-processing/...` model cleanup uses instead of a cloud one; null uses the cloud model. */
+    var localCleanupModelId: String?
 }
 
 /** The float's shortest decimal as a double, so a stored 0.05f reads back as 0.05, not 0.0500000007. */
@@ -137,6 +140,12 @@ class AppPreferences(context: Context) : DictationPreferences {
     override var downloadedModelsOnMobileData: Boolean
         get() = prefs.getBoolean(KEY_DOWNLOADED_ON_MOBILE_DATA, false)
         set(value) = prefs.edit { putBoolean(KEY_DOWNLOADED_ON_MOBILE_DATA, value) }
+
+    override var localCleanupModelId: String?
+        get() = prefs.getString(KEY_LOCAL_CLEANUP_MODEL, null)
+        set(value) = prefs.edit {
+            if (value == null) remove(KEY_LOCAL_CLEANUP_MODEL) else putString(KEY_LOCAL_CLEANUP_MODEL, value)
+        }
 
     override var audioInputId: String?
         get() = prefs.getString(KEY_AUDIO_INPUT, null)
@@ -274,6 +283,7 @@ class AppPreferences(context: Context) : DictationPreferences {
         private const val KEY_CLOUD_MODEL = "cloud_model"
         private const val KEY_DOWNLOADED_MODEL = "downloadedTranscriptionModel"
         private const val KEY_DOWNLOADED_ON_MOBILE_DATA = "downloadedModelsOnMobileData"
+        private const val KEY_LOCAL_CLEANUP_MODEL = "localCleanupModel"
         private const val KEY_CLEANUP = "cleanup_enabled"
         private const val KEY_CLEANUP_MODEL = "cleanup_model"
         private const val KEY_CLEANUP_MODEL_DISCOVERY = "cleanupModelDiscoveryEnabled"

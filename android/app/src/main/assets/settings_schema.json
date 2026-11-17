@@ -228,6 +228,19 @@
       "type" : "boolean"
     },
     {
+      "allowedValues" : [
+        "local/post-processing/qwen3-1.7b-q4",
+        "local/post-processing/qwen3-0.6b-q4",
+        "local/post-processing/smollm2-360m-instruct-q4"
+      ],
+      "default" : null,
+      "description" : "Downloaded model that cleans up transcripts on the phone; null uses cleanup_model.",
+      "key" : "localCleanupModel",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "optionalString"
+    },
+    {
       "default" : false,
       "description" : "Stop a cloud recording after silence.",
       "key" : "silenceDetectionEnabled",

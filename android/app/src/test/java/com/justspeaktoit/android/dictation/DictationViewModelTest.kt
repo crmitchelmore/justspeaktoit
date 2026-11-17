@@ -11,6 +11,14 @@ import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.local.FakeModelSource
+import com.justspeaktoit.android.local.LocalCleanupPrompt
+import com.justspeaktoit.android.local.LocalCleanupSetup
+import com.justspeaktoit.android.local.LocalModelSetup
+import com.justspeaktoit.android.local.ModelDownloader
+import com.justspeaktoit.android.local.ModelInstallState
+import com.justspeaktoit.android.local.ModelStore
+import com.justspeaktoit.android.local.llamaModel
 import com.justspeaktoit.android.readaloud.PronunciationEntry
 import com.justspeaktoit.android.ondevice.GeminiNanoAvailability
 import com.justspeaktoit.android.settings.AppAppearance
@@ -271,6 +279,75 @@ class DictationViewModelTest {
         assertEquals(DictationState.Done(RecognitionMode.Cloud, "second"), original.dictation)
         assertFalse(original.history[0].cleanedUp)
         assertEquals("First.", original.history[1].text)
+    }
+
+    @Test
+    fun testDownloadedCleanupModel_isDownloadedVerifiedAndUsed_withoutACloudKey() {
+        val content = ByteArray(2_000) { (it % 13).toByte() }
+        val cleaner = FakeCleaner { "Hello there." }
+        h.localModelSetup = LocalModelSetup(
+            catalog = emptyList(),
+            store = ModelStore(folder.newFolder("whisper")),
+            downloader = ModelDownloader(FakeModelSource(content)) { Long.MAX_VALUE },
+            totalMemoryBytes = 8L shl 30,
+            network = { true },
+            transcriber = FakeLocalTranscriber(),
+            cleanup = LocalCleanupSetup(listOf(llamaModel(CLEANUP_MODEL, content)), ModelStore(folder.newFolder("llm")), cleaner),
+        )
+        h.prefs.cleanupEnabled = true
+        h.cloud.onTranscribe = { "hello there" }
+        val vm = h.ready()
+        h.awaitState { it.localCleanup.runtimeAvailable && it.localCleanup.models.isNotEmpty() }
+        h.onMain { vm.downloadCleanupModel(CLEANUP_MODEL) }
+        h.awaitState { it.localCleanup.models.single().state == ModelInstallState.Installed }
+        h.onMain { vm.chooseLocalCleanupModel(CLEANUP_MODEL) }
+        assertTrue("No OpenRouter key is saved", h.awaitState { it.cleanupReady }.cleanupReady)
+        assertEquals(CLEANUP_MODEL, h.prefs.localCleanupModelId)
+        assertEquals(CLEANUP_MODEL, RawConfigurationValues.of(vm.state.value)["localCleanupModel"])
+
+        h.onMain { vm.start() }
+        h.awaitState { it.dictation is DictationState.Listening }
+        h.onMain { vm.stop() }
+        val cleaned = h.awaitState { it.cleanup == CleanupStatus.Applied }
+        assertEquals(DictationState.Done(RecognitionMode.Cloud, "Hello there."), cleaned.dictation)
+        assertEquals(LocalCleanupPrompt.user("hello there"), cleaner.calls.single().user)
+        assertTrue(h.cloud.cleanups.isEmpty())
+
+        h.onMain { vm.removeCleanupModel(CLEANUP_MODEL) }
+        assertFalse(h.awaitState { it.localCleanup.models.single().state != ModelInstallState.Installed }.cleanupReady)
+        h.onMain { vm.chooseLocalCleanupModel(null) }
+        assertNull(h.prefs.localCleanupModelId)
+    }
+
+    @Test
+    fun testDownloadedCleanupModel_whoseRuntimeDidNotLoad_failsVisiblyAndKeepsTheTranscript() {
+        val content = ByteArray(2_000) { (it % 13).toByte() }
+        val cleaner = FakeCleaner { "Hello there." }.apply { available = false }
+        h.localModelSetup = LocalModelSetup(
+            catalog = emptyList(),
+            store = ModelStore(folder.newFolder("whisper")),
+            downloader = ModelDownloader(FakeModelSource(content)) { Long.MAX_VALUE },
+            totalMemoryBytes = 8L shl 30,
+            network = { true },
+            transcriber = FakeLocalTranscriber(),
+            cleanup = LocalCleanupSetup(listOf(llamaModel(CLEANUP_MODEL, content)), ModelStore(folder.newFolder("llm")), cleaner),
+        )
+        h.prefs.cleanupEnabled = true
+        h.cloud.onTranscribe = { "hello there" }
+        val vm = h.ready()
+        h.awaitState { it.localCleanup.models.isNotEmpty() }
+        h.onMain { vm.downloadCleanupModel(CLEANUP_MODEL) }
+        h.awaitState { it.localCleanup.models.single().state == ModelInstallState.Installed }
+        h.onMain { vm.chooseLocalCleanupModel(CLEANUP_MODEL) }
+        assertFalse(h.awaitState { it.localCleanup.selectedId == CLEANUP_MODEL }.cleanupReady)
+
+        h.onMain { vm.start() }
+        h.awaitState { it.dictation is DictationState.Listening }
+        h.onMain { vm.stop() }
+        val failed = h.awaitState { it.cleanup == CleanupStatus.Failed }
+        assertEquals(DictationState.Done(RecognitionMode.Cloud, "hello there"), failed.dictation)
+        assertTrue(cleaner.calls.isEmpty())
+        assertTrue("nothing falls back to the cloud model", h.cloud.cleanups.isEmpty())
     }
 
     @Test
@@ -642,6 +719,7 @@ class DictationViewModelTest {
             "cloud_model" to cloud.catalogId,
             "downloadedTranscriptionModel" to "local/whisperkit/base",
             "downloadedModelsOnMobileData" to true,
+            "localCleanupModel" to null,
             "preferredLocale" to language,
             "personal_corrections" to mapOf("Ada" to "ada, adder"),
             "cleanup_enabled" to true,
@@ -719,5 +797,9 @@ class DictationViewModelTest {
 
         assertNull(vm.state.value.transfer.preview)
         assertEquals(edited, h.prefs.pronunciations)
+    }
+
+    private companion object {
+        const val CLEANUP_MODEL = "local/post-processing/qwen3-0.6b-q4"
     }
 }

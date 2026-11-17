@@ -38,6 +38,7 @@ import com.justspeaktoit.android.ondevice.GeminiNanoFailure
 import com.justspeaktoit.android.ondevice.GeminiNanoModel
 import com.justspeaktoit.android.ondevice.MlKitGeminiNano
 import com.justspeaktoit.android.local.AndroidLocalModels
+import com.justspeaktoit.android.local.CleanupModelsState
 import com.justspeaktoit.android.local.LocalModelSetup
 import com.justspeaktoit.android.local.LocalModelsState
 import com.justspeaktoit.android.local.ModelInstallState
@@ -139,7 +140,7 @@ class DictationViewModel internal constructor(
     private val pronunciationDefaults: List<PronunciationEntry> = emptyList(),
     // Gemini Nano through ML Kit for on-device cleanup; null leaves it unavailable (tests pass a fake).
     private val geminiNano: GeminiNanoModel? = null,
-    // Downloaded Whisper models (#1658); null leaves Downloaded mode out of the app.
+    // Downloaded Whisper (#1658) and cleanup (#1660) models; null leaves both out of the app.
     localModelSetup: LocalModelSetup? = null,
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     /** Hands-free dictation (#1632): its recordings take their audio from its microphone, pre-roll first. */
@@ -169,6 +170,21 @@ class DictationViewModel internal constructor(
         DownloadedTranscription({ id -> localModels?.installedFile(id) }, setup.transcriber)
     } ?: DownloadedTranscription.Unavailable
     private val localTranscriber = localModelSetup?.transcriber
+
+    /** Downloaded cleanup models (#1660), stored apart from the Whisper models. */
+    private val cleanupSetup = localModelSetup?.cleanup
+    private val cleanupModels = localModelSetup?.cleanupManager(scope, io)
+
+    /** Cleans up with a downloaded model; a failure keeps the transcript and nothing else is tried. */
+    private val downloadedCleanup = cleanupSetup?.let { setup ->
+        DownloadedCleanup(
+            installed = { id -> cleanupModels?.installedModel(id) },
+            verify = setup.verifier::verify,
+            cleaner = setup.cleaner,
+            io = io,
+            timeoutMs = timings.localCleanupMs,
+        )
+    } ?: DownloadedCleanup.Unavailable
     private val historyRetry = HistoryRetry(cloud, secrets, capture, io, timings.transcribeMs, downloaded)
 
     /** Shares the keyboard's preferences, so edits it learned appear on [refreshLearnedCorrections]. */
@@ -221,6 +237,10 @@ class DictationViewModel internal constructor(
             localModels = LocalModelsState(
                 downloadOnMobileData = prefs.downloadedModelsOnMobileData,
                 names = localModelSetup?.names.orEmpty(),
+            ),
+            localCleanup = CleanupModelsState(
+                selectedId = prefs.localCleanupModelId,
+                names = localModelSetup?.cleanup?.names.orEmpty(),
             ),
         ).withSelection(selector.selection),
     )
@@ -338,7 +358,10 @@ class DictationViewModel internal constructor(
             override val keepAudioOnCancel: Boolean get() = _state.value.keepAudioOnCancel
             override val keepRecordings: Boolean get() = _state.value.keepRecordings
             override val cleanupModel: CleanupModel?
-                get() = _state.value.let { if (it.cleanupReady) it.sessionCleanupModel else null }
+                get() = _state.value.let {
+                    if (it.cleanupReady && it.sessionLocalCleanupModelId == null) it.sessionCleanupModel else null
+                }
+            override val localCleanupModelId: String? get() = _state.value.sessionDownloadedCleanupModelId
             override val cleanupPrompt: String? get() = _state.value.sessionCleanupPrompt
             override val corrections: List<CorrectionRule> get() = _state.value.corrections
             // A hands-free recording always ends on silence, after the user's silence duration.
@@ -346,6 +369,7 @@ class DictationViewModel internal constructor(
                 get() = _state.value.silence.let { if (handsFree.startingUtterance) it.copy(enabled = true) else it }
         },
         downloaded = downloaded,
+        downloadedCleanup = downloadedCleanup,
         cues = { cue ->
             val choice = _state.value.recordingSounds
             // Hands-free plays no cues, as on the desktop: they would be heard by the listening microphone.
@@ -412,6 +436,7 @@ class DictationViewModel internal constructor(
         }
         historyOwner.load(prefs.retention, capture::recoverable)
         watchLocalModels()
+        watchCleanupModels()
         sync?.let { service ->
             scope.launch {
                 service.prepare()
@@ -431,11 +456,28 @@ class DictationViewModel internal constructor(
             // Loading the native library reads the APK, so it happens off the main thread.
             val runtime = withContext(io) { transcriber.available }
             _state.update { it.copy(localModels = it.localModels.copy(runtimeAvailable = runtime)) }
+            // An availability check that ran before the runtime loaded reported Downloaded as not provided.
+            selector.refresh()
             manager.refresh()
             manager.models.collect { items ->
                 val before = _state.value.localModels.installedIds
                 _state.update { it.copy(localModels = it.localModels.copy(models = items)) }
                 if (_state.value.localModels.installedIds != before) selector.refresh()
+            }
+        }
+    }
+
+    /** Publishes the downloaded cleanup models and whether the llama.cpp runtime loaded. */
+    private fun watchCleanupModels() {
+        val manager = cleanupModels ?: return
+        val cleaner = cleanupSetup?.cleaner ?: return
+        scope.launch {
+            // Loading the native library reads the APK, so it happens off the main thread.
+            val runtime = withContext(io) { cleaner.available }
+            _state.update { it.copy(localCleanup = it.localCleanup.copy(runtimeAvailable = runtime)) }
+            manager.refresh()
+            manager.models.collect { items ->
+                _state.update { it.copy(localCleanup = it.localCleanup.copy(models = items)) }
             }
         }
     }
@@ -700,6 +742,7 @@ class DictationViewModel internal constructor(
                 "chosen_mode" -> selector.chooseMode((value as String?)?.let(RecognitionMode::valueOf))
                 "downloadedTranscriptionModel" -> selector.chooseDownloadedModel(value as String?)
                 "downloadedModelsOnMobileData" -> setDownloadModelsOnMobileData(value as Boolean)
+                "localCleanupModel" -> chooseLocalCleanupModel(value as String?)
                 "cloud_model" -> chooseCloudModel(CloudCatalog.transcriptionModel(value as String))
                 "preferredLocale" -> chooseLanguage(value as String)
                 "personal_corrections" ->
@@ -850,6 +893,30 @@ class DictationViewModel internal constructor(
     /** Deletes a downloaded model; Downloaded mode then needs a model again if it was the chosen one. */
     fun removeLocalModel(id: String) {
         localModels?.remove(id)
+    }
+
+    /**
+     * Cleans up with a downloaded model instead of the cloud one, from the next cleanup; null goes back to
+     * the cloud model. A profile's own cloud cleanup model still wins for its sessions.
+     */
+    fun chooseLocalCleanupModel(id: String?) {
+        if (id != null && cleanupModels?.find(id) == null) return
+        prefs.localCleanupModelId = id
+        _state.update { it.copy(localCleanup = it.localCleanup.copy(selectedId = id)) }
+    }
+
+    /** Starts or resumes a cleanup model download; on mobile data only when the user allows it. */
+    fun downloadCleanupModel(id: String) {
+        cleanupModels?.download(id, _state.value.localModels.downloadOnMobileData)
+    }
+
+    fun cancelCleanupModelDownload(id: String) {
+        cleanupModels?.cancel(id)
+    }
+
+    /** Deletes a downloaded cleanup model; it stays chosen, and cleanup is skipped until it is back. */
+    fun removeCleanupModel(id: String) {
+        cleanupModels?.remove(id)
     }
 
     fun setDownloadModelsOnMobileData(allowed: Boolean) {
@@ -1132,6 +1199,7 @@ class DictationViewModel internal constructor(
                         secrets.names(),
                         System.currentTimeMillis(),
                         pronunciationDefaults,
+                        localCleanupIds = cleanupSetup?.names?.keys.orEmpty(),
                     )
                 } catch (e: ConfigArchiveException) {
                     detail = e.message
@@ -1204,6 +1272,7 @@ class DictationViewModel internal constructor(
                 cleanupPrompt = prefs.cleanupPrompt,
                 profiles = prefs.profiles,
                 localModels = it.localModels.copy(downloadOnMobileData = prefs.downloadedModelsOnMobileData),
+                localCleanup = it.localCleanup.copy(selectedId = prefs.localCleanupModelId),
             )
         }
         selector.reload()
@@ -1219,6 +1288,7 @@ class DictationViewModel internal constructor(
         interruptionWatch.onSessionChanged(s)
         followHandsFreeSession(s)
         syncForeground(s)
+        if (!s.dictation.isActive) selector.sessionEnded()
     }
 
     /** Shows the service while a session needs it and, between hands-free recordings, while listening. */
@@ -1298,7 +1368,11 @@ class DictationViewModel internal constructor(
                 },
                 pronunciationDefaults = loadPronunciationDefaults(application),
                 geminiNano = MlKitGeminiNano(),
-                localModelSetup = AndroidLocalModels.setup(application, Dispatchers.IO),
+                localModelSetup = AndroidLocalModels.setup(
+                    application,
+                    Dispatchers.IO,
+                    cleanupTimeoutMs = DictationTimings().localCleanupMs,
+                ),
             )
         }
 

@@ -15,6 +15,7 @@ object RawConfigurationValues {
         "cloud_model" to state.cloudModel.catalogId,
         "downloadedTranscriptionModel" to state.localModels.selectedId,
         "downloadedModelsOnMobileData" to state.localModels.downloadOnMobileData,
+        "localCleanupModel" to state.localCleanup.selectedId,
         "preferredLocale" to state.languageId,
         "personal_corrections" to corrections(state.corrections),
         "cleanup_enabled" to state.cleanupEnabled,

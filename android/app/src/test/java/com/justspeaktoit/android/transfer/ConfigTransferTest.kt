@@ -139,6 +139,35 @@ class ConfigTransferTest {
     }
 
     @Test
+    fun downloadedCleanupModel_travelsInTheSharedCleanupKey_andACloudModelClearsIt() = runBlocking {
+        val local = "local/post-processing/qwen3-0.6b-q4"
+        val source = sourcePrefs().apply { localCleanupModelId = local }
+        val contents = export(source)
+        val settings = contents.records.getValue(TransferCategory.Settings)
+        assertTrue(settings.any { it.id == SharedSettings.CLEANUP_MODEL && it.value == local })
+
+        val secrets = MemorySecrets()
+        val store = HistoryStore(MemoryHistoryFile())
+        val phone = MemoryPrefs(cleanupModelId = CloudCatalog.cleanupModels.first().selectionId)
+        val offered = ConfigImporter.plan(contents, phone, emptyList(), emptySet(), nowMs, localCleanupIds = setOf(local))
+        assertTrue(applier(phone, secrets, store).applyPlan(offered, includeCredentials = false))
+        assertEquals(local, phone.localCleanupModelId)
+        assertEquals("The cloud choice is kept for later", CloudCatalog.cleanupModels.first().selectionId, phone.cleanupModelId)
+
+        val unknown = MemoryPrefs()
+        // Each import moves its archive's audio, so the second one reads a fresh export.
+        val skipped = ConfigImporter.plan(export(source), unknown, emptyList(), emptySet(), nowMs)
+        assertTrue(skipped.preview.notices.toString(), skipped.preview.notices.any { "postProcessingModel" in it })
+        assertTrue(applier(unknown, secrets, store).applyPlan(skipped, includeCredentials = false))
+        assertNull(unknown.localCleanupModelId)
+
+        val cloud = ConfigImporter.plan(export(), phone, emptyList(), emptySet(), nowMs, localCleanupIds = setOf(local))
+        assertTrue(applier(phone, secrets, store).applyPlan(cloud, includeCredentials = false))
+        assertNull(phone.localCleanupModelId)
+        assertEquals(sourcePrefs().cleanupModelId, phone.cleanupModelId)
+    }
+
+    @Test
     fun pronunciations_roundTripAndMergeByWordWithTheDefaults() = runBlocking {
         val sql = PronunciationEntry(SQL_ID, "SQL", "sequel", "sequel", category = "Technical")
         val regex = PronunciationEntry(REGEX_ID, """v(\d+)""", "version", "version $1", isRegex = true, caseSensitive = true)

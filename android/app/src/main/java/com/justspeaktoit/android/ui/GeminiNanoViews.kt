@@ -52,9 +52,15 @@ internal fun GeminiNanoFailure.message(): Int = when (this) {
 /**
  * The cleanup picker's **On this phone** section. Gemini Nano is listed only where AICore offers it;
  * elsewhere a line says why. Choosing it while it still needs downloading starts the download.
+ * [more] lists the section's other on-device models, the downloaded ones.
  */
 @Composable
-internal fun GeminiNanoPickerSection(ui: GeminiNanoUi, isSelected: Boolean, onChoose: () -> Unit) {
+internal fun GeminiNanoPickerSection(
+    ui: GeminiNanoUi,
+    isSelected: Boolean,
+    onChoose: () -> Unit,
+    more: @Composable () -> Unit = {},
+) {
     val availability = ui.availability
     Text(
         stringResource(R.string.cleanup_picker_on_device_heading),
@@ -111,6 +117,7 @@ internal fun GeminiNanoPickerSection(ui: GeminiNanoUi, isSelected: Boolean, onCh
                 .padding(vertical = 8.dp),
         )
     }
+    more()
     HorizontalDivider()
 }
 

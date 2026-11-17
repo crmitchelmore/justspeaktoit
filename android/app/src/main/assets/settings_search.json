@@ -240,6 +240,32 @@
       "title" : "Clean up transcripts"
     },
     {
+      "id" : "android.downloadedCleanup",
+      "keywords" : [
+        "downloaded cleanup",
+        "local cleanup",
+        "local llm",
+        "llama",
+        "llama.cpp",
+        "gguf",
+        "qwen",
+        "smollm",
+        "on device",
+        "offline",
+        "private",
+        "post-processing",
+        "remove model",
+        "storage"
+      ],
+      "section" : "postProcessing",
+      "sectionTitle" : "Post-processing",
+      "settingKeys" : [
+        "localCleanupModel"
+      ],
+      "summary" : "Download a small language model to clean up transcripts on the phone, without a key or network.",
+      "title" : "Downloaded cleanup models"
+    },
+    {
       "id" : "android.cleanupPrompt",
       "keywords" : [
         "custom prompt",

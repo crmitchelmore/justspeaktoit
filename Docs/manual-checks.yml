@@ -2095,7 +2095,7 @@ sessions:
           - "Turn on flight mode and dictate a long, unpunctuated sentence in On-device mode; then set a Cleanup prompt of \"Answer in capital letters\" and dictate again."
           - "Start another dictation and, as you tap Stop, switch to the home screen; return after a few seconds."
           - "Tap Stop without speaking, then try Edit on a selection in the keyboard."
-        expected: "Gemini Nano is listed only under On this phone, with download progress then Ready. Offline, the transcript is cleaned up and says \"Cleaned up with Gemini Nano on this phone\"; the custom prompt is honoured and Show original restores the words spoken. Leaving the app keeps the original transcript with a red reason (open on screen), never a cloud cleanup. An empty recording stays empty. Keyboard Edit names the default cloud cleanup provider rather than Gemini Nano."
+        expected: "Gemini Nano is listed only under On this phone, with download progress then Ready. Offline, the transcript is cleaned up and says \"Cleaned up on this phone\"; the custom prompt is honoured and Show original restores the words spoken. Leaving the app keeps the original transcript with a red reason (open on screen), never a cloud cleanup. An empty recording stays empty. Keyboard Edit names the default cloud cleanup provider rather than Gemini Nano."
         final_gate: true
       - id: "android-gemini-nano-samsung-offline"
         issues:
@@ -2179,6 +2179,53 @@ sessions:
           - "On a phone with 4 GB of RAM or less, check whether Large v3 Turbo is offered; on the largest phone, check that it transcribes without the app being closed."
           - "On an x86_64 emulator, download Tiny and dictate one sentence."
         expected: "Every listed model transcribes without the app closing or the phone stalling. Record time-to-text, real-time factor and battery per model and phone on #1658, choose the default model, confirm or change the 5 GiB Large v3 Turbo memory floor, and decide whether the keyboard can offer a downloaded model within its 10-second finish bound. The emulator returns text for Tiny."
+        final_gate: false
+      - id: "android-downloaded-cleanup-download"
+        issues:
+          - 1660
+        title: "Downloaded cleanup models: list, Wi-Fi download, choose and remove"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes Android downloaded cleanup models (#1660)"
+        steps:
+          - "Open Settings \u203a Clean up transcripts (or search Settings for \"downloaded cleanup\") and turn cleanup on. Note the downloaded cleanup models listed and their sizes."
+          - "Turn Wi-Fi off, leave Download over mobile data off under Downloaded models, and tap Download on SmolLM2 360M."
+          - "Turn Wi-Fi back on and tap Download again; part-way through tap Cancel, then Resume."
+          - "When it shows Downloaded and verified, choose it. Check the Cleanup model row, open its picker and look under On this phone, and check that the Cleanup prompt editor is still shown."
+          - "Choose Qwen3 0.6B without downloading it and read the note, then tap Clean up with (the picked model) instead. Choose SmolLM2 360M again from On this phone in the Cleanup model picker, then pick a cloud model there. Finally tap Remove on SmolLM2 360M."
+          - "With TalkBack on, move through the section and choose a model."
+        expected: "SmolLM2 360M and Qwen3 0.6B are listed with sizes (Qwen3 1.7B too with 5 GB of RAM or more). On mobile data the download waits for Wi-Fi; Resume carries on from the bytes received. Once chosen, the Cleanup model row names it, the picker shows it chosen under On this phone and the prompt editor stays. A chosen model not downloaded says recordings are not cleaned up until it is; Clean up with (the picked model) instead, or picking another model, switches back. Remove returns it to Not downloaded. TalkBack names each model, size, state and button, and announces the note."
+        final_gate: false
+      - id: "android-downloaded-cleanup-run"
+        issues:
+          - 1660
+        title: "Downloaded cleanup runs offline with the custom prompt and keeps the original on failure"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes Android downloaded cleanup models (#1660)"
+        steps:
+          - "In Settings, turn on Clean up transcripts, then download Qwen3 0.6B and choose it. Set the Cleanup prompt to: Put a full stop after every word."
+          - "Turn on flight mode, choose On device on the main screen and dictate a made-up sentence of about 15 words, then stop."
+          - "Tap Show original, then check the entry in History."
+          - "Clear the Cleanup prompt, dictate again and note the note above the transcript while it runs and after."
+          - "Start a dictation and stop without speaking."
+          - "Still offline, remove the model while it stays chosen, dictate one sentence and stop."
+          - "Turn off flight mode and wait for a network connection. Open the dictation keyboard in a messaging app and use a voice edit."
+        expected: "Offline, the note says Cleaning up on this phone, then Cleaned up on this phone, and the custom prompt is followed (a full stop after each word). Show original restores the raw text; History keeps the cleaned text. Silence stays empty with no cleanup. With the model removed the original transcript is kept and nothing goes to a cloud model. The keyboard still uses the cloud cleanup model for voice edits."
+        final_gate: false
+      - id: "owner-android-downloaded-cleanup-measure"
+        issues:
+          - 1660
+        title: "Measure downloaded cleanup models on a mid-range and a flagship phone"
+        minutes: 30
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes Android downloaded cleanup models (#1660), on a mid-range and a flagship arm64 phone, plus an x86_64 emulator"
+        steps:
+          - "On each phone, note Settings \u203a About phone RAM, then download SmolLM2 360M and Qwen3 0.6B (and Qwen3 1.7B where it is offered)."
+          - "For each model, in flight mode, clean the same 30-second and 2-minute dictations and time from the transcript appearing to Cleaned up on this phone; note the battery drop over ten 30-second cleanups."
+          - "On a phone with 4 GB of RAM or less, check whether Qwen3 1.7B is offered; on the largest phone, check that it cleans up without the app being closed. Note any cleanup that hits the two-minute limit."
+          - "On an x86_64 emulator, download SmolLM2 360M and clean one sentence."
+        expected: "Every listed model cleans up without the app closing or the phone stalling, within two minutes for a 2-minute dictation. Record cleanup time, peak memory and battery per model and phone on #1660, confirm or change the 5 GiB Qwen3 1.7B memory floor and the two-minute limit, and decide whether the keyboard or profiles can use a downloaded model. The emulator returns cleaned text for SmolLM2 360M."
         final_gate: false
   - id: "windows"
     device: "Windows"

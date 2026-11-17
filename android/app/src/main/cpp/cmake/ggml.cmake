@@ -1,7 +1,8 @@
-# Adds ggml once for every native runtime. whisper.cpp uses it now; llama.cpp (#1660) must link
-# this same `ggml` target rather than its own copy, so both runtimes stay one library. The source
-# defaults to the ggml bundled with the pinned whisper.cpp (cmake/whisper.cmake); point
-# JSTI_GGML_SOURCE_DIR elsewhere only for a ggml that both runtimes are pinned against.
+# Adds ggml once for every native runtime. whisper.cpp and llama.cpp (cmake/llama.cmake) both link
+# this same `ggml` target rather than their own copies, so the runtimes stay one library. The source
+# defaults to the ggml bundled with the pinned whisper.cpp (cmake/whisper.cmake); llama.cmake fails the
+# configure if llama.cpp's bundled ggml headers differ from it. Point JSTI_GGML_SOURCE_DIR elsewhere
+# only for a ggml that both runtimes are pinned against.
 include_guard(GLOBAL)
 
 if (NOT JSTI_GGML_SOURCE_DIR)

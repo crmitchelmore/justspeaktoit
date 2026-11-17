@@ -113,9 +113,9 @@
 
     <string name="cleanup_running">Cleaning up with OpenRouter…</string>
     <string name="cleanup_applied">Cleaned up with OpenRouter</string>
+    <string name="cleanup_running_on_device">Cleaning up on this phone…</string>
+    <string name="cleanup_applied_on_device">Cleaned up on this phone</string>
     <string name="cleanup_failed">Cleanup failed, so this is the original transcript.</string>
-    <string name="cleanup_running_on_device">Cleaning up with Gemini Nano on this phone…</string>
-    <string name="cleanup_applied_on_device">Cleaned up with Gemini Nano on this phone</string>
     <string name="cleanup_failed_on_device">On-device cleanup failed: %1$s This is the original transcript.</string>
     <string name="action_skip_cleanup">Skip cleanup</string>
     <string name="action_show_original">Show original</string>
@@ -231,9 +231,14 @@
     <string name="learned_corrections_dismiss_description">Dismiss suggestion from %1$s to %2$s</string>
     <string name="learned_corrections_clear">Clear suggestions</string>
     <string name="settings_cleanup_title">Clean up transcripts</string>
-    <string name="settings_cleanup_note">Sends the final transcript to the chosen model\'s provider to fix punctuation and spelling, and needs that provider\'s key. Gemini Nano, where your phone offers it, cleans up on the phone instead. If cleanup fails, the original transcript is kept.</string>
+    <string name="settings_cleanup_note">Sends the final transcript to the chosen model\'s provider to fix punctuation and spelling, and needs that provider\'s key. Gemini Nano, where your phone offers it, and downloaded cleanup models clean up on the phone instead. If cleanup fails, the original transcript is kept.</string>
     <string name="settings_cleanup_needs_key">Add your %1$s key to use cleanup.</string>
     <string name="settings_cleanup_model">Cleanup model</string>
+    <string name="settings_downloaded_cleanup_title">Downloaded cleanup models</string>
+    <string name="settings_downloaded_cleanup_note">Small language models that clean up transcripts on this phone, with no key and nothing sent. The cleanup prompt below is the model\'s instructions. They are slower and less capable than cloud models, and if one fails the original transcript is kept. Downloads follow Download over mobile data under Downloaded models.</string>
+    <string name="settings_downloaded_cleanup_unavailable">Downloaded cleanup models can\'t run on this phone because the language model engine did not load.</string>
+    <string name="settings_downloaded_cleanup_not_ready">Download %1$s to use it for cleanup. Until then, recordings are not cleaned up.</string>
+    <string name="settings_downloaded_cleanup_use_other">Clean up with %1$s instead</string>
     <string name="settings_cleanup_prompt_title">Cleanup prompt</string>
     <string name="settings_cleanup_prompt_note">Replaces the built-in cleanup instructions, for example to set a tone or format. The transcript is still sent as data, and only the cleaned text is kept. Leave empty for the built-in prompt.</string>
     <string name="settings_cleanup_prompt_reset">Use the built-in prompt</string>
@@ -262,6 +267,8 @@
     <string name="profile_label">Profile: %1$s</string>
     <string name="cleanup_picker_title">Cleanup model</string>
     <string name="cleanup_picker_on_device_heading">On this phone</string>
+    <string name="cleanup_picker_downloaded_model">Downloaded. Cleans up on this phone without a key or a connection.</string>
+    <string name="cleanup_picker_downloaded_none">Download a model under Downloaded cleanup models in Settings to clean up with it on this phone.</string>
     <string name="gemini_nano_checking">Checking whether this phone offers Gemini Nano…</string>
     <string name="gemini_nano_ready">Ready. Cleans up on this phone without a key or a connection.</string>
     <string name="gemini_nano_downloadable">Choose it to download Gemini Nano. Then it cleans up on this phone without a key or a connection.</string>

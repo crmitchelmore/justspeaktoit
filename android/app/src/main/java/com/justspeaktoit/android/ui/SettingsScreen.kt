@@ -161,6 +161,11 @@ class SettingsActions(
     val onCancelModelDownload: (String) -> Unit = {},
     val onRemoveLocalModel: (String) -> Unit = {},
     val onDownloadModelsOnMobileDataChanged: (Boolean) -> Unit = {},
+    /** Picks a downloaded cleanup model by catalogue ID, or null to clean up with the cloud model. */
+    val onChooseLocalCleanupModel: (String?) -> Unit = {},
+    val onDownloadCleanupModel: (String) -> Unit = {},
+    val onCancelCleanupModelDownload: (String) -> Unit = {},
+    val onRemoveCleanupModel: (String) -> Unit = {},
 )
 
 /** The app-wide theme choice: light, dark or the phone's, and wallpaper colours where supported. */
@@ -339,12 +344,23 @@ fun SettingsScreen(
             }
             Text(stringResource(R.string.settings_cleanup_note), style = MaterialTheme.typography.bodyMedium)
             CleanupModelRow(state, actions, discovery, geminiNano)
-            if (state.cleanupModel.isOnDevice) {
-                GeminiNanoSettingsNote(state.geminiNano, actions.onCheckGeminiNano)
-            } else if (state.cleanupEnabled && state.cleanupModel.cloudProvider !in state.savedKeys) {
-                Text(
+            when {
+                // A chosen downloaded model's state is shown under Downloaded cleanup models below.
+                state.localCleanup.selectedId != null -> Unit
+                state.cleanupModel.isOnDevice -> GeminiNanoSettingsNote(state.geminiNano, actions.onCheckGeminiNano)
+                state.cleanupEnabled && state.cleanupModel.cloudProvider !in state.savedKeys -> Text(
                     stringResource(R.string.settings_cleanup_needs_key, state.cleanupModel.cloudProvider.displayName),
                     color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (state.localCleanup.names.isNotEmpty()) {
+                SectionTitle(R.string.settings_downloaded_cleanup_title, anchor("android.downloadedCleanup"))
+                DownloadedCleanupSection(
+                    state.localCleanup,
+                    state.cleanupEnabled,
+                    state.dictation.isActive,
+                    CleanupModelPicker.selectionLabel(state.cleanupModel),
+                    actions,
                 )
             }
             CleanupPromptField(
@@ -650,7 +666,9 @@ private fun CleanupModelRow(
 ) {
     var picking by remember { mutableStateOf(false) }
     val title = stringResource(R.string.settings_cleanup_model)
-    val label = CleanupModelPicker.selectionLabel(state.cleanupModel)
+    // A chosen downloaded model replaces the picker's model, so the row names it.
+    val label = state.localCleanup.selectedId?.let { state.localCleanup.displayName(it) ?: it }
+        ?: CleanupModelPicker.selectionLabel(state.cleanupModel)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -676,11 +694,17 @@ private fun CleanupModelRow(
             selected = state.cleanupModel,
             savedKeys = state.savedKeys,
             onChoose = {
+                // One cleanup choice: a picked cloud model or Gemini Nano replaces a downloaded model.
+                if (state.localCleanup.selectedId != null) actions.onChooseLocalCleanupModel(null)
                 actions.onChooseCleanupModel(it)
                 picking = false
             },
             onDismiss = { picking = false },
             geminiNano = geminiNano,
+            downloaded = DownloadedCleanupChoices(state.localCleanup) {
+                actions.onChooseLocalCleanupModel(it)
+                picking = false
+            },
             discovery = discovery,
         )
     }

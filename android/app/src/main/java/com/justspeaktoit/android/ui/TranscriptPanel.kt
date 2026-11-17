@@ -78,8 +78,9 @@ private fun CleanupNote(cleanup: CleanupStatus, onDevice: Boolean, failure: Gemi
     val text = when (cleanup) {
         CleanupStatus.Running -> stringResource(if (onDevice) R.string.cleanup_running_on_device else R.string.cleanup_running)
         CleanupStatus.Applied -> stringResource(if (onDevice) R.string.cleanup_applied_on_device else R.string.cleanup_applied)
-        CleanupStatus.Failed -> if (onDevice) {
-            stringResource(R.string.cleanup_failed_on_device, stringResource((failure ?: GeminiNanoFailure.Failed).message()))
+        // Gemini Nano says why it kept the original; a downloaded model's failure has no reason to give.
+        CleanupStatus.Failed -> if (failure != null) {
+            stringResource(R.string.cleanup_failed_on_device, stringResource(failure.message()))
         } else {
             stringResource(R.string.cleanup_failed)
         }

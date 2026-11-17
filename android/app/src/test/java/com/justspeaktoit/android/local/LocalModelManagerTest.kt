@@ -1,5 +1,6 @@
 package com.justspeaktoit.android.local
 
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,6 +20,7 @@ import java.io.InputStream
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.CoroutineContext
 
 class LocalModelManagerTest {
     @get:Rule val folder = TemporaryFolder()
@@ -32,7 +34,7 @@ class LocalModelManagerTest {
     private var onWifi = true
     private val gateChecks = CopyOnWriteArrayList<Boolean>()
 
-    private fun manager(memory: Long = 4L shl 30) = LocalModelManager(
+    private fun manager(memory: Long = 4L shl 30, scope: CoroutineScope = this.scope) = LocalModelManager(
         catalog = listOf(tiny, turbo),
         store = store,
         downloader = ModelDownloader(source) { Long.MAX_VALUE },
@@ -205,21 +207,50 @@ class LocalModelManagerTest {
         assertEquals(ModelInstallState.Installed, manager.models.value.single().state)
     }
 
+    /** Runs coroutines on [Dispatchers.Default], except that it holds every dispatch while [holding]. */
+    private class HoldingDispatcher : CoroutineDispatcher() {
+        private val held = mutableListOf<Pair<CoroutineContext, Runnable>>()
+        private var holding = false
+
+        fun hold() = synchronized(held) { holding = true }
+
+        fun resume() {
+            val queued = synchronized(held) {
+                holding = false
+                held.toList().also { held.clear() }
+            }
+            queued.forEach { (context, block) -> Dispatchers.Default.dispatch(context, block) }
+        }
+
+        override fun dispatch(context: CoroutineContext, block: Runnable) {
+            synchronized(held) {
+                if (holding) {
+                    held += context to block
+                    return
+                }
+            }
+            Dispatchers.Default.dispatch(context, block)
+        }
+    }
+
     @Test
     fun testCancelledQueuedResume_stillMakesTheNextResumeWaitForTheBlockedRead() {
         val reading = CountDownLatch(1)
         val release = CountDownLatch(1)
         blockFirstRead(reading, release)
-        val manager = manager()
+        val dispatcher = HoldingDispatcher()
+        val manager = manager(scope = CoroutineScope(scope.coroutineContext + dispatcher))
         runBlocking { manager.refresh().join() }
         manager.download(tiny.catalogId, allowMobileData = false)
         assertTrue(reading.await(TIMEOUT_MS, TimeUnit.MILLISECONDS))
         manager.cancel(tiny.catalogId)
 
-        // Queued behind the blocked read, then cancelled before it starts.
+        // Queued behind the blocked read and cancelled before its coroutine has started.
+        dispatcher.hold()
         manager.download(tiny.catalogId, allowMobileData = false)
         manager.cancel(tiny.catalogId)
         manager.download(tiny.catalogId, allowMobileData = false)
+        dispatcher.resume()
         Thread.sleep(QUIET_MS)
         assertEquals("no resume writes while the first read is still blocked", 1, source.requests.size)
         release.countDown()

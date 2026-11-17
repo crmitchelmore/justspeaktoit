@@ -3,6 +3,8 @@ package com.justspeaktoit.android.local
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
@@ -177,6 +179,7 @@ class LocalModelManager<M : PinnedModel>(
     fun isInstalled(id: String?): Boolean = find(id)?.let(store::isInstalled) == true
 
     /** Starts or resumes [id]'s download, unless one is running or the network does not allow it. */
+    @OptIn(DelicateCoroutinesApi::class) // CoroutineStart.ATOMIC; see the job below.
     fun download(id: String, allowMobileData: Boolean) {
         val model = find(id) ?: return
         if (jobs[id]?.isActive == true) return
@@ -188,7 +191,8 @@ class LocalModelManager<M : PinnedModel>(
         // A cancelled download may still be finishing its last write to the partial file, or a removal
         // deleting it.
         val previous = tails[id]
-        val job = scope.launch {
+        // ATOMIC: a job cancelled before it starts still runs its body, so it still waits for the one before it.
+        val job = scope.launch(start = CoroutineStart.ATOMIC) {
             val self = currentCoroutineContext()[Job]
             try {
                 previous?.join()

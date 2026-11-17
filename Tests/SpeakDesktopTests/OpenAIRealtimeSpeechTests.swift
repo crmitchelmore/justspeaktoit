@@ -93,6 +93,30 @@ final class OpenAIRealtimeSpeechTests: XCTestCase {
         XCTAssertFalse(faithful("Hello", ""))
     }
 
+    func testReadingCheckRejectsAChangedNumberOrAnInsertedNegation() {
+        let faithful = OpenAIRealtimeSpeech.isFaithfulReading
+        XCTAssertFalse(faithful("Take 5 tablets", "Take six tablets"))
+        XCTAssertFalse(faithful("Take 5 tablets", "Take 6 tablets"))
+        XCTAssertFalse(faithful("Take 5 tablets", "Take no tablets"))
+        XCTAssertFalse(faithful("Payment is approved", "Payment is not approved"))
+        XCTAssertFalse(faithful("The year is 2026.", "The year is twenty twenty five."))
+    }
+
+    func testReadingCheckAcceptsCommonReadingsOfNumbersAndSymbols() {
+        let faithful = OpenAIRealtimeSpeech.isFaithfulReading
+        XCTAssertTrue(faithful("The year is 2026.", "The year is twenty twenty-six."))
+        XCTAssertTrue(faithful("The year is 2026.", "The year is 2026."))
+        XCTAssertTrue(faithful("We sold 2,026 units.", "We sold two thousand and twenty-six units."))
+        XCTAssertTrue(faithful("Add 3.5 cups", "Add three point five cups"))
+        XCTAssertTrue(faithful("Meet at 10:30", "Meet at ten thirty"))
+        XCTAssertTrue(faithful("100 times", "a hundred times"))
+        XCTAssertTrue(faithful("It costs $5", "It costs five dollars"))
+        XCTAssertTrue(faithful("Salt & pepper", "Salt and pepper"))
+        XCTAssertTrue(faithful("Finish 1st", "Finish first"))
+        XCTAssertTrue(faithful("Es kostet 5 Euro", "Es kostet fünf Euro"),
+                      "A reading in another language is a bounded slot")
+    }
+
     func testAChunkWithoutAudioFailsInsteadOfDroppingItsText() async {
         let socket = ScriptedRealtimeSpeechSocket { text in
             .reply(audio: text.contains("Omega") ? Data() : Data([1]), transcript: text, audioTokens: 1)

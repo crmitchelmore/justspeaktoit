@@ -146,7 +146,8 @@ final class DesktopHostVoiceDiscoveryTests: XCTestCase {
     private func listing() async throws -> XAIAccountVoiceInventory {
         StubURLProtocol.handler = {
             .respond(try XCTUnwrap(HTTPURLResponse(url: try XCTUnwrap($0.url),
-                statusCode: 200, httpVersion: nil, headerFields: nil)),
+                statusCode: $0.url?.path == "/v1/custom-voices" ? 404 : 200,
+                httpVersion: nil, headerFields: nil)),
                 Data(#"{"voices":[{"voice_id":"Account-A","name":"Synthetic account voice"}]}"#.utf8))
         }
         return try await .fetch(session: session, credential: { "synthetic-key" })

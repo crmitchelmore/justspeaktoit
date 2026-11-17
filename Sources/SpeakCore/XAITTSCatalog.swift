@@ -31,7 +31,8 @@ public struct XAITTSVoice: Identifiable, Codable, Hashable, Sendable {
 /// ship as presets. xAI hosts more, but the published page points at the
 /// playground and at `GET /v1/tts/voices` for the list instead of enumerating
 /// it, so the remainder is loaded from the account rather than guessed here —
-/// an unrecognised `voice_id` is an HTTP 404, not a graceful fallback.
+/// an unrecognised `voice_id` is an HTTP 404, not a graceful fallback. The
+/// team's cloned voices come only from `GET /v1/custom-voices`.
 ///
 /// Contract: https://docs.x.ai/developers/model-capabilities/audio/text-to-speech
 /// (read 2026-09-10).

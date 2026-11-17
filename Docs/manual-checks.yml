@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-16"
+updated: "2026-11-17"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -311,7 +311,7 @@ sessions:
           - "Deadline: the name reservation lapses unless a submission is made by 13 February 2027."
           - "Submission 1 is drafted with pricing, properties, age rating, the en-GB listing and certification notes; only the package, capability justifications and submit remain."
         steps:
-          - "Email storeops@microsoft.com asking for the HeadlessAppBypass waiver for Store ID 9PDFKWGH31HP (the speak CLI has no Start menu entry); wait until it is granted."
+          - "In Partner Center open Help + support \u203a Windows Developer Center \u203a App Management and raise a support request asking for the HeadlessAppBypass waiver for Store ID 9PDFKWGH31HP (the speak CLI has no Start menu entry); wait until it is granted."
           - "In GitHub Actions run Microsoft Store (windows-store.yml) on main, then download the windows-store-bundle artifact."
           - "In Partner Center open Apps and games \u203a Just Speak to It \u203a Submission 1 and upload the .msixbundle under Packages."
           - "Justify the restricted capabilities runFullTrust (inserts dictated text into other apps) and unvirtualizedResources (keeps History and settings in %LOCALAPPDATA%\\JustSpeakToIt)."
@@ -2197,7 +2197,7 @@ sessions:
           - "For each model, dictate the same 30-second and 2-minute passages in flight mode and time from Stop to text; note the battery drop over ten 30-second dictations."
           - "On a phone with 4 GB of RAM or less, check whether Large v3 Turbo is offered; on the largest phone, check that it transcribes without the app being closed."
           - "On an x86_64 emulator, download Tiny and dictate one sentence."
-        expected: "Every listed model transcribes without the app closing or the phone stalling. Record time-to-text, real-time factor and battery per model and phone on #1658, choose the default model, confirm or change the 5 GiB Large v3 Turbo memory floor, and decide whether the keyboard can offer a downloaded model within its 10-second finish bound. The emulator returns text for Tiny."
+        expected: "Every listed model transcribes without the app closing or the phone stalling. Record time-to-text, real-time factor and battery per model and phone on #1658, choose the default model, confirm or change the 5 GiB Large v3 Turbo memory floor, and check the keyboard's estimates (KeyboardLocalModels: Tiny up to 120 seconds, Base up to 60, Small and Turbo app-only) against the measured times within its 10-second finish bound. The emulator returns text for Tiny."
         final_gate: false
       - id: "android-downloaded-cleanup-download"
         issues:
@@ -2244,8 +2244,82 @@ sessions:
           - "For each model, in flight mode, clean the same 30-second and 2-minute dictations and time from the transcript appearing to Cleaned up on this phone; note the battery drop over ten 30-second cleanups."
           - "On a phone with 4 GB of RAM or less, check whether Qwen3 1.7B is offered; on the largest phone, check that it cleans up without the app being closed. Note any cleanup that hits the two-minute limit."
           - "On an x86_64 emulator, download SmolLM2 360M and clean one sentence."
-        expected: "Every listed model cleans up without the app closing or the phone stalling, within two minutes for a 2-minute dictation. Record cleanup time, peak memory and battery per model and phone on #1660, confirm or change the 5 GiB Qwen3 1.7B memory floor and the two-minute limit, and decide whether the keyboard or profiles can use a downloaded model. The emulator returns cleaned text for SmolLM2 360M."
+        expected: "Every listed model cleans up without the app closing or the phone stalling, within two minutes for a 2-minute dictation. Record cleanup time, peak memory and battery per model and phone on #1660, confirm or change the 5 GiB Qwen3 1.7B memory floor and the two-minute limit, and check the keyboard's cleanup estimates (KeyboardLocalModels) against the measured times. The emulator returns cleaned text for SmolLM2 360M."
         final_gate: false
+      - id: "android-profile-downloaded-cleanup"
+        issues:
+          - 1650
+          - 1660
+        title: "A dictation profile uses its own downloaded cleanup model, and fails visibly without it"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes per-profile downloaded cleanup models (#1650)"
+        steps:
+          - "In Settings, turn on Clean up transcripts and download SmolLM2 360M, but choose a cloud cleanup model as your own."
+          - "Under Dictation profiles, edit a profile, open its cleanup model picker and choose SmolLM2 360M under On this phone, then save and make it the active profile."
+          - "Turn on flight mode and dictate a made-up sentence in the app, then stop."
+          - "Remove SmolLM2 360M under Downloaded cleanup models, dictate again and stop."
+          - "Make another profile active and dictate once more with flight mode off."
+        expected: "The profile's row names SmolLM2 360M (downloaded, on this phone). Offline, the profile's dictation is cleaned up on this phone. With the model removed, the original transcript is kept with a visible cleanup error and nothing goes to the cloud model. The other profile uses your own cloud cleanup model."
+        final_gate: false
+      - id: "android-keyboard-downloaded-cleanup"
+        issues:
+          - 1650
+          - 1660
+        title: "Keyboard cleans up short dictations with a downloaded model within 10 seconds"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes keyboard downloaded cleanup (#1650)"
+        steps:
+          - "In Settings, turn on Clean up transcripts, download SmolLM2 360M and choose it. Close and reopen the app so the keyboard has to check the weights again."
+          - "Turn on flight mode, open the dictation keyboard in a messaging app and dictate a made-up sentence of about 10 words; time from Stop to the cleaned text being typed."
+          - "Dictate about 60 words (roughly 30 seconds) and stop."
+          - "Choose Qwen3 1.7B where it is offered (or Qwen3 0.6B), dictate one sentence and stop."
+          - "Start a cleanup and tap into another text field before it finishes."
+        expected: "Short dictations show the words at once, the status says Cleaning up with SmolLM2 360M, and the cleaned text replaces them within 10 seconds with a Cleaned up notice. The long dictation, Qwen3 1.7B and any cleanup that runs past 10 seconds type the words as said, with a notice that the model was too slow, and nothing goes to the cloud. Leaving the field keeps the words typed as said. Record the times on #1660."
+        final_gate: false
+      - id: "android-keyboard-downloaded-whisper"
+        issues:
+          - 1650
+          - 1658
+        title: "Keyboard dictates with a downloaded Whisper model only when it is fast enough"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes keyboard downloaded Whisper models (#1650)"
+        steps:
+          - "In Settings, download Whisper Tiny and choose Downloaded with Tiny on the main screen."
+          - "Turn on flight mode, open the dictation keyboard in a messaging app and read the status, then dictate a made-up sentence; time from Stop to text."
+          - "Dictate for longer than two minutes without stopping."
+          - "Choose Base and repeat once; then choose Small (download it if needed) and open the keyboard again."
+          - "Remove the chosen model and open the keyboard again."
+        expected: "With Tiny the status names Tiny and its 120-second limit, the text arrives within 10 seconds of Stop and nothing goes online; recording stops itself at the limit and the text is typed. Base shows a 60-second limit. Small, and a removed model, leave the platform recogniser in use with a status saying why. Record Tiny and Base times on #1658."
+        final_gate: false
+      - id: "android-cloud-silence-no-invented-text"
+        issues:
+          - 1788
+        title: "A silent Cloud recording never comes back as invented text"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes the #1788 silence fix"
+        steps:
+          - "In Settings, choose Gemini 2.5 Flash (OpenRouter) as the Cloud transcription model, with a working OpenRouter key."
+          - "In a quiet room, pick Cloud, tap the microphone, say nothing for about 5 seconds and tap Stop."
+          - "Repeat with an OpenAI model such as GPT Transcribe, then once more speaking a short made-up sentence."
+        expected: "Both silent recordings end with the no speech message and no transcript, and nothing new appears in History as a dictation. The spoken sentence is transcribed as usual."
+        final_gate: true
+      - id: "android-cloud-out-of-credit-message"
+        issues:
+          - 1789
+        title: "An out-of-credit provider account says so instead of asking you to wait"
+        minutes: 2
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes the #1789 out-of-credit message"
+        steps:
+          - "In Settings, save an OpenAI key whose account has no credit left."
+          - "Choose GPT Transcribe (OpenAI) as the Cloud transcription model."
+          - "Pick Cloud, tap the microphone, say a short made-up sentence and tap Stop."
+        expected: "The error says the provider account has no credit left and to add credit or billing, not that the service is limiting requests."
+        final_gate: true
   - id: "windows"
     device: "Windows"
     title: "Windows"

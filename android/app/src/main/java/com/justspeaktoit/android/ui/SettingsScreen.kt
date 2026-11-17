@@ -381,6 +381,7 @@ fun SettingsScreen(
                 onDelete = actions.onDeleteProfile,
                 geminiNano = geminiNano,
                 discovery = discovery,
+                localCleanup = state.localCleanup,
             )
 
             HorizontalDivider()

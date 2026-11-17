@@ -149,7 +149,10 @@ final class RequiredReasonAPIManifestTests: XCTestCase {
         let plist = try XCTUnwrap(
             try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any], manifest
         )
-        let entries = try XCTUnwrap(plist["NSPrivacyAccessedAPITypes"] as? [[String: Any]], manifest)
+        // A bundle that calls no required-reason API omits the key rather than shipping an empty array.
+        guard let value = plist["NSPrivacyAccessedAPITypes"] else { return [:] }
+        let entries = try XCTUnwrap(value as? [[String: Any]], manifest)
+        XCTAssertFalse(entries.isEmpty, "\(manifest): omit NSPrivacyAccessedAPITypes instead of an empty array")
         var result: [String: [String]] = [:]
         for entry in entries {
             let category = try XCTUnwrap(entry["NSPrivacyAccessedAPIType"] as? String, manifest)

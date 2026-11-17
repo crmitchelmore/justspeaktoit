@@ -83,7 +83,8 @@ final class DesktopHostVoiceKeyAdmissionTests: XCTestCase {
         defer { session.invalidateAndCancel(); StubURLProtocol.reset() }
         StubURLProtocol.handler = {
             .respond(try XCTUnwrap(HTTPURLResponse(
-                url: try XCTUnwrap($0.url), statusCode: 200, httpVersion: nil, headerFields: nil)),
+                url: try XCTUnwrap($0.url), statusCode: $0.url?.path == "/v1/custom-voices" ? 404 : 200,
+                httpVersion: nil, headerFields: nil)),
                 Data(#"{"voices":[{"voice_id":"Account-A","name":"Synthetic account voice"}]}"#.utf8))
         }
         let inventory = try await XAIAccountVoiceInventory.fetch(session: session) { "synthetic-list-key" }

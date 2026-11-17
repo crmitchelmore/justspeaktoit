@@ -126,6 +126,12 @@ class CloudWireTest {
         assertEquals(DictationFailure.InvalidKey, CloudWire.failureForStatus(403))
         assertEquals(DictationFailure.NetworkTimeout, CloudWire.failureForStatus(408))
         assertEquals(DictationFailure.TooManyRequests, CloudWire.failureForStatus(429))
+        assertEquals(DictationFailure.TooManyRequests, CloudWire.failureForStatus(429, """{"error":{"code":"rate_limit_exceeded"}}"""))
+        assertEquals(
+            DictationFailure.OutOfCredit,
+            CloudWire.failureForStatus(429, """{"error":{"type":"insufficient_quota","code":"insufficient_quota"}}"""),
+        )
+        assertEquals(DictationFailure.OutOfCredit, CloudWire.failureForStatus(402))
         assertEquals(DictationFailure.Client, CloudWire.failureForStatus(413))
         assertEquals(DictationFailure.Server, CloudWire.failureForStatus(500))
         assertEquals(DictationFailure.Server, CloudWire.failureForStatus(302))

@@ -150,13 +150,32 @@ object CloudWire {
         return out.toString(Charsets.UTF_8.name())
     }
 
-    fun failureForStatus(status: Int): DictationFailure = when (status) {
+    /**
+     * [body] is the error response when it was read. An account with no credit is not a rate limit
+     * that waiting fixes (#1789): OpenRouter reports it as 402, OpenAI as 429 `insufficient_quota`.
+     */
+    fun failureForStatus(status: Int, body: String = ""): DictationFailure = when (status) {
         401, 403 -> DictationFailure.InvalidKey
+        402 -> DictationFailure.OutOfCredit
         408 -> DictationFailure.NetworkTimeout
-        429 -> DictationFailure.TooManyRequests
+        429 -> if (isOutOfCredit(body)) DictationFailure.OutOfCredit else DictationFailure.TooManyRequests
         in 400..499 -> DictationFailure.Client
         else -> DictationFailure.Server
     }
+
+    private fun isOutOfCredit(body: String): Boolean {
+        val error = try {
+            JSONObject(body).optJSONObject("error")
+        } catch (e: JSONException) {
+            null
+        } ?: return false
+        return error.optString("code") == INSUFFICIENT_QUOTA || error.optString("type") == INSUFFICIENT_QUOTA
+    }
+
+    private const val INSUFFICIENT_QUOTA = "insufficient_quota"
+
+    /** Enough of an error response to read its error code; the rest is never needed. */
+    const val MAX_ERROR_BYTES = 16 * 1024
 
     fun failureForIo(error: IOException): DictationFailure =
         if (error is SocketTimeoutException) DictationFailure.NetworkTimeout else DictationFailure.Network

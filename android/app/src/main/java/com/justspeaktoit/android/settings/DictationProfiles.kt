@@ -61,6 +61,15 @@ data class DictationProfile(
             return CloudCatalog.findCleanupModel(id)
         }
 
+    /**
+     * The profile's downloaded cleanup model (#1660) when it names one of Android's `local/post-processing/`
+     * catalogue IDs ([catalog]), whether or not it is on this phone, so a missing model fails visibly rather
+     * than quietly using another. Null when it names a cloud model, nothing, or a model Android has no
+     * catalogue entry for.
+     */
+    fun downloadedCleanupModelId(catalog: Set<String>): String? =
+        cleanupModelId?.trim()?.takeIf { it in catalog }
+
     /** The profile's base cleanup prompt, or null to keep the user's own. */
     val prompt: String? get() = cleanupPrompt?.takeIf { it.isNotBlank() }
 

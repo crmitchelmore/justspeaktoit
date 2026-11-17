@@ -147,7 +147,7 @@ extension APIKeyGuidance {
                 APIKeyPermissionRequirement(
                     .transcription, permissions: ["speech-to-text endpoint access"], endpoints: ["wss /v1/stt", "Grok Voice realtime"]
                 ),
-                APIKeyPermissionRequirement(.voiceOutput, permissions: ["text-to-speech endpoint access"], endpoints: ["/v1/tts", "/v1/tts/voices"]),
+                APIKeyPermissionRequirement(.voiceOutput, permissions: ["text-to-speech endpoint access"], endpoints: ["/v1/tts", "/v1/tts/voices", "/v1/custom-voices"]),
                 APIKeyPermissionRequirement(nil, permissions: ["api-key:endpoint:models"], endpoints: ["GET /v1/models"])
             ],
             expiry: APIKeyExpiryGuidance(.notDocumented, providerRecommendation: "rotate keys regularly."),

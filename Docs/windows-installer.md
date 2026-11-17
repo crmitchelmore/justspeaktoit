@@ -180,9 +180,10 @@ need a different data design ([File system](#file-system-and-user-data)).
 **Headless app waiver.** The CLI application (`JustSpeakToItCLI`, `speak.exe`)
 has `AppListEntry="none"`, so Partner Center rejects the package during
 upload validation as a headless app unless the product has the
-`HeadlessAppBypass` waiver. Microsoft grants it on request to
-`storeops@microsoft.com` (quote the Store ID); it must be in place before the
-bundle is uploaded.
+`HeadlessAppBypass` waiver. Request it through a Partner Center support
+request (Help + support › Windows Developer Center › App Management, quoting
+the Store ID); `storeops@microsoft.com` rejects outside mail. The waiver must
+be in place before the bundle is uploaded.
 
 ## Identity and version
 
@@ -443,7 +444,8 @@ Done by the owner only; each step creates an account or accepts terms.
    Kingdom) Store listing with four 1920x1080 screenshots, and the
    certification notes (Additional Testing Information) that explain the
    restricted capabilities and the CLI alias. Remaining:
-   1. Email `storeops@microsoft.com` asking for the `HeadlessAppBypass`
+   1. Open a Partner Center support request (Help + support › Windows
+      Developer Center › App Management) asking for the `HeadlessAppBypass`
       waiver for Store ID `9PDFKWGH31HP` (see
       [Microsoft Store package](#microsoft-store-package)). Without it the
       upload is rejected.

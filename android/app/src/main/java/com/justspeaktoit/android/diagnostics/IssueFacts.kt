@@ -159,6 +159,7 @@ data class IssueFailure(
             DictationFailure.Server -> IssueFailure("request", "unavailable", "provider")
             DictationFailure.Client -> IssueFailure("request", "invalidInput", "application")
             DictationFailure.TooManyRequests -> IssueFailure("request", "unavailable", "provider", TOO_MANY_REQUESTS)
+            DictationFailure.OutOfCredit -> IssueFailure("request", "unavailable", "provider")
             DictationFailure.LanguageNotSupported, DictationFailure.LanguageUnavailable ->
                 IssueFailure("admission", "unavailable", "provider")
             DictationFailure.LeftApp, DictationFailure.RecordingRecovered ->

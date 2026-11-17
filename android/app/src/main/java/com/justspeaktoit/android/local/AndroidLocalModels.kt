@@ -22,6 +22,7 @@ object AndroidLocalModels {
             catalog = loadCatalog(context, LlamaCatalog.ASSET, LlamaCatalog::parse),
             store = ModelStore(File(context.filesDir, "models/llm")),
             cleaner = LlamaCppCleaner(io, cleanupTimeoutMs),
+            verifier = PinnedWeightsVerifier.shared,
         ),
     )
 

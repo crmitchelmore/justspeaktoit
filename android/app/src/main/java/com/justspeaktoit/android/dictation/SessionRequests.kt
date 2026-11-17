@@ -7,9 +7,13 @@ import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.CloudService
 import com.justspeaktoit.android.cloud.RequestReleasedException
 import com.justspeaktoit.android.cloud.SharedAudio
+import com.justspeaktoit.android.ondevice.GeminiNanoCleanup
+import com.justspeaktoit.android.ondevice.GeminiNanoFailure
+import com.justspeaktoit.android.ondevice.GeminiNanoResult
 import com.justspeaktoit.android.security.SecretStore
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.security.GeneralSecurityException
 import java.security.ProviderException
@@ -21,6 +25,12 @@ internal sealed interface CleanupOutcome {
     data object Failed : CleanupOutcome
 
     data object Released : CleanupOutcome
+
+    /** An empty transcript that on-device cleanup left empty without calling the model. */
+    data object Skipped : CleanupOutcome
+
+    /** Gemini Nano kept the original transcript; the reason is shown. No cloud model is tried instead. */
+    data class OnDeviceFailed(val failure: GeminiNanoFailure) : CleanupOutcome
 }
 
 /**
@@ -28,7 +38,7 @@ internal sealed interface CleanupOutcome {
  * deadline with a releasable hold ([CloudCapture.call]). Failures become the session's events; a key
  * the provider rejected or that could not be read is reported to [onKeyFailure] for the Errors filter.
  * A request the user released throws [RequestReleasedException], so the caller decides what a cancel
- * keeps.
+ * keeps. On-device cleanup goes to [onDevice] instead, which needs no key and never reaches the network.
  */
 internal class SessionRequests(
     private val cloud: CloudService,
@@ -36,6 +46,7 @@ internal class SessionRequests(
     private val capture: CloudCapture,
     private val io: CoroutineDispatcher,
     private val timings: DictationTimings,
+    private val onDevice: GeminiNanoCleanup? = null,
     private val onKeyFailure: (CloudProvider, DictationFailure) -> Unit,
 ) {
     /**
@@ -109,13 +120,15 @@ internal class SessionRequests(
 
     /**
      * Cleans up [transcript] with [systemPrompt]. Any failure, including a missing key, keeps the
-     * original text.
+     * original text. Gemini Nano runs on the phone and reports why it kept the original.
      */
     suspend fun cleanup(model: CleanupModel, transcript: String, systemPrompt: String): CleanupOutcome {
+        if (model.isOnDevice) return cleanupOnDevice(transcript, systemPrompt)
+        val provider = model.cloudProvider
         val cleaned = try {
-            val key = withContext(io) { secrets.read(model.provider.credentialId) }
+            val key = withContext(io) { secrets.read(provider.credentialId) }
             key?.let {
-                capture.call(timings.cleanupMs, model.provider) { call ->
+                capture.call(timings.cleanupMs, provider) { call ->
                     cloud.cleanup(model, it, transcript, systemPrompt, call)
                 }
             }
@@ -129,6 +142,17 @@ internal class SessionRequests(
             null
         }
         return if (cleaned.isNullOrBlank()) CleanupOutcome.Failed else CleanupOutcome.Applied(cleaned)
+    }
+
+    private suspend fun cleanupOnDevice(transcript: String, systemPrompt: String): CleanupOutcome {
+        val engine = onDevice ?: return CleanupOutcome.OnDeviceFailed(GeminiNanoFailure.Unavailable)
+        val result = withTimeoutOrNull(timings.cleanupMs) { engine.clean(transcript, systemPrompt) }
+            ?: return CleanupOutcome.OnDeviceFailed(GeminiNanoFailure.Failed)
+        return when (result) {
+            is GeminiNanoResult.Cleaned -> CleanupOutcome.Applied(result.text)
+            GeminiNanoResult.Skipped -> CleanupOutcome.Skipped
+            is GeminiNanoResult.Failed -> CleanupOutcome.OnDeviceFailed(result.failure)
+        }
     }
 
     /** Only a key the provider rejected, or one that could not be read, shows under Errors. */

@@ -3,7 +3,7 @@ import Foundation
 /// The live (streaming) half of the Android cloud catalogue; see `CloudCatalogAndroidExport`.
 extension CloudCatalogAndroidExport {
     /// Live providers whose WebSocket protocol Android implements, in catalogue order.
-    static let liveProviderIDs: Set<LiveTranscriptionProviderID> = [.deepgram, .assemblyai, .openai]
+    static let liveProviderIDs: Set<LiveTranscriptionProviderID> = [.deepgram, .assemblyai, .openai, .elevenlabs]
 
     /// The live models Android streams, in catalogue order: every current route of an Android live
     /// provider. A new route of one of these providers appears on Android without edits here.
@@ -20,7 +20,7 @@ extension CloudCatalogAndroidExport {
         let sampleRate: Int
         /// The wire field for the spoken-language hint, or empty when the route takes none.
         let languageField: String
-        /// The wire field for the vocabulary (`prompt`, `keyterm`, `keywords`, `keyterms_prompt`),
+        /// The wire field for the vocabulary (`prompt`, `keyterm`, `keyterms`, `keyterms_prompt`),
         /// or empty when the route takes none.
         let vocabularyField: String
         /// `LiveModelCapabilities.postStopFinalizeBudget`, in milliseconds.
@@ -40,6 +40,9 @@ extension CloudCatalogAndroidExport {
         case .deepgram:
             languageField = api == "flux-general-multi" ? "language_hint" : "language"
             vocabularyField = TranscriptionKeywordPolicy.deepgramQuery(model: api, words: ["x"]).first?.name ?? ""
+        case .elevenlabs:
+            languageField = "language_code"
+            vocabularyField = ElevenLabsLiveProtocol.keytermModelIDs.contains(api) ? "keyterms" : ""
         default:
             languageField = ""
             vocabularyField = "keyterms_prompt"

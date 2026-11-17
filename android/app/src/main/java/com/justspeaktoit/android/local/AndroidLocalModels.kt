@@ -9,20 +9,25 @@ import org.json.JSONException
 import java.io.File
 import java.io.IOException
 
-/** The production wiring for downloaded Whisper models. */
+/** The production wiring for downloaded Whisper and cleanup models. */
 object AndroidLocalModels {
-    fun setup(context: Context, io: CoroutineDispatcher): LocalModelSetup = LocalModelSetup(
-        catalog = loadCatalog(context),
-        store = WhisperModelStore(File(context.filesDir, "models/whisper")),
+    fun setup(context: Context, io: CoroutineDispatcher, cleanupTimeoutMs: Long): LocalModelSetup = LocalModelSetup(
+        catalog = loadCatalog(context, WhisperCatalog.ASSET, WhisperCatalog::parse),
+        store = ModelStore(File(context.filesDir, "models/whisper")),
         downloader = ModelDownloader(),
         totalMemoryBytes = totalMemory(context),
         network = ConnectivityNetworkGate(context),
         transcriber = WhisperCppTranscriber(io),
+        cleanup = LocalCleanupSetup(
+            catalog = loadCatalog(context, LlamaCatalog.ASSET, LlamaCatalog::parse),
+            store = ModelStore(File(context.filesDir, "models/llm")),
+            cleaner = LlamaCppCleaner(io, cleanupTimeoutMs),
+        ),
     )
 
     /** A missing or unreadable asset offers no models rather than stopping the app. */
-    private fun loadCatalog(context: Context): List<WhisperModel> = try {
-        context.assets.open(WhisperCatalog.ASSET).bufferedReader().use { WhisperCatalog.parse(it.readText()) }
+    private fun <M> loadCatalog(context: Context, asset: String, parse: (String) -> List<M>): List<M> = try {
+        context.assets.open(asset).bufferedReader().use { parse(it.readText()) }
     } catch (e: IOException) {
         emptyList()
     } catch (e: JSONException) {

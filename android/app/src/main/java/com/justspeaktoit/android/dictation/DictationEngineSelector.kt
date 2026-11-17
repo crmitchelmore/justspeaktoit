@@ -96,9 +96,19 @@ internal class DictationEngineSelector(
 
     private var downloadWatch: Job? = null
 
-    /** Rechecks keys, recognisers and the on-device language, so new models, services or keys are noticed. */
+    /** A [refresh] a running session held back, applied by [sessionEnded]. */
+    private var refreshPending = false
+
+    /**
+     * Rechecks keys, recognisers and the on-device language, so new models, services or keys are noticed.
+     * During a session it is held back until [sessionEnded].
+     */
     fun refresh() {
-        if (sessionActive()) return
+        if (sessionActive()) {
+            refreshPending = true
+            return
+        }
+        refreshPending = false
         // Presence only: names are listed without decrypting any secret.
         val names = secrets.names()
         val saved = CloudCatalog.providers.filterTo(mutableSetOf()) { it.credentialId in names }
@@ -120,6 +130,11 @@ internal class DictationEngineSelector(
                 )
             }
         }
+    }
+
+    /** Applies a [refresh] held back while the session ran, such as a model that finished downloading. */
+    fun sessionEnded() {
+        if (refreshPending) refresh()
     }
 
     /** Re-reads every saved choice, after an import replaced them, then rechecks availability. */

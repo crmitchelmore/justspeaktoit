@@ -44,6 +44,9 @@ extension SettingsSchema {
             Field(key: "handsFreeDictationEnabled", kind: .boolean,
                   summary: "Speech starts and stops Cloud recordings.",
                   defaultValue: .bool(SharedApplicationPreferences.handsFreeDictationEnabled.iOS.defaultValue)),
+            Field(key: "keyboardLiveCloudEnabled", kind: .boolean,
+                  summary: "Let the dictation keyboard stream audio to the live Cloud model's provider.",
+                  defaultValue: .bool(false)),
             Field(key: "history_retention", kind: .enumeration, summary: "How long History keeps transcripts.",
                   defaultValue: .string("Month"), allowedValues: androidHistoryRetentions),
             Field(key: "keepRecordingsInHistory", kind: .boolean,
@@ -52,13 +55,17 @@ extension SettingsSchema {
         ] + androidDownloadedModelFields + androidAudioFields + androidAppearanceFields
     }()
 
-    /// Downloaded Whisper models (`WhisperCppModels`, exported by `WhisperCppAndroidExport`).
+    /// Downloaded Whisper models (`WhisperCppModels`, exported by `WhisperCppAndroidExport`) and cleanup
+    /// models (`LlamaCppModels`, exported by `LlamaCppAndroidExport`).
     private static let androidDownloadedModelFields: [Field] = [
         Field(key: "downloadedTranscriptionModel", kind: .optionalString,
               summary: "Downloaded Whisper model used in Downloaded mode; null until one is chosen.",
               defaultValue: .null, allowedValues: WhisperCppModels.all.map(\.catalogueID)),
         Field(key: "downloadedModelsOnMobileData", kind: .boolean,
-              summary: "Download models over mobile data as well as Wi-Fi.", defaultValue: .bool(false))
+              summary: "Download models over mobile data as well as Wi-Fi.", defaultValue: .bool(false)),
+        Field(key: "localCleanupModel", kind: .optionalString,
+              summary: "Downloaded model that cleans up transcripts on the phone; null uses cleanup_model.",
+              defaultValue: .null, allowedValues: LlamaCppModels.all.map(\.catalogueID))
     ]
 
     private static let androidAudioFields: [Field] = [

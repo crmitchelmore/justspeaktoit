@@ -143,8 +143,8 @@ UPDATE_SETTINGS_SEARCH_ANDROID=1 swift test --filter SettingsSearchAndroidExport
 ```
 
 `scripts/update-android-assets` regenerates this asset, the cloud catalogue
-(`cloud_catalog.json`) and the raw configuration schema (`settings_schema.json`)
-together.
+(`cloud_catalog.json`), the read-aloud voice catalogue (`voice_catalog.json`) and
+the raw configuration schema (`settings_schema.json`) together.
 
 `SettingsSearchIndex.kt` mirrors the Swift ranking rules and adds one entry per
 `CloudCatalog` model and provider key. Settings has a search field with

@@ -138,7 +138,7 @@ class TroubleshootingTest {
 
         assertNull(off.of(TroubleshootingCheck.PostProcessingKey))
         val key = on.of(TroubleshootingCheck.PostProcessingKey)
-        assertTrue(key!!.title.contains(onDeviceReady.sessionCleanupModel.provider.displayName))
+        assertTrue(key!!.title.contains(onDeviceReady.sessionCleanupModel.cloudProvider.displayName))
         assertTrue(TroubleshootingFix.DisablePostProcessing in key.fixes)
     }
 

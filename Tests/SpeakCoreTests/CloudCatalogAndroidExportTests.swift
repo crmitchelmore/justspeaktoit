@@ -51,7 +51,7 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         let models = CloudCatalogAndroidExport.liveTranscriptionModels
         let expected = ModelCatalog.liveTranscription.filter { option in
             guard let route = LiveTranscriptionRouting.route(for: option.id) else { return false }
-            return [.deepgram, .assemblyai, .openai].contains(route.provider)
+            return [.deepgram, .assemblyai, .openai, .elevenlabs].contains(route.provider)
                 && ModelRetirements.retirement(for: option.id) == nil
         }
         XCTAssertEqual(models.map(\.id), expected.map(\.id))
@@ -61,6 +61,8 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         }
         XCTAssertTrue(models.map(\.id).contains(AssemblyAIModels.universal36ProStreamingID))
         XCTAssertTrue(models.map(\.id).contains(OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID))
+        XCTAssertTrue(models.map(\.id).contains(ModelCatalog.elevenLabsScribeV3LiveID))
+        XCTAssertTrue(models.map(\.id).contains("elevenlabs/scribe-v2-streaming"))
 
         let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
         let exported = try XCTUnwrap(object?["liveTranscriptionModels"] as? [[String: Any]])
@@ -75,6 +77,10 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
                 entry["postStopFinalizeBudgetMs"] as? Int,
                 Int((capabilities.postStopFinalizeBudget * 1000).rounded()), id
             )
+            if route.provider == .elevenlabs {
+                XCTAssertEqual(entry["languageField"] as? String, "language_code", id)
+                XCTAssertEqual(entry["vocabularyField"] as? String, "keyterms", id)
+            }
         }
     }
 
@@ -167,6 +173,25 @@ final class CloudCatalogAndroidExportTests: XCTestCase {
         // Android appends a blank line and the JSON payload to the intro, as `userMessage` does.
         let intro = try XCTUnwrap(voiceEdit["userMessageIntro"] as? String)
         XCTAssertTrue(VoiceEditPolicy.userMessage(selection: "a", instruction: "b").hasPrefix(intro + "\n\n{"))
+    }
+
+    func testDocumentCarriesGeminiNanoOutsideTheCloudCleanupModels() throws {
+        let object = try JSONSerialization.jsonObject(with: CloudCatalogAndroidExport.json()) as? [String: Any]
+        let nano = try XCTUnwrap(object?["geminiNano"] as? [String: Any])
+        XCTAssertEqual(nano["selectionId"] as? String, AndroidLocalModels.geminiNanoID)
+        XCTAssertEqual(nano["displayName"] as? String, AndroidLocalModels.geminiNano.displayName)
+        XCTAssertEqual(nano["description"] as? String, AndroidLocalModels.geminiNano.description)
+        XCTAssertEqual(nano["inputTokenLimit"] as? Int, 4_000)
+        let cleanupIDs = (object?["cleanupModels"] as? [[String: String]] ?? []).compactMap { $0["selectionId"] }
+        XCTAssertFalse(cleanupIDs.contains(AndroidLocalModels.geminiNanoID))
+        // Android-only: no other platform's cleanup catalogue offers it, and a synced selection
+        // falls back to the cloud default there while History keeps its name.
+        XCTAssertFalse(ModelCatalog.postProcessing.contains { $0.id == AndroidLocalModels.geminiNanoID })
+        XCTAssertEqual(
+            ModelCatalog.normalizedPostProcessingModel(AndroidLocalModels.geminiNanoID),
+            ModelCatalog.defaultPostProcessingModel
+        )
+        XCTAssertEqual(ModelCatalog.friendlyName(for: AndroidLocalModels.geminiNanoID), "Gemini Nano (On-device)")
     }
 
     func testCleanupModelsAreNativeRoutesThenOpenRouterSlugs() throws {

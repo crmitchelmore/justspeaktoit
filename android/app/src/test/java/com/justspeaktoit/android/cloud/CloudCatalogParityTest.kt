@@ -123,9 +123,20 @@ class CloudCatalogParityTest {
         val expected = asset.getJSONArray("cleanupModels").objects().map {
             listOf(it.getString("selectionId"), it.getString("displayName"), it.getString("provider"), it.getString("apiName"))
         }
-        val actual = CloudCatalog.cleanupModels.map { listOf(it.selectionId, it.displayName, it.provider.id, it.apiName) }
+        val actual = CloudCatalog.cleanupModels.map { listOf(it.selectionId, it.displayName, it.cloudProvider.id, it.apiName) }
         assertEquals(expected, actual)
         assertEquals(CloudCatalog.CLEANUP_MODEL, CloudCatalog.cleanupModel(null).selectionId)
+    }
+
+    @Test
+    fun testGeminiNano_matchesTheGeneratedCatalogueAndStaysOutOfTheCloudModels() {
+        val nano = asset.getJSONObject("geminiNano")
+        assertEquals(nano.getString("selectionId"), CloudCatalog.geminiNano.selectionId)
+        assertEquals(nano.getString("displayName"), CloudCatalog.geminiNano.displayName)
+        assertEquals(nano.getInt("inputTokenLimit"), GeneratedCloudCatalog.GEMINI_NANO_INPUT_TOKEN_LIMIT)
+        assertTrue(CloudCatalog.geminiNano.isOnDevice)
+        assertTrue(CloudCatalog.cleanupModels.none { it.isOnDevice })
+        assertEquals(CloudCatalog.geminiNano, CloudCatalog.cleanupModel(nano.getString("selectionId")))
     }
 
     @Test
@@ -142,7 +153,7 @@ class CloudCatalogParityTest {
         val urls = asset.getJSONArray("providers").objects()
             .filter { it.has("chatCompletionsURL") }
             .associate { it.getString("id") to it.getString("chatCompletionsURL") }
-        CloudCatalog.cleanupModels.filterNot { it.isOpenRouter }.map { it.provider }.distinct().forEach { provider ->
+        CloudCatalog.cleanupModels.filterNot { it.isOpenRouter }.map { it.cloudProvider }.distinct().forEach { provider ->
             assertEquals(provider.id, urls[provider.id], "${provider.baseUrl}/chat/completions")
         }
     }

@@ -1,4 +1,4 @@
-package com.justspeaktoit.android.ui
+package com.justspeaktoit.android.readaloud
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

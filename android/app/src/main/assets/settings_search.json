@@ -149,6 +149,53 @@
       "title" : "Learned corrections"
     },
     {
+      "id" : "android.readAloudVoice",
+      "keywords" : [
+        "voice output",
+        "text to speech",
+        "tts",
+        "speak",
+        "read aloud",
+        "voice",
+        "elevenlabs",
+        "azure",
+        "deepgram",
+        "cartesia",
+        "gemini",
+        "groq",
+        "speechmatics",
+        "soniox"
+      ],
+      "section" : "voiceOutput",
+      "sectionTitle" : "Voice Output",
+      "settingKeys" : [
+        "readAloudVoice"
+      ],
+      "summary" : "The voice that reads transcripts aloud: the phone's text-to-speech or a cloud voice.",
+      "title" : "Read aloud voice"
+    },
+    {
+      "id" : "android.pronunciation",
+      "keywords" : [
+        "pronunciation dictionary",
+        "pronounce",
+        "say as",
+        "read aloud",
+        "acronyms",
+        "names",
+        "text to speech",
+        "tts",
+        "regex"
+      ],
+      "section" : "pronunciation",
+      "sectionTitle" : "Pronunciation",
+      "settingKeys" : [
+        "pronunciationDictionary"
+      ],
+      "summary" : "Words read aloud differently from how they are written, such as names and acronyms.",
+      "title" : "Pronunciation dictionary"
+    },
+    {
       "id" : "android.cleanup",
       "keywords" : [
         "post-processing",
@@ -172,7 +219,15 @@
         "discover models",
         "model discovery",
         "live models",
-        "newest models"
+        "newest models",
+        "gemini nano",
+        "nano",
+        "on-device cleanup",
+        "on this phone",
+        "offline cleanup",
+        "local cleanup",
+        "private cleanup",
+        "aicore"
       ],
       "section" : "postProcessing",
       "sectionTitle" : "Post-processing",
@@ -183,6 +238,32 @@
       ],
       "summary" : "Send the final transcript to the chosen cleanup model to fix punctuation and filler words.",
       "title" : "Clean up transcripts"
+    },
+    {
+      "id" : "android.downloadedCleanup",
+      "keywords" : [
+        "downloaded cleanup",
+        "local cleanup",
+        "local llm",
+        "llama",
+        "llama.cpp",
+        "gguf",
+        "qwen",
+        "smollm",
+        "on device",
+        "offline",
+        "private",
+        "post-processing",
+        "remove model",
+        "storage"
+      ],
+      "section" : "postProcessing",
+      "sectionTitle" : "Post-processing",
+      "settingKeys" : [
+        "localCleanupModel"
+      ],
+      "summary" : "Download a small language model to clean up transcripts on the phone, without a key or network.",
+      "title" : "Downloaded cleanup models"
     },
     {
       "id" : "android.cleanupPrompt",
@@ -343,6 +424,27 @@
       ],
       "summary" : "Listen for speech in Cloud mode, record from just before you speak and stop when you go quiet.",
       "title" : "Hands-free dictation"
+    },
+    {
+      "id" : "android.keyboardLiveCloud",
+      "keywords" : [
+        "keyboard",
+        "IME",
+        "live",
+        "streaming",
+        "cloud",
+        "BYOK",
+        "partial",
+        "real-time",
+        "use live cloud models in the keyboard"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+        "keyboardLiveCloudEnabled"
+      ],
+      "summary" : "Let the keyboard stream to your live Cloud model, showing text as you speak.",
+      "title" : "Dictation keyboard"
     },
     {
       "id" : "android.appearance",

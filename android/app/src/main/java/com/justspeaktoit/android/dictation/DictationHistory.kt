@@ -17,6 +17,68 @@ import java.io.File
 import java.io.IOException
 import java.util.UUID
 
+/** What a dictation session writes to History; [SessionHistory.None] keeps nothing, for the keyboard. */
+internal interface SessionHistory {
+    /** The entry [recordSession] wrote last, so an interrupted recording can be attached to it. */
+    val latestSession: HistoryEntry?
+
+    fun recordSession(
+        state: DictationState,
+        modelId: String?,
+        retention: Retention,
+        audio: File? = null,
+        durationSeconds: Double? = null,
+    ): Job?
+
+    fun replaceSessionText(text: String, cleanedUp: Boolean, retention: Retention): Job?
+
+    fun keepRecording(
+        file: File,
+        modelId: String?,
+        retention: Retention,
+        mode: RecognitionMode = RecognitionMode.Cloud,
+        durationSeconds: Double? = null,
+    ): Job?
+
+    fun attachAudio(file: File, entry: HistoryEntry?, retention: Retention): Job?
+
+    companion object {
+        /** Records nothing: a recording handed over to be kept is deleted instead. */
+        val None: SessionHistory = object : SessionHistory {
+            override val latestSession: HistoryEntry? get() = null
+
+            override fun recordSession(
+                state: DictationState,
+                modelId: String?,
+                retention: Retention,
+                audio: File?,
+                durationSeconds: Double?,
+            ): Job? {
+                audio?.delete()
+                return null
+            }
+
+            override fun replaceSessionText(text: String, cleanedUp: Boolean, retention: Retention): Job? = null
+
+            override fun keepRecording(
+                file: File,
+                modelId: String?,
+                retention: Retention,
+                mode: RecognitionMode,
+                durationSeconds: Double?,
+            ): Job? {
+                file.delete()
+                return null
+            }
+
+            override fun attachAudio(file: File, entry: HistoryEntry?, retention: Retention): Job? {
+                file.delete()
+                return null
+            }
+        }
+    }
+}
+
 /**
  * Owns History for a dictation screen: the ordered writes, the entry of the latest session (so a
  * cleanup or "Show original" replaces it rather than adding another) and cancelled recordings kept
@@ -33,7 +95,7 @@ internal class DictationHistory(
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val onLocalChange: () -> Unit = {},
     private val publish: (entries: List<HistoryEntry>, failed: Boolean) -> Unit,
-) {
+) : SessionHistory {
     // One thread owns the history file, so writes are ordered without locks.
     @OptIn(ExperimentalCoroutinesApi::class)
     private val writer = io.limitedParallelism(1)
@@ -44,8 +106,7 @@ internal class DictationHistory(
     /** The latest change; the next one waits for it, so changes publish in call order. */
     private var last: Job? = null
 
-    /** The entry [recordSession] wrote last, so an interrupted recording can be attached to it. */
-    val latestSession: HistoryEntry? get() = sessionEntry
+    override val latestSession: HistoryEntry? get() = sessionEntry
 
     /**
      * Loads History, saves the [recoverable] recordings no session finished, and deletes audio no
@@ -74,8 +135,15 @@ internal class DictationHistory(
     /**
      * Records a session that just ended. Only Done and Failed sessions are recorded, and [audio] (a
      * stopped recording) is moved into History beside the entry; it is deleted if it cannot be kept.
+     * [durationSeconds] is how long the session listened, for usage insights.
      */
-    fun recordSession(state: DictationState, modelId: String?, retention: Retention, audio: File? = null): Job? {
+    override fun recordSession(
+        state: DictationState,
+        modelId: String?,
+        retention: Retention,
+        audio: File?,
+        durationSeconds: Double?,
+    ): Job? {
         val base = when (state) {
             is DictationState.Done -> sessionEntry(state.mode, modelId, HistoryStatus.Completed, state.transcript, null)
             is DictationState.Failed ->
@@ -84,7 +152,7 @@ internal class DictationHistory(
                 audio?.delete()
                 return null
             }
-        }
+        }.copy(durationSeconds = durationSeconds)
         val kept = audio?.let { File(recordingsDir, "${base.id}.wav") }
         val entry = base.copy(audioPath = kept?.absolutePath)
         sessionEntry = entry
@@ -102,7 +170,7 @@ internal class DictationHistory(
     }
 
     /** Replaces the latest session's text, after a cleanup or when the user restores the original. */
-    fun replaceSessionText(text: String, cleanedUp: Boolean, retention: Retention): Job? {
+    override fun replaceSessionText(text: String, cleanedUp: Boolean, retention: Retention): Job? {
         val prior = sessionEntry ?: return null
         // Keeps the transcript a cleanup replaced, so History sync can send it as the raw text.
         val rawText = when {
@@ -123,11 +191,12 @@ internal class DictationHistory(
      * Moves a stopped recording into History as a cancelled entry, ready for [replace] after a later
      * transcription. If the audio cannot be moved it is deleted and History is left unchanged.
      */
-    fun keepRecording(
+    override fun keepRecording(
         file: File,
         modelId: String?,
         retention: Retention,
-        mode: RecognitionMode = RecognitionMode.Cloud,
+        mode: RecognitionMode,
+        durationSeconds: Double?,
     ): Job {
         val id = newId()
         return update {
@@ -144,6 +213,7 @@ internal class DictationHistory(
                 status = HistoryStatus.Cancelled,
                 text = "",
                 audioPath = kept.absolutePath,
+                durationSeconds = durationSeconds,
             )
             store.add(entry, retention)
         }
@@ -153,7 +223,7 @@ internal class DictationHistory(
      * Moves an interrupted session's stopped recording into History beside its entry, so it can be
      * transcribed later. Runs after [recordSession] wrote [entry]; too short a recording is deleted.
      */
-    fun attachAudio(file: File, entry: HistoryEntry?, retention: Retention): Job =
+    override fun attachAudio(file: File, entry: HistoryEntry?, retention: Retention): Job =
         update {
             if (entry == null || RecordingRecovery.finalise(file) < 0) {
                 file.delete()

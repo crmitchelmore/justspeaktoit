@@ -160,23 +160,34 @@ final class XAITTSTransportTests: XCTestCase {
         }
     }
 
-    func testListVoices_readsTheAccountListingAndItsOptionalLanguage() async throws {
+    func testListVoices_readsBuiltInsThenTheTeamsCustomVoices() async throws {
         let session = TTSTransportStub.session()
-        TTSTransportStub.stub(
-            statusCode: 200,
-            body: Data("""
-            {"voices":[{"voice_id":"eve","name":"Eve","language":"en"},
-                       {"voice_id":"nlbqfwie","name":"Custom","language":null}]}
-            """.utf8)
-        )
+        StubURLProtocol.respond { request in
+            let body = request.url?.path == "/v1/custom-voices"
+                ? #"{"voices":[{"voice_id":"nlbqfwie","name":"Custom","language":null}],"pagination_token":null}"#
+                : #"{"voices":[{"voice_id":"eve","name":"Eve","language":"en"}]}"#
+            return (TTSTransportStub.response(for: request, statusCode: 200), Data(body.utf8))
+        }
         let voices = try await XAITTSAPI(session: session).listVoices(apiKey: "fixture")
         let request = try XCTUnwrap(StubURLProtocol.lastRequest)
 
-        XCTAssertEqual(request.url, XAITTSAPI.voicesEndpoint)
+        XCTAssertEqual(request.url?.path, XAITTSAPI.customVoicesEndpoint.path)
         XCTAssertEqual(request.httpMethod, "GET")
         XCTAssertEqual(voices.map(\.id), ["eve", "nlbqfwie"])
+        XCTAssertEqual(voices.first?.language, "en")
         XCTAssertEqual(voices.last?.providerVoiceID, "xai/nlbqfwie")
         XCTAssertNil(voices.last?.language)
+    }
+
+    func testListVoices_keepsBuiltInsWhenTheTeamHasNoCustomVoiceLibrary() async throws {
+        let session = TTSTransportStub.session()
+        StubURLProtocol.respond { request in
+            let custom = request.url?.path == "/v1/custom-voices"
+            return (TTSTransportStub.response(for: request, statusCode: custom ? 403 : 200),
+                    Data((custom ? "{}" : #"{"voices":[{"voice_id":"eve"}]}"#).utf8))
+        }
+        let voices = try await XAITTSAPI(session: session).listVoices(apiKey: "fixture")
+        XCTAssertEqual(voices.map(\.id), ["eve"])
     }
 
     func testDecodeVoices_reportsAResponseItCannotRead() {

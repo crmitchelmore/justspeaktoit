@@ -111,6 +111,8 @@ private extension LocalPostProcessingModelList {
               Button("Use") {
                 settings.postProcessingModel = model.id
               }
+              .accessibilityLabel("Use \(model.displayName)")
+              .accessibilityIdentifier("localPostProcessingModelUse.\(model.id)")
             }
             Button("Delete") {
               localPostProcessingModels.deleteModel(model)
@@ -118,6 +120,8 @@ private extension LocalPostProcessingModelList {
                 settings.postProcessingModel = LocalPostProcessingModelManager.builtInRulesModelID
               }
             }
+            .accessibilityLabel("Delete \(model.displayName)")
+            .accessibilityIdentifier("localPostProcessingModelDelete.\(model.id)")
           }
         case .installing:
           VStack(alignment: .trailing, spacing: 6) {
@@ -132,6 +136,8 @@ private extension LocalPostProcessingModelList {
             Button("Download") {
               Task { await localPostProcessingModels.installModel(model) }
             }
+            .accessibilityLabel("Download \(model.displayName)")
+            .accessibilityIdentifier("localPostProcessingModelDownload.\(model.id)")
           }
         }
       }

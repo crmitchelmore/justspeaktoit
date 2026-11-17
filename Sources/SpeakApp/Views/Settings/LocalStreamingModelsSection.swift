@@ -118,6 +118,8 @@ struct LocalStreamingModelsSection: View, LocalModelRowPresenting {
                 Button("Use") {
                   settings.localStreamingModelSource = FluidAudioParakeetModel.id
                 }
+                .accessibilityLabel("Use \(FluidAudioParakeetModel.displayName)")
+                .accessibilityIdentifier("localStreamingModelUse.\(FluidAudioParakeetModel.id)")
               }
               Button("Delete") {
                 fluidAudioModels.delete()
@@ -130,6 +132,8 @@ struct LocalStreamingModelsSection: View, LocalModelRowPresenting {
                   }
                 }
               }
+              .accessibilityLabel("Delete \(FluidAudioParakeetModel.displayName)")
+              .accessibilityIdentifier("localStreamingModelDelete.\(FluidAudioParakeetModel.id)")
             case .installing:
               ProgressView(value: fluidAudioModels.downloadProgress)
                 .frame(width: 90)
@@ -141,6 +145,8 @@ struct LocalStreamingModelsSection: View, LocalModelRowPresenting {
                 Task { await fluidAudioModels.install() }
               }
               .disabled(!FluidAudioModelManager.supportsCurrentHardware)
+              .accessibilityLabel("Download \(FluidAudioParakeetModel.displayName)")
+              .accessibilityIdentifier("localStreamingModelDownload.\(FluidAudioParakeetModel.id)")
             }
           }
         }
@@ -214,11 +220,15 @@ struct LocalStreamingModelsSection: View, LocalModelRowPresenting {
               Button("Use") {
                 settings.localStreamingModelSource = streamingID
               }
+              .accessibilityLabel("Use \(model.displayName)")
+              .accessibilityIdentifier("localStreamingModelUse.\(streamingID)")
             }
             Button(localModels.usesLegacyStorage(model) ? "Remove" : "Delete") {
               inventory.deleteDownloadedWhisperKitModel(model)
             }
             .disabled(!localModels.canDelete(model))
+            .accessibilityLabel("\(localModels.usesLegacyStorage(model) ? "Remove" : "Delete") \(model.displayName)")
+            .accessibilityIdentifier("localStreamingModelDelete.\(streamingID)")
           case .installing:
             ProgressView()
               .controlSize(.small)
@@ -226,10 +236,14 @@ struct LocalStreamingModelsSection: View, LocalModelRowPresenting {
             Button("Download") {
               Task { await localModels.install(model) }
             }
+            .accessibilityLabel("Download \(model.displayName)")
+            .accessibilityIdentifier("localStreamingModelDownload.\(streamingID)")
             if localModels.canDelete(model) {
               Button(state == .notInstalled ? "Delete" : "Retry Delete") {
                 inventory.deleteDownloadedWhisperKitModel(model)
               }
+              .accessibilityLabel("\(state == .notInstalled ? "Delete" : "Retry Delete") \(model.displayName)")
+              .accessibilityIdentifier("localStreamingModelDelete.\(streamingID)")
             }
           }
         }

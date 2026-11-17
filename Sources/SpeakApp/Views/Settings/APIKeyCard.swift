@@ -42,6 +42,17 @@ struct APIKeyCardConfiguration {
   var statusLabel = "Status"
   /// The uses this card covers, for its least-privilege key guide.
   let guideUses: APIKeyUses
+
+  /// Card-unique stem for automation identifiers; titles differ even when two
+  /// cards share a credential (Deepgram transcription and voice output).
+  var automationIDStem: String {
+    title.lowercased().map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined()
+  }
+
+  /// Names the provider so each card's key-page link reads differently.
+  func linkAccessibilityLabel(_ linkLabel: String) -> String {
+    "\(linkLabel), \(title)"
+  }
 }
 
 /// A settings card that stores, checks and removes one provider credential.
@@ -73,6 +84,8 @@ private extension APIKeyCard {
           .privacySensitive()
           .textFieldStyle(.roundedBorder)
           .speakTooltip("Paste the key exactly as issued; Speak stores it securely in your Keychain.")
+          .accessibilityLabel(configuration.keyFieldLabel)
+          .accessibilityIdentifier("apiKeyField.\(configuration.automationIDStem)")
 
         compactAPIKeySaveButton(configuration)
         compactAPIKeyValidateButton(configuration)
@@ -123,7 +136,8 @@ private extension APIKeyCard {
             .labelStyle(.iconOnly)
         }
         .speakTooltip("Open \(configuration.title)'s site to manage your API key.")
-        .accessibilityLabel(linkLabel)
+        .accessibilityLabel(configuration.linkAccessibilityLabel(linkLabel))
+        .accessibilityIdentifier("apiKeyLink.\(configuration.automationIDStem)")
       }
 
       Spacer(minLength: 0)
@@ -203,6 +217,8 @@ private extension APIKeyCard {
             .font(.caption)
         }
         .speakTooltip("Open \(configuration.title)'s site to create or manage your API key.")
+        .accessibilityLabel(configuration.linkAccessibilityLabel(linkLabel))
+        .accessibilityIdentifier("apiKeyLink.\(configuration.automationIDStem)")
       }
 
       SecureField(configuration.keyFieldLabel, text: configuration.keyBinding)
@@ -210,6 +226,8 @@ private extension APIKeyCard {
         .privacySensitive()
         .textFieldStyle(.roundedBorder)
         .speakTooltip("Paste the key exactly as issued; Speak stores it securely in your Keychain.")
+        .accessibilityLabel(configuration.keyFieldLabel)
+        .accessibilityIdentifier("apiKeyField.\(configuration.automationIDStem)")
 
       Text(configuration.descriptionText)
         .font(.caption)

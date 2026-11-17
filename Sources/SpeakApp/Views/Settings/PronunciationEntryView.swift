@@ -12,6 +12,8 @@ struct PronunciationEntryView: View {
     HStack(spacing: 8) {
       TextField("Word", text: $newWord)
         .textFieldStyle(.roundedBorder)
+        .accessibilityLabel("Word")
+        .accessibilityIdentifier("pronunciationNewWordField")
         .frame(width: 120)
 
       Text("→")
@@ -19,6 +21,8 @@ struct PronunciationEntryView: View {
 
       TextField("Pronunciation", text: $newPronunciation)
         .textFieldStyle(.roundedBorder)
+        .accessibilityLabel("Pronunciation")
+        .accessibilityIdentifier("pronunciationNewPronunciationField")
         .frame(width: 150)
 
       Button("Add") {

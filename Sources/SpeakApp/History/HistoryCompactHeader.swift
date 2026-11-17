@@ -19,6 +19,7 @@ struct HistoryCompactHeader: View {
         TextField("Search", text: self.$list.searchText)
           .textFieldStyle(.plain)
           .frame(minWidth: 120, idealWidth: 180, maxWidth: 240)
+          .accessibilityLabel("Search history")
           .accessibilityIdentifier("historySearchField")
       }
       .padding(.horizontal, 6)

@@ -58,6 +58,8 @@ struct PronunciationDictionaryHeader: View {
                 .foregroundStyle(.secondary)
             TextField("Search words or pronunciations…", text: $searchText)
                 .textFieldStyle(.plain)
+                .accessibilityLabel("Search pronunciations")
+                .accessibilityIdentifier("pronunciationSearchField")
             if !searchText.isEmpty {
                 Button {
                     searchText = ""

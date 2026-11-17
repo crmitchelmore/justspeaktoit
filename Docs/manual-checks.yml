@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-16"
+updated: "2026-11-17"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -543,6 +543,21 @@ sessions:
           - "Turn VoiceOver off."
         expected: "The menu bar item reads \"Just Speak to It\" with the current state. Every control has a meaningful name and both sheets close on Escape. Starting a dictation says \"Recording started\", and transcribing and errors are announced."
         final_gate: true
+      - id: "mac-voiceover-fields-and-repeated-buttons"
+        issues:
+          - 1399
+        title: "Mac: search fields, key fields and repeated buttons have their own names"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes the AX names fix for #1399 search fields and Download buttons"
+        steps:
+          - "Turn on VoiceOver (Command-F5). Move to the History search field, then the Pronunciation search, Word and Pronunciation fields."
+          - "In Settings \u203a API Keys, move through two provider cards and listen to the key field and the Get API Key link."
+          - "In Settings \u203a Transcription, choose Local and move through the model list's Download, Use and Delete buttons, then choose Remote again."
+          - "Open the Remote Streaming model chooser, move to its search field and a few rows, then press Done."
+          - "Turn VoiceOver off."
+        expected: "Every field reads a name (\"Search history\", \"Search pronunciations\", the provider's API key), not only its placeholder. Each Get API Key link names its provider, and each Download, Use and Delete button names its model. The chooser's search field reads \"Search\" and the chooser's title, and the Transcription location is back on Remote."
+        final_gate: false
       - id: "mac-record-button-follows-hotkey"
         issues:
           - 1407

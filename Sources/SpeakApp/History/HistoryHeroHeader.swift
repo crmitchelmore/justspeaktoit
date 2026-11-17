@@ -77,6 +77,7 @@ struct HistoryHeroHeader: View {
           .speakTooltip(
             "Search your past sessions by transcript, model, or keyword so you can quickly revisit the right moment."
           )
+          .accessibilityLabel("Search history")
           .accessibilityIdentifier("historySearchField")
       }
       .padding(.vertical, 12)

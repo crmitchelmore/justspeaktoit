@@ -80,6 +80,7 @@ struct ModelChooserSheet: View {
             }
           }
           .buttonStyle(.plain)
+          .accessibilityIdentifier("modelPicker.custom")
         }
       },
       row: { option in

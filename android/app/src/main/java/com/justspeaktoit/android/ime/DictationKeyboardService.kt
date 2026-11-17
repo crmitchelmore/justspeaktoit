@@ -150,6 +150,7 @@ class DictationKeyboardService : InputMethodService() {
     private var microphoneHold: SystemResourceToken? = null
     private var mic: ImageButton? = null
     private var profileKey: Button? = null
+    private var editingKeys: List<Button> = emptyList()
     private var voiceEditKey: Button? = null
 
     /** The downloaded model cleaning up the last transcript, shown as composing text meanwhile. */
@@ -268,8 +269,11 @@ class DictationKeyboardService : InputMethodService() {
             addView(key(R.id.keyboard_switch, R.string.keyboard_switch) { switchKeyboard() })
             addView(micButton)
             // While cleanup holds the words as composing text, editing keys would change what it replaces.
-            addView(key(R.id.keyboard_delete, R.string.keyboard_delete) { sendKeyUnlessCleaning(KeyEvent.KEYCODE_DEL) })
-            addView(key(R.id.keyboard_enter, R.string.keyboard_enter) { sendKeyUnlessCleaning(KeyEvent.KEYCODE_ENTER) })
+            editingKeys = listOf(
+                key(R.id.keyboard_delete, R.string.keyboard_delete) { sendKeyUnlessCleaning(KeyEvent.KEYCODE_DEL) },
+                key(R.id.keyboard_enter, R.string.keyboard_enter) { sendKeyUnlessCleaning(KeyEvent.KEYCODE_ENTER) },
+            )
+            editingKeys.forEach { addView(it) }
         }
         status = statusView
         mic = micButton
@@ -930,6 +934,10 @@ class DictationKeyboardService : InputMethodService() {
             contentDescription = getString(R.string.keyboard_profile_description, name)
             isEnabled = !state.isActive && !checking && run == null && cleaning == null
             alpha = if (isEnabled) 1f else 0.4f
+        }
+        editingKeys.forEach {
+            it.isEnabled = cleaning == null
+            it.alpha = if (it.isEnabled) 1f else 0.4f
         }
         // Read here: inside the button's apply, selectionStart would be the button's own TextView selection.
         val hasSelection = selectionStart != selectionEnd

@@ -219,7 +219,15 @@
         "discover models",
         "model discovery",
         "live models",
-        "newest models"
+        "newest models",
+        "gemini nano",
+        "nano",
+        "on-device cleanup",
+        "on this phone",
+        "offline cleanup",
+        "local cleanup",
+        "private cleanup",
+        "aicore"
       ],
       "section" : "postProcessing",
       "sectionTitle" : "Post-processing",
@@ -390,6 +398,27 @@
       ],
       "summary" : "Listen for speech in Cloud mode, record from just before you speak and stop when you go quiet.",
       "title" : "Hands-free dictation"
+    },
+    {
+      "id" : "android.keyboardLiveCloud",
+      "keywords" : [
+        "keyboard",
+        "IME",
+        "live",
+        "streaming",
+        "cloud",
+        "BYOK",
+        "partial",
+        "real-time",
+        "use live cloud models in the keyboard"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+        "keyboardLiveCloudEnabled"
+      ],
+      "summary" : "Let the keyboard stream to your live Cloud model, showing text as you speak.",
+      "title" : "Dictation keyboard"
     },
     {
       "id" : "android.appearance",

@@ -30,6 +30,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okhttp3.ResponseBody
 import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.ProviderException
@@ -144,7 +145,7 @@ internal class OkHttpSpeechHttp(private val client: OkHttpClient = sharedClient)
 
             override fun onResponse(call: Call, response: Response) {
                 val result = try {
-                    response.use { SpeechHttpResponse(it.code, it.body.bytes()) }
+                    response.use { SpeechHttpResponse(it.code, boundedBytes(it.body, MAX_RESPONSE_BYTES)) }
                 } catch (error: IOException) {
                     if (continuation.isActive) continuation.resumeWithException(error)
                     return
@@ -155,6 +156,20 @@ internal class OkHttpSpeechHttp(private val client: OkHttpClient = sharedClient)
     }
 
     companion object {
+        /**
+         * The most a speech response may hold: a few minutes of 24 kHz 16-bit audio for the longest
+         * segment, base64-encoded for Gemini, fits with room to spare; a larger body is refused.
+         */
+        const val MAX_RESPONSE_BYTES = 50L * 1024 * 1024
+
+        /** The whole [body], or [SpeechResponseTooLarge] once it passes [limit] bytes; reads at most limit + 1. */
+        fun boundedBytes(body: ResponseBody, limit: Long): ByteArray {
+            if (body.contentLength() > limit) throw SpeechResponseTooLarge(limit)
+            val source = body.source()
+            if (source.request(limit + 1)) throw SpeechResponseTooLarge(limit)
+            return source.buffer.readByteArray()
+        }
+
         /**
          * Speech requests carry API keys in provider-specific headers that a redirect would forward to
          * another host, so redirects are never followed; a 3xx answer is reported as a service error.

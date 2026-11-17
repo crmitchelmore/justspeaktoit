@@ -59,7 +59,7 @@ public final class PronunciationRenderer: @unchecked Sendable {
     }
 
     /// A case-sensitive word replaces every literal occurrence. Otherwise the
-    /// word matches case-insensitively between word boundaries. Either way
+    /// word matches case-insensitively as a whole word (see `wordPattern`). Either way
     /// `replacement` is literal text; only regular-expression entries use templates.
     func applySimpleReplacement(
         text: String,
@@ -146,8 +146,31 @@ public final class PronunciationRenderer: @unchecked Sendable {
         return entry.caseSensitive ? nil : cacheKey(pattern: wordPattern(entry.word), options: .caseInsensitive)
     }
 
+    /// Letters, marks, digits and underscore, spelt out so Android's matcher
+    /// (`PronunciationDictionary.wordPattern`) uses the same class.
+    private static let wordCharacter = "[\\p{L}\\p{M}\\p{N}_]"
+
+    /// `word` as a literal that no word character may touch on a side whose
+    /// edge is itself a word character: "cat" stays whole-word, while a symbol
+    /// such as "@" still matches between spaces, which `\b` never allows.
+    /// An empty word matches nothing.
     static func wordPattern(_ word: String) -> String {
-        "\\b\(NSRegularExpression.escapedPattern(for: word))\\b"
+        guard let first = word.unicodeScalars.first, let last = word.unicodeScalars.last else { return "(?!)" }
+        let before = isWordScalar(first) ? "(?<!\(wordCharacter))" : ""
+        let after = isWordScalar(last) ? "(?!\(wordCharacter))" : ""
+        return before + NSRegularExpression.escapedPattern(for: word) + after
+    }
+
+    private static func isWordScalar(_ scalar: Unicode.Scalar) -> Bool {
+        if scalar == "_" { return true }
+        switch scalar.properties.generalCategory {
+        case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter,
+             .nonspacingMark, .spacingMark, .enclosingMark,
+             .decimalNumber, .letterNumber, .otherNumber:
+            return true
+        default:
+            return false
+        }
     }
 
     static func regexOptions(caseSensitive: Bool) -> NSRegularExpression.Options {

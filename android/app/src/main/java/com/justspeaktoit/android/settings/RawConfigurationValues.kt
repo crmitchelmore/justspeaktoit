@@ -22,6 +22,7 @@ object RawConfigurationValues {
         "cleanupModelDiscoveryEnabled" to state.cleanupModelDiscoveryEnabled,
         "keepAudioOnCancel" to state.keepAudioOnCancel,
         "handsFreeDictationEnabled" to state.handsFreeEnabled,
+        "keyboardLiveCloudEnabled" to state.keyboardLiveCloudEnabled,
         "history_retention" to state.retention.name,
         "keepRecordingsInHistory" to state.keepRecordings,
         "silenceDetectionEnabled" to state.silence.enabled,

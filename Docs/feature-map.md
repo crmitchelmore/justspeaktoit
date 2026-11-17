@@ -93,7 +93,7 @@ The flags live in `Project.swift`; release selection is in
 | F05 | Downloaded local transcription models | Yes | Partial | Yes | Yes | Partial | #1650 | iOS: WhisperKit Core ML batch transcription only; no live, sherpa-onnx or Phonon models. Android: whisper.cpp batch in the app only; not in the keyboard. |
 | F06 | Platform on-device recogniser | Yes | Yes | N/A | N/A | Yes | | |
 | F07 | Remote cleanup (OpenRouter and native LLMs) | Yes | Yes | Yes | Yes | Yes | | |
-| F08 | Local LLM cleanup | Yes | No | Yes | Yes | No | #1650 | iOS needs llama.cpp compiled into the app (no downloaded runtime, guideline 2.5.2). |
+| F08 | Local LLM cleanup | Yes | No | Yes | Yes | Partial | #1650 | iOS needs llama.cpp compiled into the app (no downloaded runtime, guideline 2.5.2). Android: Gemini Nano on phones whose AICore offers it; llama.cpp for other phones is #1660. |
 | F09 | Custom cleanup prompt | Yes | Yes | Yes | Yes | Yes | | |
 | F10 | Browse OpenRouter models picker | Yes | Yes | Yes | Yes | Yes | | Batch and cleanup pickers only; streaming pickers have none because OpenRouter can't stream. Windows and Linux also keep OpenRouter routes in the picker. |
 | F11 | Dictation profiles | Yes | Limited | Yes | Yes | Limited | | iOS and Android cannot see the frontmost app. |
@@ -121,7 +121,7 @@ The flags live in `Project.swift`; release selection is in
 | F33 | Configuration export/import and backup | Yes | Yes | Yes | Yes | Yes | | Android: settings, profiles, corrections, History, WAV recordings, keys opt-in. Windows and Linux: every category, keys opt-in; models are named, never copied. |
 | F34 | Raw settings editor and config tools | Yes | Partial | Yes | Yes | Partial | #1608 | iOS and Android have the raw JSON editor but no automation server, so no config tools. Windows and Linux have the raw JSON editor window, `speak config` and MCP `get_configuration`/`set_configuration`. |
 | F35 | Automation (CLI, MCP, App Intents) | Yes | Yes | Yes | Yes | Limited | | |
-| F36 | Usage insights dashboard | Yes | No | Yes | Yes | Partial | #1623 | Android: 7-day card on History. |
+| F36 | Usage insights dashboard | Yes | Yes | Yes | Yes | Partial | #1623 | iOS, Android: no spend (their History records no cost). Android: no top words, vocabulary or word of the month (no lemmatiser); unspaced Chinese and Japanese text counts as one word per run. |
 | F37 | Opt-in analytics and crash reporting | Yes | Yes | Partial | Partial | Yes | #1624 | Windows, Linux: crash reports ship; release workflows do not stamp the PostHog project key yet (owner step #1744), so analytics stays off. |
 | F38 | Tip jar / paid access | Yes | Yes | Partial | Partial | Partial | #1625 | Paid access is compiled dark. Windows, Linux: About's Support development opens GitHub Sponsors or Ko-fi; no paid access. Android: tip jar only. |
 | F39 | Audio file import | Yes | Yes | Yes | Yes | Yes | | |
@@ -135,7 +135,7 @@ The flags live in `Project.swift`; release selection is in
 | F47 | Accessible names, IDs and recording announcements | Yes | Yes | Yes | Yes | Yes | | |
 | F48 | Learned auto-corrections | Yes | Yes | Yes | Yes | Limited | | iOS learns from edits to text its keyboard inserted. Android learns only from edits made while its keyboard is in the field. |
 | F49 | Appearance settings | Yes | Yes | Yes | Yes | Yes | | |
-| F50 | Keyboard / IME surface | N/A | Yes | N/A | N/A | Yes | | |
+| F50 | Keyboard / IME surface | N/A | Yes | N/A | N/A | Yes | | Android can stream live Cloud models as an explicit opt-in. |
 
 ## Features
 
@@ -203,13 +203,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Android resolves a removed selection through the exported successor map, then the default. When a provider pre-processing prompt is active (AssemblyAI keyterms), LLM cleanup is skipped.
 
 ### F08 Local LLM cleanup
-- **Platforms:** macOS Yes · iOS No · Windows Yes · Linux Yes · Android No
+- **Platforms:** macOS Yes · iOS No · Windows Yes · Linux Yes · Android Partial
 - **Excluded:** none
-- **Gaps:** iOS, Android #1650 (iOS plan: compile llama.cpp (ggml with Metal) into the app; Android plan: Gemini Nano #1659 and llama.cpp #1660; see [Android on-device models](android-on-device-models.md)).
-- **How:** Local cleanup IDs are `local/post-processing/...`; `local/post-processing/rules` is the built-in rules cleanup. A downloaded LLM must receive the user's cleanup prompt as its system instruction.
-- **Refs:** `Sources/SpeakCore/LocalModels/LocalPostProcessingModel.swift`, `Sources/SpeakCore/ModelCatalog+LocalModels.swift`, `Sources/SpeakDesktop/Transcription/DesktopPostProcessing.swift`, `Sources/SpeakWindows/WindowsLocalCleanup.swift`, `Sources/SpeakLinux/LinuxLocalCleanup.swift`
+- **Gaps:** iOS, Android #1650 (iOS plan: compile llama.cpp (ggml with Metal) into the app; Android has Gemini Nano on phones whose AICore offers it (#1659, device acceptance pending) and still needs llama.cpp for other phones (#1660); see [Android on-device models](android-on-device-models.md)).
+- **How:** Local cleanup IDs are `local/post-processing/...`; `local/post-processing/rules` is the built-in rules cleanup. A downloaded LLM must receive the user's cleanup prompt as its system instruction. Android's Gemini Nano is the `AndroidLocalModels.geminiNanoID` route (exported as `geminiNano` in `cloud_catalog.json`): ML Kit's GenAI Prompt API sends the shared `TranscriptCleanupPolicy` instruction (or the user's prompt) as the system instruction and the transcript as separate JSON data, checks `countTokens` against the 4,000-token input limit first, and runs only while the app is the top foreground app. It is listed under **On this phone** in the cleanup picker only where `checkStatus()` reports it available or downloadable; elsewhere the picker says why.
+- **Refs:** `Sources/SpeakCore/LocalModels/LocalPostProcessingModel.swift`, `Sources/SpeakCore/LocalModels/AndroidLocalModels.swift`, `Sources/SpeakCore/ModelCatalog+LocalModels.swift`, `Sources/SpeakDesktop/Transcription/DesktopPostProcessing.swift`, `Sources/SpeakWindows/WindowsLocalCleanup.swift`, `Sources/SpeakLinux/LinuxLocalCleanup.swift`, `android/app/src/main/java/com/justspeaktoit/android/ondevice/GeminiNanoCleanup.kt`, `android/app/src/main/java/com/justspeaktoit/android/ondevice/MlKitGeminiNano.kt`, `android/app/src/main/java/com/justspeaktoit/android/ui/GeminiNanoViews.kt`
 - **Sunset:** none
-- **Nuances:** Rules cleanup ignores the prompt; the UI must say so. Desktop runtime notes: [desktop local LLM cleanup](desktop-local-llm-cleanup.md). iOS can't reuse the macOS path: `Sources/CLlamaCpp` vendors headers only and `LlamaCpp.cpp` `dlopen`s a separately provisioned shared library, and the macOS direct build installs a Python sidecar. On iOS the runtime may not be downloaded or loaded from outside the app (App Store guideline 2.5.2), so it needs llama.cpp built into the app as a source target or static XCFramework, an iOS adapter honouring `postProcessingSystemPrompt` as the system instruction, and memory limits per device. GGUF weights themselves are data and may be downloaded. Until then iOS on-device cleanup is Apple Foundation Models.
+- **Nuances:** Rules cleanup ignores the prompt; the UI must say so. Desktop runtime notes: [desktop local LLM cleanup](desktop-local-llm-cleanup.md). iOS can't reuse the macOS path: `Sources/CLlamaCpp` vendors headers only and `LlamaCpp.cpp` `dlopen`s a separately provisioned shared library, and the macOS direct build installs a Python sidecar. On iOS the runtime may not be downloaded or loaded from outside the app (App Store guideline 2.5.2), so it needs llama.cpp built into the app as a source target or static XCFramework, an iOS adapter honouring `postProcessingSystemPrompt` as the system instruction, and memory limits per device. GGUF weights themselves are data and may be downloaded. Until then iOS on-device cleanup is Apple Foundation Models. Android Gemini Nano never falls back to a cloud model: background use (`BACKGROUND_USE_BLOCKED`), `BUSY`, the per-app battery quota, an over-limit or cut-short request and an empty reply all keep the original transcript with the reason shown, and an empty transcript never calls the model. The keyboard is never the top app, so voice edit maps Gemini Nano to the default cloud cleanup model (`VoiceEditPolicy`). AICore refuses phones with an unlocked bootloader.
 
 ### F09 Custom cleanup prompt
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
@@ -455,13 +455,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** Android has the tile and launcher shortcut only, with no CLI by design. See [automation](automation.md).
 
 ### F36 Usage insights dashboard
-- **Platforms:** macOS Yes · iOS No · Windows Yes · Linux Yes · Android Partial
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Partial
 - **Excluded:** none
-- **Gaps:** iOS, Android #1623 (Android: 7-day dictations and words card only).
-- **How:** Derive totals and trends from completed History entries on the device.
-- **Refs:** `Sources/SpeakCore/SpeechInsights/SpeechInsightsEngine.swift`, `Sources/SpeakDesktop/History/DesktopHistoryPresentation.swift`, `Sources/SpeakApp/Views/Dashboard/SpeechInsightsDashboard.swift`, `android/app/src/main/java/com/justspeaktoit/android/history/HistoryInsights.kt`
+- **Gaps:** Android #1623 (top words, vocabulary, trending words and word of the month need SpeakCore's NaturalLanguage lemmas, which Android has no equivalent for; the Kotlin tokenizer splits on spaces and punctuation only, so an unspaced Chinese or Japanese run counts as one word, lowering words, phrases and pace for those languages. Android's ICU dictionary segments differently from NaturalLanguage and the JVM tests cannot run it, so no shared fixture could hold the two to the same words).
+- **How:** Derive everything on the device from History; nothing is sent. Usage totals (sessions, errors, recording time, average length, words) use `HistoryPresentationStatistics`'s rules over every History entry. Speech insights run `SpeechInsightsEngine` over completed entries with text, analysed on the raw transcript (the cleaned text only as a fallback), via `SpeechSessionRecord(historyRecord:)`; Apple platforms hold the persisted aggregate in the shared `SpeechInsightsModel`. Android reads the definitions (fillers, stopwords, limits, pace ranges) from `speech_insights.json`, exported from SpeakCore by `scripts/update-android-assets`, and mirrors the engine and tokenizer in Kotlin.
+- **Refs:** `Sources/SpeakCore/SpeechInsights/SpeechInsightsEngine.swift`, `Sources/SpeakCore/SpeechInsights/SpeechInsightsModel.swift`, `Sources/SpeakCore/SpeechInsights/SpeechSessionRecord+History.swift`, `Sources/SpeakCore/SpeechInsights/SpeechInsightsAndroidExport.swift`, `Sources/SpeakDesktop/History/DesktopHistoryPresentation.swift`, `Sources/SpeakApp/Views/Dashboard/SpeechInsightsDashboard.swift`, `Sources/SpeakiOS/Views/UsageInsightsView.swift`, `android/app/src/main/java/com/justspeaktoit/android/history/SpeechInsights.kt`, `android/app/src/main/java/com/justspeaktoit/android/ui/InsightsScreen.kt`, `Tests/Fixtures/speech-insights/parity.json`
 - **Sunset:** none
-- **Nuances:** Count only completed entries with text, as `HistoryInsights` does.
+- **Nuances:** `Tests/Fixtures/speech-insights/parity.json` is the shared fixture: `SpeechInsightsParityTests` (Swift) regenerates its `expected` block with `UPDATE_SPEECH_INSIGHTS_PARITY=1` and `SpeechInsightsParityTest` (Kotlin) must produce the same numbers. The Kotlin tokenizer mirrors NaturalLanguage for dictated prose: clitics split off ("can't" is "ca" + "n't"), and dotted abbreviations keep their full stop only away from the end of the text. iOS and Android History record no cost, so they show no spend. "Time saved" is not shown on any platform.
 
 ### F37 Opt-in analytics and crash reporting
 - **Platforms:** macOS Yes · iOS Yes · Windows Partial · Linux Partial · Android Yes
@@ -584,10 +584,10 @@ The flags live in `Project.swift`; release selection is in
 - **Platforms:** macOS N/A · iOS Yes · Windows N/A · Linux N/A · Android Yes
 - **Excluded:** macOS, Windows, Linux (OS: desktops insert directly via hotkeys, F01 and F24).
 - **Gaps:** none
-- **How:** iOS: the keyboard hands off to the app to record, then inserts the result on return. Android: an IME records and commits into the focused field.
+- **How:** iOS: the keyboard hands off to the app to record, then inserts the result on return. Android: an IME records and commits into the focused field. It uses on-device recognition or the speech service unless the user opts in to live Cloud models (Settings > Dictation keyboard, `keyboardLiveCloudEnabled`, off by default; #1668): then, with Cloud chosen and a live model, it streams through the app's own session controller and `cloud/live` clients (`KeyboardLiveDictation`), reading the key in process, shows partials as composing text and commits the corrected final text.
 - **Refs:** `Sources/SpeakCore/Keyboard/Apple/KeyboardHandoff.swift`, `Docs/ios-keyboard-v2-design.md`, `android/app/src/main/java/com/justspeaktoit/android/ime/DictationKeyboardService.kt`, `Docs/android-input-surfaces.md`
 - **Sunset:** `TUIST_IOS_KEYBOARD_DIRECT_CAPTURE` is an experiment (#661); Apple gives custom keyboards no microphone. `KeyboardHandoff.legacyRecordKey` (v3) is still read for migration.
-- **Nuances:** The iOS app runs on iPad: name the device through `DeviceCopy`, never "iPhone" (`Sources/SpeakiOS/Views/DeviceCopy.swift`).
+- **Nuances:** The iOS app runs on iPad: name the device through `DeviceCopy`, never "iPhone" (`Sources/SpeakiOS/Views/DeviceCopy.swift`). Android's live Cloud keyboard never falls back: a batch Cloud model, a missing key, a stream failure or a finish past the keyboard's 10-second bound (`KeyboardPolicy.FINISH_TIMEOUT_MS`) fails visibly and types nothing, and no on-device or speech-service recogniser is tried instead. It watches calls, audio focus and headset changes with the app's own `SessionInterruptionWatch` and `InterruptionPolicy`: a brief focus loss pauses it (the status line says Paused) and a call, lasting focus loss or headset change ends it visibly. When an explicit on-device or speech-service choice is unusable the keyboard says so and never blames Cloud (`KeyboardPolicy.blamesBatchCloud`). Voice edit (F22) still hears its instruction on the phone. Keyboard sessions skip History and cleanup (`SessionHistory.None`).
 
 ## Companion surfaces
 

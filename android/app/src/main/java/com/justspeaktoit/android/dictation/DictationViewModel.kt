@@ -31,6 +31,12 @@ import com.justspeaktoit.android.history.AtomicHistoryFile
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.ondevice.GeminiNanoAvailability
+import com.justspeaktoit.android.ondevice.GeminiNanoCleanup
+import com.justspeaktoit.android.ondevice.GeminiNanoException
+import com.justspeaktoit.android.ondevice.GeminiNanoFailure
+import com.justspeaktoit.android.ondevice.GeminiNanoModel
+import com.justspeaktoit.android.ondevice.MlKitGeminiNano
 import com.justspeaktoit.android.local.AndroidLocalModels
 import com.justspeaktoit.android.local.LocalModelSetup
 import com.justspeaktoit.android.local.LocalModelsState
@@ -131,6 +137,8 @@ class DictationViewModel internal constructor(
     openRouterFetch: (String) -> String = OpenRouterDiscovery::download,
     // SpeakCore's shared pronunciation defaults, from voice_catalog.json.
     private val pronunciationDefaults: List<PronunciationEntry> = emptyList(),
+    // Gemini Nano through ML Kit for on-device cleanup; null leaves it unavailable (tests pass a fake).
+    private val geminiNano: GeminiNanoModel? = null,
     // Downloaded Whisper models (#1658); null leaves Downloaded mode out of the app.
     localModelSetup: LocalModelSetup? = null,
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
@@ -194,6 +202,7 @@ class DictationViewModel internal constructor(
             keepAudioOnCancel = prefs.keepAudioOnCancel,
             silence = prefs.silence,
             handsFreeEnabled = prefs.handsFreeEnabled,
+            keyboardLiveCloudEnabled = prefs.keyboardLiveCloudEnabled,
             keepRecordings = prefs.keepRecordings,
             corrections = prefs.corrections,
             pronunciations = prefs.pronunciations ?: pronunciationDefaults,
@@ -295,21 +304,31 @@ class DictationViewModel internal constructor(
     private var historySignIn: Job? = null
     private var pendingHistorySync: Job? = null
 
+    private val interruptionWatch = SessionInterruptionWatch(interruptions) { session }
+
     private val session: DictationSessionController = DictationSessionController(
         engine = engine,
         capture = capture,
-        requests = SessionRequests(cloud, secrets, capture, io, timings, onKeyFailure = { provider, failure ->
-            _state.update {
-                it.copy(
-                    keyErrors = it.keyErrors + provider,
-                    rejectedKeys = if (failure == DictationFailure.InvalidKey) {
-                        it.rejectedKeys + provider
-                    } else {
-                        it.rejectedKeys
-                    },
-                )
-            }
-        }),
+        requests = SessionRequests(
+            cloud,
+            secrets,
+            capture,
+            io,
+            timings,
+            onDevice = geminiNano?.let { GeminiNanoCleanup(it, isTopApp = { appInFront }) },
+            onKeyFailure = { provider, failure ->
+                _state.update {
+                    it.copy(
+                        keyErrors = it.keyErrors + provider,
+                        rejectedKeys = if (failure == DictationFailure.InvalidKey) {
+                            it.rejectedKeys + provider
+                        } else {
+                            it.rejectedKeys
+                        },
+                    )
+                }
+            },
+        ),
         history = historyOwner,
         resources = resources,
         scope = scope,
@@ -344,6 +363,8 @@ class DictationViewModel internal constructor(
                 it.copy(
                     dictation = s.dictation,
                     cleanup = s.cleanup,
+                    cleanupOnDevice = s.cleanupOnDevice,
+                    cleanupFailure = s.cleanupFailure,
                     originalTranscript = s.originalTranscript,
                     releasingMicrophone = s.releasingMicrophone,
                     paused = s.paused,
@@ -362,7 +383,10 @@ class DictationViewModel internal constructor(
     private var handsFreeStartPending = false
 
     private var appVisible = true
-    private var watchingInterruptions = false
+
+    /** Resumed: the top foreground app, which AICore requires before it runs Gemini Nano. */
+    private var appInFront = false
+    private var geminiNanoDownload: Job? = null
     private var foregroundPhase: ForegroundPhase? = null
 
     /** True while Android lets the foreground service keep the session running off screen. */
@@ -560,6 +584,51 @@ class DictationViewModel internal constructor(
         _state.update { it.copy(cleanupModel = model) }
     }
 
+    /**
+     * Checks whether this phone offers Gemini Nano, when Settings or a cleanup picker opens; never at app
+     * start, so a phone that never looks at it never binds to AICore. A model AICore is already
+     * downloading reports its progress.
+     */
+    fun checkGeminiNano() {
+        val model = geminiNano
+        if (model == null) {
+            _state.update { it.copy(geminiNano = GeminiNanoAvailability.Unavailable(GeminiNanoFailure.Unavailable)) }
+            return
+        }
+        when (_state.value.geminiNano) {
+            GeminiNanoAvailability.Checking, GeminiNanoAvailability.Available, is GeminiNanoAvailability.Downloading ->
+                return
+            else -> Unit
+        }
+        _state.update { it.copy(geminiNano = GeminiNanoAvailability.Checking) }
+        scope.launch {
+            val checked = try {
+                GeminiNanoAvailability.of(model.status())
+            } catch (e: GeminiNanoException) {
+                GeminiNanoAvailability.Unavailable(e.failure)
+            }
+            _state.update { it.copy(geminiNano = checked) }
+            if (checked is GeminiNanoAvailability.Downloading) downloadGeminiNano()
+        }
+    }
+
+    /** Downloads Gemini Nano through AICore, showing progress beside it; a failed download can be retried. */
+    fun downloadGeminiNano() {
+        val model = geminiNano ?: return
+        if (geminiNanoDownload?.isActive == true) return
+        _state.update { it.copy(geminiNano = GeminiNanoAvailability.Downloading(0, 0)) }
+        geminiNanoDownload = scope.launch {
+            model.download().collect { update ->
+                _state.update { it.copy(geminiNano = GeminiNanoAvailability.after(update, it.geminiNano)) }
+            }
+            // A download that ended without a final status is checked again rather than left showing progress.
+            if (_state.value.geminiNano is GeminiNanoAvailability.Downloading) {
+                _state.update { it.copy(geminiNano = GeminiNanoAvailability.Unchecked) }
+                checkGeminiNano()
+            }
+        }
+    }
+
     fun setCleanupEnabled(enabled: Boolean) {
         prefs.cleanupEnabled = enabled
         _state.update { it.copy(cleanupEnabled = enabled) }
@@ -640,6 +709,7 @@ class DictationViewModel internal constructor(
                 "cleanupModelDiscoveryEnabled" -> setCleanupModelDiscovery(value as Boolean)
                 "keepAudioOnCancel" -> setKeepAudioOnCancel(value as Boolean)
                 "handsFreeDictationEnabled" -> setHandsFree(value as Boolean)
+                "keyboardLiveCloudEnabled" -> setKeyboardLiveCloud(value as Boolean)
                 "history_retention" -> setRetention(Retention.valueOf(value as String))
                 "keepRecordingsInHistory" -> setKeepRecordings(value as Boolean)
                 "silenceDetectionEnabled" -> setSilence(_state.value.silence.copy(enabled = value as Boolean))
@@ -680,6 +750,12 @@ class DictationViewModel internal constructor(
         prefs.handsFreeEnabled = enabled
         _state.update { it.copy(handsFreeEnabled = enabled) }
         if (!enabled) handsFree.disarm()
+    }
+
+    /** Lets the dictation keyboard stream to the live Cloud model; it reads this when a session starts. */
+    fun setKeyboardLiveCloud(enabled: Boolean) {
+        prefs.keyboardLiveCloudEnabled = enabled
+        _state.update { it.copy(keyboardLiveCloudEnabled = enabled) }
     }
 
     fun setAppearance(appearance: AppAppearance, dynamicColor: Boolean) {
@@ -934,6 +1010,16 @@ class DictationViewModel internal constructor(
         appVisible = true
     }
 
+    /** MainActivity's onResume: the app is the top foreground app, so Gemini Nano may run. */
+    fun onAppResumed() {
+        appInFront = true
+    }
+
+    /** MainActivity's onPause: AICore refuses Gemini Nano requests from an app that is not on top. */
+    fun onAppPaused() {
+        appInFront = false
+    }
+
     /**
      * A session protected by the foreground service carries on; without it, capture cannot continue
      * once the app is hidden (see [DictationSessionController.leaveApp]).
@@ -1130,15 +1216,7 @@ class DictationViewModel internal constructor(
 
     /** Keeps the foreground service and interruption watching in step with the session. */
     private fun onSessionChanged(s: SessionState) {
-        val capturing = s.dictation is DictationState.Starting || s.dictation is DictationState.Listening
-        if (capturing != watchingInterruptions) {
-            watchingInterruptions = capturing
-            if (capturing) {
-                interruptions.start(requestFocus = s.dictation.modeOrNull()?.recordsAudio == true, ::onInterruption)
-            } else {
-                interruptions.stop()
-            }
-        }
+        interruptionWatch.onSessionChanged(s)
         followHandsFreeSession(s)
         syncForeground(s)
     }
@@ -1158,26 +1236,16 @@ class DictationViewModel internal constructor(
         }
     }
 
-    private fun onInterruption(signal: InterruptionSignal) {
-        if (!session.isCapturing) return
-        val mode = session.state.dictation.modeOrNull() ?: return
-        when (val action = InterruptionPolicy.decide(signal, mode, session.state.paused)) {
-            InterruptionAction.None -> Unit
-            InterruptionAction.Pause -> session.pause()
-            InterruptionAction.Resume -> session.resume()
-            is InterruptionAction.Stop -> session.interrupt(action.failure)
-        }
-    }
-
     override fun onCleared() {
         handsFree.disarm()
-        interruptions.stop()
+        interruptionWatch.stop()
         if (foregroundPhase != null) foreground.hide()
         if (ForegroundDictation.listener === foregroundListener) ForegroundDictation.listener = null
         engine.close()
         session.close()
         sounds?.close()
         inputWatch.close()
+        geminiNano?.close()
     }
 
     companion object {
@@ -1229,6 +1297,7 @@ class DictationViewModel internal constructor(
                     AndroidHistorySync.create(application, KeystoreSecretStore.create(application), entries, Dispatchers.IO)
                 },
                 pronunciationDefaults = loadPronunciationDefaults(application),
+                geminiNano = MlKitGeminiNano(),
                 localModelSetup = AndroidLocalModels.setup(application, Dispatchers.IO),
             )
         }

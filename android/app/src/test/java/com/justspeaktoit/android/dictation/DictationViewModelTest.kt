@@ -12,6 +12,7 @@ import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.ondevice.GeminiNanoAvailability
 import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RawConfigurationValues
@@ -107,6 +108,18 @@ class DictationViewModelTest {
 
         h.clear()
         assertFalse("the device watch ends with the ViewModel", h.audioInputs.watching)
+    }
+
+    @Test
+    fun testClearing_closesGeminiNano() {
+        val nano = FakeGeminiNano()
+        h.geminiNano = nano
+        h.onMain { h.viewModel.checkGeminiNano() }
+        h.awaitState { it.geminiNano == GeminiNanoAvailability.Available }
+
+        h.clear()
+
+        assertEquals(1, nano.closes)
     }
 
     @Test
@@ -636,6 +649,7 @@ class DictationViewModelTest {
             "cleanupModelDiscoveryEnabled" to true,
             "keepAudioOnCancel" to false,
             "handsFreeDictationEnabled" to true,
+            "keyboardLiveCloudEnabled" to true,
             "history_retention" to "Forever",
             "keepRecordingsInHistory" to true,
             "silenceDetectionEnabled" to true,
@@ -665,6 +679,7 @@ class DictationViewModelTest {
         assertTrue(h.prefs.cleanupModelDiscoveryEnabled)
         assertFalse(h.prefs.keepAudioOnCancel)
         assertTrue(h.prefs.handsFreeEnabled)
+        assertTrue(h.prefs.keyboardLiveCloudEnabled)
         assertEquals(Retention.Forever, h.prefs.retention)
         assertTrue(h.prefs.keepRecordings)
         assertEquals(SilenceSettings(enabled = true, threshold = 0.1, durationSeconds = 3.5), h.prefs.silence)

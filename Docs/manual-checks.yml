@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-14"
+updated: "2026-11-16"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -1371,6 +1371,21 @@ sessions:
           - "Turn VoiceOver on and move through a model row while it downloads."
         expected: "The sentence is transcribed with Airplane Mode on and History names the model (for example WhisperKit Base), never a generic label or a cloud provider. The silent recording produces no text and no placeholder. The not-downloaded model fails with a message to download it rather than uploading. Removed models show Download again. The import appears in the list and downloads. VoiceOver reads each model's name, size, state and progress, and announces when a download finishes."
         final_gate: false
+      - id: "iphone-usage-insights-dashboard"
+        issues:
+          - 1623
+        title: "Usage insights dashboard matches History"
+        minutes: 5
+        core: false
+        build: "TestFlight Just Speak to It Alpha, the first build that includes the #1623 iOS usage insights dashboard, on an iPhone and an iPad"
+        steps:
+          - "Dictate three made-up sentences of at least 15 seconds each, saying \"um\" and \"you know\" a few times."
+          - "Open History and note Sessions, Average, Total Time, Words and Errors in the header."
+          - "Tap the chart button in the History toolbar to open Usage insights."
+          - "Compare the Usage section with the History header, then read Top words, Top phrases, Filler words, Speaking pace and Speech records."
+          - "Delete one History entry, go back to Usage insights, then turn VoiceOver on and move through the sections."
+        expected: "Sessions, Errors, Recording time (Total Time), Average length and Words equal the History header, before and after the deletion. Filler words lists um and you know, Speaking pace counts the three sessions and Speech records shows the words all-time. VoiceOver reads each row's name and value together, and the chart button is named Usage insights."
+        final_gate: false
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"
@@ -1716,6 +1731,36 @@ sessions:
           - "With TalkBack on, focus the Edit key with and without a selection."
         expected: "Edit is enabled only with a selection. The rewrite replaces only the selected words and the rest of the sentence is unchanged. Moving away or changing the selection leaves the text as it was with a message that it changed, Airplane mode leaves it unchanged with a network message, and a missing key names the provider without recording. TalkBack reads Edit with its state and a description of what it does."
         final_gate: false
+      - id: "owner-android-keyboard-live-cloud"
+        issues:
+          - 1668
+        title: "Dictation keyboard: opt-in live Cloud dictation shows words while speaking"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1668"
+        steps:
+          - "In the app choose Cloud mode with OpenAI GPT Live Transcribe (Streaming) and a saved OpenAI key. Leave Settings > Dictation keyboard > Use live Cloud models in the keyboard off, and dictate a sentence with the Just Speak to It keyboard in a notes app."
+          - "Turn the setting on, read its note, then dictate three sentences with the keyboard, pausing between them, and tap Stop mid-word."
+          - "Start another keyboard dictation, open Settings > System resources in use from the app and stop the microphone."
+          - "Start another one, say a sentence and turn on Airplane mode while still talking, then tap Stop."
+          - "Choose a batch Cloud model such as GPT Transcribe, then tap the keyboard's microphone. Choose the live model again, remove the OpenAI key and tap it again."
+          - "With TalkBack on, focus the new setting."
+        expected: "Off, the keyboard dictates on the phone as before. On, the note and status line name OpenAI, words appear underlined while speaking and Stop types the full text within 10 seconds. Stopping from System resources or Airplane mode removes the underlined words, shows why and types nothing. The batch model and the missing key each show a message and never dictate on the phone instead. Nothing from the keyboard appears in History. TalkBack reads the setting's name, state and switch role."
+        final_gate: false
+      - id: "owner-android-keyboard-live-cloud-interruptions"
+        issues:
+          - 1668
+        title: "Dictation keyboard: live Cloud handles interruptions; local choices never blame Cloud"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1668"
+        steps:
+          - "Turn on Settings > Dictation keyboard > Use live Cloud models in the keyboard, choose Cloud mode with OpenAI GPT Live Transcribe (Streaming) and a saved OpenAI key."
+          - "Start a keyboard dictation in a notes app and, while speaking, start a voice note or the Google Assistant for a few seconds, then return."
+          - "Start another and connect or disconnect a Bluetooth headset while speaking."
+          - "Choose a batch Cloud model such as GPT Transcribe, then choose On-device mode with a language On-device does not support, and tap the keyboard's microphone."
+        expected: "The voice note or Assistant makes the keyboard's status line say Paused, and dictation carries on by itself afterwards. The headset change stops dictation with a message naming the headset and types nothing. The unavailable On-device choice says no on-device or speech-service recognition is available and does not mention Cloud or the batch model."
+        final_gate: false
       - id: "android-raw-configuration-editor"
         issues:
           - 1608
@@ -2022,6 +2067,75 @@ sessions:
           - "With TalkBack on, move through the editor's fields, toggles and Remove buttons."
         expected: "The entry is listed and the transcript is read as \"just speak to it\" while the text on screen stays JSTI; after removing it, JSTI is spelled out. Adding \"jsti\" updates the existing entry in place (one entry, now saying \"just speak to it\") rather than adding a second one. The invalid expression shows its message and adds nothing. The other app imports the entry and the phone gets it back unchanged, with no duplicate. TalkBack reads each field and toggle with its name and each Remove button with its word."
         final_gate: false
+      - id: "android-usage-insights-dashboard"
+        issues:
+          - 1623
+        title: "Usage insights dashboard matches History and the Mac"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes the #1623 Android usage insights dashboard"
+        steps:
+          - "Dictate three made-up sentences of at least 15 seconds each, saying \"um\" and \"you know\" a few times."
+          - "Open History and tap Open usage insights on the Last 7 days card."
+          - "Count the History entries and compare them with Sessions; check Errors counts the failed entries."
+          - "Read Top phrases, Filler words, Speaking pace and Speech records, then press Back."
+          - "With TalkBack on, reopen Usage insights and move through the cards."
+        expected: "Sessions and Errors match History. Filler words lists um and you know, and Speaking pace counts the three sessions. Back returns to History. TalkBack reads each row's name and value together."
+        final_gate: false
+      - id: "android-gemini-nano-pixel-offline"
+        issues:
+          - 1659
+        title: "Gemini Nano cleanup on a Pixel: download, offline cleanup and visible failures"
+        minutes: 8
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1659"
+        steps:
+          - "On a Pixel 9 or later with a locked bootloader, open Settings, turn on Clean up transcripts and tap Cleanup model."
+          - "Under On this phone, choose Gemini Nano (On-device); if it says it needs downloading, wait on Wi-Fi until it shows Ready."
+          - "Turn on flight mode and dictate a long, unpunctuated sentence in On-device mode; then set a Cleanup prompt of \"Answer in capital letters\" and dictate again."
+          - "Start another dictation and, as you tap Stop, switch to the home screen; return after a few seconds."
+          - "Tap Stop without speaking, then try Edit on a selection in the keyboard."
+        expected: "Gemini Nano is listed only under On this phone, with download progress then Ready. Offline, the transcript is cleaned up and says \"Cleaned up with Gemini Nano on this phone\"; the custom prompt is honoured and Show original restores the words spoken. Leaving the app keeps the original transcript with a red reason (open on screen), never a cloud cleanup. An empty recording stays empty. Keyboard Edit names the default cloud cleanup provider rather than Gemini Nano."
+        final_gate: true
+      - id: "android-gemini-nano-samsung-offline"
+        issues:
+          - 1659
+        title: "Gemini Nano cleanup on a Samsung Galaxy works offline"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1659"
+        steps:
+          - "On a Galaxy S25 or later, open Settings, Cleanup model and choose Gemini Nano (On-device) under On this phone; let it download if asked."
+          - "Turn on flight mode, turn on Clean up transcripts and dictate a long, unpunctuated sentence in On-device mode."
+          - "Dictate for over five minutes without pausing, then stop."
+        expected: "The short dictation is cleaned up on the phone offline. The very long one either cleans up or keeps the original transcript with \"The transcript is too long for Gemini Nano\"; nothing is sent to a cloud model."
+        final_gate: true
+      - id: "android-gemini-nano-unsupported"
+        issues:
+          - 1659
+        title: "Gemini Nano is not offered on an unsupported phone, and the picker says why"
+        minutes: 2
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1659"
+        steps:
+          - "On a phone that is not on Google's Gemini Nano list (for example an older or mid-range phone, or an emulator), open Settings and tap Cleanup model."
+          - "Read the On this phone section."
+          - "Choose a cloud model, turn on Clean up transcripts and dictate a sentence."
+        expected: "Gemini Nano is not selectable; the section says Gemini Nano isn't offered and why (for example \"This phone doesn't support Gemini Nano.\"), and the cloud models still work as before."
+        final_gate: true
+      - id: "owner-android-gemini-nano-data-safety"
+        issues:
+          - 1659
+        title: "Play data safety covers ML Kit GenAI diagnostics"
+        minutes: 5
+        core: false
+        build: "Play Console for the Android app, before the first Production or Open testing release that includes #1659"
+        steps:
+          - "Read the ML Kit Android data disclosure page (developers.google.com/ml-kit/android-data-disclosure), GenAI features."
+          - "Compare it with the Diagnostics and Device or other IDs rows in Docs/android-play-store-submission.md and the Android section of justspeaktoit.com/privacy."
+          - "Update the Play Console Data safety form to match."
+        expected: "The Play Console Data safety answers and the privacy page disclose ML Kit's diagnostics and identifiers for Gemini Nano, and say the transcript stays on the phone."
+        final_gate: true
       - id: "android-downloaded-whisper-download"
         issues:
           - 1658

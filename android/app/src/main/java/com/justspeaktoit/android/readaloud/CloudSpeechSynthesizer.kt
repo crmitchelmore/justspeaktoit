@@ -14,6 +14,9 @@ data class SpeechHttpRequest(val method: String, val url: String, val headers: M
 
 data class SpeechHttpResponse(val status: Int, val body: ByteArray)
 
+/** A response body longer than a [SpeechHttp] reads; reported as invalid audio, not as no network. */
+class SpeechResponseTooLarge(limit: Long) : IOException("response body exceeds $limit bytes")
+
 interface SpeechHttp {
     /** Throws IOException when the provider cannot be reached; cancelling the caller cancels the call. */
     suspend fun send(request: SpeechHttpRequest): SpeechHttpResponse
@@ -112,6 +115,8 @@ class CloudSpeechSynthesizer(private val http: SpeechHttp) {
         val request = request(template, values + (TEXT to text))
         return try {
             http.send(request)
+        } catch (_: SpeechResponseTooLarge) {
+            throw ReadAloudException(ReadAloudFailure.InvalidAudio(voice.providerName))
         } catch (_: IOException) {
             throw ReadAloudException(ReadAloudFailure.Unreachable(voice.providerName))
         }
@@ -235,6 +240,12 @@ object WavAudio {
     private const val HEADER = 12
     private const val CHUNK_HEADER = 8
 
+    /**
+     * `data` sizes that mean "length unknown": 0 and 0x7FFF0000 as SpeakCore's `DeepgramSpeechWAV`
+     * accepts, and 0xFFFFFFFF, which streaming encoders write when they cannot seek back.
+     */
+    private val STREAMED_SIZES = setOf(0L, 0x7FFF0000L, 0xFFFFFFFFL)
+
     fun parse(bytes: ByteArray): PcmAudio? {
         if (bytes.size < HEADER || String(bytes, 0, 4, Charsets.US_ASCII) != "RIFF" ||
             String(bytes, 8, 4, Charsets.US_ASCII) != "WAVE"
@@ -263,8 +274,13 @@ object WavAudio {
                 }
                 "data" -> {
                     if (sampleRate == 0) return null
-                    // A streamed WAV declares 0 or 0xFFFFFFFF; its data runs to the end.
-                    val length = if (declared == 0L || declared > available) available else declared
+                    // A streamed WAV declares a sentinel and its data runs to the end; any other
+                    // length is finite, and one the body does not reach is truncated audio.
+                    val length = when {
+                        declared in STREAMED_SIZES -> available
+                        declared > available -> return null
+                        else -> declared
+                    }
                     val even = (length - length % 2).toInt()
                     return PcmAudio(sampleRate, channels, bytes.copyOfRange(start, start + even))
                 }

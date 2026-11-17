@@ -88,7 +88,8 @@ extension SettingsSearchCatalog {
                 "post-processing", "polish", "cleanup", "llm", "openrouter", "grammar", "cleanup model",
                 "anthropic", "claude", "openai", "gemini", "groq", "mistral", "browse openrouter models",
                 "openrouter models", "model browser", "model pricing", "zero listed prices",
-                "discover models", "model discovery", "live models", "newest models"
+                "discover models", "model discovery", "live models", "newest models", "gemini nano", "nano",
+                "on-device cleanup", "on this phone", "offline cleanup", "local cleanup", "private cleanup", "aicore"
             ],
             settingKeys: ["cleanup_enabled", "cleanup_model", "cleanupModelDiscoveryEnabled"], platforms: .android
         ),
@@ -157,6 +158,16 @@ extension SettingsSearchCatalog {
                 "automatic start", "pre-roll", "listen", "VAD"
             ],
             settingKeys: ["handsFreeDictationEnabled"], platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.keyboardLiveCloud", title: "Dictation keyboard", section: .general,
+            systemImage: "keyboard",
+            summary: "Let the keyboard stream to your live Cloud model, showing text as you speak.",
+            keywords: [
+                "keyboard", "IME", "live", "streaming", "cloud", "BYOK", "partial", "real-time",
+                "use live cloud models in the keyboard"
+            ],
+            settingKeys: ["keyboardLiveCloudEnabled"], platforms: .android
         ),
         SettingsSearchEntry(
             id: "android.appearance", title: "Appearance", section: .general, systemImage: "paintpalette",

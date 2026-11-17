@@ -1,5 +1,6 @@
 package com.justspeaktoit.android.readaloud
 
+import com.justspeaktoit.android.settings.SettingsSearchAsset
 import com.justspeaktoit.android.ui.PronunciationEdits
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -29,6 +30,23 @@ class PronunciationTest {
         val spoken = PronunciationDictionary.apply("The api and API, not apiary.", listOf(entry("API", "A P I")))
 
         assertEquals("The A P I and A P I, not apiary.", spoken)
+    }
+
+    @Test
+    fun testApply_sharedSymbolDefaultsMatchStandaloneAndWordsStayWhole() {
+        val catalog = VoiceCatalog.parse(SettingsSearchAsset.locate("app/src/main/assets/${VoiceCatalog.ASSET}").readText())
+        val symbols = catalog.pronunciationDefaults.filter { it.word in setOf("@", "#", "&") }
+        assertEquals(3, symbols.size)
+
+        assertEquals(
+            "email  at  home,  hashtag 1  and  co",
+            PronunciationDictionary.apply("email @ home, #1 & co", symbols),
+        )
+        val words = listOf(entry("API", "A P I"), entry("C++", "C plus plus"), entry("_id", "I D"))
+        assertEquals(
+            "A P I apiary rapid C plus plus I D my_id",
+            PronunciationDictionary.apply("API apiary rapid C++ _id my_id", words),
+        )
     }
 
     @Test

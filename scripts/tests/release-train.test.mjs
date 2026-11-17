@@ -1,8 +1,60 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {digest, validateManifest, frozenSurfaces, publicationSurfaces, stablePublicationSurfaces, nextAllocation, effectiveCommits, notesFor, canAdvance} from '../release-train-lib.mjs';
+import {digest, validateManifest, frozenSurfaces, publicationSurfaces, stablePublicationSurfaces, nextAllocation, effectiveCommits, notesFor, storeNotesFor, canAdvance} from '../release-train-lib.mjs';
 import {mergeEntries} from '../release-notes-catalogue-lib.mjs';
+import {execFileSync} from 'node:child_process';
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 const source='a'.repeat(40), prior='b'.repeat(40);
+
+function storeNotesRepo(t, files) {
+ const root=mkdtempSync(join(tmpdir(),'store-notes-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const git=(...args)=>execFileSync('git',args,{cwd:root,encoding:'utf8'}).trim();
+ git('init','-q');
+ mkdirSync(join(root,'Config/StoreNotes'),{recursive:true});
+ for(const [surface,content] of Object.entries(files)) writeFileSync(join(root,`Config/StoreNotes/${surface}.md`),content);
+ git('add','Config');
+ git('-c','user.name=Test','-c','user.email=test@example.com','commit','-qm','Store notes','--allow-empty');
+ return {root,git,source:git('rev-parse','HEAD')};
+}
+
+test('Stable store notes are trimmed per surface and frozen to the source, not HEAD or the worktree',t=>{
+ const {root,git,source}=storeNotesRepo(t,{ios:'\n  - Personalised dictation.\n','mac-direct':'- Mac improvements.\n'});
+ writeFileSync(join(root,'Config/StoreNotes/ios.md'),'Later committed notes');
+ git('add','Config/StoreNotes/ios.md');
+ git('-c','user.name=Test','-c','user.email=test@example.com','commit','-qm','Later notes');
+ writeFileSync(join(root,'Config/StoreNotes/ios.md'),'Uncommitted notes');
+ for(const [surface,expected] of [['ios','- Personalised dictation.'],['mac-direct','- Mac improvements.']]) {
+  const notes=storeNotesFor({train:'stable',source,surface,notes:'Generated notes'},git);
+  assert.equal(notes,expected);
+ }
+});
+
+test('missing or blank Stable store notes preserve generated notes and their existing truncation',t=>{
+ for(const files of [{},{ios:' \n\t '}]) {
+  const {git,source}=storeNotesRepo(t,files);
+  for(const notes of ['Generated notes','x'.repeat(4100)]) {
+   assert.equal(storeNotesFor({train:'stable',source,surface:'ios',notes},git),
+    notes.length<=4000 ? notes : notes.slice(0,3900)+'\nFull release notes are available in the app.');
+  }
+ }
+});
+
+test('Stable accepts 4,000 trimmed characters, rejects longer overrides, and Alpha never reads them',t=>{
+ for(const length of [4000,4001]) {
+  const {git,source}=storeNotesRepo(t,{ios:`\n${'x'.repeat(length)}\n`});
+  const input={train:'stable',source,surface:'ios',notes:'Generated notes'};
+  if(length===4000) assert.equal(storeNotesFor(input,git),'x'.repeat(length));
+  else assert.throws(()=>storeNotesFor(input,git),/Config\/StoreNotes\/ios.md.*4,000.*4001/);
+  const noGit=()=>{throw Error('Alpha must not read store notes');};
+  assert.equal(storeNotesFor({...input,train:'alpha'},noGit),'Generated notes');
+  const notes='x'.repeat(4100);
+  assert.equal(storeNotesFor({...input,train:'alpha',notes},noGit),notes.slice(0,3900)+'\nFull release notes are available in the app.');
+ }
+ assert.throws(()=>storeNotesFor({train:'stable',source,surface:'ios',notes:''},()=>{throw Error('Git failed');}),/Git failed/);
+});
+
 test('manifest rejects changed frozen notes and moving source refs',()=>{
  const entry={version:'3.2.0',build:'1001',baseline:prior,notes:'Frozen',notesHash:digest('Frozen'),storeNotes:'Short',storeNotesHash:digest('Short')};
  const m={schema:1,train:'stable',tag:'stable-candidate-1',source,ordinal:1,dependenciesHash:digest('lock'),build:'202609091400',surfaces:Object.fromEntries(['mac-direct','mac-store','ios'].map(s=>[s,{...entry}]))};

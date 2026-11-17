@@ -3,10 +3,11 @@ import Foundation
 /// Canonical contract for voice-driven selection rewrites ("edit mode"): the user selects
 /// text anywhere, speaks an instruction, and the model returns replacement text only.
 public enum VoiceEditPolicy {
-    /// Cleanup-only local engines cannot follow arbitrary editing instructions.
+    /// Cleanup-only local engines cannot follow arbitrary editing instructions, and Android's Gemini
+    /// Nano cannot run from the keyboard, which is never the top foreground app.
     public static func modelIdentifier(configured: String) -> String {
         let model = configured.trimmingCharacters(in: .whitespacesAndNewlines)
-        if model.isEmpty || model == AppleLocalModels.foundationModelID
+        if model.isEmpty || model == AppleLocalModels.foundationModelID || AndroidLocalModels.isGeminiNano(model)
             || model.lowercased() == LocalPostProcessingModel.builtInRulesModelID
             || LocalPostProcessingModel.isDownloadedModelID(model) {
             return ModelCatalog.defaultPostProcessingModel

@@ -208,6 +208,8 @@ class MainActivity : ComponentActivity() {
                                 onKeyboardLiveCloudChanged = viewModel::setKeyboardLiveCloud,
                                 onKeepRecordingsChanged = viewModel::setKeepRecordings,
                                 onChooseCleanupModel = viewModel::chooseCleanupModel,
+                                onCheckGeminiNano = viewModel::checkGeminiNano,
+                                onDownloadGeminiNano = viewModel::downloadGeminiNano,
                                 onChooseTranscriptionId = viewModel::chooseTranscriptionModel,
                                 onRefreshTranscriptionModels = viewModel::refreshTranscriptionModels,
                                 onRefreshCleanupModels = viewModel::refreshCleanupModels,
@@ -388,6 +390,16 @@ class MainActivity : ComponentActivity() {
     private fun refreshPrivacy() {
         privacy.value = PrivacyChoices(telemetry.analyticsEnabled, telemetry.diagnosticsEnabled)
         consentPending.value = telemetry.needsConsentPrompt
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.onAppResumed()
+    }
+
+    override fun onPause() {
+        viewModel.onAppPaused()
+        super.onPause()
     }
 
     override fun onStop() {

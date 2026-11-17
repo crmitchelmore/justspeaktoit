@@ -88,7 +88,8 @@ extension SettingsSearchCatalog {
                 "post-processing", "polish", "cleanup", "llm", "openrouter", "grammar", "cleanup model",
                 "anthropic", "claude", "openai", "gemini", "groq", "mistral", "browse openrouter models",
                 "openrouter models", "model browser", "model pricing", "zero listed prices",
-                "discover models", "model discovery", "live models", "newest models"
+                "discover models", "model discovery", "live models", "newest models", "gemini nano", "nano",
+                "on-device cleanup", "on this phone", "offline cleanup", "local cleanup", "private cleanup", "aicore"
             ],
             settingKeys: ["cleanup_enabled", "cleanup_model", "cleanupModelDiscoveryEnabled"], platforms: .android
         ),

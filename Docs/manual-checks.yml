@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-14"
+updated: "2026-11-16"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -2082,6 +2082,60 @@ sessions:
           - "With TalkBack on, reopen Usage insights and move through the cards."
         expected: "Sessions and Errors match History. Filler words lists um and you know, and Speaking pace counts the three sessions. Back returns to History. TalkBack reads each row's name and value together."
         final_gate: false
+      - id: "android-gemini-nano-pixel-offline"
+        issues:
+          - 1659
+        title: "Gemini Nano cleanup on a Pixel: download, offline cleanup and visible failures"
+        minutes: 8
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1659"
+        steps:
+          - "On a Pixel 9 or later with a locked bootloader, open Settings, turn on Clean up transcripts and tap Cleanup model."
+          - "Under On this phone, choose Gemini Nano (On-device); if it says it needs downloading, wait on Wi-Fi until it shows Ready."
+          - "Turn on flight mode and dictate a long, unpunctuated sentence in On-device mode; then set a Cleanup prompt of \"Answer in capital letters\" and dictate again."
+          - "Start another dictation and, as you tap Stop, switch to the home screen; return after a few seconds."
+          - "Tap Stop without speaking, then try Edit on a selection in the keyboard."
+        expected: "Gemini Nano is listed only under On this phone, with download progress then Ready. Offline, the transcript is cleaned up and says \"Cleaned up with Gemini Nano on this phone\"; the custom prompt is honoured and Show original restores the words spoken. Leaving the app keeps the original transcript with a red reason (open on screen), never a cloud cleanup. An empty recording stays empty. Keyboard Edit names the default cloud cleanup provider rather than Gemini Nano."
+        final_gate: true
+      - id: "android-gemini-nano-samsung-offline"
+        issues:
+          - 1659
+        title: "Gemini Nano cleanup on a Samsung Galaxy works offline"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1659"
+        steps:
+          - "On a Galaxy S25 or later, open Settings, Cleanup model and choose Gemini Nano (On-device) under On this phone; let it download if asked."
+          - "Turn on flight mode, turn on Clean up transcripts and dictate a long, unpunctuated sentence in On-device mode."
+          - "Dictate for over five minutes without pausing, then stop."
+        expected: "The short dictation is cleaned up on the phone offline. The very long one either cleans up or keeps the original transcript with \"The transcript is too long for Gemini Nano\"; nothing is sent to a cloud model."
+        final_gate: true
+      - id: "android-gemini-nano-unsupported"
+        issues:
+          - 1659
+        title: "Gemini Nano is not offered on an unsupported phone, and the picker says why"
+        minutes: 2
+        core: true
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1659"
+        steps:
+          - "On a phone that is not on Google's Gemini Nano list (for example an older or mid-range phone, or an emulator), open Settings and tap Cleanup model."
+          - "Read the On this phone section."
+          - "Choose a cloud model, turn on Clean up transcripts and dictate a sentence."
+        expected: "Gemini Nano is not selectable; the section says Gemini Nano isn't offered and why (for example \"This phone doesn't support Gemini Nano.\"), and the cloud models still work as before."
+        final_gate: true
+      - id: "owner-android-gemini-nano-data-safety"
+        issues:
+          - 1659
+        title: "Play data safety covers ML Kit GenAI diagnostics"
+        minutes: 5
+        core: false
+        build: "Play Console for the Android app, before the first Production or Open testing release that includes #1659"
+        steps:
+          - "Read the ML Kit Android data disclosure page (developers.google.com/ml-kit/android-data-disclosure), GenAI features."
+          - "Compare it with the Diagnostics and Device or other IDs rows in Docs/android-play-store-submission.md and the Android section of justspeaktoit.com/privacy."
+          - "Update the Play Console Data safety form to match."
+        expected: "The Play Console Data safety answers and the privacy page disclose ML Kit's diagnostics and identifiers for Gemini Nano, and say the transcript stays on the phone."
+        final_gate: true
       - id: "android-downloaded-whisper-download"
         issues:
           - 1658

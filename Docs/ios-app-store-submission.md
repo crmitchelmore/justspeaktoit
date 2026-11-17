@@ -71,6 +71,11 @@ attribute references, so it declares own-app and App Group defaults reasons and
 `C617.1` too. Watch transfers to the user's
 paired phone. Neither declares direct service collection; Watch does not
 declare required-reason APIs absent from its current code and linked binary.
+The Watch app and complication therefore omit `NSPrivacyAccessedAPITypes`
+rather than ship it as an empty array, which compliance scanners report as a
+manifest that disagrees with itself. The tests and the archive verifier reject
+an empty array in any bundle; add the key with real reasons when a bundle starts
+calling a required-reason API.
 
 The app manifest declares six collected data types. Audio data covers the
 recording sent to the transcription provider. Other user content covers

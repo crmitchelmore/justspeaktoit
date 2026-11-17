@@ -58,7 +58,7 @@
 	<!-- App Transport Security: the shipping feed and every download stay
 	     HTTPS. The single exception is the release smoke test
 	     (scripts/sparkle-update-smoke.sh), which serves a synthetic appcast from
-	     python3 -m http.server on http://127.0.0.1:<port> so a notarised build
+	     python3 -m http.server on a loopback port so a notarised build
 	     can be made to update itself in CI without publishing a throw-away feed.
 	     NSAllowsLocalNetworking relaxes ATS only for loopback, .local and
 	     link-local addresses; NSAllowsArbitraryLoads would have relaxed it for

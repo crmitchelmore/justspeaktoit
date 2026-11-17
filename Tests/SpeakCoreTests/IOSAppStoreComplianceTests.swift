@@ -194,10 +194,13 @@ final class IOSAppStoreComplianceTests: XCTestCase {
         for path in manifests {
             let privacy = try plist(at: path)
             XCTAssertEqual(privacy["NSPrivacyTracking"] as? Bool, false, "\(path) must declare tracking")
-            XCTAssertNotNil(
-                privacy["NSPrivacyAccessedAPITypes"] as? [[String: Any]],
-                "\(path) must declare its required-reason APIs"
-            )
+            if let apis = privacy["NSPrivacyAccessedAPITypes"] {
+                let entries = apis as? [[String: Any]]
+                XCTAssertFalse(
+                    entries?.isEmpty ?? true,
+                    "\(path) must list its required-reason APIs or omit the key, never an empty array"
+                )
+            }
         }
     }
 

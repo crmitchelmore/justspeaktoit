@@ -87,7 +87,7 @@ struct TranscribeSmallView: View {
         TranscribeAction {
             VStack(alignment: .leading, spacing: 6) {
                 TranscribeGlyph(isRecording: entry.isRecording)
-                    .font(.system(size: 26))
+                    .font(.title)
                 Spacer(minLength: 0)
                 Text(entry.isRecording ? "Recording" : "Dictate")
                     .font(.headline)

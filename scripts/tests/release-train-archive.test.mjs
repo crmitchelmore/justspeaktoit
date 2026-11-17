@@ -98,6 +98,9 @@ test('archive verifier accepts duplicate extension resources and rejects Stable 
  copyFileSync('JustSpeakWatchWidget/PrivacyInfo.xcprivacy',join(complication,'PrivacyInfo.xcprivacy'));
  plist(join(watch,'signed.plist'),watchGroup);plist(join(complication,'signed.plist'),watchGroup);
  assert.match(verify().toString(),/Verified ios alpha/);
+ plist(join(complication,'PrivacyInfo.xcprivacy'),{NSPrivacyTracking:false,NSPrivacyTrackingDomains:[],NSPrivacyCollectedDataTypes:[],NSPrivacyAccessedAPITypes:[]});
+ assert.throws(verify,error=>error.stderr.toString().includes('must list APIs or be omitted'));
+ copyFileSync('JustSpeakWatchWidget/PrivacyInfo.xcprivacy',join(complication,'PrivacyInfo.xcprivacy'));
  plist(join(complication,'signed.plist'),{'com.apple.security.application-groups':entitlements['com.apple.security.application-groups']});
  assert.throws(verify,error=>error.stderr.toString().includes('Signed extension has the wrong App Groups'));
  plist(join(complication,'signed.plist'),watchGroup);
@@ -150,7 +153,7 @@ test('Stable archive accepts the actual widget and keyboard source plists',t=>{
  const verify=()=>execFileSync('python3',['scripts/verify-release-train-archive.py',app,manifest,'ios'],{env:{...process.env,PATH:root+':'+process.env.PATH},stdio:'pipe'});
  assert.match(verify().toString(),/Verified ios stable/);
  const sharePrivacy=join(app,'PlugIns/JustSpeakShare.appex/PrivacyInfo.xcprivacy');
- plist(sharePrivacy,{NSPrivacyTracking:false,NSPrivacyTrackingDomains:[],NSPrivacyCollectedDataTypes:[],NSPrivacyAccessedAPITypes:[]});
+ plist(sharePrivacy,{NSPrivacyTracking:false,NSPrivacyTrackingDomains:[],NSPrivacyCollectedDataTypes:[]});
  assert.throws(verify,error=>error.stderr.toString().includes('Missing extension defaults API declaration'));
  copyFileSync('JustSpeakShare/PrivacyInfo.xcprivacy',sharePrivacy);
  const keyboardPrivacy=join(app,'PlugIns/JustSpeakKeyboard.appex/PrivacyInfo.xcprivacy');

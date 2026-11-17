@@ -71,6 +71,8 @@ import com.justspeaktoit.android.cloud.OpenRouterDiscovery
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.dictation.DictationUiState
 import com.justspeaktoit.android.dictation.SilenceSettings
+import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.readaloud.VoiceSelection
 import com.justspeaktoit.android.sendtomac.SendToMacState
 import com.justspeaktoit.android.settings.ApiKeyStatusFilter
 import com.justspeaktoit.android.settings.AppAppearance
@@ -104,6 +106,8 @@ class SettingsActions(
     val onReleaseEverything: () -> Unit = {},
     val onChooseLanguage: (String) -> Unit = {},
     val onCorrectionsChanged: (List<CorrectionRule>) -> Unit = {},
+    val onPronunciationsChanged: (List<PronunciationEntry>) -> Unit = {},
+    val onReadAloudVoiceChanged: (VoiceSelection) -> Unit = {},
     val onLearnCorrectionsChanged: (Boolean) -> Unit = {},
     val onCorrectionThresholdChanged: (Int) -> Unit = {},
     val onAcceptCorrection: (String) -> Unit = {},
@@ -476,6 +480,18 @@ fun SettingsScreen(
                 candidates = state.correctionCandidates,
                 actions = actions,
             )
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_read_aloud_voice_title, anchor("android.readAloudVoice"))
+            ReadAloudVoiceRow(
+                selection = state.readAloudVoice,
+                savedCredentials = state.savedKeys.mapTo(mutableSetOf()) { it.credentialId },
+                onChoose = actions.onReadAloudVoiceChanged,
+            )
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_pronunciation_title, anchor("android.pronunciation"))
+            PronunciationEditor(state.pronunciations, actions.onPronunciationsChanged)
 
             HorizontalDivider()
             SectionTitle(R.string.settings_appearance_title, anchor("android.appearance"))

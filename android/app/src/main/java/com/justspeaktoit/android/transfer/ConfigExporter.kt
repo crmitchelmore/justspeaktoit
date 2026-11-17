@@ -40,8 +40,9 @@ internal object ConfigExporter {
         if (recordings.isNotEmpty()) records[TransferCategory.Recordings] = recordings
         val profiles = prefs.profiles.mapNotNull(ProfileRecords::record)
         if (profiles.isNotEmpty()) records[TransferCategory.Profiles] = profiles
-        val corrections = prefs.corrections.map { LexiconRecords.record(it, nowMs) }
-        if (corrections.isNotEmpty()) records[TransferCategory.Vocabulary] = corrections
+        val vocabulary = prefs.corrections.map { LexiconRecords.record(it, nowMs) } +
+            prefs.pronunciations.orEmpty().map(PronunciationRecords::record)
+        if (vocabulary.isNotEmpty()) records[TransferCategory.Vocabulary] = vocabulary
         if (includeCredentials) {
             val keys = CloudProvider.entries.mapNotNull { provider ->
                 secrets.read(provider.credentialId)?.takeIf { it.isNotBlank() }?.let {

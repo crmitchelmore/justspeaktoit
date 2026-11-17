@@ -24,6 +24,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.justspeaktoit.android.R
 import com.justspeaktoit.android.dictation.CleanupStatus
+import com.justspeaktoit.android.dictation.DictationLanguages
 import com.justspeaktoit.android.dictation.DictationState
 import com.justspeaktoit.android.dictation.DictationUiState
 import com.justspeaktoit.android.dictation.RecognitionMode
@@ -136,7 +137,11 @@ internal fun ResultActions(state: DictationUiState, snackbar: SnackbarHostState,
             Text(stringResource(R.string.action_clear))
         }
     }
-    if (final && text.isNotBlank()) ReadAloudButton(text, snackbar)
+    if (final && text.isNotBlank()) {
+        // A chosen dictation language is the transcript's; with automatic, the voice detects it.
+        val language = state.languageTag.takeIf { state.languageId != DictationLanguages.AUTOMATIC }
+        ReadAloudButton(text, language, state.readAloudVoice, state.pronunciations, snackbar)
+    }
 }
 
 @Composable

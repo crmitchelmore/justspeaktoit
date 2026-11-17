@@ -40,6 +40,7 @@ object AutomationIds {
 
     /** One per History entry, keyed by its generated ID, never by its text. */
     fun historyPlay(entryId: String) = "history.play.$entryId"
+    fun historyReadAloud(entryId: String) = "history.readAloud.$entryId"
     const val SETTINGS_BACK = "settings.back"
     const val SETTINGS_DOWNLOADED_MOBILE_DATA = "settings.downloadedModels.mobileData"
     const val SETTINGS_DOWNLOADED_UNAVAILABLE = "settings.downloadedModels.unavailable"
@@ -218,6 +219,20 @@ object AutomationIds {
 
     /** One per correction, keyed by its position in the list, never by the user's own text. */
     fun correctionRemove(index: Int) = "settings.corrections.remove.$index"
+    const val READ_ALOUD_VOICE = "settings.readAloudVoice"
+    const val READ_ALOUD_VOICE_CANCEL = "settings.readAloudVoice.cancel"
+
+    /** One per voice in the read aloud picker, keyed by its saved `VoiceSelection` value. */
+    fun readAloudVoiceOption(selection: String) = "settings.readAloudVoice.option.$selection"
+    const val PRONUNCIATION_WORD = "settings.pronunciation.word"
+    const val PRONUNCIATION_SAY_AS = "settings.pronunciation.sayAs"
+    const val PRONUNCIATION_CASE_SENSITIVE = "settings.pronunciation.caseSensitive"
+    const val PRONUNCIATION_REGEX = "settings.pronunciation.regex"
+    const val PRONUNCIATION_ADD = "settings.pronunciation.add"
+    const val PRONUNCIATION_PROBLEM = "settings.pronunciation.problem"
+
+    /** One per pronunciation, keyed by its position in the list, never by the user's own text. */
+    fun pronunciationRemove(index: Int) = "settings.pronunciation.remove.$index"
     const val LEARNED_CORRECTIONS_TOGGLE = "settings.learnedCorrections.toggle"
     const val LEARNED_CORRECTIONS_FEWER = "settings.learnedCorrections.fewer"
     const val LEARNED_CORRECTIONS_MORE = "settings.learnedCorrections.more"

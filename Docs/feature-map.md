@@ -97,7 +97,7 @@ The flags live in `Project.swift`; release selection is in
 | F09 | Custom cleanup prompt | Yes | Yes | Yes | Yes | Yes | | |
 | F10 | Browse OpenRouter models picker | Yes | Yes | Yes | Yes | Yes | | Batch and cleanup pickers only; streaming pickers have none because OpenRouter can't stream. Windows and Linux also keep OpenRouter routes in the picker. |
 | F11 | Dictation profiles | Yes | Limited | Yes | Yes | Limited | | iOS and Android cannot see the frontmost app. |
-| F12 | Vocabulary, corrections, pronunciation | Yes | Yes | Yes | Yes | Partial | #1626 | Android: corrections only. Corrections also restore the stored spelling's case. |
+| F12 | Vocabulary, corrections, pronunciation | Yes | Yes | Yes | Yes | Yes | — | Corrections also restore the stored spelling's case. |
 | F13 | Transcription language selection | Yes | Yes | Yes | Yes | Yes | | |
 | F14 | History list and search | Yes | Yes | Yes | Yes | Yes | | |
 | F15 | History filters (model, errors, dates) | Yes | Yes | Yes | Yes | Yes | | Android filters by Cloud model or recognition mode. |
@@ -106,7 +106,7 @@ The flags live in `Project.swift`; release selection is in
 | F18 | Settings search | Yes | Yes | Yes | Yes | Yes | | |
 | F19 | Command palette | Yes | N/A | Yes | Yes | N/A | | Windows and Linux also list recent History. |
 | F20 | Compare models | Yes | N/A | Yes | Yes | N/A | #1622 | Desktop-only by owner decision. |
-| F21 | Voice output / read aloud | Yes | Yes | Yes | Yes | Partial | #1631 | Android: system TTS only. |
+| F21 | Voice output / read aloud | Yes | Yes | Yes | Yes | Partial | #1775 | Android: no account-discovered or Realtime voices. |
 | F22 | Voice edit of selected text | Yes | Yes | Yes | Partial | Yes | #1620 | Linux: external editable AT-SPI fields with session selection access only. Android: from the dictation keyboard. |
 | F23 | Hands-free and silence auto-stop | Yes | Yes | Yes | Yes | Yes | | Android: Cloud mode only. |
 | F24 | Insert text into other apps | Yes | Limited | Yes | Limited | Yes | | |
@@ -239,13 +239,13 @@ The flags live in `Project.swift`; release selection is in
 - **Nuances:** iOS can't see the frontmost app, so profiles apply through keyboard handoff and Focus filters (F44). Android can't either; the user picks the active profile in the app or the keyboard's profile key. Linux app matching depends on what the compositor exposes.
 
 ### F12 Vocabulary, corrections, pronunciation
-- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Partial
+- **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
 - **Excluded:** none
-- **Gaps:** Android #1626 (corrections and vocabulary prompt only; no pronunciation).
+- **Gaps:** none
 - **How:** Vocabulary biases recognition (sent as the provider's keyterms or prompt when its catalogue entry accepts one); corrections rewrite final text, and an automatic correction also restores the stored spelling's case when the recogniser already writes the word ("kubernetes" → "Kubernetes"). Limits come from `TranscriptionKeywordPolicy`.
-- **Refs:** `Sources/SpeakCore/Vocabulary/PersonalLexiconStore.swift`, `Sources/SpeakDesktop/Vocabulary/DesktopVocabulary.swift`, `Sources/SpeakDesktopHost/Transcription/DesktopHostVocabulary.swift`, `Sources/SpeakApp/PostProcessing/PersonalCorrectionsView.swift`, `Sources/SpeakCore/Vocabulary/KeyboardCorrectionWatcher.swift`, `Sources/SpeakCore/Keyboard/Apple/KeyboardCorrectionObserver.swift`, `Sources/SpeakCore/Keyboard/Apple/KeyboardCorrectionStore.swift`, `Sources/SpeakiOS/Services/IOSLearnedCorrections.swift`, `Sources/SpeakiOS/Views/Settings/LearnedCorrectionsView.swift`, `android/app/src/main/java/com/justspeaktoit/android/corrections/PersonalCorrections.kt`
+- **Refs:** `Sources/SpeakCore/Vocabulary/PersonalLexiconStore.swift`, `Sources/SpeakDesktop/Vocabulary/DesktopVocabulary.swift`, `Sources/SpeakDesktopHost/Transcription/DesktopHostVocabulary.swift`, `Sources/SpeakApp/PostProcessing/PersonalCorrectionsView.swift`, `Sources/SpeakCore/Vocabulary/KeyboardCorrectionWatcher.swift`, `Sources/SpeakCore/Keyboard/Apple/KeyboardCorrectionObserver.swift`, `Sources/SpeakCore/Keyboard/Apple/KeyboardCorrectionStore.swift`, `Sources/SpeakiOS/Services/IOSLearnedCorrections.swift`, `Sources/SpeakiOS/Views/Settings/LearnedCorrectionsView.swift`, `android/app/src/main/java/com/justspeaktoit/android/corrections/PersonalCorrections.kt`, `android/app/src/main/java/com/justspeaktoit/android/readaloud/Pronunciation.kt`, `Sources/SpeakCore/DataMigrationVocabularyCatalog.swift`
 - **Sunset:** none
-- **Nuances:** AssemblyAI keyterms are capped (50 characters each, 100 items). Corrections apply to every final path: app, keyboard, import and History retry.
+- **Nuances:** AssemblyAI keyterms are capped (50 characters each, 100 items). Corrections apply to every final path: app, keyboard, import and History retry. The pronunciation dictionary rewrites text only before read aloud (F21), never the transcript. Android's starting entries come from SpeakCore through `voice_catalog.json`, and its entries transfer as the shared migration catalogue's `pronunciation` records, merged by id or word. Only a regular expression's replacement is a template; a word's replacement is said literally on every platform. Android's regex engine cannot be interrupted, so it runs each expression off the main thread with a time limit and skips one that ran past it from then on.
 
 ### F13 Transcription language selection
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Yes
@@ -322,11 +322,11 @@ The flags live in `Project.swift`; release selection is in
 ### F21 Voice output / read aloud
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Yes · Android Partial
 - **Excluded:** none
-- **Gaps:** Android #1631 (system TTS only; no provider or voice choice).
+- **Gaps:** Android #1775 (no account-discovered voices such as Mistral or xAI and Soniox custom voices, and no OpenAI Realtime voices).
 - **How:** Read a transcript or selection with the chosen provider and voice from the shared TTS catalogue; validate voice options before sending.
-- **Refs:** `Sources/SpeakCore/TTS/Desktop/DesktopSpeechSynthesis.swift`, `Sources/SpeakDesktopHost/ReadAloud/DesktopHostReadAloud.swift`, `Sources/SpeakApp/TextToSpeech/TextToSpeechManager.swift`, `Sources/SpeakiOS/Services/VoiceOutputRouter.swift`, `android/app/src/main/java/com/justspeaktoit/android/ui/ReadAloudButton.kt`
+- **Refs:** `Sources/SpeakCore/TTS/Desktop/DesktopSpeechSynthesis.swift`, `Sources/SpeakDesktopHost/ReadAloud/DesktopHostReadAloud.swift`, `Sources/SpeakApp/TextToSpeech/TextToSpeechManager.swift`, `Sources/SpeakiOS/Services/VoiceOutputRouter.swift`, `android/app/src/main/java/com/justspeaktoit/android/ui/ReadAloudButton.kt`, `android/app/src/main/java/com/justspeaktoit/android/readaloud/ReadAloudController.kt`, `android/app/src/main/java/com/justspeaktoit/android/readaloud/CloudSpeechSynthesizer.kt`, `Sources/SpeakCore/TTS/VoiceCatalogAndroidExport.swift`
 - **Sunset:** OpenAI `/v1/audio/speech` TTS models shut down 2027-01-06 (`ModelRetirements`). ElevenLabs `elevenlabs/rachel|adam|bella` IDs migrate (`ElevenLabsTTSCatalog.legacyVoiceIdentifiers`). `SonioxTTSTextChunker` is a deprecated alias of `TTSTextChunker`, removed at the next major release.
-- **Nuances:** Desktop SSML is capped at 64 KiB and never split. Groq PlayAI voices retired on 2025-12-31 and must not return (`Sources/SpeakCore/GroqTTSCatalog.swift`). Voice settings transfer atomically on desktop hosts ([desktop voice sources](desktop-voice-sources.md)).
+- **Nuances:** Desktop SSML is capped at 64 KiB and never split. Groq PlayAI voices retired on 2025-12-31 and must not return (`Sources/SpeakCore/GroqTTSCatalog.swift`). Voice settings transfer atomically on desktop hosts ([desktop voice sources](desktop-voice-sources.md)). Android reads transcripts and History entries with the phone's voices or the cloud voices in `voice_catalog.json`, exported from SpeakCore and never copied; the export leaves out retiring OpenAI speech models. A cloud voice uses the provider's saved key. A missing or rejected key, an exhausted quota or a busy speaker is shown, and Android never moves to another voice. Audio focus pauses on a transient loss, resumes only a pause it caused and stops on a permanent loss.
 
 ### F22 Voice edit of selected text
 - **Platforms:** macOS Yes · iOS Yes · Windows Yes · Linux Partial · Android Yes

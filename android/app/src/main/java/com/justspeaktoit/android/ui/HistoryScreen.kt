@@ -21,6 +21,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -43,6 +45,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justspeaktoit.android.R
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.diagnostics.AndroidIssueEnvironment
@@ -55,6 +58,10 @@ import com.justspeaktoit.android.history.HistoryInsights
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.output.TranscriptOutput
+import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.readaloud.ReadAloudController
+import com.justspeaktoit.android.readaloud.ReadAloudState
+import com.justspeaktoit.android.readaloud.VoiceSelection
 import com.justspeaktoit.android.sendtomac.SendToMacActivity
 import com.justspeaktoit.android.sendtomac.SendToMacState
 import java.time.LocalDate
@@ -70,6 +77,20 @@ class HistoryActions(
     /** Sends the entry's transcript to the paired Mac. */
     val onSendToMac: (HistoryEntry) -> Unit = {},
     val onDismissSendToMac: () -> Unit = {},
+)
+
+/** The read-aloud voice and pronunciation dictionary History reads entries with. */
+data class HistoryReadAloud(
+    val voice: String = VoiceSelection.SYSTEM,
+    val pronunciations: List<PronunciationEntry> = emptyList(),
+)
+
+/** Which entry the screen's one read-aloud player is reading, and how to read another. */
+private class HistoryReader(
+    val controller: ReadAloudController,
+    val state: ReadAloudState,
+    val entryId: String?,
+    val read: (HistoryEntry) -> Unit,
 )
 
 /** Whether kept audio can be transcribed now, and which entry is being transcribed. */
@@ -90,6 +111,7 @@ fun HistoryScreen(
     transcribe: HistoryTranscription,
     actions: HistoryActions,
     sendToMac: SendToMacState = SendToMacState(),
+    readAloud: HistoryReadAloud = HistoryReadAloud(),
 ) {
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     // Filters are view state only: they never change the stored entries.
@@ -119,7 +141,26 @@ fun HistoryScreen(
         val playing = player.playingPath
         if (transcribe.sessionActive || (playing != null && entries.none { it.audioPath == playing })) player.stop()
     }
-    Scaffold { padding ->
+    val snackbar = remember { SnackbarHostState() }
+    val reader = rememberReadAloudController(snackbar)
+    val readerState by reader.state.collectAsStateWithLifecycle()
+    var readingId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Reading aloud stops while the microphone records, or once its entry, and so its controls, is no
+    // longer listed: deleted, or hidden by the search or a filter.
+    LaunchedEffect(transcribe.sessionActive, visible) {
+        if (transcribe.sessionActive || visible.none { it.id == readingId }) reader.stop()
+    }
+    val history = HistoryReader(
+        controller = reader,
+        state = readerState,
+        entryId = readingId.takeIf { readerState.active },
+        read = { entry ->
+            player.stop()
+            readingId = entry.id
+            reader.speak(entry.text, VoiceSelection.parse(readAloud.voice), readAloud.pronunciations)
+        },
+    )
+    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
@@ -185,7 +226,9 @@ fun HistoryScreen(
                 }
                 if (filter.isActive) item(key = "historyFilterSummary") { FilterSummary(visible.size, entries.size) }
             }
-            items(visible, key = { it.id }) { entry -> HistoryCard(entry, transcribe, player, sendToMac, actions) }
+            items(visible, key = { it.id }) { entry ->
+                HistoryCard(entry, transcribe, player, history, sendToMac, actions)
+            }
         }
     }
     if (confirmClear) {
@@ -261,6 +304,7 @@ private fun HistoryCard(
     entry: HistoryEntry,
     transcribe: HistoryTranscription,
     player: HistoryAudioPlayer,
+    reader: HistoryReader,
     sendToMac: SendToMacState,
     actions: HistoryActions,
 ) {
@@ -317,7 +361,10 @@ private fun HistoryCard(
                 if (audio != null) {
                     val playing = player.playingPath == audio
                     TextButton(
-                        onClick = { player.toggle(audio) },
+                        onClick = {
+                            reader.controller.stop()
+                            player.toggle(audio)
+                        },
                         enabled = playing || !transcribe.sessionActive,
                         modifier = Modifier.testTag(AutomationIds.historyPlay(entry.id)),
                     ) {
@@ -337,6 +384,16 @@ private fun HistoryCard(
                             Text(stringResource(R.string.action_share))
                         }
                     }
+                }
+                if (!failed && entry.text.isNotBlank()) {
+                    val reading = reader.entryId == entry.id
+                    ReadAloudControls(
+                        state = if (reading) reader.state else ReadAloudState(),
+                        tags = ReadAloudTags(AutomationIds.historyReadAloud(entry.id)),
+                        onRead = { reader.read(entry) },
+                        controller = reader.controller,
+                        readEnabled = !transcribe.sessionActive,
+                    )
                 }
                 if (!failed && entry.text.isNotBlank() && sendToMac.isPaired) {
                     TextButton(

@@ -303,6 +303,37 @@ class DictationViewModelTest {
     }
 
     @Test
+    fun testDownloadedCleanupModel_whoseRuntimeDidNotLoad_failsVisiblyAndKeepsTheTranscript() {
+        val content = ByteArray(2_000) { (it % 13).toByte() }
+        val cleaner = FakeCleaner { "Hello there." }.apply { available = false }
+        h.localModelSetup = LocalModelSetup(
+            catalog = emptyList(),
+            store = ModelStore(folder.newFolder("whisper")),
+            downloader = ModelDownloader(FakeModelSource(content)) { Long.MAX_VALUE },
+            totalMemoryBytes = 8L shl 30,
+            network = { true },
+            transcriber = FakeLocalTranscriber(),
+            cleanup = LocalCleanupSetup(listOf(llamaModel(CLEANUP_MODEL, content)), ModelStore(folder.newFolder("llm")), cleaner),
+        )
+        h.prefs.cleanupEnabled = true
+        h.cloud.onTranscribe = { "hello there" }
+        val vm = h.ready()
+        h.awaitState { it.localCleanup.models.isNotEmpty() }
+        h.onMain { vm.downloadCleanupModel(CLEANUP_MODEL) }
+        h.awaitState { it.localCleanup.models.single().state == ModelInstallState.Installed }
+        h.onMain { vm.chooseLocalCleanupModel(CLEANUP_MODEL) }
+        assertFalse(h.awaitState { it.localCleanup.selectedId == CLEANUP_MODEL }.cleanupReady)
+
+        h.onMain { vm.start() }
+        h.awaitState { it.dictation is DictationState.Listening }
+        h.onMain { vm.stop() }
+        val failed = h.awaitState { it.cleanup == CleanupStatus.Failed }
+        assertEquals(DictationState.Done(RecognitionMode.Cloud, "hello there"), failed.dictation)
+        assertTrue(cleaner.calls.isEmpty())
+        assertTrue("nothing falls back to the cloud model", h.cloud.cleanups.isEmpty())
+    }
+
+    @Test
     fun testCleanupPrompt_isTheSystemInstruction_andTheActiveProfileOverridesIt() {
         h.prefs.cleanupEnabled = true
         h.prefs.cleanupPrompt = "Write in British English."

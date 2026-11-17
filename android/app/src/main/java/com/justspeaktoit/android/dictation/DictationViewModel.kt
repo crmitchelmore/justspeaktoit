@@ -333,8 +333,7 @@ class DictationViewModel internal constructor(
                 get() = _state.value.let {
                     if (it.cleanupReady && it.sessionLocalCleanupModelId == null) it.sessionCleanupModel else null
                 }
-            override val localCleanupModelId: String?
-                get() = _state.value.let { if (it.cleanupReady) it.sessionLocalCleanupModelId else null }
+            override val localCleanupModelId: String? get() = _state.value.sessionDownloadedCleanupModelId
             override val cleanupPrompt: String? get() = _state.value.sessionCleanupPrompt
             override val corrections: List<CorrectionRule> get() = _state.value.corrections
             // A hands-free recording always ends on silence, after the user's silence duration.

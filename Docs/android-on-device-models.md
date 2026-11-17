@@ -289,9 +289,10 @@ still open on that issue and listed in `Docs/manual-checks.yml`.
   before the model loads, and cancellation or the deadline aborts loading as
   well as decoding. One model is loaded at a time and freed after each
   transcript.
-- An empty transcript stays empty and never loads the model. A missing or
-  unverified model, a load or decode failure, a timeout, an empty reply or a
-  reply that thinks aloud keeps the original transcript with a visible notice;
+- An empty transcript stays empty and never loads the model. A runtime that
+  did not load, a missing or unverified model, a load or decode failure, a
+  timeout, an empty reply or a reply that thinks aloud keeps the original
+  transcript with a visible notice;
   nothing falls back to the cloud or rules cleanup. A selected model that is not
   downloaded turns cleanup off for the session and Settings says so.
 - Small models sometimes echo the `{"transcript": ...}` wrapper; Android

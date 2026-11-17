@@ -2041,12 +2041,13 @@ sessions:
         core: false
         build: "Just Speak to It for Android, the signed APK from the first Alpha that includes Android downloaded cleanup models (#1660)"
         steps:
-          - "Download Qwen3 0.6B and choose it in Settings \u203a Clean up transcripts. Set the Cleanup prompt to: Put a full stop after every word."
+          - "In Settings, turn on Clean up transcripts, then download Qwen3 0.6B and choose it. Set the Cleanup prompt to: Put a full stop after every word."
           - "Turn on flight mode, choose On device on the main screen and dictate a made-up sentence of about 15 words, then stop."
           - "Tap Show original, then check the entry in History."
           - "Clear the Cleanup prompt, dictate again and note the note above the transcript while it runs and after."
           - "Start a dictation and stop without speaking."
-          - "Remove the model while it stays chosen, dictate one sentence and stop. Then open the dictation keyboard in a messaging app and use a voice edit."
+          - "Still offline, remove the model while it stays chosen, dictate one sentence and stop."
+          - "Turn off flight mode and wait for a network connection. Open the dictation keyboard in a messaging app and use a voice edit."
         expected: "Offline, the note says Cleaning up on this phone, then Cleaned up on this phone, and the custom prompt is followed (a full stop after each word). Show original restores the raw text; History keeps the cleaned text. Silence stays empty with no cleanup. With the model removed the original transcript is kept and nothing goes to a cloud model. The keyboard still uses the cloud cleanup model for voice edits."
         final_gate: false
       - id: "owner-android-downloaded-cleanup-measure"

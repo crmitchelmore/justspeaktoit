@@ -17,6 +17,7 @@ import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.local.CleanupModelsState
 import com.justspeaktoit.android.local.LocalModelsState
+import com.justspeaktoit.android.local.ModelInstallState
 import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.AppPreferences
@@ -134,6 +135,16 @@ data class DictationUiState(
      */
     val sessionLocalCleanupModelId: String?
         get() = if (profile?.cleanupModel != null) null else localCleanup.selectedId
+
+    /**
+     * The downloaded model a session hands to cleanup: the chosen one when cleanup is on and it is on the
+     * phone. A runtime that did not load still gets it, so cleanup fails visibly and keeps the original;
+     * a model that is not downloaded turns cleanup off for the session instead, as Settings says.
+     */
+    val sessionDownloadedCleanupModelId: String?
+        get() = sessionLocalCleanupModelId?.takeIf {
+            sessionCleanupEnabled && localCleanup.selected?.state == ModelInstallState.Installed
+        }
 
     /** The base cleanup prompt a session uses: the profile's, else the user's, else null for the built-in one. */
     val sessionCleanupPrompt: String?

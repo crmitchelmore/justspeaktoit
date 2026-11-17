@@ -155,6 +155,12 @@
       "selectionId" : "anthropic/claude-sonnet-5.5"
     }
   ],
+  "geminiNano" : {
+    "description" : "Cleans up transcripts on the phone with Android's built-in Gemini Nano, on supported Pixel and Samsung devices. The transcript never leaves the device.",
+    "displayName" : "Gemini Nano (On-device)",
+    "inputTokenLimit" : 4000,
+    "selectionId" : "android/local/GeminiNano"
+  },
   "keywordPrompt" : {
     "maximumBytes" : 224,
     "maximumTerms" : 100

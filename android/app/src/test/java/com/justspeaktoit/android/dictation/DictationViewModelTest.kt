@@ -12,6 +12,7 @@ import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.Retention
 import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.ondevice.GeminiNanoAvailability
 import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RawConfigurationValues
@@ -107,6 +108,18 @@ class DictationViewModelTest {
 
         h.clear()
         assertFalse("the device watch ends with the ViewModel", h.audioInputs.watching)
+    }
+
+    @Test
+    fun testClearing_closesGeminiNano() {
+        val nano = FakeGeminiNano()
+        h.geminiNano = nano
+        h.onMain { h.viewModel.checkGeminiNano() }
+        h.awaitState { it.geminiNano == GeminiNanoAvailability.Available }
+
+        h.clear()
+
+        assertEquals(1, nano.closes)
     }
 
     @Test

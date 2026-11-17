@@ -15,6 +15,8 @@ import com.justspeaktoit.android.corrections.AutoCorrectionLearningPolicy
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.ondevice.GeminiNanoAvailability
+import com.justspeaktoit.android.ondevice.GeminiNanoFailure
 import com.justspeaktoit.android.local.LocalModelsState
 import com.justspeaktoit.android.readaloud.PronunciationEntry
 import com.justspeaktoit.android.readaloud.VoiceSelection
@@ -28,7 +30,7 @@ import java.util.Locale
 
 data class SharedAudioOffer(val uri: Uri, val mimeType: String?)
 
-/** Optional OpenRouter cleanup of a final transcript. A failure keeps the original text. */
+/** Optional cleanup of a final transcript, in the cloud or on the phone. A failure keeps the original text. */
 enum class CleanupStatus { None, Running, Applied, Failed }
 
 data class DictationUiState(
@@ -50,6 +52,12 @@ data class DictationUiState(
     /** Live OpenRouter models for the transcription and cleanup browsers. */
     val openRouterDiscovery: OpenRouterDiscoveryState = OpenRouterDiscoveryState(),
     val cleanup: CleanupStatus = CleanupStatus.None,
+    /** The running or last cleanup used Gemini Nano on the phone. */
+    val cleanupOnDevice: Boolean = false,
+    /** Why Gemini Nano kept the original transcript, when [cleanup] is [CleanupStatus.Failed]. */
+    val cleanupFailure: GeminiNanoFailure? = null,
+    /** Whether this phone offers Gemini Nano for cleanup; checked when Settings or the picker opens. */
+    val geminiNano: GeminiNanoAvailability = GeminiNanoAvailability.Unchecked,
     val originalTranscript: String? = null,
     /** Set when a key could not be saved or removed securely. */
     val keyStoreError: Boolean = false,
@@ -164,9 +172,13 @@ data class DictationUiState(
     val armsHandsFree: Boolean
         get() = handsFreeEnabled && activeMode == RecognitionMode.Cloud
 
-    /** Cleanup runs only when switched on (by the profile or the user) and its model's provider has a key. */
+    /**
+     * Cleanup runs only when switched on (by the profile or the user) and its model's provider has a key.
+     * Gemini Nano needs no key; when the phone cannot run it, the session says why and keeps the transcript.
+     */
     val cleanupReady: Boolean
-        get() = sessionCleanupEnabled && sessionCleanupModel.provider in savedKeys
+        get() = sessionCleanupEnabled &&
+            sessionCleanupModel.let { it.isOnDevice || it.cloudProvider in savedKeys }
 }
 
 /** Deadlines and polling for the session's blocking work; tests shorten them. */

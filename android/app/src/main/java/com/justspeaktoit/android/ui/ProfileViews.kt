@@ -103,6 +103,7 @@ internal fun ProfilesEditor(
     savedKeys: Set<CloudProvider>,
     onSave: (DictationProfile) -> Unit,
     onDelete: (String) -> Unit,
+    geminiNano: GeminiNanoUi,
     discovery: OpenRouterDiscoveryUi = OpenRouterDiscoveryUi(),
 ) {
     var editing by remember { mutableStateOf<DictationProfile?>(null) }
@@ -149,6 +150,7 @@ internal fun ProfilesEditor(
         ProfileEditorDialog(
             initial = current,
             savedKeys = savedKeys,
+            geminiNano = geminiNano,
             discovery = discovery,
             onSave = {
                 onSave(it)
@@ -176,6 +178,7 @@ private data class Choice(val key: String?, val label: String, val tag: String? 
 private fun ProfileEditorDialog(
     initial: DictationProfile?,
     savedKeys: Set<CloudProvider>,
+    geminiNano: GeminiNanoUi,
     discovery: OpenRouterDiscoveryUi,
     onSave: (DictationProfile) -> Unit,
     onDelete: (() -> Unit)?,
@@ -382,6 +385,7 @@ private fun ProfileEditorDialog(
                 picking = null
             },
             onDismiss = { picking = null },
+            geminiNano = geminiNano,
             discovery = discovery,
         )
     }

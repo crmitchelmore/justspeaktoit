@@ -21,7 +21,7 @@ class VoiceEditTest {
     private val target = VoiceEditTarget("com.example.notes", 7, 4, 9, "hello")
     private val cloud = FakeCloud()
 
-    private fun rewriter(secrets: SecretStore = MemorySecrets(model.provider.credentialId to "sk-test")) =
+    private fun rewriter(secrets: SecretStore = MemorySecrets(model.cloudProvider.credentialId to "sk-test")) =
         VoiceEditRewriter(cloud, secrets)
 
     @Test
@@ -59,17 +59,20 @@ class VoiceEditTest {
         assertEquals(other, VoiceEditRules.model(other, model.selectionId))
         assertEquals(other, VoiceEditRules.model(null, other.selectionId))
         assertEquals(model, VoiceEditRules.model(null, null))
+        // The keyboard is never the top app, so on-device Gemini Nano cannot rewrite from it.
+        assertEquals(model, VoiceEditRules.model(CloudCatalog.geminiNano, null))
+        assertEquals(model, VoiceEditRules.model(null, CloudCatalog.geminiNano.selectionId))
     }
 
     @Test
     fun testReadKey_reportsAMissingOrUnreadableKey() {
         assertEquals(
-            VoiceEditKey.Missing(VoiceEditFailure.MissingKey(model.provider)),
+            VoiceEditKey.Missing(VoiceEditFailure.MissingKey(model.cloudProvider)),
             rewriter(MemorySecrets()).readKey(model),
         )
         assertEquals(
-            VoiceEditKey.Missing(VoiceEditFailure.MissingKey(model.provider)),
-            rewriter(MemorySecrets(model.provider.credentialId to " ")).readKey(model),
+            VoiceEditKey.Missing(VoiceEditFailure.MissingKey(model.cloudProvider)),
+            rewriter(MemorySecrets(model.cloudProvider.credentialId to " ")).readKey(model),
         )
         val locked = object : SecretStore {
             override fun read(name: String): String? = throw GeneralSecurityException("locked")

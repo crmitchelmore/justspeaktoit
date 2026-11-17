@@ -12,6 +12,7 @@ import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.ondevice.GeminiNanoFailure
 import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.resources.SystemResourceToken
@@ -31,6 +32,10 @@ import java.io.IOException
 internal data class SessionState(
     val dictation: DictationState = DictationState.Idle,
     val cleanup: CleanupStatus = CleanupStatus.None,
+    /** The running or last cleanup used Gemini Nano on the phone. */
+    val cleanupOnDevice: Boolean = false,
+    /** Why on-device cleanup kept the original transcript, when [cleanup] is [CleanupStatus.Failed]. */
+    val cleanupFailure: GeminiNanoFailure? = null,
     /** The transcript before an applied cleanup, so the user can restore it. */
     val originalTranscript: String? = null,
     /** True until a cancelled Cloud recording has released the microphone. */
@@ -570,7 +575,7 @@ internal class DictationSessionController(
     }
 
     private fun runCleanup(done: DictationState.Done, model: CleanupModel) {
-        change { it.copy(cleanup = CleanupStatus.Running) }
+        change { it.copy(cleanup = CleanupStatus.Running, cleanupOnDevice = model.isOnDevice, cleanupFailure = null) }
         work = scope.launch {
             // Cleanup can restore a misheard word, so corrections run again on its output.
             val systemPrompt = CleanupPolicy.systemPrompt(settings.cleanupPrompt)
@@ -582,8 +587,12 @@ internal class DictationSessionController(
             if (state.dictation != done) return@launch
             change {
                 when (outcome) {
-                    CleanupOutcome.Released -> it.copy(cleanup = CleanupStatus.None)
+                    CleanupOutcome.Released, CleanupOutcome.Skipped -> it.copy(cleanup = CleanupStatus.None)
                     CleanupOutcome.Failed -> it.copy(cleanup = CleanupStatus.Failed)
+                    is CleanupOutcome.OnDeviceFailed -> it.copy(
+                        cleanup = CleanupStatus.Failed,
+                        cleanupFailure = outcome.failure,
+                    )
                     is CleanupOutcome.Applied -> it.copy(
                         dictation = done.copy(transcript = outcome.text),
                         cleanup = CleanupStatus.Applied,

@@ -187,6 +187,11 @@ object AutomationIds {
     const val SETTINGS_CLEANUP_MODEL = "settings.cleanupModel"
     const val SETTINGS_CLEANUP_PROMPT = "settings.cleanupPrompt"
     const val SETTINGS_CLEANUP_PROMPT_RESET = "settings.cleanupPrompt.reset"
+
+    /** Gemini Nano's status under the cleanup model row, its line in the cleanup picker, and the cleanup note. */
+    const val SETTINGS_CLEANUP_GEMINI_NANO_STATUS = "settings.cleanupModel.geminiNano.status"
+    const val CLEANUP_PICKER_GEMINI_NANO_STATUS = "cleanupPicker.geminiNano.status"
+    const val CLEANUP_STATUS = "dictation.cleanup.status"
     const val SETTINGS_PROFILE_ADD = "settings.profiles.add"
     const val PROFILE_CHOOSER = "dictation.profile"
     const val PROFILE_CHOOSER_NONE = "dictation.profile.none"

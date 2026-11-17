@@ -114,6 +114,9 @@
     <string name="cleanup_running">Cleaning up with OpenRouter…</string>
     <string name="cleanup_applied">Cleaned up with OpenRouter</string>
     <string name="cleanup_failed">Cleanup failed, so this is the original transcript.</string>
+    <string name="cleanup_running_on_device">Cleaning up with Gemini Nano on this phone…</string>
+    <string name="cleanup_applied_on_device">Cleaned up with Gemini Nano on this phone</string>
+    <string name="cleanup_failed_on_device">On-device cleanup failed: %1$s This is the original transcript.</string>
     <string name="action_skip_cleanup">Skip cleanup</string>
     <string name="action_show_original">Show original</string>
 
@@ -228,7 +231,7 @@
     <string name="learned_corrections_dismiss_description">Dismiss suggestion from %1$s to %2$s</string>
     <string name="learned_corrections_clear">Clear suggestions</string>
     <string name="settings_cleanup_title">Clean up transcripts</string>
-    <string name="settings_cleanup_note">Sends the final transcript to the chosen model\'s provider to fix punctuation and spelling. Needs that provider\'s key. If cleanup fails, the original transcript is kept.</string>
+    <string name="settings_cleanup_note">Sends the final transcript to the chosen model\'s provider to fix punctuation and spelling, and needs that provider\'s key. Gemini Nano, where your phone offers it, cleans up on the phone instead. If cleanup fails, the original transcript is kept.</string>
     <string name="settings_cleanup_needs_key">Add your %1$s key to use cleanup.</string>
     <string name="settings_cleanup_model">Cleanup model</string>
     <string name="settings_cleanup_prompt_title">Cleanup prompt</string>
@@ -258,6 +261,24 @@
     <string name="profile_none">No profile</string>
     <string name="profile_label">Profile: %1$s</string>
     <string name="cleanup_picker_title">Cleanup model</string>
+    <string name="cleanup_picker_on_device_heading">On this phone</string>
+    <string name="gemini_nano_checking">Checking whether this phone offers Gemini Nano…</string>
+    <string name="gemini_nano_ready">Ready. Cleans up on this phone without a key or a connection.</string>
+    <string name="gemini_nano_downloadable">Choose it to download Gemini Nano. Then it cleans up on this phone without a key or a connection.</string>
+    <string name="gemini_nano_downloading">Downloading Gemini Nano…</string>
+    <string name="gemini_nano_downloading_percent">Downloading Gemini Nano: %1$d%%</string>
+    <string name="gemini_nano_download_failed">The download failed: %1$s Choose Gemini Nano to try again.</string>
+    <string name="gemini_nano_not_offered">Gemini Nano isn\'t offered: %1$s Choose a cloud model below for cleanup.</string>
+    <string name="gemini_nano_not_in_foreground">Gemini Nano runs only while Just Speak to It is open on screen.</string>
+    <string name="gemini_nano_busy">Gemini Nano is busy with another app.</string>
+    <string name="gemini_nano_quota">Android paused Gemini Nano for this app to save battery. Try again later.</string>
+    <string name="gemini_nano_too_long">The transcript is too long for Gemini Nano.</string>
+    <string name="gemini_nano_not_downloaded">Gemini Nano hasn\'t finished downloading.</string>
+    <string name="gemini_nano_unavailable">This phone doesn\'t support Gemini Nano.</string>
+    <string name="gemini_nano_needs_update">Gemini Nano needs a system update. Update Android and Google AICore, then try again.</string>
+    <string name="gemini_nano_storage">There isn\'t enough free storage for Gemini Nano.</string>
+    <string name="gemini_nano_no_reply">Gemini Nano returned no text.</string>
+    <string name="gemini_nano_failed">Gemini Nano couldn\'t clean up the transcript.</string>
     <plurals name="cleanup_picker_openrouter_note">
         <item quantity="one">%1$d model from many providers with one OpenRouter key</item>
         <item quantity="other">%1$d models from many providers with one OpenRouter key</item>

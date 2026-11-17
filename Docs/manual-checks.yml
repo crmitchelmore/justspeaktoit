@@ -2502,13 +2502,13 @@ sessions:
         core: false
         build: "Just Speak to It Alpha for Linux that includes the #1640 phone receiver, and a TestFlight Just Speak to It Alpha on an iPhone on the same Wi-Fi"
         steps:
-          - "With avahi-daemon running and the native (not Flatpak) package installed, open Settings \u203a iCloud Sync, turn on Receive transcripts from a phone and note the pairing code."
+          - "With avahi-daemon running and the native package or the Flatpak installed, open Settings \u203a iCloud Sync, turn on Receive transcripts from a phone and note the pairing code."
           - "On the phone open Settings \u203a Sync & Transfer \u203a Send to Mac, allow Local Network access, tap Pair with <this computer's name>, enter the code and tap Pair."
           - "On the computer click into a scratch text editor, then on the phone long-press a History entry and choose Send to Mac."
           - "On the computer choose New pairing code, then send another History item from the phone. Then on the phone forget the computer, pair again with the new code and send once more."
           - "In Paired phones choose Forget next to the phone, then send again from the phone."
           - "Turn receiving off and send once more. Then search Settings for \"send from phone\" and, with Orca on, move through the receiver controls."
-        expected: "The phone shows the computer as paired and it appears under Paired phones. Each send shows Sent to <this computer> and types the text once at the cursor. A new pairing code empties Paired phones and the next send asks you to pair again; re-pairing works. After Forget the send asks you to pair again and never re-pairs on its own. With receiving off the send fails within ten seconds. Search finds Send from phone. Orca reads each control's name and state and the code. Under Flatpak, or with avahi-daemon stopped, Status explains why phones cannot find the computer."
+        expected: "The phone shows the computer as paired and it appears under Paired phones. Each send shows Sent to <this computer> and types the text once at the cursor. A new pairing code empties Paired phones and the next send asks you to pair again; re-pairing works. After Forget the send asks you to pair again and never re-pairs on its own. With receiving off the send fails within ten seconds. Search finds Send from phone. Orca reads each control's name and state and the code. The Flatpak works like the native package; with avahi-daemon stopped, Status says why phones cannot find it."
         final_gate: false
   - id: "decisions"
     device: "Decision"

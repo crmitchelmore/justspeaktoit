@@ -9,6 +9,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayInputStream
+import java.io.IOException
 
 class ModelDownloaderTest {
     @get:Rule val folder = TemporaryFolder()
@@ -106,6 +107,13 @@ class ModelDownloaderTest {
         source.respond = source::serve
         assertNull(download())
         assertEquals(300L, source.requests.last().offset)
+        assertTrue(store.isInstalled(model))
+    }
+
+    @Test
+    fun testResponseThatFailsToClose_stillInstallsAVerifiedBody() {
+        source.respond = { ModelResponse(200, null, ByteArrayInputStream(content)) { throw IOException("reset") } }
+        assertNull(download())
         assertTrue(store.isInstalled(model))
     }
 

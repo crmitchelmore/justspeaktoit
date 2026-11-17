@@ -285,9 +285,10 @@ still open on that issue and listed in `Docs/manual-checks.yml`.
   transcript is the USER message, formatted with the model's own chat template
   (Qwen3 gets its documented non-thinking prefill). Decoding is greedy.
 - Bounds: a 4,096-token context, at most 2,048 output tokens, at most four
-  threads, two minutes per transcript (`DictationTimings.localCleanupMs`), and
-  cancellation aborts decoding. One model is loaded at a time and freed after
-  each transcript.
+  threads, two minutes per transcript (`DictationTimings.localCleanupMs`) from
+  before the model loads, and cancellation or the deadline aborts loading as
+  well as decoding. One model is loaded at a time and freed after each
+  transcript.
 - An empty transcript stays empty and never loads the model. A missing or
   unverified model, a load or decode failure, a timeout, an empty reply or a
   reply that thinks aloud keeps the original transcript with a visible notice;

@@ -133,20 +133,36 @@ class LocalModelManager<M : PinnedModel>(
 ) {
     private val jobs = mutableMapOf<String, Job>()
 
+    /**
+     * Each model's latest download or removal. The next one waits for it, and every one finishes only after
+     * the one before it, so at most one ever touches a model's files.
+     */
+    private val tails = mutableMapOf<String, Job>()
+
     /** Orders a download's progress against [cancel], so a read that ends after Cancel cannot report. */
     private val publishLock = Any()
+
+    /** Counts each model's state changes, so [refresh] never publishes a disk read that one has overtaken. */
+    private val versions = mutableMapOf<String, Long>()
     private val _models = MutableStateFlow<List<LocalModelItem<M>>>(emptyList())
     val models: StateFlow<List<LocalModelItem<M>>> = _models.asStateFlow()
 
     /** Reads which models are on disk, off the main thread. */
     fun refresh(): Job = scope.launch {
-        val states = withContext(io) { catalog.associate { it.catalogId to diskState(it) } }
-        val installed = states.filterValues { it == ModelInstallState.Installed }.keys
-        _models.value = PinnedModels.offered(catalog, totalMemoryBytes, installed).map { model ->
-            // A download under way keeps the state it is reporting.
-            val running = _models.value.firstOrNull { it.model.catalogId == model.catalogId }
-                ?.takeIf { jobs[model.catalogId]?.isActive == true }
-            running ?: LocalModelItem(model, states.getValue(model.catalogId))
+        val read = synchronized(publishLock) { versions.toMap() }
+        val disk = withContext(io) { catalog.associate { it.catalogId to diskState(it) } }
+        synchronized(publishLock) {
+            // A download under way keeps the state it is reporting, and a state published since the disk
+            // was read (a download that finished meanwhile, say) is newer than what was read.
+            val kept = _models.value.filter { item ->
+                val id = item.model.catalogId
+                jobs[id]?.isActive == true || versions[id] != read[id]
+            }.associateBy { it.model.catalogId }
+            val states = disk + kept.mapValues { it.value.state }
+            val installed = states.filterValues { it == ModelInstallState.Installed }.keys
+            _models.value = PinnedModels.offered(catalog, totalMemoryBytes, installed).map { model ->
+                kept[model.catalogId] ?: LocalModelItem(model, states.getValue(model.catalogId))
+            }
         }
     }
 
@@ -169,8 +185,9 @@ class LocalModelManager<M : PinnedModel>(
             return
         }
         set(id, ModelInstallState.Downloading(0L))
-        // A cancelled download may still be finishing its last write to the partial file.
-        val previous = jobs[id]
+        // A cancelled download may still be finishing its last write to the partial file, or a removal
+        // deleting it.
+        val previous = tails[id]
         val job = scope.launch {
             val self = currentCoroutineContext()[Job]
             try {
@@ -200,9 +217,12 @@ class LocalModelManager<M : PinnedModel>(
                     },
                 )
             } catch (e: CancellationException) {
-                // The blocking read has settled now, so report what it left on disk, unless a new
-                // download or Remove has taken this model over.
                 withContext(NonCancellable) {
+                    // Cancelled while still queued: the earlier writer must finish before this job does, or
+                    // the next download, which waits only for this one, could write alongside it.
+                    previous?.join()
+                    // The blocking read has settled now, so report what it left on disk, unless a new
+                    // download or Remove has taken this model over.
                     val partial = withContext(io) { store.partialBytes(model) }
                     synchronized(publishLock) {
                         if (jobs[id] === self) set(id, ModelInstallState.NotDownloaded(partial))
@@ -211,7 +231,10 @@ class LocalModelManager<M : PinnedModel>(
                 throw e
             }
         }
-        synchronized(publishLock) { jobs[id] = job }
+        synchronized(publishLock) {
+            jobs[id] = job
+            tails[id] = job
+        }
     }
 
     /** Stops [id]'s download, keeping what has arrived so the next attempt resumes. */
@@ -226,13 +249,16 @@ class LocalModelManager<M : PinnedModel>(
     /** Stops any download and deletes the model and its partial file. */
     fun remove(id: String): Job? {
         val model = find(id) ?: return null
-        val running = synchronized(publishLock) { jobs.remove(id) }
+        val (running, previous) = synchronized(publishLock) { jobs.remove(id) to tails[id] }
         running?.cancel()
-        return scope.launch {
-            running?.join()
+        // Queued like a download, so a download started meanwhile waits and is not deleted by this removal.
+        val removal = scope.launch {
+            withContext(NonCancellable) { previous?.join() }
             withContext(io) { store.remove(model) }
             refresh().join()
         }
+        synchronized(publishLock) { tails[id] = removal }
+        return removal
     }
 
     private fun diskState(model: M): ModelInstallState = when {
@@ -244,7 +270,8 @@ class LocalModelManager<M : PinnedModel>(
         synchronized(publishLock) { if (context.isActive) set(id, state) }
     }
 
-    private fun set(id: String, state: ModelInstallState) {
+    private fun set(id: String, state: ModelInstallState) = synchronized(publishLock) {
+        versions[id] = (versions[id] ?: 0L) + 1
         _models.update { items -> items.map { if (it.model.catalogId == id) it.copy(state = state) else it } }
     }
 

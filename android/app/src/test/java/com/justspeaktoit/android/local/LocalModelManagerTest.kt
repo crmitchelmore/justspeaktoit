@@ -149,6 +149,85 @@ class LocalModelManagerTest {
         assertFalse(manager.isInstalled(tiny.catalogId))
     }
 
+    /** The first request's second read blocks until [release]; later requests are served normally. */
+    private fun blockFirstRead(reading: CountDownLatch, release: CountDownLatch) {
+        var first = true
+        source.respond = { request ->
+            if (!first) {
+                source.serve(request)
+            } else {
+                first = false
+                ModelResponse(200, null, BlockingStream(reading, release))
+            }
+        }
+    }
+
+    private inner class BlockingStream(
+        private val reading: CountDownLatch,
+        private val release: CountDownLatch,
+    ) : InputStream() {
+        private var position = 0
+
+        override fun read(): Int = throw UnsupportedOperationException()
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            if (position == content.size) return -1
+            if (position > 0) {
+                reading.countDown()
+                release.await(TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            }
+            val count = minOf(length, if (position == 0) 500 else content.size - position)
+            content.copyInto(buffer, offset, position, position + count)
+            position += count
+            return count
+        }
+    }
+
+    @Test
+    fun testRemove_duringABlockedRead_neverDeletesADownloadStartedAfterIt() {
+        val reading = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        blockFirstRead(reading, release)
+        val manager = manager()
+        runBlocking { manager.refresh().join() }
+        manager.download(tiny.catalogId, allowMobileData = false)
+        assertTrue(reading.await(TIMEOUT_MS, TimeUnit.MILLISECONDS))
+
+        val removal = manager.remove(tiny.catalogId)
+        manager.download(tiny.catalogId, allowMobileData = false)
+        Thread.sleep(QUIET_MS)
+        assertEquals("the new download waits for the removal", 1, source.requests.size)
+        release.countDown()
+
+        manager.awaitState(tiny.catalogId) { it == ModelInstallState.Installed }
+        runBlocking { removal?.join() }
+        assertTrue(manager.isInstalled(tiny.catalogId))
+        assertEquals(ModelInstallState.Installed, manager.models.value.single().state)
+    }
+
+    @Test
+    fun testCancelledQueuedResume_stillMakesTheNextResumeWaitForTheBlockedRead() {
+        val reading = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        blockFirstRead(reading, release)
+        val manager = manager()
+        runBlocking { manager.refresh().join() }
+        manager.download(tiny.catalogId, allowMobileData = false)
+        assertTrue(reading.await(TIMEOUT_MS, TimeUnit.MILLISECONDS))
+        manager.cancel(tiny.catalogId)
+
+        // Queued behind the blocked read, then cancelled before it starts.
+        manager.download(tiny.catalogId, allowMobileData = false)
+        manager.cancel(tiny.catalogId)
+        manager.download(tiny.catalogId, allowMobileData = false)
+        Thread.sleep(QUIET_MS)
+        assertEquals("no resume writes while the first read is still blocked", 1, source.requests.size)
+        release.countDown()
+
+        manager.awaitState(tiny.catalogId) { it == ModelInstallState.Installed }
+        assertTrue(manager.isInstalled(tiny.catalogId))
+    }
+
     @Test
     fun testDownloadedModel_staysOfferedOnAPhoneWithTooLittleMemory_soItCanBeRemoved() {
         store.dir.mkdirs()
@@ -161,5 +240,6 @@ class LocalModelManagerTest {
 
     private companion object {
         const val TIMEOUT_MS = 10_000L
+        const val QUIET_MS = 300L
     }
 }

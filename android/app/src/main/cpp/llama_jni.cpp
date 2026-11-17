@@ -1,9 +1,11 @@
 // JNI bridge between LlamaNative (LlamaCppCleaner.kt) and llama.cpp, for downloaded cleanup models. A
-// session owns one llama_model; Kotlin opens it, runs one cleanup, then frees it. nativeAbort may run on
-// another thread while nativeComplete is running; nativeFree runs only after nativeComplete has
-// returned. The generation loop follows the desktop adapter (Sources/CLlamaCpp/LlamaCpp.cpp): the
-// model's own chat template with SYSTEM and USER roles, Qwen3's non-thinking prefill, greedy sampling,
-// bounded prompt and output, and no partial output when the budget runs out.
+// session owns one llama_model; Kotlin creates it with its deadline, loads the model, runs one cleanup,
+// then frees it. The deadline and nativeAbort cover the load as well as generation, so a slow load can
+// be cancelled and counts against the time limit. nativeAbort may run on another thread while
+// nativeLoad or nativeComplete is running; nativeFree runs only after both have returned. The
+// generation loop follows the desktop adapter (Sources/CLlamaCpp/LlamaCpp.cpp): the model's own chat
+// template with SYSTEM and USER roles, Qwen3's non-thinking prefill, greedy sampling, bounded prompt and
+// output, and no partial output when the budget runs out.
 #include <android/log.h>
 #include <jni.h>
 
@@ -49,8 +51,8 @@ struct Session {
     std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
     std::atomic<bool> timedOut{false};
 
-    // Called by ggml (possibly from its worker threads) and by the loops below. The deadline is set
-    // before generation starts and not changed while it runs.
+    // Called by the model loader, by ggml (possibly from its worker threads) and by the loops below. The
+    // deadline is set when the session is created and never changed.
     bool stopped() {
         if (abort.load(std::memory_order_relaxed)) return true;
         if (std::chrono::steady_clock::now() >= deadline) {
@@ -73,7 +75,8 @@ void logToAndroid(ggml_log_level level, const char *text, void *) {
 
 bool abortRun(void *userData) { return static_cast<Session *>(userData)->stopped(); }
 
-bool loadProgress(float, void *) { return true; }
+// Returning false stops llama.cpp loading the model, which then fails.
+bool loadProgress(float, void *userData) { return !static_cast<Session *>(userData)->stopped(); }
 
 std::string utf8(JNIEnv *env, jstring value) {
     if (value == nullptr) return {};
@@ -194,45 +197,58 @@ jint complete(Session *session, const std::string &system, const std::string &us
 extern "C" {
 
 JNIEXPORT jlong JNICALL
-Java_com_justspeaktoit_android_local_LlamaNative_nativeOpen(JNIEnv *env, jclass, jstring path) {
+Java_com_justspeaktoit_android_local_LlamaNative_nativeCreate(JNIEnv *, jclass, jlong timeoutMs) {
+    auto *session = new Session();
+    session->deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(std::clamp<jlong>(timeoutMs, 1, kMaxTimeoutMs));
+    return reinterpret_cast<jlong>(session);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_justspeaktoit_android_local_LlamaNative_nativeLoad(JNIEnv *env, jclass, jlong handle, jstring path) {
+    Session *session = fromHandle(handle);
+    if (session == nullptr || session->model != nullptr) return JNI_FALSE;
     llama_log_set(logToAndroid, nullptr);
     llama_backend_init();
     const std::string modelPath = utf8(env, path);
-    if (modelPath.empty()) return 0;
+    if (modelPath.empty()) {
+        failed(session, kContext);
+        return JNI_FALSE;
+    }
     llama_model_params params = llama_model_default_params();
     params.n_gpu_layers = 0;
     params.load_mode = LLAMA_LOAD_MODE_MMAP;
     params.check_tensors = true;
     params.progress_callback = loadProgress;
+    params.progress_callback_user_data = session;
     llama_model *model = llama_model_load_from_file(modelPath.c_str(), params);
-    if (model == nullptr) return 0;
-    if (llama_model_has_encoder(model) || !llama_model_has_decoder(model) ||
+    if (model == nullptr) {
+        failed(session, kContext);
+        return JNI_FALSE;
+    }
+    if (session->stopped() || llama_model_has_encoder(model) || !llama_model_has_decoder(model) ||
         llama_model_get_vocab(model) == nullptr) {
         llama_model_free(model);
-        return 0;
+        failed(session, kContext);
+        return JNI_FALSE;
     }
-    auto *session = new Session();
     session->model = model;
-    return reinterpret_cast<jlong>(session);
+    return JNI_TRUE;
 }
 
 JNIEXPORT jbyteArray JNICALL
 Java_com_justspeaktoit_android_local_LlamaNative_nativeComplete(
     JNIEnv *env, jclass, jlong handle, jbyteArray systemBytes, jbyteArray userBytes, jint maxTokens,
-    jlong timeoutMs, jint threads) {
+    jint threads) {
     Session *session = fromHandle(handle);
-    if (session == nullptr) return nullptr;
+    if (session == nullptr || session->model == nullptr) return nullptr;
     session->lastError.store(kNone);
-    session->timedOut.store(false);
     std::string system;
     std::string user;
     if (!bytes(env, systemBytes, system) || !bytes(env, userBytes, user) || user.empty()) {
         failed(session, kInvalidOutput);
         return nullptr;
     }
-    session->deadline = std::chrono::steady_clock::now() +
-                        std::chrono::milliseconds(std::clamp<jlong>(timeoutMs, 1, kMaxTimeoutMs));
-
     std::string output;
     const jint status = complete(session, system, user, maxTokens, threads > 0 ? threads : 1, output);
     if (status != kNone || session->stopped()) {
@@ -265,7 +281,7 @@ JNIEXPORT void JNICALL
 Java_com_justspeaktoit_android_local_LlamaNative_nativeFree(JNIEnv *, jclass, jlong handle) {
     Session *session = fromHandle(handle);
     if (session == nullptr) return;
-    llama_model_free(session->model);
+    if (session->model != nullptr) llama_model_free(session->model);
     delete session;
 }
 

@@ -425,6 +425,8 @@ class DictationViewModel internal constructor(
             // Loading the native library reads the APK, so it happens off the main thread.
             val runtime = withContext(io) { transcriber.available }
             _state.update { it.copy(localModels = it.localModels.copy(runtimeAvailable = runtime)) }
+            // An availability check that ran before the runtime loaded reported Downloaded as not provided.
+            selector.refresh()
             manager.refresh()
             manager.models.collect { items ->
                 val before = _state.value.localModels.installedIds
@@ -1176,6 +1178,7 @@ class DictationViewModel internal constructor(
         }
         followHandsFreeSession(s)
         syncForeground(s)
+        if (!s.dictation.isActive) selector.sessionEnded()
     }
 
     /** Shows the service while a session needs it and, between hands-free recordings, while listening. */

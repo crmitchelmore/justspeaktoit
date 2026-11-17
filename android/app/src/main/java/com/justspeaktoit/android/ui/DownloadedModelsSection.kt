@@ -95,6 +95,8 @@ internal fun DownloadedCleanupSection(
             color = MaterialTheme.colorScheme.error,
             modifier = Modifier.testTag(AutomationIds.SETTINGS_DOWNLOADED_CLEANUP_UNAVAILABLE),
         )
+        // A saved choice can still be cleared, so cleanup goes back to the cloud model.
+        if (local.selectedId != null) UseCloudCleanupButton(sessionActive, actions)
         return
     }
     val rowActions = DownloadedModelActions(
@@ -119,6 +121,11 @@ internal fun DownloadedCleanupSection(
                 .semantics { liveRegion = LiveRegionMode.Polite },
         )
     }
+    UseCloudCleanupButton(sessionActive, actions)
+}
+
+@Composable
+private fun UseCloudCleanupButton(sessionActive: Boolean, actions: SettingsActions) {
     OutlinedButton(
         onClick = { actions.onChooseLocalCleanupModel(null) },
         enabled = !sessionActive,

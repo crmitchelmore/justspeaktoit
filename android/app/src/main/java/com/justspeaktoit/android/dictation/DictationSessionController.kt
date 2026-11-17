@@ -397,9 +397,12 @@ internal class DictationSessionController(
                         DictationFailure.InvalidKey,
                         vocabulary(),
                     ).also { keepForHistory = settings.keepRecordings }
-                    // A failed downloaded-model transcription keeps its recording for a retry from History.
-                    else -> downloaded.transcribe(local?.modelId, file, local?.languageTag)
-                        .also { keepForHistory = settings.keepRecordings || it is DictationEvent.Error }
+                    // A failed downloaded-model transcription keeps its recording for a retry from History,
+                    // including one that heard nothing, which the reducer turns into a NoSpeech failure.
+                    else -> downloaded.transcribe(local?.modelId, file, local?.languageTag).also {
+                        val heardNothing = it is DictationEvent.Final && it.text.isBlank()
+                        keepForHistory = settings.keepRecordings || it is DictationEvent.Error || heardNothing
+                    }
                 }.also { settled = true }
             } catch (e: RequestReleasedException) {
                 // Releasing the upload is a cancel, so honour "Keep audio when a recording is cancelled".

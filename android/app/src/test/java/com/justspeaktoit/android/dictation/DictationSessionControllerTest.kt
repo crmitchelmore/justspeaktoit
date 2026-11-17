@@ -390,6 +390,21 @@ class DictationSessionControllerTest {
         assertTrue(File(checkNotNull(entry.audioPath)).exists())
     }
 
+    @Test
+    fun testDownloadedPlan_thatHearsNothing_failsAsNoSpeechAndKeepsTheRecordingInHistory() {
+        downloadedModels[BASE_MODEL] = folder.newFile("ggml-base.bin")
+        localTranscriber.onTranscribe = { "  " }
+        onMain { controller.start(SessionPlan.Local(BASE_MODEL, "en-GB")) }
+        await(states) { it.dictation is DictationState.Listening }
+
+        onMain { controller.stop() }
+
+        val failed = await(states) { it.dictation is DictationState.Failed }.dictation as DictationState.Failed
+        assertEquals(DictationFailure.NoSpeech, failed.failure)
+        val entry = await(history) { it.isNotEmpty() }.single()
+        assertTrue("the recording is kept for a retry", File(checkNotNull(entry.audioPath)).exists())
+    }
+
     private fun startLive(provider: CloudProvider, awaitListening: Boolean = true): FakeLiveClient {
         val model = CloudCatalog.liveTranscriptionModels.first { it.provider == provider }
         onMain { controller.start(SessionPlan.Cloud(model, "en-GB")) }

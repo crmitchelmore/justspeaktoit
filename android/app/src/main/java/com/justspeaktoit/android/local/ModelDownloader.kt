@@ -112,7 +112,7 @@ class ModelDownloader(
         } catch (e: RedirectRejected) {
             return Fetched.Failed(e.failure)
         }
-        val failure = response.use {
+        val failure = try {
             when (response.status) {
                 HttpURLConnection.HTTP_PARTIAL -> if (offset > 0) {
                     copy(response, part, offset, model.bytes, progress, cancelled)
@@ -124,8 +124,19 @@ class ModelDownloader(
                 RANGE_NOT_SATISFIABLE -> return Fetched.RangeRejected
                 else -> DownloadFailure.Http
             }
+        } finally {
+            closeQuietly(response)
         }
         return if (failure == null) Fetched.Complete else Fetched.Failed(failure)
+    }
+
+    /** What arrived is already on disk, and [install] checks its size and SHA-256, so a failed close changes nothing. */
+    private fun closeQuietly(response: ModelResponse) {
+        try {
+            response.close()
+        } catch (e: IOException) {
+            // Nothing to recover.
+        }
     }
 
     private fun resolve(model: PinnedModel, offset: Long): ModelResponse {

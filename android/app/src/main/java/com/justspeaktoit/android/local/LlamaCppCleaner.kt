@@ -31,29 +31,35 @@ internal object LlamaNative {
     }
 
     /**
-     * A model handle, or 0 when the file is not a decoder-only GGUF with a vocabulary and a chat template.
-     * The template is required: there is no raw-prompt fallback.
+     * A session handle with no model yet, whose [timeoutMs] deadline starts now and covers both
+     * [nativeLoad] and [nativeComplete].
      */
-    @JvmStatic external fun nativeOpen(path: String): Long
+    @JvmStatic external fun nativeCreate(timeoutMs: Long): Long
 
     /**
-     * Renders [system] and [user] (UTF-8) with the model's chat template, then generates greedily. Returns
-     * the UTF-8 reply, or null on failure, abort, [timeoutMs] or [maxTokens] without an end of turn; never
-     * partial text. [nativeLastError] then says why.
+     * Loads [path] into [handle]'s session. False when the file is not a decoder-only GGUF with a
+     * vocabulary, or when the session was aborted or ran out of time while loading; [nativeLastError]
+     * then says which. The chat template is checked by [nativeComplete]: there is no raw-prompt fallback.
+     */
+    @JvmStatic external fun nativeLoad(handle: Long, path: String): Boolean
+
+    /**
+     * Renders [system] and [user] (UTF-8) with the loaded model's chat template, then generates greedily.
+     * Returns the UTF-8 reply, or null on failure, abort, the session's deadline or [maxTokens] without an
+     * end of turn; never partial text. [nativeLastError] then says why.
      */
     @JvmStatic external fun nativeComplete(
         handle: Long,
         system: ByteArray,
         user: ByteArray,
         maxTokens: Int,
-        timeoutMs: Long,
         threads: Int,
     ): ByteArray?
 
-    /** The [LocalCleanupFailure] code of the last [nativeComplete] on [handle]. */
+    /** The [LocalCleanupFailure] code of the last failed [nativeLoad] or [nativeComplete] on [handle]. */
     @JvmStatic external fun nativeLastError(handle: Long): Int
 
-    /** Asks a running [nativeComplete] on [handle] to stop; safe from any thread. */
+    /** Asks a running [nativeLoad] or [nativeComplete] on [handle] to stop; safe from any thread. */
     @JvmStatic external fun nativeAbort(handle: Long)
 
     @JvmStatic external fun nativeFree(handle: Long)
@@ -179,11 +185,11 @@ class LlamaCppCleaner(
     }
 
     private suspend fun run(model: File, system: String, user: String): String {
-        val handle = LlamaNative.nativeOpen(model.absolutePath)
-        if (handle == 0L) throw LocalCleanupException(LocalCleanupFailure.ModelCorrupt, "Model did not load")
+        val handle = LlamaNative.nativeCreate(timeoutMs)
+        if (handle == 0L) throw LocalCleanupException(LocalCleanupFailure.Context, "No session")
         try {
             return coroutineScope {
-                // Cancelling this call aborts generation; the watcher stops before the handle is freed.
+                // Cancelling this call aborts loading or generation; the watcher stops before the handle is freed.
                 val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
                     try {
                         awaitCancellation()
@@ -192,12 +198,17 @@ class LlamaCppCleaner(
                     }
                 }
                 try {
+                    if (!LlamaNative.nativeLoad(handle, model.absolutePath)) {
+                        val failure = LocalCleanupFailure.of(LlamaNative.nativeLastError(handle))
+                            .takeIf { it == LocalCleanupFailure.Aborted || it == LocalCleanupFailure.TimedOut }
+                            ?: LocalCleanupFailure.ModelCorrupt
+                        throw LocalCleanupException(failure, "Model did not load")
+                    }
                     val bytes = LlamaNative.nativeComplete(
                         handle,
                         system.toByteArray(Charsets.UTF_8),
                         user.toByteArray(Charsets.UTF_8),
                         MAX_OUTPUT_TOKENS,
-                        timeoutMs,
                         threads,
                     ) ?: LlamaNative.nativeLastError(handle).let { code ->
                         throw LocalCleanupException(LocalCleanupFailure.of(code), "Cleanup failed ($code)")

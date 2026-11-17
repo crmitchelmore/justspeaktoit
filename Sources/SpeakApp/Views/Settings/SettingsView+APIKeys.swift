@@ -160,6 +160,7 @@ extension SettingsView {
     switch item.source {
     case .openRouter:
       apiKeyCard(APIKeyCardConfiguration(
+        cardID: item.id,
         title: "OpenRouter",
         systemImage: "network",
         tint: .green,
@@ -191,11 +192,11 @@ extension SettingsView {
         guideUses: [.transcription, .postProcessing, .voiceOutput]
       ))
     case .transcription(let provider):
-      providerAPIKeyCard(for: provider)
+      providerAPIKeyCard(for: provider, cardID: item.id)
     case .textToSpeech(let provider):
-      ttsProviderAPIKeyCard(for: provider)
+      ttsProviderAPIKeyCard(for: provider, cardID: item.id)
     case .postProcessing(let provider):
-      nativeTextAPIKeyCard(for: provider)
+      nativeTextAPIKeyCard(for: provider, cardID: item.id)
     }
   }
 
@@ -204,7 +205,7 @@ extension SettingsView {
     apiKeyStatusFilter = .all
   }
 
-  private func providerAPIKeyCard(for provider: TranscriptionProviderMetadata) -> some View {
+  private func providerAPIKeyCard(for provider: TranscriptionProviderMetadata, cardID: String) -> some View {
     let isStored = isAPIKeyStored(provider.apiKeyIdentifier)
     let tintColor = colorFromString(provider.tintColor)
     let validationState = apiKeyForm.providerStates[provider.id] ?? .idle
@@ -215,6 +216,7 @@ extension SettingsView {
     let removeDisabled = inFlight
 
     return apiKeyCard(APIKeyCardConfiguration(
+      cardID: cardID,
       title: "\(provider.displayName) (Transcription)",
       systemImage: provider.systemImage,
       tint: tintColor,
@@ -247,7 +249,7 @@ extension SettingsView {
   }
 
   // swiftlint:disable:next function_body_length
-  private func ttsProviderAPIKeyCard(for provider: TTSProvider) -> some View {
+  private func ttsProviderAPIKeyCard(for provider: TTSProvider, cardID: String) -> some View {
     let isStored = isAPIKeyStored(provider.apiKeyIdentifier)
     let validationState = apiKeyForm.ttsStates[provider.rawValue] ?? .idle
     let inFlight = validationState.isInFlight
@@ -265,6 +267,7 @@ extension SettingsView {
     // Keep it out of the transcription-provider ForEach; one card covers both capabilities.
     if provider == .elevenlabs {
       return apiKeyCard(APIKeyCardConfiguration(
+        cardID: cardID,
         title: "ElevenLabs API Key",
         systemImage: systemImage,
         tint: tintColor,
@@ -301,6 +304,7 @@ extension SettingsView {
     }
 
     return apiKeyCard(APIKeyCardConfiguration(
+      cardID: cardID,
       title: provider.sharesTranscriptionCredential
         ? "\(provider.displayName) API Key"
         : "\(provider.displayName) (TTS)",

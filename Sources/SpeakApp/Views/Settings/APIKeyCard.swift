@@ -4,6 +4,9 @@ import SwiftUI
 
 /// Everything one API-key card shows and the actions its buttons run.
 struct APIKeyCardConfiguration {
+  /// Stable card identity (`MacAPIKeyItem.id`) for automation identifiers, so
+  /// they never change with the card's display title.
+  let cardID: String
   let title: String
   let systemImage: String
   let tint: Color
@@ -43,12 +46,6 @@ struct APIKeyCardConfiguration {
   /// The uses this card covers, for its least-privilege key guide.
   let guideUses: APIKeyUses
 
-  /// Card-unique stem for automation identifiers; titles differ even when two
-  /// cards share a credential (Deepgram transcription and voice output).
-  var automationIDStem: String {
-    title.lowercased().map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined()
-  }
-
   /// Names the provider so each card's key-page link reads differently.
   func linkAccessibilityLabel(_ linkLabel: String) -> String {
     "\(linkLabel), \(title)"
@@ -85,7 +82,7 @@ private extension APIKeyCard {
           .textFieldStyle(.roundedBorder)
           .speakTooltip("Paste the key exactly as issued; Speak stores it securely in your Keychain.")
           .accessibilityLabel(configuration.keyFieldLabel)
-          .accessibilityIdentifier("apiKeyField.\(configuration.automationIDStem)")
+          .accessibilityIdentifier("apiKeyField.\(configuration.cardID)")
 
         compactAPIKeySaveButton(configuration)
         compactAPIKeyValidateButton(configuration)
@@ -137,7 +134,7 @@ private extension APIKeyCard {
         }
         .speakTooltip("Open \(configuration.title)'s site to manage your API key.")
         .accessibilityLabel(configuration.linkAccessibilityLabel(linkLabel))
-        .accessibilityIdentifier("apiKeyLink.\(configuration.automationIDStem)")
+        .accessibilityIdentifier("apiKeyLink.\(configuration.cardID)")
       }
 
       Spacer(minLength: 0)
@@ -218,7 +215,7 @@ private extension APIKeyCard {
         }
         .speakTooltip("Open \(configuration.title)'s site to create or manage your API key.")
         .accessibilityLabel(configuration.linkAccessibilityLabel(linkLabel))
-        .accessibilityIdentifier("apiKeyLink.\(configuration.automationIDStem)")
+        .accessibilityIdentifier("apiKeyLink.\(configuration.cardID)")
       }
 
       SecureField(configuration.keyFieldLabel, text: configuration.keyBinding)
@@ -227,7 +224,7 @@ private extension APIKeyCard {
         .textFieldStyle(.roundedBorder)
         .speakTooltip("Paste the key exactly as issued; Speak stores it securely in your Keychain.")
         .accessibilityLabel(configuration.keyFieldLabel)
-        .accessibilityIdentifier("apiKeyField.\(configuration.automationIDStem)")
+        .accessibilityIdentifier("apiKeyField.\(configuration.cardID)")
 
       Text(configuration.descriptionText)
         .font(.caption)

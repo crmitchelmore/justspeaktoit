@@ -137,6 +137,18 @@ class AccountVoicesTest {
     }
 
     @Test
+    fun testSoniox_nonStringCursorIsInvalid() {
+        val soniox = provider("soniox")
+        val voice = JSONObject().put("id", "ready_one").put("name", "Ready")
+            .put("models", JSONArray().put(JSONObject().put("model", soniox.readyModel).put("status", "ready")))
+        val page = JSONObject().put("voices", JSONArray().put(voice)).put("next_page_cursor", 17).toString()
+        assertEquals(
+            ReadAloudFailure.InvalidVoiceList(soniox.providerName),
+            failureOf { directory(FakeHttp(page)).voices(soniox, "k") },
+        )
+    }
+
+    @Test
     fun testListing_mapsRefusalsAndKeepsNoPartialList() {
         val mistral = provider("mistral")
         val name = mistral.providerName

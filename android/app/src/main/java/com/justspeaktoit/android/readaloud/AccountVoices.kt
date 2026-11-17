@@ -235,7 +235,10 @@ internal object AccountVoiceListing {
             }?.optString("status")?.lowercase(Locale.ROOT) == READY
             Listed(AccountVoice(id, name), usable = ready)
         }
-        return ParsedPage(entries, root.optStringOrNull("next_page_cursor"))
+        // A cursor that is present but not a string is invalid, as SpeakCore's decoder rejects it.
+        val cursor = root.opt("next_page_cursor")
+        if (cursor != null && cursor != JSONObject.NULL && cursor !is String) return null
+        return ParsedPage(entries, cursor as? String)
     }
 
     private fun languagesValid(languages: JSONArray?): Boolean {

@@ -2061,12 +2061,13 @@ sessions:
         build: "Just Speak to It for Android, the first Alpha APK that includes account and Realtime read-aloud voices for #1775"
         prerequisites:
           - "Saved keys for Mistral and OpenAI, and if possible an xAI or Soniox key whose account has a custom voice. Use made-up sentences only."
+          - "An xAI or Soniox key whose account has no custom voices, to see the no-voices status."
         steps:
           - "Settings: open Read aloud voice and scroll to Your Mistral voices, Your xAI voices and Your Soniox voices."
           - "Pick a Mistral account voice and tap Read aloud on a transcript of a few sentences."
-          - "Pick an OpenAI Realtime voice and read the same transcript, including a time such as 5pm."
-          - "In Settings replace the Mistral key with an invalid one, reopen Read aloud voice, then read aloud with the Mistral voice still chosen."
-          - "Turn on aeroplane mode, reopen Read aloud voice and read aloud with the Realtime voice."
+          - "With that Mistral voice still chosen, replace the Mistral key in Settings with an invalid one, reopen Read aloud voice, close it without choosing and read aloud."
+          - "Restore the Mistral key, pick an OpenAI Realtime voice and read a transcript that includes a time such as 5pm."
+          - "With the Realtime voice still chosen, turn on aeroplane mode, reopen Read aloud voice, close it and read aloud."
           - "With TalkBack on, move through the account voice groups and their status lines."
         expected: "Each account group lists that account's voices by name, says it is loading first, says when no key is saved, and says when the account has no voices. The Mistral and Realtime voices read the whole text word for word in the chosen voice. The invalid key shows the key-rejected message in the Mistral group and when reading, and offline shows the can't-reach message; nothing is read in another voice. TalkBack reads each group heading, voice name and status line."
         final_gate: false

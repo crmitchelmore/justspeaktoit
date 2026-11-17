@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { parseCommits } from './release-notes-lib.mjs';
 import { CATALOGUE_PATH, newAlphaChecks, pleaseTestMarkdown, previousDeliveredSource } from './alpha-testing-notes-lib.mjs';
 import { buildCatalogue, mergeEntries } from './release-notes-catalogue-lib.mjs';
-import { digest, validateManifest, surfaces, retiredSurfaces, frozenSurfaces, publicationSurfaces, stablePublicationSurfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
+import { digest, validateManifest, surfaces, retiredSurfaces, frozenSurfaces, publicationSurfaces, stablePublicationSurfaces, notesFor, storeNotesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/justspeaktoit';
 const run = runReleaseCommand;
@@ -131,7 +131,7 @@ if(command === 'allocate' || command === 'prepare') {
         git('merge-base','--is-ancestor',base,source);
         const commits=parseCommits(git('log','--first-parent','--reverse','--format=%H%x1f%s%x1f%b%x1e',`${base}..${source}`));
         const notes=notesFor(commits,platform,`https://github.com/${repo}/compare/${base}...${source}`,train === 'alpha' ? alphaTesting(manifests,all,surface,platform,source,base) : '');
-        const storeNotes=notes.length <= 4000 ? notes : notes.slice(0,3900)+'\nFull release notes are available in the app.';
+        const storeNotes=storeNotesFor({train,source,surface,notes},git);
         manifest.surfaces[surface]={build:surface === "mac-direct" ? allocation.build : `${1000+Math.floor(allocation.ordinal/10000)}.${Math.floor(allocation.ordinal/100)%100}.${allocation.ordinal%100}`,version:versions[platform],baseline:base,notes,notesHash:digest(notes),storeNotes,storeNotesHash:digest(storeNotes),...(retiredSurfaces.includes(surface)?{retired:true}:{})};
     }
     validateManifest(manifest);

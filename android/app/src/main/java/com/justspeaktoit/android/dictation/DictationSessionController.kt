@@ -550,6 +550,11 @@ internal class DictationSessionController(
     private fun vocabulary(): List<String> = settings.corrections.map { it.writeAs }
 
     private fun onEngineEvent(received: DictationEvent) {
+        // The wait for the recogniser's result is not recording time.
+        if (received == DictationEvent.EndOfSpeech) {
+            captureTimer.end()
+            return
+        }
         // Corrected before the reducer sees it, so History, cleanup and the screen all get the same text.
         val event = if (received is DictationEvent.Final) {
             DictationEvent.Final(PersonalCorrections.apply(received.text, settings.corrections))

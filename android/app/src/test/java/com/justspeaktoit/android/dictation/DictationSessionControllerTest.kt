@@ -149,11 +149,14 @@ class DictationSessionControllerTest {
     }
 
     @Test
-    fun testRecognizerSession_recordsHowLongItListened_fromReadyToTheResult() {
+    fun testRecognizerSession_recordsHowLongItListened_withoutTheWaitForItsResult() {
         onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
         clock.addAndGet(700)
         onMain { checkNotNull(engine.onEvent)(DictationEvent.Ready) }
         clock.addAndGet(12_500)
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.EndOfSpeech) }
+        clock.addAndGet(3_000)
+        assertTrue("the result is still pending", states.value.dictation is DictationState.Listening)
         onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("twelve and a half seconds")) }
 
         val entry = await(history) { it.isNotEmpty() }.single()

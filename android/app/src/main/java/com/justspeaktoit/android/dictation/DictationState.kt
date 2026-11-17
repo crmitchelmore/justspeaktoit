@@ -106,6 +106,9 @@ sealed interface DictationEvent {
 
     data object StopRequested : DictationEvent
 
+    /** The recogniser stopped hearing speech; its result follows. Ends capture timing, not the session. */
+    data object EndOfSpeech : DictationEvent
+
     data class Final(val text: String) : DictationEvent
 
     data class Error(val failure: DictationFailure) : DictationEvent
@@ -150,6 +153,8 @@ object DictationReducer {
         }
 
         DictationEvent.Cancelled -> if (state.isActive) DictationState.Idle else state
+
+        DictationEvent.EndOfSpeech -> state
     }
 
     private fun DictationState.activeMode(): RecognitionMode? = when (this) {

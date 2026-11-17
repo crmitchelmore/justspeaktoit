@@ -518,6 +518,7 @@ class DictationKeyboardService : InputMethodService() {
     }
 
     private fun dispatch(event: DictationEvent) {
+        if (event == DictationEvent.EndOfSpeech) return
         state = DictationReducer.reduce(state, event)
         val edit = voiceEdit
         if (edit != null) {

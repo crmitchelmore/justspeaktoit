@@ -1371,6 +1371,21 @@ sessions:
           - "Turn VoiceOver on and move through a model row while it downloads."
         expected: "The sentence is transcribed with Airplane Mode on and History names the model (for example WhisperKit Base), never a generic label or a cloud provider. The silent recording produces no text and no placeholder. The not-downloaded model fails with a message to download it rather than uploading. Removed models show Download again. The import appears in the list and downloads. VoiceOver reads each model's name, size, state and progress, and announces when a download finishes."
         final_gate: false
+      - id: "iphone-usage-insights-dashboard"
+        issues:
+          - 1623
+        title: "Usage insights dashboard matches History"
+        minutes: 5
+        core: false
+        build: "TestFlight Just Speak to It Alpha, the first build that includes the #1623 iOS usage insights dashboard, on an iPhone and an iPad"
+        steps:
+          - "Dictate three made-up sentences of at least 15 seconds each, saying \"um\" and \"you know\" a few times."
+          - "Open History and note Sessions, Average, Total Time, Words and Errors in the header."
+          - "Tap the chart button in the History toolbar to open Usage insights."
+          - "Compare the Usage section with the History header, then read Top words, Top phrases, Filler words, Speaking pace and Speech records."
+          - "Delete one History entry, go back to Usage insights, then turn VoiceOver on and move through the sections."
+        expected: "Sessions, Errors, Recording time (Total Time), Average length and Words equal the History header, before and after the deletion. Filler words lists um and you know, Speaking pace counts the three sessions and Speech records shows the words all-time. VoiceOver reads each row's name and value together, and the chart button is named Usage insights."
+        final_gate: false
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"
@@ -2051,6 +2066,21 @@ sessions:
           - "Export settings with Vocabulary, pronunciation & corrections selected and import the file on the Mac or desktop app; then export there and import on the phone."
           - "With TalkBack on, move through the editor's fields, toggles and Remove buttons."
         expected: "The entry is listed and the transcript is read as \"just speak to it\" while the text on screen stays JSTI; after removing it, JSTI is spelled out. Adding \"jsti\" updates the existing entry in place (one entry, now saying \"just speak to it\") rather than adding a second one. The invalid expression shows its message and adds nothing. The other app imports the entry and the phone gets it back unchanged, with no duplicate. TalkBack reads each field and toggle with its name and each Remove button with its word."
+        final_gate: false
+      - id: "android-usage-insights-dashboard"
+        issues:
+          - 1623
+        title: "Usage insights dashboard matches History and the Mac"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes the #1623 Android usage insights dashboard"
+        steps:
+          - "Dictate three made-up sentences of at least 15 seconds each, saying \"um\" and \"you know\" a few times."
+          - "Open History and tap Open usage insights on the Last 7 days card."
+          - "Count the History entries and compare them with Sessions; check Errors counts the failed entries."
+          - "Read Top phrases, Filler words, Speaking pace and Speech records, then press Back."
+          - "With TalkBack on, reopen Usage insights and move through the cards."
+        expected: "Sessions and Errors match History. Filler words lists um and you know, and Speaking pace counts the three sessions. Back returns to History. TalkBack reads each row's name and value together."
         final_gate: false
       - id: "android-downloaded-whisper-download"
         issues:

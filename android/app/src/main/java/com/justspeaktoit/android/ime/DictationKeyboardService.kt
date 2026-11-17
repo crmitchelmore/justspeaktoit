@@ -612,6 +612,7 @@ class DictationKeyboardService : InputMethodService() {
     }
 
     private fun dispatch(event: DictationEvent) {
+        if (event == DictationEvent.EndOfSpeech) return
         state = DictationReducer.reduce(state, event)
         applyState(corrected = false)
     }

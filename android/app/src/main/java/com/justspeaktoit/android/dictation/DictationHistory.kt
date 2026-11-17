@@ -22,7 +22,13 @@ internal interface SessionHistory {
     /** The entry [recordSession] wrote last, so an interrupted recording can be attached to it. */
     val latestSession: HistoryEntry?
 
-    fun recordSession(state: DictationState, modelId: String?, retention: Retention, audio: File? = null): Job?
+    fun recordSession(
+        state: DictationState,
+        modelId: String?,
+        retention: Retention,
+        audio: File? = null,
+        durationSeconds: Double? = null,
+    ): Job?
 
     fun replaceSessionText(text: String, cleanedUp: Boolean, retention: Retention): Job?
 
@@ -31,6 +37,7 @@ internal interface SessionHistory {
         modelId: String?,
         retention: Retention,
         mode: RecognitionMode = RecognitionMode.Cloud,
+        durationSeconds: Double? = null,
     ): Job?
 
     fun attachAudio(file: File, entry: HistoryEntry?, retention: Retention): Job?
@@ -45,6 +52,7 @@ internal interface SessionHistory {
                 modelId: String?,
                 retention: Retention,
                 audio: File?,
+                durationSeconds: Double?,
             ): Job? {
                 audio?.delete()
                 return null
@@ -57,6 +65,7 @@ internal interface SessionHistory {
                 modelId: String?,
                 retention: Retention,
                 mode: RecognitionMode,
+                durationSeconds: Double?,
             ): Job? {
                 file.delete()
                 return null
@@ -126,8 +135,15 @@ internal class DictationHistory(
     /**
      * Records a session that just ended. Only Done and Failed sessions are recorded, and [audio] (a
      * stopped recording) is moved into History beside the entry; it is deleted if it cannot be kept.
+     * [durationSeconds] is how long the session listened, for usage insights.
      */
-    override fun recordSession(state: DictationState, modelId: String?, retention: Retention, audio: File?): Job? {
+    override fun recordSession(
+        state: DictationState,
+        modelId: String?,
+        retention: Retention,
+        audio: File?,
+        durationSeconds: Double?,
+    ): Job? {
         val base = when (state) {
             is DictationState.Done -> sessionEntry(state.mode, modelId, HistoryStatus.Completed, state.transcript, null)
             is DictationState.Failed ->
@@ -136,7 +152,7 @@ internal class DictationHistory(
                 audio?.delete()
                 return null
             }
-        }
+        }.copy(durationSeconds = durationSeconds)
         val kept = audio?.let { File(recordingsDir, "${base.id}.wav") }
         val entry = base.copy(audioPath = kept?.absolutePath)
         sessionEntry = entry
@@ -180,6 +196,7 @@ internal class DictationHistory(
         modelId: String?,
         retention: Retention,
         mode: RecognitionMode,
+        durationSeconds: Double?,
     ): Job {
         val id = newId()
         return update {
@@ -196,6 +213,7 @@ internal class DictationHistory(
                 status = HistoryStatus.Cancelled,
                 text = "",
                 audioPath = kept.absolutePath,
+                durationSeconds = durationSeconds,
             )
             store.add(entry, retention)
         }

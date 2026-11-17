@@ -67,6 +67,15 @@ public struct HistoryView: View {
             }
             if !historyManager.items.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        UsageInsightsView()
+                    } label: {
+                        Image(systemName: "chart.bar.xaxis")
+                    }
+                    .accessibilityLabel("Usage insights")
+                    .accessibilityIdentifier("historyUsageInsightsButton")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showingFilters = true
                     } label: {

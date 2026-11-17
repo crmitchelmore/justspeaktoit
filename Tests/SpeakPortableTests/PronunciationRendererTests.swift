@@ -50,7 +50,7 @@ final class PronunciationRendererTests: XCTestCase {
         let renderer = PronunciationRenderer()
         let entries = [
             PronunciationEntry(word: "usd", pronunciation: "x", replacement: "US $1 and $0 \\n"),
-            PronunciationEntry(word: "(\\d+)k", pronunciation: "x", replacement: "$1 thousand", isRegex: true),
+            PronunciationEntry(word: "(\\d+)k", pronunciation: "x", replacement: "$1 thousand", isRegex: true)
         ]
         XCTAssertEqual(
             renderer.applyReplacements(to: "Pay USD for 5k", entries: entries),

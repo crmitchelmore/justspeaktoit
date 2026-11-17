@@ -42,21 +42,22 @@ object KeyboardPolicy {
      * keyboard in to live Cloud models in Settings, and only when the session's Cloud model streams
      * live ([KeyboardCloud.Live]); a batch model is never uploaded instead and returns null, so the
      * keyboard says why rather than switching route. Without the opt-in a Cloud choice is treated as
-     * no choice. Automatic never picks Cloud. Downloaded Whisper models stay out of the keyboard until
-     * their load time, memory and transcription speed are measured on real phones (#1658,
-     * Docs/android-on-device-models.md): the keyboard's process has a tighter memory budget than the
-     * app and the user is waiting in another app's text field, so a Downloaded choice is treated as no
-     * choice. An explicit on-device or speech-service choice is honoured and never silently replaced
-     * if unusable.
+     * no choice. Automatic never picks Cloud. A Downloaded choice is honoured only when [downloaded] says
+     * the chosen Whisper model is on the phone and its estimate fits the keyboard's finish bound
+     * ([KeyboardLocalModels.whisperLimitSeconds]); otherwise it is treated as no choice, because the user
+     * is waiting in another app's text field and the platform recogniser finishes sooner. An explicit
+     * on-device or speech-service choice is honoured and never silently replaced if unusable.
      */
     fun mode(
         chosen: RecognitionMode?,
         options: List<ModeAvailability>,
         cloud: KeyboardCloud = KeyboardCloud.Off,
+        downloaded: Boolean = false,
     ): RecognitionMode? {
         if (chosen == RecognitionMode.Cloud && cloud != KeyboardCloud.Off) {
             return RecognitionMode.Cloud.takeIf { cloud == KeyboardCloud.Live }
         }
+        if (chosen == RecognitionMode.Downloaded && downloaded) return RecognitionMode.Downloaded
         val platform = options.filter { it.mode !in APP_ONLY_MODES }
         return if (chosen != null && chosen !in APP_ONLY_MODES) {
             chosen.takeIf { mode -> platform.any { it.mode == mode && it.usable } }
@@ -79,7 +80,7 @@ object KeyboardPolicy {
     fun blamesBatchCloud(chosen: RecognitionMode?, cloud: KeyboardCloud): Boolean =
         chosen == RecognitionMode.Cloud && cloud == KeyboardCloud.NotLive
 
-    /** Modes the keyboard never uses outside the Cloud opt-in: Cloud (BYOK) and Downloaded models. */
+    /** Modes the keyboard never picks by itself: Cloud (BYOK, opt-in) and Downloaded models (when they fit). */
     private val APP_ONLY_MODES = setOf(RecognitionMode.Cloud, RecognitionMode.Downloaded)
 
     /**

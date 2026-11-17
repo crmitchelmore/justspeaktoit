@@ -260,6 +260,7 @@
     <string name="profile_cleanup_off">Off</string>
     <string name="profile_cleanup_model">Cleanup model</string>
     <string name="profile_cleanup_model_use_settings">Use the cleanup model in Settings</string>
+    <string name="profile_cleanup_model_downloaded">%1$s (downloaded, on this phone)</string>
     <string name="profile_cleanup_prompt">Cleanup prompt</string>
     <string name="profile_cleanup_prompt_note">Leave empty to use the cleanup prompt in Settings.</string>
     <string name="profile_use_settings">Use Settings</string>
@@ -596,6 +597,19 @@
     <string name="keyboard_cloud_missing_key">Add a %1$s API key in Just Speak to It to dictate with it. Nothing was typed.</string>
     <string name="keyboard_cloud_timeout">%1$s took too long to finish. Nothing was typed.</string>
     <string name="keyboard_cloud_failed">%1$s Nothing was typed.</string>
+    <plurals name="keyboard_listening_downloaded">
+        <item quantity="one">Listening with %1$s on this phone, up to %2$d second</item>
+        <item quantity="other">Listening with %1$s on this phone, up to %2$d seconds</item>
+    </plurals>
+    <string name="keyboard_downloaded_too_slow">Listening (%1$s). %2$s would take too long to finish in the keyboard, so it is used only in the app.</string>
+    <string name="keyboard_downloaded_not_ready">Listening (%1$s). %2$s is not downloaded or not ready on this phone, so the keyboard uses this instead.</string>
+    <string name="keyboard_downloaded_timeout">%1$s took longer than the keyboard can wait. Nothing was typed.</string>
+    <string name="keyboard_cleaning_up">Cleaning up with %1$s on this phone…</string>
+    <string name="keyboard_cleanup_done">Cleaned up with %1$s.</string>
+    <string name="keyboard_cleanup_too_long">Typed what you said: %1$s would take longer than the keyboard can wait to clean it up.</string>
+    <string name="keyboard_cleanup_timed_out">Typed what you said: %1$s did not finish cleaning up in time.</string>
+    <string name="keyboard_cleanup_failed">Typed what you said: cleanup with %1$s failed. Check the model in Just Speak to It.</string>
+    <string name="keyboard_cleanup_text_changed">Kept your text: it changed while %1$s was cleaning it up.</string>
     <string name="keyboard_switch">Switch</string>
     <string name="keyboard_delete">Delete</string>
     <string name="keyboard_enter">Enter</string>

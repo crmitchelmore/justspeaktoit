@@ -99,10 +99,19 @@ class KeyboardPolicyTest {
     }
 
     @Test
-    fun testMode_neverUsesADownloadedModel() {
+    fun testMode_usesADownloadedModelOnlyWhenItFits() {
         val both = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = true)
         val options = RecognizerAvailability.evaluate(both, LanguageSupport.Installed, downloaded = ModeStatus.Ready)
         assertEquals(RecognitionMode.OnDevice, KeyboardPolicy.mode(RecognitionMode.Downloaded, options))
+        assertEquals(
+            RecognitionMode.Downloaded,
+            KeyboardPolicy.mode(RecognitionMode.Downloaded, options, downloaded = true),
+        )
+        assertEquals(
+            "a fitting downloaded model is never used unless chosen",
+            RecognitionMode.OnDevice,
+            KeyboardPolicy.mode(null, options, downloaded = true),
+        )
 
         val onlyDownloaded = RecognizerCapabilities(34, speechServiceAvailable = false, onDeviceAvailable = false)
         val unusable = RecognizerAvailability.evaluate(onlyDownloaded, LanguageSupport.Unknown, downloaded = ModeStatus.Ready)

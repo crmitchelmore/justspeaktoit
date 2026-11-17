@@ -85,7 +85,36 @@ class DictationUiStateTest {
         assertTrue(profiled.copy(savedKeys = setOf(cloud.cloudProvider)).cleanupReady)
     }
 
+    @Test
+    fun testProfilesDownloadedCleanupModel_winsOverTheUsersChoice_andIsHandedOverEvenWhenMissing() {
+        val names = mapOf(SMOL to "SmolLM2", QWEN to "Qwen3 0.6B")
+        fun state(selectedId: String?, profileModel: String?, cleanupEnabled: Boolean? = true) = DictationUiState(
+            cleanupEnabled = false,
+            localCleanup = CleanupModelsState(runtimeAvailable = true, selectedId = selectedId, names = names),
+            profile = DictationProfile(
+                id = "P", name = "Notes", cleanupEnabled = cleanupEnabled, cleanupModelId = profileModel,
+            ),
+        )
+
+        val overCloud = state(selectedId = null, profileModel = QWEN)
+        assertEquals(QWEN, overCloud.sessionLocalCleanupModelId)
+        assertEquals(
+            "a missing model fails visibly rather than turning cleanup off",
+            QWEN,
+            overCloud.sessionDownloadedCleanupModelId,
+        )
+        assertTrue("no cloud key is needed", overCloud.cleanupReady)
+
+        assertEquals(QWEN, state(selectedId = SMOL, profileModel = QWEN).sessionDownloadedCleanupModelId)
+        assertNull(state(selectedId = null, profileModel = QWEN, cleanupEnabled = false).sessionDownloadedCleanupModelId)
+
+        val elsewhere = state(selectedId = null, profileModel = "local/post-processing/mac-only-mlx")
+        assertNull("a model Android has no entry for keeps the user's choice", elsewhere.profileLocalCleanupModelId)
+        assertNull(elsewhere.sessionDownloadedCleanupModelId)
+    }
+
     private companion object {
         const val SMOL = "local/post-processing/smollm2-360m-instruct-q4"
+        const val QWEN = "local/post-processing/qwen3-0.6b-q4"
     }
 }

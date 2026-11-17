@@ -166,18 +166,29 @@ class PinnedWeightsVerifier(private val digest: (File) -> String = ModelDownload
         synchronized(lock) { verified += version }
         return true
     }
+
+    /** Whether [file] is already verified for [model], so [verify] would only re-check its size. */
+    fun isVerified(model: PinnedModel, file: File): Boolean {
+        val version = Version(file.absolutePath, file.length(), file.lastModified(), model.sha256)
+        return synchronized(lock) { version in verified }
+    }
+
+    companion object {
+        /** The app's and the keyboard's verifier: they share a process, so a file is hashed once for both. */
+        val shared = PinnedWeightsVerifier()
+    }
 }
 
-/** llama.cpp through [LlamaNative], loading the model for each cleanup and freeing it after. */
+/**
+ * llama.cpp through [LlamaNative], loading the model for each cleanup and freeing it after. Every instance
+ * waits for the one model in memory, so the keyboard never loads a second model beside the app's.
+ */
 class LlamaCppCleaner(
     private val io: CoroutineDispatcher,
     private val timeoutMs: Long,
     private val threads: Int = Runtime.getRuntime().availableProcessors().coerceIn(1, MAX_THREADS),
 ) : LocalCleaner {
     override val available: Boolean get() = LlamaNative.loaded
-
-    /** One model in memory at a time. */
-    private val running = Mutex()
 
     override suspend fun complete(model: File, system: String, user: String): String {
         if (!available) throw LocalCleanupException(LocalCleanupFailure.RuntimeMissing, "Runtime missing")
@@ -224,6 +235,9 @@ class LlamaCppCleaner(
     }
 
     private companion object {
+        /** One model in memory at a time, across the app and the keyboard, which share a process. */
+        val running = Mutex()
+
         const val MAX_THREADS = 4
 
         /** As the desktop adapter; the native side also stops at the context window. */

@@ -75,9 +75,9 @@ model ([ML Kit GenAI][mlkit-genai], [Gemini Nano][android-nano]).
 - **Surface limit:** inference is allowed only while the app is the top
   foreground app; background and foreground-service use returns
   `BACKGROUND_USE_BLOCKED` ([ML Kit GenAI][mlkit-genai]). Our keyboard runs
-  inside another app, so Gemini Nano cleanup is in-app only. The keyboard does
-  not run cleanup today; its voice edit uses the default cloud cleanup model
-  when Gemini Nano is chosen.
+  inside another app, so Gemini Nano cleanup is in-app only. The keyboard
+  cleans up only with a downloaded llama.cpp model (see below); its voice edit
+  uses the default cloud cleanup model when Gemini Nano is chosen.
 
 ### Gemini Nano cleanup as shipped (#1659)
 
@@ -263,11 +263,18 @@ open on that issue and listed in `Docs/manual-checks.yml`.
   falls back to Cloud or the platform recogniser, and a Downloaded History
   entry is retried only with a downloaded model.
 - Hands-free and shared audio files stay on Cloud for now.
-- **Keyboard:** the dictation keyboard never offers Downloaded models
-  (`KeyboardPolicy.APP_ONLY_MODES`). There are no device measurements yet, the
-  keyboard must finish within its 10-second bound while the user waits in
-  another app, and an IME process has a tighter memory budget than the app.
-  Revisit once the measurements exist.
+- **Keyboard:** the keyboard must finish within its 10-second bound while the
+  user waits in another app, and there are no device measurements yet, so it
+  honours a Downloaded choice only when `KeyboardLocalModels.whisperLimitSeconds`
+  gives the model a non-zero recording limit. The estimate uses 8 of the 10
+  seconds and deliberately slow rates (500 ms fixed, loading at 200 MB/s and
+  50 MB of weights per second for each 30-second window): Tiny may record for
+  up to 120 seconds and Base for 60, while Small and Large v3 Turbo stay
+  app-only. A model that is too slow, not downloaded or without its runtime
+  leaves the platform recogniser in use and the keyboard's status says so. A
+  run that still passes 10 seconds after Stop is cancelled and fails visibly;
+  nothing falls back. The keyboard runs in the app's process, so it shares the
+  app's memory budget. Raise the rates once the measurements exist.
 
 ## Downloaded cleanup on Android
 
@@ -323,8 +330,10 @@ still open on that issue and listed in `Docs/manual-checks.yml`.
   **On this phone** in the Settings cleanup picker, beside Gemini Nano) replaces
   the picked cleanup model, cloud or Gemini Nano, and the Cleanup model row
   names it; choosing any other model in the picker clears it. The prompt editor
-  stays visible. A profile's own cleanup model (cloud or Gemini Nano) still
-  wins for its sessions. Configuration transfer uses
+  stays visible. A profile's own cleanup model (cloud, Gemini Nano or a
+  downloaded model chosen in the profile editor's picker) still wins for its
+  sessions; a profile's downloaded model that is missing fails visibly and
+  keeps the original transcript. Configuration transfer uses
   the shared `postProcessingModel` key, so a desktop's `local/post-processing/*`
   choice imports when Android offers that model.
 - The cleanup prompt (`CleanupPolicy.systemPrompt`, honouring
@@ -344,8 +353,19 @@ still open on that issue and listed in `Docs/manual-checks.yml`.
   downloaded turns cleanup off for the session and Settings says so.
 - Small models sometimes echo the `{"transcript": ...}` wrapper; Android
   unwraps exactly that shape. The desktop runtimes do not.
-- **Keyboard:** the dictation keyboard keeps cloud cleanup for voice edits, for
-  the same latency and memory reasons as Downloaded transcription.
+- **Keyboard:** keyboard dictation is cleaned up with the profile's or the
+  user's downloaded model, never a cloud model or Gemini Nano; voice edits keep
+  cloud cleanup. While it runs the words show as composing text. Before
+  loading, `KeyboardLocalModels.cleanupFits` estimates hashing (300 MB/s, first
+  run in the process only), loading (200 MB/s), prompt (60e9 / model bytes
+  tokens per second) and reply (8e9 / model bytes tokens per second, at 3
+  characters per token) against 8 of the 10 seconds: SmolLM2 fits about 230
+  characters, Qwen3 0.6B a few words once hashed, Qwen3 1.7B never. A cleanup
+  that would not fit, runs past 10 seconds (the runtime's own deadline is a
+  second later) or fails types the words as said with the reason shown. The
+  keyboard hashes the chosen model's weights in the background when it opens,
+  the hash is shared with the app, and one process-wide lock keeps the app and
+  keyboard from loading two models at once.
 - **Unit tests** never load the library: cleanup talks to the `LocalCleaner`
   interface, and JVM tests use a fake.
 

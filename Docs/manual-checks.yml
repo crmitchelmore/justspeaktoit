@@ -1712,11 +1712,23 @@ sessions:
           - "Turn the setting on, read its note, then dictate three sentences with the keyboard, pausing between them, and tap Stop mid-word."
           - "Start another keyboard dictation, open Settings > System resources in use from the app and stop the microphone."
           - "Start another one, say a sentence and turn on Airplane mode while still talking, then tap Stop."
-          - "Start another one and, while speaking, start a voice note or the Google Assistant for a few seconds, then return. Start another and connect or disconnect a Bluetooth headset."
           - "Choose a batch Cloud model such as GPT Transcribe, then tap the keyboard's microphone. Choose the live model again, remove the OpenAI key and tap it again."
-          - "With the setting still on and the batch model still chosen in Cloud settings, choose On-device mode on a phone where On-device is unavailable for the language, then tap the keyboard's microphone."
           - "With TalkBack on, focus the new setting."
-        expected: "Off, the keyboard dictates on the phone as before. On, the note and status line name OpenAI, words appear underlined while speaking and Stop types the full text within 10 seconds. Stopping from System resources or Airplane mode removes the underlined words, shows why and types nothing. The voice note or Assistant makes the status line say Paused, and it carries on by itself afterwards; the headset change stops dictation with a message naming the headset and types nothing. The batch model and the missing key each show a message and never dictate on the phone instead. The unavailable On-device choice says no on-device or speech-service recognition is available and does not mention Cloud or the batch model. Nothing from the keyboard appears in History. TalkBack reads the setting's name, state and switch role."
+        expected: "Off, the keyboard dictates on the phone as before. On, the note and status line name OpenAI, words appear underlined while speaking and Stop types the full text within 10 seconds. Stopping from System resources or Airplane mode removes the underlined words, shows why and types nothing. The batch model and the missing key each show a message and never dictate on the phone instead. Nothing from the keyboard appears in History. TalkBack reads the setting's name, state and switch role."
+        final_gate: false
+      - id: "owner-android-keyboard-live-cloud-interruptions"
+        issues:
+          - 1668
+        title: "Dictation keyboard: live Cloud handles interruptions; local choices never blame Cloud"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1668"
+        steps:
+          - "Turn on Settings > Dictation keyboard > Use live Cloud models in the keyboard, choose Cloud mode with OpenAI GPT Live Transcribe (Streaming) and a saved OpenAI key."
+          - "Start a keyboard dictation in a notes app and, while speaking, start a voice note or the Google Assistant for a few seconds, then return."
+          - "Start another and connect or disconnect a Bluetooth headset while speaking."
+          - "Choose a batch Cloud model such as GPT Transcribe, then choose On-device mode with a language On-device does not support, and tap the keyboard's microphone."
+        expected: "The voice note or Assistant makes the keyboard's status line say Paused, and dictation carries on by itself afterwards. The headset change stops dictation with a message naming the headset and types nothing. The unavailable On-device choice says no on-device or speech-service recognition is available and does not mention Cloud or the batch model."
         final_gate: false
       - id: "android-raw-configuration-editor"
         issues:

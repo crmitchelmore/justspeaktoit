@@ -19,6 +19,7 @@ def verify(manifest):
     assert set(manifest['finish-args']) == {
         '--share=network', '--share=ipc', '--socket=wayland', '--socket=fallback-x11',
         '--socket=pulseaudio', '--device=dri', '--talk-name=org.kde.StatusNotifierWatcher',
+        '--system-talk-name=org.freedesktop.Avahi',
         '--env=JSTI_WHISPER_RUNTIME_DIRECTORY=/app/lib/justspeaktoit',
         '--env=GGML_NO_BACKTRACE=1',
     }, 'sandbox permissions changed: owner review required'

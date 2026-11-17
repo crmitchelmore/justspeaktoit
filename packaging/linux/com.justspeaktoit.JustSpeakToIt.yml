@@ -37,6 +37,9 @@ finish-args:
   # The status notifier (panel icon and menu) registers with the desktop's
   # watcher under the app's own bus name.
   - --talk-name=org.kde.StatusNotifierWatcher
+  # Send from phone announces the receiver through the host's avahi-daemon on
+  # the system bus (mDNS/DNS-SD), so paired phones can find this computer.
+  - --system-talk-name=org.freedesktop.Avahi
 build-options:
   append-path: /usr/lib/sdk/swift6/bin
   prepend-ld-library-path: /usr/lib/sdk/swift6/lib

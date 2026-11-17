@@ -59,8 +59,8 @@ public final class PronunciationRenderer: @unchecked Sendable {
     }
 
     /// A case-sensitive word replaces every literal occurrence. Otherwise the
-    /// word matches case-insensitively between word boundaries, and
-    /// `replacement` is a regular-expression template.
+    /// word matches case-insensitively between word boundaries. Either way
+    /// `replacement` is literal text; only regular-expression entries use templates.
     func applySimpleReplacement(
         text: String,
         word: String,
@@ -80,7 +80,7 @@ public final class PronunciationRenderer: @unchecked Sendable {
                 in: text,
                 options: [],
                 range: range,
-                withTemplate: replacement
+                withTemplate: NSRegularExpression.escapedTemplate(for: replacement)
             )
         }
     }

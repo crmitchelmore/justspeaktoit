@@ -35,6 +35,10 @@ import com.justspeaktoit.android.local.AndroidLocalModels
 import com.justspeaktoit.android.local.LocalModelSetup
 import com.justspeaktoit.android.local.LocalModelsState
 import com.justspeaktoit.android.local.ModelInstallState
+import com.justspeaktoit.android.readaloud.PronunciationDictionary
+import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.readaloud.VoiceSelection
+import com.justspeaktoit.android.readaloud.readVoiceCatalog
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.security.KeystoreSecretStore
 import com.justspeaktoit.android.security.SecretStore
@@ -125,6 +129,8 @@ class DictationViewModel internal constructor(
     historySync: (SyncHistoryEntries) -> HistorySyncService? = { null },
     // Downloads OpenRouter's public model list for the browsers; tests pass a fake.
     openRouterFetch: (String) -> String = OpenRouterDiscovery::download,
+    // SpeakCore's shared pronunciation defaults, from voice_catalog.json.
+    private val pronunciationDefaults: List<PronunciationEntry> = emptyList(),
     // Downloaded Whisper models (#1658); null leaves Downloaded mode out of the app.
     localModelSetup: LocalModelSetup? = null,
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
@@ -190,6 +196,8 @@ class DictationViewModel internal constructor(
             handsFreeEnabled = prefs.handsFreeEnabled,
             keepRecordings = prefs.keepRecordings,
             corrections = prefs.corrections,
+            pronunciations = prefs.pronunciations ?: pronunciationDefaults,
+            readAloudVoice = VoiceSelection.parse(prefs.readAloudVoice).encoded,
             learnCorrections = prefs.learnCorrections,
             correctionPromotionThreshold = prefs.correctionPromotionThreshold,
             correctionCandidates = learner.pending(),
@@ -269,6 +277,7 @@ class DictationViewModel internal constructor(
 
     /** The import the preview describes, applied only when the user confirms it. */
     private var pendingImport: ImportPlan? = null
+    private var pronunciationEdits = 0
 
     private val sync: HistorySyncService? = historySync(
         object : SyncHistoryEntries {
@@ -481,6 +490,22 @@ class DictationViewModel internal constructor(
     fun setCorrections(rules: List<CorrectionRule>) {
         prefs.corrections = rules
         _state.update { it.copy(corrections = rules) }
+    }
+
+    /** Saves the whole pronunciation dictionary; read aloud uses it from the next reading. */
+    fun setPronunciations(entries: List<PronunciationEntry>) {
+        if (PronunciationDictionary.validate(entries) != null) return
+        // A previewed import was planned against the old dictionary; applying it would undo this edit.
+        pronunciationEdits++
+        if (pendingImport != null) dismissConfigurationImport()
+        prefs.pronunciations = entries
+        _state.update { it.copy(pronunciations = entries) }
+    }
+
+    /** Saves the read-aloud voice; a cloud voice uses the provider key already saved for it. */
+    fun setReadAloudVoice(selection: VoiceSelection) {
+        prefs.readAloudVoice = selection.encoded
+        _state.update { it.copy(readAloudVoice = selection.encoded) }
     }
 
     /** Saves the shared start/stop sound settings; they apply from the next cue. */
@@ -1007,13 +1032,21 @@ class DictationViewModel internal constructor(
         if (current.transfer.busy || current.dictation.isActive) return
         pendingImport = null
         updateTransfer { it.copy(busy = true, preview = null, importCredentials = false, outcome = null, detail = null) }
+        val edits = pronunciationEdits
         scope.launch {
             val history = historyOwner.snapshot(_state.value.retention)
             var detail: String? = null
             val plan = withContext(transferIo) {
                 try {
                     val contents = transferFiles.read(open)
-                    ConfigImporter.plan(contents, prefs, history, secrets.names(), System.currentTimeMillis())
+                    ConfigImporter.plan(
+                        contents,
+                        prefs,
+                        history,
+                        secrets.names(),
+                        System.currentTimeMillis(),
+                        pronunciationDefaults,
+                    )
                 } catch (e: ConfigArchiveException) {
                     detail = e.message
                     null
@@ -1022,6 +1055,12 @@ class DictationViewModel internal constructor(
                 } catch (_: SecurityException) {
                     null
                 }
+            }
+            if (plan != null && edits != pronunciationEdits) {
+                // The dictionary changed while the archive was read, so this plan is already stale.
+                updateTransfer { it.copy(busy = false) }
+                withContext(transferIo) { transferFiles.clear() }
+                return@launch
             }
             pendingImport = plan
             updateTransfer {
@@ -1075,6 +1114,7 @@ class DictationViewModel internal constructor(
                 retention = prefs.retention,
                 keepAudioOnCancel = prefs.keepAudioOnCancel,
                 corrections = prefs.corrections,
+                pronunciations = prefs.pronunciations ?: pronunciationDefaults,
                 cleanupPrompt = prefs.cleanupPrompt,
                 profiles = prefs.profiles,
                 localModels = it.localModels.copy(downloadOnMobileData = prefs.downloadedModelsOnMobileData),
@@ -1188,8 +1228,20 @@ class DictationViewModel internal constructor(
                 historySync = { entries ->
                     AndroidHistorySync.create(application, KeystoreSecretStore.create(application), entries, Dispatchers.IO)
                 },
+                pronunciationDefaults = loadPronunciationDefaults(application),
                 localModelSetup = AndroidLocalModels.setup(application, Dispatchers.IO),
             )
+        }
+
+        /** A missing or unreadable asset leaves the dictionary empty rather than stopping the app. */
+        private fun loadPronunciationDefaults(application: Application): List<PronunciationEntry> = try {
+            readVoiceCatalog(application).pronunciationDefaults
+        } catch (e: java.io.IOException) {
+            emptyList()
+        } catch (e: org.json.JSONException) {
+            emptyList()
+        } catch (e: IllegalStateException) {
+            emptyList()
         }
 
         /** A missing or unreadable asset hides balances rather than stopping the app. */

@@ -138,6 +138,7 @@ internal class ConfigImportApplier(
         settings.cleanupPrompt?.let { prefs.cleanupPrompt = it.value }
         plan.profiles?.let { prefs.profiles = it }
         plan.corrections?.let { prefs.corrections = it }
+        plan.pronunciations?.let { prefs.pronunciations = it }
         settings.activeProfileId?.let { prefs.activeProfileId = it.value }
         settings.retention?.let { prefs.retention = it }
     }

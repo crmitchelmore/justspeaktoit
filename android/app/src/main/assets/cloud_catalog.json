@@ -275,6 +275,26 @@
       "vocabularyField" : "keyterms_prompt"
     },
     {
+      "apiName" : "scribe_v3_live",
+      "catalogId" : "elevenlabs/scribe-v3-live-streaming",
+      "displayName" : "ElevenLabs Scribe v3 Live (Streaming)",
+      "languageField" : "language_code",
+      "postStopFinalizeBudgetMs" : 0,
+      "provider" : "elevenlabs",
+      "sampleRate" : 16000,
+      "vocabularyField" : "keyterms"
+    },
+    {
+      "apiName" : "scribe_v2_realtime",
+      "catalogId" : "elevenlabs/scribe-v2-streaming",
+      "displayName" : "ElevenLabs Scribe v2 (Streaming)",
+      "languageField" : "language_code",
+      "postStopFinalizeBudgetMs" : 0,
+      "provider" : "elevenlabs",
+      "sampleRate" : 16000,
+      "vocabularyField" : "keyterms"
+    },
+    {
       "apiName" : "gpt-live-transcribe",
       "catalogId" : "openai/gpt-live-transcribe-streaming",
       "displayName" : "OpenAI GPT Live Transcribe (Streaming)",

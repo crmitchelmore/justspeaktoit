@@ -62,6 +62,8 @@
         "deepgram/flux-general-en-streaming",
         "deepgram/flux-general-multi-streaming",
         "assemblyai/universal-3-6-pro-streaming",
+        "elevenlabs/scribe-v3-live-streaming",
+        "elevenlabs/scribe-v2-streaming",
         "openai/gpt-live-transcribe-streaming",
         "openai/gpt-realtime-whisper-streaming"
       ],
@@ -383,6 +385,8 @@
     "postRecordingTailDuration",
     "preferredAudioInputUID",
     "preferredLocaleIdentifier",
+    "pronunciationDictionary",
+    "readAloudVoice",
     "recordingsDirectory",
     "recoveredTranscriptionKeywords",
     "rememberedLocalTranscriptionSource",

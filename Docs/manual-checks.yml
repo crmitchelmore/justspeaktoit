@@ -1657,6 +1657,22 @@ sessions:
           - "Save an invalid Deepgram key and dictate with Deepgram Nova-3 (Streaming)."
         expected: "Each model shows words while speaking and returns the full formatted text after Stop. The vocabulary word is spelt correctly. The invalid key fails with \"rejected the API key\" and shows under Errors on the API key filter."
         final_gate: true
+      - id: "owner-android-live-elevenlabs"
+        issues:
+          - 1667
+        title: "ElevenLabs live streaming with a real key"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha that includes #1667"
+        steps:
+          - "Save an ElevenLabs key with speech-to-text (Scribe) access in Settings."
+          - "Dictate three sentences with ElevenLabs Scribe v3 Live (Streaming), pausing between them, then tap Stop mid-word. Repeat with ElevenLabs Scribe v2 (Streaming)."
+          - "Add a personal correction, write as \"Kubernetes\", and say \"Kubernetes\" with each model."
+          - "Start another dictation, say a sentence, then turn on flight mode while still talking."
+          - "Turn off flight mode and wait for network access to return."
+          - "Save an invalid ElevenLabs key and dictate with ElevenLabs Scribe v3 Live (Streaming)."
+        expected: "Words appear while speaking and each settled phrase replaces its partial, never duplicated. Stop returns the full text within a few seconds, including the last words. The vocabulary word is spelt correctly. Flight mode ends with a network failure and History keeps the words heard so far as unfinished, with no upload or other provider instead. The invalid key fails with \"rejected the API key\"."
+        final_gate: true
       - id: "android-first-run-setup"
         issues:
           - 1639
@@ -1972,6 +1988,39 @@ sessions:
           - "In Settings tap Forget This Mac and confirm, then open History. Search Settings for \"send to mac\"."
           - "With TalkBack on, pair again and repeat one send, listening to the code field, the Pair button and the result."
         expected: "The Mac appears under Send to Mac within a few seconds and pairing shows Paired Mac with its name. Each send shows Sent to <your Mac> and the text is pasted once at the Mac's cursor, including after reopening the app. After regenerating the code the send fails with the Mac's message asking you to pair again, and the phone never re-pairs on its own. After forgetting, History no longer offers Send to Mac. Search finds Send to Mac and opens its section. TalkBack names the code field and buttons and announces pairing, sent and failed results."
+        final_gate: false
+      - id: "android-read-aloud-voices"
+        issues:
+          - 1631
+        title: "Read aloud: phone and cloud voices, pause and resume, interruptions and failures"
+        minutes: 10
+        core: false
+        build: "Just Speak to It for Android, the first Alpha APK that includes read-aloud voice choice for #1631"
+        prerequisites:
+          - "A saved key for one cloud voice provider, for example ElevenLabs, Deepgram or Groq, and no saved key for another such as Cartesia. Use made-up sentences only."
+        steps:
+          - "Dictate a few sentences and tap Read aloud on the finished transcript. Tap Pause reading, then Resume reading, then Stop reading."
+          - "Settings: open Read aloud voice, pick a different phone voice and read the transcript again."
+          - "Pick a cloud voice for the provider whose key is saved, read the transcript, and while it plays start a voice note or a call in another app, then end it."
+          - "Pick a cloud voice for the provider with no saved key and tap Read aloud."
+          - "Open History and tap Read aloud on an entry, then tap Play recording on another entry while it reads."
+          - "With TalkBack on, open the voice picker and move through it, then read aloud once, listening to the buttons and the status line."
+        expected: "Each voice reads the text in that voice, and pause, resume and stop act at once. The other app's audio pauses the reading, and it resumes when that audio ends; a call stops it. The missing key shows that provider's key message and nothing is read in another voice. History reads its entry, and playing a recording stops the reading. Search Settings for \"voice\" and it opens Read aloud voice. TalkBack names each voice with its provider, says when a key is needed and announces Reading aloud and Reading paused."
+        final_gate: false
+      - id: "android-pronunciation-dictionary"
+        issues:
+          - 1626
+        title: "Pronunciation dictionary: edit entries, hear them read aloud and carry them in an export"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Android, the first Alpha APK that includes the pronunciation dictionary for #1626, and a Mac or desktop app for the export check"
+        steps:
+          - "Settings: open Pronunciation dictionary. Add Word \"JSTI\", Say as \"just speak it\", then add Word \"jsti\" with Say as \"just speak to it\". Then turn on Regular expression and try to add an invalid pattern such as \"(\"."
+          - "Dictate or paste a transcript containing JSTI and tap Read aloud."
+          - "Remove the entry, read aloud again, then add it back."
+          - "Export settings with Vocabulary, pronunciation & corrections selected and import the file on the Mac or desktop app; then export there and import on the phone."
+          - "With TalkBack on, move through the editor's fields, toggles and Remove buttons."
+        expected: "The entry is listed and the transcript is read as \"just speak to it\" while the text on screen stays JSTI; after removing it, JSTI is spelled out. Adding \"jsti\" updates the existing entry in place (one entry, now saying \"just speak to it\") rather than adding a second one. The invalid expression shows its message and adds nothing. The other app imports the entry and the phone gets it back unchanged, with no duplicate. TalkBack reads each field and toggle with its name and each Remove button with its word."
         final_gate: false
       - id: "android-downloaded-whisper-download"
         issues:

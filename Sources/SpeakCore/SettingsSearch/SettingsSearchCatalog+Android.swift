@@ -61,6 +61,26 @@ extension SettingsSearchCatalog {
             platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.readAloudVoice", title: "Read aloud voice", section: .voiceOutput,
+            systemImage: "speaker.wave.3",
+            summary: "The voice that reads transcripts aloud: the phone's text-to-speech or a cloud voice.",
+            keywords: [
+                "voice output", "text to speech", "tts", "speak", "read aloud", "voice", "elevenlabs", "azure",
+                "deepgram", "cartesia", "gemini", "groq", "speechmatics", "soniox"
+            ],
+            settingKeys: ["readAloudVoice"], platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.pronunciation", title: "Pronunciation dictionary", section: .pronunciation,
+            systemImage: "character.book.closed",
+            summary: "Words read aloud differently from how they are written, such as names and acronyms.",
+            keywords: [
+                "pronunciation dictionary", "pronounce", "say as", "read aloud", "acronyms", "names",
+                "text to speech", "tts", "regex"
+            ],
+            settingKeys: ["pronunciationDictionary"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.cleanup", title: "Clean up transcripts", section: .postProcessing,
             systemImage: "wand.and.stars",
             summary: "Send the final transcript to the chosen cleanup model to fix punctuation and filler words.",

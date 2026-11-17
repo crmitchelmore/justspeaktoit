@@ -7,6 +7,7 @@ import com.justspeaktoit.android.dictation.DictationLanguages
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStatus
+import com.justspeaktoit.android.readaloud.PronunciationEntry
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.DictationProfiles
 import org.json.JSONArray
@@ -21,6 +22,7 @@ internal object RecordKinds {
     const val SECRET = "secret"
     const val PROFILE = "profile"
     const val LEXICON = "lexicon"
+    const val PRONUNCIATION = "pronunciation"
     const val HISTORY = "history"
     const val AUDIO = "audio"
 }
@@ -237,5 +239,17 @@ internal object LexiconRecords {
         val canonical = value.opt("canonical") as? String ?: return null
         val aliases = value.optJSONArray("aliases") ?: JSONArray()
         return PersonalCorrections.rule(canonical, (0 until aliases.length()).mapNotNull { aliases.opt(it) as? String })
+    }
+}
+
+/** Pronunciation dictionary entries as SpeakCore `PronunciationEntry` records, keyed by entry id. */
+internal object PronunciationRecords {
+    fun record(entry: PronunciationEntry): ArchiveRecord =
+        ArchiveRecord(id = entry.id, kind = RecordKinds.PRONUNCIATION, value = entry.toJson())
+
+    fun entry(record: ArchiveRecord): PronunciationEntry? {
+        val value = record.value as? JSONObject ?: return null
+        val entry = PronunciationEntry.fromJson(value) ?: return null
+        return entry.takeIf { it.id.equals(record.id, ignoreCase = true) }
     }
 }

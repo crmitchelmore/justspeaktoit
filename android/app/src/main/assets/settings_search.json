@@ -149,6 +149,53 @@
       "title" : "Learned corrections"
     },
     {
+      "id" : "android.readAloudVoice",
+      "keywords" : [
+        "voice output",
+        "text to speech",
+        "tts",
+        "speak",
+        "read aloud",
+        "voice",
+        "elevenlabs",
+        "azure",
+        "deepgram",
+        "cartesia",
+        "gemini",
+        "groq",
+        "speechmatics",
+        "soniox"
+      ],
+      "section" : "voiceOutput",
+      "sectionTitle" : "Voice Output",
+      "settingKeys" : [
+        "readAloudVoice"
+      ],
+      "summary" : "The voice that reads transcripts aloud: the phone's text-to-speech or a cloud voice.",
+      "title" : "Read aloud voice"
+    },
+    {
+      "id" : "android.pronunciation",
+      "keywords" : [
+        "pronunciation dictionary",
+        "pronounce",
+        "say as",
+        "read aloud",
+        "acronyms",
+        "names",
+        "text to speech",
+        "tts",
+        "regex"
+      ],
+      "section" : "pronunciation",
+      "sectionTitle" : "Pronunciation",
+      "settingKeys" : [
+        "pronunciationDictionary"
+      ],
+      "summary" : "Words read aloud differently from how they are written, such as names and acronyms.",
+      "title" : "Pronunciation dictionary"
+    },
+    {
       "id" : "android.cleanup",
       "keywords" : [
         "post-processing",

@@ -48,6 +48,7 @@ import com.justspeaktoit.android.settings.AppPreferences
 import com.justspeaktoit.android.ui.DictationActions
 import com.justspeaktoit.android.ui.DictationScreen
 import com.justspeaktoit.android.ui.HistoryActions
+import com.justspeaktoit.android.ui.HistoryReadAloud
 import com.justspeaktoit.android.ui.HistoryScreen
 import com.justspeaktoit.android.ui.HistoryTranscription
 import com.justspeaktoit.android.ui.MicPermission
@@ -207,6 +208,8 @@ class MainActivity : ComponentActivity() {
                                 onReleaseEverything = viewModel::releaseEverything,
                                 onChooseLanguage = viewModel::chooseLanguage,
                                 onCorrectionsChanged = viewModel::setCorrections,
+                                onPronunciationsChanged = viewModel::setPronunciations,
+                                onReadAloudVoiceChanged = viewModel::setReadAloudVoice,
                                 onLearnCorrectionsChanged = viewModel::setLearnCorrections,
                                 onCorrectionThresholdChanged = viewModel::setCorrectionPromotionThreshold,
                                 onAcceptCorrection = viewModel::acceptCorrectionCandidate,
@@ -286,6 +289,7 @@ class MainActivity : ComponentActivity() {
                                 onDismissSendToMac = sendToMac::clearActivity,
                             ),
                             sendToMac = sendToMacState,
+                            readAloud = HistoryReadAloud(state.readAloudVoice, state.pronunciations),
                         )
                         Screen.Dictation -> DictationScreen(
                             state = state,

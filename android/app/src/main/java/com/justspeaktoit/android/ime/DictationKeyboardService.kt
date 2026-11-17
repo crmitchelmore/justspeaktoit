@@ -267,8 +267,9 @@ class DictationKeyboardService : InputMethodService() {
             setPadding(dp(8), dp(4), dp(8), dp(12))
             addView(key(R.id.keyboard_switch, R.string.keyboard_switch) { switchKeyboard() })
             addView(micButton)
-            addView(key(R.id.keyboard_delete, R.string.keyboard_delete) { sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL) })
-            addView(key(R.id.keyboard_enter, R.string.keyboard_enter) { sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER) })
+            // While cleanup holds the words as composing text, editing keys would change what it replaces.
+            addView(key(R.id.keyboard_delete, R.string.keyboard_delete) { sendKeyUnlessCleaning(KeyEvent.KEYCODE_DEL) })
+            addView(key(R.id.keyboard_enter, R.string.keyboard_enter) { sendKeyUnlessCleaning(KeyEvent.KEYCODE_ENTER) })
         }
         status = statusView
         mic = micButton
@@ -342,6 +343,10 @@ class DictationKeyboardService : InputMethodService() {
         voiceEdit = null
         abandonCleanup()
         if (state.isActive) cancelSession()
+    }
+
+    private fun sendKeyUnlessCleaning(keyCode: Int) {
+        if (cleanupRun == null) sendDownUpKeyEvents(keyCode)
     }
 
     /** Stops a cleanup still running; the words it was given stay in the field as typed text. */
@@ -771,9 +776,10 @@ class DictationKeyboardService : InputMethodService() {
         if (ownsComposing) ic.setComposingText("", 1)
         // The editor's report of that empty region must not count as the composing text being ended.
         editorShowedComposing = false
-        ic.setComposingText(KeyboardPolicy.textToCommit(transcript, ic.getTextBeforeCursor(1, 0)), 1)
+        val shown = KeyboardPolicy.textToCommit(transcript, ic.getTextBeforeCursor(1, 0))
+        ic.setComposingText(shown, 1)
         ownsComposing = true
-        val run = CleanupRun(inputGeneration, name)
+        val run = CleanupRun(inputGeneration, name, shown)
         cleanupRun = run
         run.job = scope.launch {
             val result = cleaner.clean(modelId, transcript, prompt)
@@ -790,8 +796,11 @@ class DictationKeyboardService : InputMethodService() {
             render()
             return
         }
-        if (!ownsComposing) {
-            // The app or the user ended the composing text, so those words are theirs now.
+        if (!ownsComposing || ic.getTextBeforeCursor(run.shown.length, 0)?.toString() != run.shown) {
+            // The app or the user ended or edited the composing text, so those words are theirs now.
+            if (ownsComposing) ic.finishComposingText()
+            ownsComposing = false
+            editorShowedComposing = false
             voiceEditNotice = getString(R.string.keyboard_cleanup_text_changed, run.modelName)
             render()
             return
@@ -1044,8 +1053,8 @@ class DictationKeyboardService : InputMethodService() {
         const val NATIVE_GRACE_MS = 1_000L
     }
 
-    /** One keyboard cleanup; [generation] is the field it started in. */
-    private class CleanupRun(val generation: Long, val modelName: String) {
+    /** One keyboard cleanup; [generation] is the field it started in and [shown] the composing text it set. */
+    private class CleanupRun(val generation: Long, val modelName: String, val shown: String) {
         var job: Job? = null
     }
 

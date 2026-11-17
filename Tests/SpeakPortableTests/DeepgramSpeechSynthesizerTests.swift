@@ -149,7 +149,7 @@ final class DeepgramSpeechSynthesizerTests: DeepgramSpeechStubTestCase {
             text: text, modelID: "aura-2", voiceID: "thalia", pronunciation: entries
         )
         _ = try await synthesize(request)
-        let expected = "The A P I reached Tsoo-rick and Tokyo in 250 milliseconds 🙂; café stays."
+        let expected = "The A P I reached Tsoo-rick and Tokyo in 250 milliseconds  smile ; café stays."
         XCTAssertEqual(try sentText(try XCTUnwrap(StubURLProtocol.lastRequest)), expected)
         XCTAssertEqual(
             try DeepgramSpeechSynthesizer().utterance(for: request)?.characterCount, expected.unicodeScalars.count

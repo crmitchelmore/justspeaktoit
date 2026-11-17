@@ -77,6 +77,8 @@ class HistoryActions(
     /** Sends the entry's transcript to the paired Mac. */
     val onSendToMac: (HistoryEntry) -> Unit = {},
     val onDismissSendToMac: () -> Unit = {},
+    /** Opens the full usage insights dashboard. */
+    val onOpenInsights: () -> Unit = {},
 )
 
 /** The read-aloud voice and pronunciation dictionary History reads entries with. */
@@ -191,7 +193,8 @@ fun HistoryScreen(
                 item(key = "sendToMacStatus") { SendToMacStatus(sendToMac.activity, actions.onDismissSendToMac) }
             }
             val insights = HistoryInsights.of(entries, System.currentTimeMillis())
-            if (insights.dictations > 0) item { InsightsCard(insights) }
+            // The dashboard covers all of History, so its entry stays even with no recent dictation.
+            if (entries.isNotEmpty()) item { InsightsCard(insights, actions.onOpenInsights) }
             item { RetentionPicker(retention, actions.onRetention) }
             item {
                 Text(
@@ -497,7 +500,7 @@ private fun platformName(origin: String): String = when (origin) {
 
 /** Recent dictation totals, the Android counterpart of the Mac's usage insights. */
 @Composable
-private fun InsightsCard(insights: HistoryInsights) {
+private fun InsightsCard(insights: HistoryInsights, onOpen: () -> Unit) {
     val dictations = pluralStringResource(
         R.plurals.history_insights_dictations, insights.dictations, insights.dictations,
     )
@@ -506,7 +509,11 @@ private fun InsightsCard(insights: HistoryInsights) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(stringResource(R.string.history_insights_title), style = MaterialTheme.typography.titleMedium)
             Text(
-                stringResource(R.string.history_insights_summary, dictations, words),
+                if (insights.dictations > 0) {
+                    stringResource(R.string.history_insights_summary, dictations, words)
+                } else {
+                    stringResource(R.string.history_insights_none)
+                },
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
@@ -514,6 +521,9 @@ private fun InsightsCard(insights: HistoryInsights) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            TextButton(onClick = onOpen, modifier = Modifier.testTag(AutomationIds.HISTORY_INSIGHTS_OPEN)) {
+                Text(stringResource(R.string.history_insights_open))
+            }
         }
     }
 }

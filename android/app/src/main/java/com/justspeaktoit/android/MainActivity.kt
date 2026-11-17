@@ -51,6 +51,7 @@ import com.justspeaktoit.android.ui.HistoryActions
 import com.justspeaktoit.android.ui.HistoryReadAloud
 import com.justspeaktoit.android.ui.HistoryScreen
 import com.justspeaktoit.android.ui.HistoryTranscription
+import com.justspeaktoit.android.ui.InsightsScreen
 import com.justspeaktoit.android.ui.MicPermission
 import com.justspeaktoit.android.ui.PrivacyChoices
 import com.justspeaktoit.android.ui.OnboardingActions
@@ -64,7 +65,7 @@ import com.justspeaktoit.android.ui.theme.JustSpeakTheme
 import java.io.FileNotFoundException
 import java.time.LocalDate
 
-private enum class Screen { Dictation, Settings, History, Onboarding }
+private enum class Screen { Dictation, Settings, History, Insights, Onboarding }
 
 class MainActivity : ComponentActivity() {
     private val viewModel: DictationViewModel by viewModels { DictationViewModel.Factory }
@@ -171,7 +172,13 @@ class MainActivity : ComponentActivity() {
             }
             JustSpeakTheme(dark = dark, dynamicColor = appearance.dynamicColor) {
                 if (screen != Screen.Dictation) {
-                    BackHandler { if (screen == Screen.Onboarding) finishOnboarding() else screen = Screen.Dictation }
+                    BackHandler {
+                        when (screen) {
+                            Screen.Onboarding -> finishOnboarding()
+                            Screen.Insights -> screen = Screen.History
+                            else -> screen = Screen.Dictation
+                        }
+                    }
                 }
                 // Back leaves a session running in the background rather than closing it with the screen.
                 if (screen == Screen.Dictation && state.dictation.isActive) BackHandler { moveTaskToBack(true) }
@@ -288,9 +295,14 @@ class MainActivity : ComponentActivity() {
                                 onTranscribe = viewModel::transcribeHistoryEntry,
                                 onSendToMac = sendToMac::send,
                                 onDismissSendToMac = sendToMac::clearActivity,
+                                onOpenInsights = { screen = Screen.Insights },
                             ),
                             sendToMac = sendToMacState,
                             readAloud = HistoryReadAloud(state.readAloudVoice, state.pronunciations),
+                        )
+                        Screen.Insights -> InsightsScreen(
+                            entries = state.history,
+                            onBack = { screen = Screen.History },
                         )
                         Screen.Dictation -> DictationScreen(
                             state = state,

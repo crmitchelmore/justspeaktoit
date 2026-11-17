@@ -254,7 +254,7 @@ class AndroidSpeechEngine(context: Context) : SpeechEngine {
 
         override fun onBufferReceived(buffer: ByteArray?) = Unit
 
-        override fun onEndOfSpeech() = Unit
+        override fun onEndOfSpeech() = emit(DictationEvent.EndOfSpeech)
 
         override fun onError(error: Int) = finish(DictationEvent.Error(RecognizerErrors.failureFor(error)))
 

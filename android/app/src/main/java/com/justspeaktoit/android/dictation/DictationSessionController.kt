@@ -102,6 +102,7 @@ internal class DictationSessionController(
     /** Names the microphone's holder in Settings > System resources. */
     private val microphoneOwner: String = "DictationViewModel",
     private val downloaded: DownloadedTranscription = DownloadedTranscription.Unavailable,
+    clockMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     var state = SessionState()
         private set
@@ -132,6 +133,9 @@ internal class DictationSessionController(
 
     /** A finished Cloud recording waiting for its session's History entry; see [dispatch]. */
     private var sessionAudio: File? = null
+
+    /** How long the current session listened, recorded with its History entry for usage insights. */
+    private val captureTimer = CaptureTimer(clockMs)
 
     val isCapturing: Boolean
         get() = state.dictation is DictationState.Starting || state.dictation is DictationState.Listening
@@ -199,12 +203,14 @@ internal class DictationSessionController(
         if (!isCapturing || state.paused || state.dictation.modeOrNull()?.recordsAudio != true) return
         val rec = capture.current ?: return
         rec.recorder.setPaused(true)
+        captureTimer.pause()
         change { it.copy(paused = true) }
     }
 
     fun resume() {
         if (!state.paused) return
         capture.current?.recorder?.setPaused(false)
+        captureTimer.resume()
         change { it.copy(paused = false) }
     }
 
@@ -394,7 +400,7 @@ internal class DictationSessionController(
                 // Releasing the upload is a cancel, so honour "Keep audio when a recording is cancelled".
                 if (settings.keepAudioOnCancel) {
                     kept = true
-                    history.keepRecording(file, modelId, settings.retention, mode)
+                    history.keepRecording(file, modelId, settings.retention, mode, captureTimer.seconds)
                 }
                 DictationEvent.Cancelled
             } finally {
@@ -478,6 +484,7 @@ internal class DictationSessionController(
         val modelId = sessionModelId
         val mode = state.dictation.modeOrNull() ?: RecognitionMode.Cloud
         val retention = settings.retention
+        val seconds = captureTimer.seconds
         change { it.copy(releasingMicrophone = true) }
         scope.launch {
             var handed = false
@@ -491,7 +498,7 @@ internal class DictationSessionController(
                     capture.delete(file)
                     return@launch
                 }
-                history.keepRecording(file, modelId, retention, mode)
+                history.keepRecording(file, modelId, retention, mode, seconds)
             } finally {
                 if (!handed) capture.abandon(file)
             }
@@ -545,6 +552,11 @@ internal class DictationSessionController(
     private fun vocabulary(): List<String> = settings.corrections.map { it.writeAs }
 
     private fun onEngineEvent(received: DictationEvent) {
+        // The wait for the recogniser's result is not recording time.
+        if (received == DictationEvent.EndOfSpeech) {
+            captureTimer.end()
+            return
+        }
         // Corrected before the reducer sees it, so History, cleanup and the screen all get the same text.
         val event = if (received is DictationEvent.Final) {
             DictationEvent.Final(PersonalCorrections.apply(received.text, settings.corrections))
@@ -594,6 +606,7 @@ internal class DictationSessionController(
             it.copy(dictation = dictation, paused = it.paused && capturing)
         }
         val after = state.dictation
+        timeCapture(before, after)
         playCue(before, after, event)
         if (!after.isActive) _level.value = 0f
         reconcileMicrophoneHold()
@@ -601,7 +614,17 @@ internal class DictationSessionController(
         // A session just ended: record it now, so it survives even if optional cleanup never finishes.
         val audio = sessionAudio
         sessionAudio = null
-        history.recordSession(after, sessionModelId, settings.retention, audio)
+        history.recordSession(after, sessionModelId, settings.retention, audio, captureTimer.seconds)
+    }
+
+    private fun timeCapture(before: DictationState, after: DictationState) {
+        val capturing = after is DictationState.Starting || after is DictationState.Listening
+        if (!before.isActive && after.isActive) captureTimer.reset()
+        if (before !is DictationState.Listening && after is DictationState.Listening) {
+            captureTimer.begin()
+        } else if (before is DictationState.Listening && !capturing) {
+            captureTimer.end()
+        }
     }
 
     private fun playCue(before: DictationState, after: DictationState, event: DictationEvent) {
@@ -631,4 +654,51 @@ internal fun DictationState.modeOrNull(): RecognitionMode? = when (this) {
     is DictationState.Done -> mode
     is DictationState.Failed -> mode
     DictationState.Idle -> null
+}
+
+/**
+ * Times one session's capture on a monotonic clock: from listening until capture ends, less any time
+ * paused while another app held audio focus. [seconds] is null when the session never listened, such
+ * as audio shared from another app.
+ */
+internal class CaptureTimer(private val clockMs: () -> Long) {
+    private var startedAt: Long? = null
+    private var endedAt: Long? = null
+    private var pausedAt: Long? = null
+    private var pausedMs = 0L
+
+    fun reset() {
+        startedAt = null
+        endedAt = null
+        pausedAt = null
+        pausedMs = 0L
+    }
+
+    fun begin() {
+        reset()
+        startedAt = clockMs()
+    }
+
+    fun pause() {
+        if (startedAt != null && endedAt == null && pausedAt == null) pausedAt = clockMs()
+    }
+
+    fun resume() {
+        pausedAt?.let { pausedMs += clockMs() - it }
+        pausedAt = null
+    }
+
+    fun end() {
+        if (startedAt == null || endedAt != null) return
+        resume()
+        endedAt = clockMs()
+    }
+
+    val seconds: Double?
+        get() {
+            val start = startedAt ?: return null
+            val end = endedAt ?: clockMs()
+            val paused = pausedMs + (pausedAt?.let { end - it } ?: 0L)
+            return maxOf(0L, end - start - paused) / 1000.0
+        }
 }

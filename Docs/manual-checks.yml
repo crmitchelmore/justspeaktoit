@@ -2296,7 +2296,9 @@ sessions:
         core: false
         build: "Just Speak to It for Android, the signed APK from the first Alpha that includes the #1789 out-of-credit message"
         steps:
-          - "Save an OpenAI key whose account has no credit, choose GPT Transcribe (OpenAI) and dictate a short made-up sentence with Cloud."
+          - "In Settings, save an OpenAI key whose account has no credit left."
+          - "Choose GPT Transcribe (OpenAI) as the Cloud transcription model."
+          - "Pick Cloud, tap the microphone, say a short made-up sentence and tap Stop."
         expected: "The error says the provider account has no credit left and to add credit or billing, not that the service is limiting requests."
         final_gate: true
   - id: "windows"

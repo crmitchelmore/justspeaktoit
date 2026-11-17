@@ -410,6 +410,7 @@ internal class MemoryPrefs(
     override var audioInputId: String? = null,
     override var silence: SilenceSettings = SilenceSettings(),
     override var handsFreeEnabled: Boolean = false,
+    override var keyboardLiveCloudEnabled: Boolean = false,
     override var appearance: AppAppearance = AppAppearance.System,
     override var dynamicColor: Boolean = false,
     override var downloadedTranscriptionModel: String? = null,

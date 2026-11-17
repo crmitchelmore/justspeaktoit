@@ -176,6 +176,14 @@
       "type" : "boolean"
     },
     {
+      "default" : false,
+      "description" : "Let the dictation keyboard stream audio to the live Cloud model's provider.",
+      "key" : "keyboardLiveCloudEnabled",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "boolean"
+    },
+    {
       "allowedValues" : [
         "Off",
         "Week",

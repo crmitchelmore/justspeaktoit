@@ -636,6 +636,7 @@ class DictationViewModelTest {
             "cleanupModelDiscoveryEnabled" to true,
             "keepAudioOnCancel" to false,
             "handsFreeDictationEnabled" to true,
+            "keyboardLiveCloudEnabled" to true,
             "history_retention" to "Forever",
             "keepRecordingsInHistory" to true,
             "silenceDetectionEnabled" to true,
@@ -665,6 +666,7 @@ class DictationViewModelTest {
         assertTrue(h.prefs.cleanupModelDiscoveryEnabled)
         assertFalse(h.prefs.keepAudioOnCancel)
         assertTrue(h.prefs.handsFreeEnabled)
+        assertTrue(h.prefs.keyboardLiveCloudEnabled)
         assertEquals(Retention.Forever, h.prefs.retention)
         assertTrue(h.prefs.keepRecordings)
         assertEquals(SilenceSettings(enabled = true, threshold = 0.1, durationSeconds = 3.5), h.prefs.silence)

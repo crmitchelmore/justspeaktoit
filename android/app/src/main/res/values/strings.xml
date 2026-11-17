@@ -385,6 +385,9 @@
     <string name="settings_hands_free_title">Hands-free dictation</string>
     <string name="settings_hands_free_note">Cloud mode only. Tap the microphone once and the app listens: speaking starts a recording that keeps the half second before you spoke, and going quiet for the silence duration ends it. It keeps listening, even with the screen off, until you turn it off. On-device and speech-service recognition cannot keep the audio from before you spoke, so they record as usual.</string>
     <string name="settings_silence_threshold_note">Lower is more sensitive: raise it if background noise keeps recordings going.</string>
+    <string name="settings_keyboard_title">Dictation keyboard</string>
+    <string name="settings_keyboard_live_cloud">Use live Cloud models in the keyboard</string>
+    <string name="settings_keyboard_live_cloud_note">Off by default. When on, and Cloud is your mode with a live model, the keyboard sends your audio to %1$s as you speak, using your API key, and types the text it sends back. When off, the keyboard uses on-device recognition or your phone\'s speech service. If your Cloud model is not a live model, the keyboard says so instead of dictating.</string>
     <string name="settings_appearance_title">Appearance</string>
     <string name="settings_appearance_system">System</string>
     <string name="settings_appearance_light">Light</string>
@@ -524,6 +527,11 @@
     <string name="keyboard_password_field">Dictation is off in password fields.</string>
     <string name="keyboard_needs_permission">Tap the microphone to open Just Speak to It and allow microphone access.</string>
     <string name="keyboard_unavailable">No on-device or speech-service recognition is available. Open Just Speak to It for details.</string>
+    <string name="keyboard_listening_cloud">Listening · sending audio to %1$s</string>
+    <string name="keyboard_cloud_not_live">%1$s is not a live model, so the keyboard cannot use it. Choose a live Cloud model in Just Speak to It, or turn off live Cloud models for the keyboard.</string>
+    <string name="keyboard_cloud_missing_key">Add a %1$s API key in Just Speak to It to dictate with it. Nothing was typed.</string>
+    <string name="keyboard_cloud_timeout">%1$s took too long to finish. Nothing was typed.</string>
+    <string name="keyboard_cloud_failed">%1$s Nothing was typed.</string>
     <string name="keyboard_switch">Switch</string>
     <string name="keyboard_delete">Delete</string>
     <string name="keyboard_enter">Enter</string>

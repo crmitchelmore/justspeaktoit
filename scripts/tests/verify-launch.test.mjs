@@ -170,7 +170,8 @@ exit 42
 });
 
 test('collects the same diagnostics for death during stability monitoring', t => {
-  const result = fixture(t, 'echo "monitoring evidence"; sleep 2.25; exit 43', { timeout: '3', startup: '2' });
+  const result = fixture(t, 'echo "monitoring evidence"; sleep 2.25; exit 43', { timeout: '30', startup: '2' });
+  // The monitor returns at the death, so a long window costs nothing but survives a loaded Mac.
   assert.equal(result.status, 1);
   assert.match(result.stdout, /Process died after/);
   assert.match(result.stdout, /exit status: 43/);

@@ -15,6 +15,9 @@ from pathlib import Path
 
 from test_paid_access_recovery import block
 
+# A hang guard, not a speed check: swiftc on a Mac loaded by parallel agents can take minutes.
+COMPILE_TIMEOUT = 600
+
 ROOT = Path(__file__).resolve().parents[2]
 FLOW = 'Sources/SpeakCore/PaidAccess/Apple/PaidAccessFlow.swift'
 # Purchase and sign-in need real StoreKit products and Apple identity; the
@@ -74,7 +77,7 @@ class PaidSessionBoundaryTests(unittest.TestCase):
                     binary = Path(temp) / 'boundary'
                     result = subprocess.run(['xcrun', 'swiftc', '-swift-version', '6', '-parse-as-library',
                                              '-module-cache-path', str(Path(temp) / 'cache'),
-                                             str(swift), '-o', str(binary)], capture_output=True, text=True, timeout=60)
+                                             str(swift), '-o', str(binary)], capture_output=True, text=True, timeout=COMPILE_TIMEOUT)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30)
                     self.assertEqual(result.returncode, 0, result.stderr)

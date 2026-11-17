@@ -254,10 +254,10 @@ class OwnedRunnerTests(unittest.TestCase):
                                         sys.executable, "-B", "-c", "import time; time.sleep(30)"],
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             try:
-                self.assertTrue(select.select([process.stdout], [], [], 5)[0], "owned child readiness was signalled")
+                self.assertTrue(select.select([process.stdout], [], [], 60)[0], "owned child readiness was signalled")
                 self.assertEqual(process.stdout.readline().strip(), "Owned Modulate test command started")
                 process.terminate()
-                _, stderr = process.communicate(timeout=10)
+                _, stderr = process.communicate(timeout=60)
                 self.assertEqual(process.returncode, 143, stderr)
                 receipt = json.loads((output / "qualification.json").read_text())
                 self.assertEqual(receipt["qualificationExitCode"], 143)

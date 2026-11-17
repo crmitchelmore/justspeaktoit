@@ -13,6 +13,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# A hang guard, not a speed check: swiftc on a Mac loaded by parallel agents can take minutes.
+COMPILE_TIMEOUT = 600
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -111,7 +114,7 @@ print(String(data: data, encoding: .utf8)!)
             source.write_text(swift)
             result = subprocess.run(
                 ["xcrun", "swift", "-module-cache-path", str(Path(temp) / "cache"), str(source)],
-                check=True, text=True, capture_output=True, timeout=60,
+                check=True, text=True, capture_output=True, timeout=COMPILE_TIMEOUT,
             )
             cls.result = json.loads(result.stdout)
 

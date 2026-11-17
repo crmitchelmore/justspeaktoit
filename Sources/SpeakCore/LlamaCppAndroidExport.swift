@@ -9,6 +9,8 @@ import Foundation
 /// model with `minimumDeviceMemoryBytes` is offered only on a phone whose
 /// `ActivityManager.MemoryInfo.totalMem` is at least that. The rule lives here,
 /// beside the shared pins, not in an Android-owned list.
+/// iOS applies the same floor to `ProcessInfo.physicalMemory`
+/// (`IOSLocalCleanupModels.offered`).
 ///
 /// `LlamaCppAndroidExportTests` fails when the committed asset is stale;
 /// regenerate it with `scripts/update-android-assets`.

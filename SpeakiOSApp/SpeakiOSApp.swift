@@ -1,6 +1,7 @@
 import SwiftUI
 import SpeakCore
 import SpeakiOSLib
+import SpeakiOSLlama
 import SpeakSync
 import UIKit
 import UserNotifications
@@ -38,6 +39,12 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
     /// than a routine incremental sync needs.
     static let historyPushCompletionBudget: TimeInterval = 20
 
+    private var memoryWarningObserver: NSObjectProtocol?
+
+    deinit {
+        if let memoryWarningObserver { NotificationCenter.default.removeObserver(memoryWarningObserver) }
+    }
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
@@ -54,6 +61,16 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
         // Downloaded transcription models run in process; registering does no
         // file or model work until a model is downloaded or used.
         IOSLocalTranscriptionEngines.register(WhisperKitLocalTranscriptionEngine())
+        // Downloaded cleanup models run on llama.cpp compiled into the app. The
+        // model is loaded per cleanup and freed after it; a memory warning
+        // stops a running cleanup, which keeps the original transcript.
+        let cleanupEngine = LlamaRuntimeCleanupEngine()
+        IOSLocalCleanupEngines.register(cleanupEngine)
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
+        ) { _ in
+            cleanupEngine.releaseMemory()
+        }
         iOSHistoryManager.resetSyncStateIfContainerChanged()
         UNUserNotificationCenter.current().delegate = self
         TranscriptReadyNotificationRoute.reconcileDisabledPreference()

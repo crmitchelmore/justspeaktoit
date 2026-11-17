@@ -1,8 +1,12 @@
 package com.justspeaktoit.android.readaloud
 
 import kotlinx.coroutines.runBlocking
+import okhttp3.ResponseBody.Companion.asResponseBody
+import okio.Buffer
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.InetAddress
@@ -57,5 +61,14 @@ class OkHttpSpeechHttpTest {
                 assertFalse("the redirect was followed to another host", followed)
             }
         }
+    }
+
+    @Test
+    fun testBoundedBytes_readsUpToTheLimitAndRefusesMoreWhateverTheDeclaredLength() {
+        fun body(size: Int, declared: Long = -1) = Buffer().write(ByteArray(size) { it.toByte() }).asResponseBody(null, declared)
+
+        assertArrayEquals(ByteArray(8) { it.toByte() }, OkHttpSpeechHttp.boundedBytes(body(8), 8))
+        assertThrows(SpeechResponseTooLarge::class.java) { OkHttpSpeechHttp.boundedBytes(body(9), 8) }
+        assertThrows(SpeechResponseTooLarge::class.java) { OkHttpSpeechHttp.boundedBytes(body(0, declared = 9), 8) }
     }
 }

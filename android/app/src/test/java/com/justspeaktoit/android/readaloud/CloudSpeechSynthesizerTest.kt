@@ -211,6 +211,50 @@ class CloudSpeechSynthesizerTest {
     }
 
     @Test
+    fun testPlan_emojiAtTheGroqLimitStaysWhole() {
+        val voice = voice("groq")
+        val text = "a".repeat(voice.maxCharacters - 1) + "\uD83D\uDE00" + "b".repeat(20)
+
+        val segments = CloudSpeechSynthesizer(FakeHttp()).plan(voice, text).map { it.text }
+
+        assertEquals(text, segments.joinToString(""))
+        assertTrue(segments.all { it.length <= voice.maxCharacters })
+        for (segment in segments) {
+            assertFalse(segment.first().isLowSurrogate())
+            assertFalse(segment.last().isHighSurrogate())
+        }
+    }
+
+    @Test
+    fun testWav_finiteDataLongerThanTheBodyIsInvalidAudio() = runBlocking {
+        val truncated = wav(byteArrayOf(1, 0, 2, 0), dataSize = 4000)
+        assertNull(WavAudio.parse(truncated))
+
+        val http = FakeHttp(SpeechHttpResponse(200, truncated))
+        val segment = CloudSpeechSynthesizer.Segment("hi", false)
+        assertEquals(
+            ReadAloudFailure.InvalidAudio("Deepgram"),
+            failureOf { CloudSpeechSynthesizer(http).synthesize(voice("deepgram"), segment, "k", "en") },
+        )
+        for (sentinel in listOf(0, 0x7FFF0000)) {
+            assertArrayEquals(byteArrayOf(1, 0, 2, 0), WavAudio.parse(wav(byteArrayOf(1, 0, 2, 0), dataSize = sentinel))!!.data)
+        }
+    }
+
+    @Test
+    fun testOversizedResponse_isInvalidAudioNotUnreachable() {
+        val http = object : SpeechHttp {
+            override suspend fun send(request: SpeechHttpRequest): SpeechHttpResponse = throw SpeechResponseTooLarge(1)
+        }
+        val segment = CloudSpeechSynthesizer.Segment("hi", false)
+
+        assertEquals(
+            ReadAloudFailure.InvalidAudio("Deepgram"),
+            failureOf { CloudSpeechSynthesizer(http).synthesize(voice("deepgram"), segment, "k", "en") },
+        )
+    }
+
+    @Test
     fun testWav_readsStreamedSizesAndRejectsOtherFormats() {
         val streamed = wav(byteArrayOf(1, 2, 3, 4), dataSize = -1)
         assertArrayEquals(byteArrayOf(1, 2, 3, 4), WavAudio.parse(streamed)!!.data)

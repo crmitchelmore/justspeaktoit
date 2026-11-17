@@ -27,6 +27,7 @@ internal fun DictationFailure.message(): Int = when (this) {
     DictationFailure.Server -> R.string.failure_server
     DictationFailure.Client -> R.string.failure_client
     DictationFailure.TooManyRequests -> R.string.failure_too_many_requests
+    DictationFailure.OutOfCredit -> R.string.failure_out_of_credit
     DictationFailure.LanguageNotSupported -> R.string.failure_language_not_supported
     DictationFailure.LanguageUnavailable -> R.string.failure_language_unavailable
     DictationFailure.LeftApp -> R.string.failure_left_app

@@ -77,8 +77,8 @@ internal class BatchTranscriber(
             }
             CloudProvider.Meta -> meta(model, key, audio, languageTag, vocabulary, call)
             CloudProvider.Gladia -> gladia(model, key, audio, format, languageTag, call)
-            CloudProvider.Google -> gemini(key, audio, format, languageTag, call)
-            CloudProvider.OpenRouter -> openRouter(model, key, audio, format, languageTag, call)
+            CloudProvider.Google -> unlessQuiet(audio) { gemini(key, audio, format, languageTag, call) }
+            CloudProvider.OpenRouter -> unlessQuiet(audio) { openRouter(model, key, audio, format, languageTag, call) }
             CloudProvider.Azure -> azure(model, key, audio, languageTag, vocabulary, call)
             CloudProvider.Alibaba -> alibaba(model, key, audio, languageTag, call)
             CloudProvider.StepFun -> stepFun(key, audio, format, languageTag, call)
@@ -279,7 +279,7 @@ internal class BatchTranscriber(
             BatchWire.ALIBABA_MAX_AUDIO_BYTES + 1,
         )
         // A general audio model can describe silence, so a silent recording is never sent.
-        if (WavFormat.isSilent(audio)) return ""
+        if (WavFormat.isQuiet(audio)) return ""
         val body = send(BatchWire.alibaba(credential, model, audio, languageTag), call)
         return if (model.catalogId == BatchWire.ALIBABA_FUN_FLASH) {
             BatchWire.alibabaFunText(body)
@@ -413,6 +413,13 @@ internal class BatchTranscriber(
         val request = BatchWire.openRouterSpeechToText(slug, key, audio, audioFormat, languageTag)
         return BatchWire.openRouterSpeechToTextText(send(request, call))
     }
+
+    /**
+     * A general audio model can describe silence or invent speech from it (#1788), so a recording that
+     * never rises above silence is not sent and comes back empty, which the app reports as no speech.
+     */
+    private inline fun unlessQuiet(audio: File, send: () -> String): String =
+        if (WavFormat.isQuiet(audio)) "" else send()
 
     /** Runs [step] until it returns true; a NetworkTimeout once [attempts] are spent. */
     private inline fun poll(attempts: Int, provider: String, step: () -> Boolean) {

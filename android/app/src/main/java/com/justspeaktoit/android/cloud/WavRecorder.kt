@@ -5,6 +5,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import java.io.BufferedOutputStream
+import java.io.DataInputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
@@ -42,20 +43,34 @@ object WavFormat {
         }.array()
     }
 
-    /** Whether every sample after the header is zero, as `AlibabaAppleBatchTranscription.hasAudio` reads it. */
-    fun isSilent(file: File): Boolean = file.inputStream().buffered().use { input ->
-        val buffer = ByteArray(8192)
-        var offset = 0L
-        var count = input.read(buffer)
-        var silent = true
-        while (count >= 0 && silent) {
-            for (i in 0 until count) {
-                if (offset + i >= HEADER_BYTES && buffer[i] != 0.toByte()) silent = false
+    /**
+     * Whether a recording in this app's 16 kHz mono 16-bit WAV layout stays below [threshold] on the
+     * shared meter scale ([normalizedLevel]) in every 100 ms window, so it holds no speech. Room noise
+     * on a real phone is never all zero, so this does not wait for digital silence. False for any other
+     * file, which this cannot judge.
+     */
+    fun isQuiet(file: File, threshold: Double = QUIET_LEVEL): Boolean {
+        val payload = file.length() - HEADER_BYTES
+        if (payload < 0 || payload % 2 != 0L || payload > UInt.MAX_VALUE.toLong() - 36) return false
+        DataInputStream(file.inputStream().buffered()).use { input ->
+            val header = ByteArray(HEADER_BYTES)
+            input.readFully(header)
+            if (!header.contentEquals(header(payload))) return false
+            val bytes = ByteArray(QUIET_WINDOW_SAMPLES * 2)
+            val samples = ShortArray(QUIET_WINDOW_SAMPLES)
+            while (true) {
+                var filled = 0
+                while (filled < bytes.size) {
+                    val count = input.read(bytes, filled, bytes.size - filled)
+                    if (count < 0) break
+                    filled += count
+                }
+                val count = filled / 2
+                if (count == 0) return true
+                ByteBuffer.wrap(bytes, 0, count * 2).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(samples, 0, count)
+                if (normalizedLevel(samples, count) >= threshold) return false
             }
-            offset += count
-            count = input.read(buffer)
         }
-        silent
     }
 
     /** Maps PCM loudness onto the -2..10 range SpeechRecognizer reports, so one meter fits both. */
@@ -90,6 +105,9 @@ object WavFormat {
         return ((0.7 * averageDb + 0.3 * peakDb + 60) / 60).coerceIn(0.0, 1.0)
     }
 
+    /** SpeakCore's default silence threshold (`DictationSilencePolicy.defaultThreshold`). */
+    const val QUIET_LEVEL = 0.05
+    private const val QUIET_WINDOW_SAMPLES = SAMPLE_RATE / 10
     private const val FULL_SCALE = 32_768.0
 }
 

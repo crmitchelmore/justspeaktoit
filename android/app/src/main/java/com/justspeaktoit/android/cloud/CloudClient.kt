@@ -96,6 +96,8 @@ class CloudClient(
         if (!model.provider.isOpenAICompatible) {
             return batch.transcribe(model, apiKey, audio, languageTag, call, format, vocabulary)
         }
+        // Whisper and GPT-4o transcription invent text from silence (#1788): a quiet recording comes back empty.
+        if (WavFormat.isQuiet(audio)) return ""
         val prompt = PersonalCorrections.vocabularyPrompt(vocabulary)
         val multipart = CloudWire.multipart(
             fields = CloudWire.transcriptionFields(model, languageTag, prompt),
@@ -168,8 +170,10 @@ class CloudClient(
             write(conn)
             val status = conn.responseCode
             if (status !in 200..299) {
-                conn.errorStream?.close()
-                throw CloudException(CloudWire.failureForStatus(status), "HTTP $status")
+                val error = runCatching {
+                    conn.errorStream?.use { CloudWire.readBody(it, CloudWire.MAX_ERROR_BYTES) }
+                }.getOrNull().orEmpty()
+                throw CloudException(CloudWire.failureForStatus(status, error), "HTTP $status")
             }
             return conn.inputStream.use { CloudWire.readBody(it) }
         } catch (e: IOException) {

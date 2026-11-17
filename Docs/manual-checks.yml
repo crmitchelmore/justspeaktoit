@@ -2275,6 +2275,30 @@ sessions:
           - "Remove the chosen model and open the keyboard again."
         expected: "With Tiny the status names Tiny and its 120-second limit, the text arrives within 10 seconds of Stop and nothing goes online; recording stops itself at the limit and the text is typed. Base shows a 60-second limit. Small, and a removed model, leave the platform recogniser in use with a status saying why. Record Tiny and Base times on #1658."
         final_gate: false
+      - id: "android-cloud-silence-no-invented-text"
+        issues:
+          - 1788
+        title: "A silent Cloud recording never comes back as invented text"
+        minutes: 3
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes the #1788 silence fix"
+        steps:
+          - "In Settings, choose Gemini 2.5 Flash (OpenRouter) as the Cloud transcription model, with a working OpenRouter key."
+          - "In a quiet room, pick Cloud, tap the microphone, say nothing for about 5 seconds and tap Stop."
+          - "Repeat with an OpenAI model such as GPT Transcribe, then once more speaking a short made-up sentence."
+        expected: "Both silent recordings end with the no speech message and no transcript, and nothing new appears in History as a dictation. The spoken sentence is transcribed as usual."
+        final_gate: true
+      - id: "android-cloud-out-of-credit-message"
+        issues:
+          - 1789
+        title: "An out-of-credit provider account says so instead of asking you to wait"
+        minutes: 2
+        core: false
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes the #1789 out-of-credit message"
+        steps:
+          - "Save an OpenAI key whose account has no credit, choose GPT Transcribe (OpenAI) and dictate a short made-up sentence with Cloud."
+        expected: "The error says the provider account has no credit left and to add credit or billing, not that the service is limiting requests."
+        final_gate: true
   - id: "windows"
     device: "Windows"
     title: "Windows"

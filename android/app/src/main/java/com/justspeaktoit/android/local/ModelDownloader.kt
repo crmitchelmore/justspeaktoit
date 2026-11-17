@@ -6,6 +6,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.InterruptedIOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URISyntaxException
@@ -229,6 +230,7 @@ class ModelDownloader(
         private const val RANGE_NOT_SATISFIABLE = 416
         private val REDIRECTS = setOf(301, 302, 303, 307, 308)
 
+        /** Stops with an [InterruptedIOException] when its thread is interrupted (`runInterruptible`). */
         fun sha256(file: File): String {
             val digest = MessageDigest.getInstance("SHA-256")
             file.inputStream().use { input ->
@@ -236,6 +238,7 @@ class ModelDownloader(
                 while (true) {
                     val read = input.read(buffer)
                     if (read < 0) break
+                    if (Thread.interrupted()) throw InterruptedIOException("Digest interrupted")
                     digest.update(buffer, 0, read)
                 }
             }

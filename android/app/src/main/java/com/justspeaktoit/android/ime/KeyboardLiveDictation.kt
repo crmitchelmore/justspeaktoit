@@ -7,6 +7,7 @@ import com.justspeaktoit.android.dictation.CloudCapture
 import com.justspeaktoit.android.dictation.DictationFailure
 import com.justspeaktoit.android.dictation.DictationSessionController
 import com.justspeaktoit.android.dictation.DictationState
+import com.justspeaktoit.android.dictation.DownloadedTranscription
 import com.justspeaktoit.android.dictation.LiveSessions
 import com.justspeaktoit.android.dictation.NoAudioInterruptions
 import com.justspeaktoit.android.dictation.RecognitionMode
@@ -35,6 +36,11 @@ import java.io.File
  * While it captures, [interruptions] is watched exactly as in the app: a transient loss of audio focus
  * pauses it ([isPaused]), and a call, a lasting focus loss or a headset change ends it as a failure.
  *
+ * It also records for a downloaded Whisper model ([startLocal], #1650) through the same controller, when
+ * the keyboard's estimate says the model finishes within the bound ([KeyboardLocalModels]); the
+ * recording itself is capped by the caller's recorder, and a run past [finishTimeoutMs] fails visibly
+ * with what was heard, as a slow stream does.
+ *
  * Call from the main thread of [scope]; each change of the session's state is handed to [onState].
  */
 internal class KeyboardLiveDictation(
@@ -50,6 +56,7 @@ internal class KeyboardLiveDictation(
     liveSessions: LiveSessions = LiveSessions.Default,
     interruptions: AudioInterruptions = NoAudioInterruptions,
     private val finishTimeoutMs: Long = KeyboardPolicy.FINISH_TIMEOUT_MS,
+    downloaded: DownloadedTranscription = DownloadedTranscription.Unavailable,
 ) {
     /** True from [start] until the session ends, so a late update from an abandoned one is ignored. */
     private var running = false
@@ -78,6 +85,7 @@ internal class KeyboardLiveDictation(
         publish = ::onSession,
         liveSessions = liveSessions,
         microphoneOwner = "DictationKeyboardService",
+        downloaded = downloaded,
     )
 
     val isRunning: Boolean get() = running
@@ -94,16 +102,21 @@ internal class KeyboardLiveDictation(
         controller.start(SessionPlan.Cloud(model, languageTag))
     }
 
-    /** Asks the provider for its final text; the wait is bounded at [finishTimeoutMs]. */
+    /** Records for the downloaded Whisper model [modelId], which transcribes once recording stops. */
+    fun startLocal(modelId: String, languageTag: String) {
+        finishWatch?.cancel()
+        running = true
+        begun = false
+        controller.start(SessionPlan.Local(modelId, languageTag))
+    }
+
+    /**
+     * Asks for the final text; the wait is bounded at [finishTimeoutMs] from when the session starts
+     * finishing, whether this stopped it or its recording limit did.
+     */
     fun stop() {
         if (!running || !controller.isCapturing) return
         controller.stop()
-        if (!running) return
-        finishWatch?.cancel()
-        finishWatch = scope.launch {
-            delay(finishTimeoutMs)
-            timeOut()
-        }
     }
 
     fun cancel() {
@@ -127,6 +140,12 @@ internal class KeyboardLiveDictation(
         val dictation = session.dictation
         if (dictation.isActive) begun = true
         if (!begun) return
+        if (dictation is DictationState.Finishing && finishWatch?.isActive != true) {
+            finishWatch = scope.launch {
+                delay(finishTimeoutMs)
+                timeOut()
+            }
+        }
         // Ended, including a release from Settings > System resources, which cancels the controller directly.
         if (!dictation.isActive) {
             running = false
@@ -137,9 +156,10 @@ internal class KeyboardLiveDictation(
 
     private fun timeOut() {
         if (!running) return
-        val heard = (controller.state.dictation as? DictationState.Finishing)?.partial.orEmpty()
+        val finishing = controller.state.dictation as? DictationState.Finishing
+        val mode = finishing?.mode ?: RecognitionMode.Cloud
         running = false
         controller.cancel()
-        onState(DictationState.Failed(RecognitionMode.Cloud, DictationFailure.NetworkTimeout, heard))
+        onState(DictationState.Failed(mode, DictationFailure.NetworkTimeout, finishing?.partial.orEmpty()))
     }
 }

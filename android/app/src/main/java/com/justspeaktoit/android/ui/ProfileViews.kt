@@ -46,6 +46,7 @@ import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.OpenRouterBrowser
 import com.justspeaktoit.android.dictation.DictationLanguages
+import com.justspeaktoit.android.local.CleanupModelsState
 import com.justspeaktoit.android.settings.DictationProfile
 
 /**
@@ -105,6 +106,7 @@ internal fun ProfilesEditor(
     onDelete: (String) -> Unit,
     geminiNano: GeminiNanoUi,
     discovery: OpenRouterDiscoveryUi = OpenRouterDiscoveryUi(),
+    localCleanup: CleanupModelsState = CleanupModelsState(),
 ) {
     var editing by remember { mutableStateOf<DictationProfile?>(null) }
     var creating by remember { mutableStateOf(false) }
@@ -152,6 +154,7 @@ internal fun ProfilesEditor(
             savedKeys = savedKeys,
             geminiNano = geminiNano,
             discovery = discovery,
+            localCleanup = localCleanup,
             onSave = {
                 onSave(it)
                 editing = null
@@ -180,6 +183,7 @@ private fun ProfileEditorDialog(
     savedKeys: Set<CloudProvider>,
     geminiNano: GeminiNanoUi,
     discovery: OpenRouterDiscoveryUi,
+    localCleanup: CleanupModelsState,
     onSave: (DictationProfile) -> Unit,
     onDelete: (() -> Unit)?,
     onDismiss: () -> Unit,
@@ -190,7 +194,11 @@ private fun ProfileEditorDialog(
     var cloudModelChanged by rememberSaveable(base.id) { mutableStateOf(false) }
     var languageId by rememberSaveable(base.id) { mutableStateOf(base.language) }
     var cleanupEnabled by rememberSaveable(base.id) { mutableStateOf(base.cleanupEnabled) }
-    var cleanupModelId by rememberSaveable(base.id) { mutableStateOf(base.cleanupModel?.selectionId) }
+    // A cloud model's selection ID, or a downloaded model's catalogue ID (#1660).
+    val localCleanupIds = localCleanup.names.keys
+    val initialCleanupModelId = base.cleanupModel?.selectionId ?: base.downloadedCleanupModelId(localCleanupIds)
+    var cleanupModelId by rememberSaveable(base.id) { mutableStateOf(initialCleanupModelId) }
+    val cleanupModelIsDownloaded = cleanupModelId in localCleanupIds
     var prompt by rememberSaveable(base.id) { mutableStateOf(base.cleanupPrompt.orEmpty()) }
     var picking by remember { mutableStateOf<String?>(null) }
 
@@ -210,8 +218,10 @@ private fun ProfileEditorDialog(
         false -> stringResource(R.string.profile_cleanup_off)
         null -> useSettings
     }
-    val cleanupModelLabel = cleanupModelId?.let { CleanupModelPicker.selectionLabel(CloudCatalog.cleanupModel(it)) }
-        ?: useSettings
+    val cleanupModelLabel = cleanupModelId?.let { id ->
+        localCleanup.displayName(id)?.let { stringResource(R.string.profile_cleanup_model_downloaded, it) }
+            ?: CleanupModelPicker.selectionLabel(CloudCatalog.cleanupModel(id))
+    } ?: useSettings
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -286,7 +296,7 @@ private fun ProfileEditorDialog(
                         name = name.trim(),
                         languageId = if (languageId == base.language) base.languageId else languageId,
                         cleanupEnabled = cleanupEnabled,
-                        cleanupModelId = if (cleanupModelId == base.cleanupModel?.selectionId) {
+                        cleanupModelId = if (cleanupModelId == initialCleanupModelId) {
                             base.cleanupModelId
                         } else {
                             cleanupModelId
@@ -378,7 +388,7 @@ private fun ProfileEditorDialog(
             onDismiss = { picking = null },
         )
         CLEANUP_MODEL -> CleanupModelPickerDialog(
-            selected = CloudCatalog.cleanupModel(cleanupModelId),
+            selected = CloudCatalog.cleanupModel(cleanupModelId.takeUnless { cleanupModelIsDownloaded }),
             savedKeys = savedKeys,
             onChoose = {
                 cleanupModelId = it.selectionId
@@ -386,6 +396,12 @@ private fun ProfileEditorDialog(
             },
             onDismiss = { picking = null },
             geminiNano = geminiNano,
+            downloaded = DownloadedCleanupChoices(
+                localCleanup.copy(selectedId = cleanupModelId.takeIf { cleanupModelIsDownloaded }),
+            ) {
+                cleanupModelId = it
+                picking = null
+            },
             discovery = discovery,
         )
     }

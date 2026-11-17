@@ -8,11 +8,13 @@ import com.justspeaktoit.android.dictation.CloudCapture
 import com.justspeaktoit.android.dictation.DictationFailure
 import com.justspeaktoit.android.dictation.DictationState
 import com.justspeaktoit.android.dictation.DictationTimings
+import com.justspeaktoit.android.dictation.DownloadedTranscription
 import com.justspeaktoit.android.dictation.FakeCloud
 import com.justspeaktoit.android.dictation.FakeEngine
 import com.justspeaktoit.android.dictation.FakeInterruptions
 import com.justspeaktoit.android.dictation.FakeLiveClient
 import com.justspeaktoit.android.dictation.FakeLiveSessions
+import com.justspeaktoit.android.dictation.FakeLocalTranscriber
 import com.justspeaktoit.android.dictation.FakeRecorders
 import com.justspeaktoit.android.dictation.InterruptionSignal
 import com.justspeaktoit.android.dictation.MemorySecrets
@@ -21,8 +23,10 @@ import com.justspeaktoit.android.dictation.RecorderRetirement
 import com.justspeaktoit.android.dictation.SessionRequests
 import com.justspeaktoit.android.dictation.SilenceSettings
 import com.justspeaktoit.android.dictation.ViewModelHarness
+import com.justspeaktoit.android.local.LocalTranscriber
 import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,6 +45,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.File
 import java.util.concurrent.Executors
 
 /** The keyboard's live Cloud path (#1668), on the app's real session controller with a fake provider. */
@@ -60,6 +65,9 @@ class KeyboardLiveDictationTest {
     private val seen = mutableListOf<DictationState>()
     private var rules = emptyList<CorrectionRule>()
     private var finishTimeoutMs = KeyboardPolicy.FINISH_TIMEOUT_MS
+    private val localTranscriber = FakeLocalTranscriber()
+    private val downloadedModels = mutableMapOf<String, File>()
+    private var transcriber: LocalTranscriber = localTranscriber
 
     private val keyboard by lazy {
         val cacheDir = folder.newFolder("keyboard-live")
@@ -81,6 +89,7 @@ class KeyboardLiveDictationTest {
             liveSessions = live,
             interruptions = interruptions,
             finishTimeoutMs = finishTimeoutMs,
+            downloaded = DownloadedTranscription({ downloadedModels[it] }, transcriber),
         )
     }
 
@@ -158,6 +167,53 @@ class KeyboardLiveDictationTest {
     }
 
     @Test
+    fun testDownloadedModel_transcribesOnThePhoneWithCorrections() {
+        rules = listOf(CorrectionRule("Kubernetes", listOf("local words")))
+        val model = folder.newFile("ggml-tiny.bin")
+        downloadedModels[TINY] = model
+        onMain { keyboard.startLocal(TINY, "en-GB") }
+        await { it is DictationState.Listening }
+
+        onMain { keyboard.stop() }
+
+        assertEquals(DictationState.Done(RecognitionMode.Downloaded, "Kubernetes"), await { !it.isActive })
+        val call = localTranscriber.calls.single()
+        assertEquals(model, call.model)
+        assertEquals("en-GB", call.languageTag)
+        assertTrue("a downloaded model never falls back to the cloud", cloud.transcriptions.isEmpty())
+        assertTrue(live.created.isEmpty())
+        assertEquals(0, engine.started.size)
+    }
+
+    @Test
+    fun testDownloadedModelThatOutlastsTheKeyboardBound_failsVisiblyAsDownloaded() {
+        finishTimeoutMs = 200L
+        downloadedModels[TINY] = folder.newFile("ggml-tiny.bin")
+        val release = CompletableDeferred<Unit>()
+        transcriber = object : LocalTranscriber {
+            override val available = true
+
+            override suspend fun transcribe(model: File, audio: File, languageTag: String?): String {
+                release.await()
+                return "too late"
+            }
+        }
+        onMain { keyboard.startLocal(TINY, "en-GB") }
+        await { it is DictationState.Listening }
+
+        onMain { keyboard.stop() }
+
+        val failed = await { it is DictationState.Failed }
+        assertEquals(DictationState.Failed(RecognitionMode.Downloaded, DictationFailure.NetworkTimeout, ""), failed)
+        assertFalse(onMain { keyboard.isRunning })
+        assertEquals("no other recogniser is started instead", 0, engine.started.size)
+        assertTrue(cloud.transcriptions.isEmpty())
+        release.complete(Unit)
+        onMain { }
+        assertTrue("a late transcript is ignored", seen.none { it is DictationState.Done })
+    }
+
+    @Test
     fun testMissingKey_failsVisiblyWithoutConnecting() {
         val client = start(CloudProvider.Deepgram)
 
@@ -222,5 +278,9 @@ class KeyboardLiveDictationTest {
     fun testBatchModel_isNeverStarted() {
         val batch = CloudCatalog.transcriptionModels.first { it.live == null }
         onMain { keyboard.start(batch, "en-GB") }
+    }
+
+    private companion object {
+        const val TINY = "local/whisperkit/tiny"
     }
 }

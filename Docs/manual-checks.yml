@@ -311,7 +311,7 @@ sessions:
           - "Deadline: the name reservation lapses unless a submission is made by 13 February 2027."
           - "Submission 1 is drafted with pricing, properties, age rating, the en-GB listing and certification notes; only the package, capability justifications and submit remain."
         steps:
-          - "Email storeops@microsoft.com asking for the HeadlessAppBypass waiver for Store ID 9PDFKWGH31HP (the speak CLI has no Start menu entry); wait until it is granted."
+          - "In Partner Center open Help + support \u203a Windows Developer Center \u203a App Management and raise a support request asking for the HeadlessAppBypass waiver for Store ID 9PDFKWGH31HP (the speak CLI has no Start menu entry); wait until it is granted."
           - "In GitHub Actions run Microsoft Store (windows-store.yml) on main, then download the windows-store-bundle artifact."
           - "In Partner Center open Apps and games \u203a Just Speak to It \u203a Submission 1 and upload the .msixbundle under Packages."
           - "Justify the restricted capabilities runFullTrust (inserts dictated text into other apps) and unvirtualizedResources (keeps History and settings in %LOCALAPPDATA%\\JustSpeakToIt)."

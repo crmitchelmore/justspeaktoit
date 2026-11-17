@@ -60,7 +60,7 @@ final class DesktopLocalRulesConfigurationTests: XCTestCase {
 
     func testUnsupportedLocalValuesStayDisabledAndRoundTripWithoutRemoteSubstitution() throws {
         for identifier in ["local/post-processing/downloaded", "LOCAL/post-processing/unknown",
-                           AppleLocalModels.foundationModelID] {
+                           AppleLocalModels.foundationModelID, AndroidLocalModels.geminiNanoID] {
             let source = try DesktopConfiguration(values: [
                 model: AnyCodable(.string(identifier)), enabled: AnyCodable(.bool(true)),
                 prompt: AnyCodable(.string("Keep custom instructions.")),

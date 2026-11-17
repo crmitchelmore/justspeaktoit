@@ -15,7 +15,13 @@ import com.justspeaktoit.android.corrections.AutoCorrectionLearningPolicy
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.local.CleanupModelsState
 import com.justspeaktoit.android.local.LocalModelsState
+import com.justspeaktoit.android.local.ModelInstallState
+import com.justspeaktoit.android.ondevice.GeminiNanoAvailability
+import com.justspeaktoit.android.ondevice.GeminiNanoFailure
+import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.readaloud.VoiceSelection
 import com.justspeaktoit.android.resources.SystemResourceHold
 import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.AppPreferences
@@ -26,7 +32,10 @@ import java.util.Locale
 
 data class SharedAudioOffer(val uri: Uri, val mimeType: String?)
 
-/** Optional OpenRouter cleanup of a final transcript. A failure keeps the original text. */
+/**
+ * Optional cleanup of a final transcript by a cloud model, Gemini Nano or a downloaded model on the phone.
+ * A failure keeps the original text.
+ */
 enum class CleanupStatus { None, Running, Applied, Failed }
 
 data class DictationUiState(
@@ -48,6 +57,12 @@ data class DictationUiState(
     /** Live OpenRouter models for the transcription and cleanup browsers. */
     val openRouterDiscovery: OpenRouterDiscoveryState = OpenRouterDiscoveryState(),
     val cleanup: CleanupStatus = CleanupStatus.None,
+    /** The running or last cleanup ran on this phone: Gemini Nano or a downloaded model. */
+    val cleanupOnDevice: Boolean = false,
+    /** Why Gemini Nano kept the original transcript, when [cleanup] is [CleanupStatus.Failed]. */
+    val cleanupFailure: GeminiNanoFailure? = null,
+    /** Whether this phone offers Gemini Nano for cleanup; checked when Settings or the picker opens. */
+    val geminiNano: GeminiNanoAvailability = GeminiNanoAvailability.Unchecked,
     val originalTranscript: String? = null,
     /** Set when a key could not be saved or removed securely. */
     val keyStoreError: Boolean = false,
@@ -80,6 +95,8 @@ data class DictationUiState(
     val silence: SilenceSettings = SilenceSettings(),
     /** Whether the record button arms hands-free dictation; Cloud mode only. */
     val handsFreeEnabled: Boolean = false,
+    /** Whether the dictation keyboard may stream to the live Cloud model; an explicit opt-in. */
+    val keyboardLiveCloudEnabled: Boolean = false,
     val handsFree: HandsFreeStatus = HandsFreeStatus.Off,
     /** Finished Cloud recordings stay in History to play back or transcribe again. */
     val keepRecordings: Boolean = false,
@@ -87,6 +104,10 @@ data class DictationUiState(
     val transcribingEntryId: String? = null,
     /** Personal corrections, in the order they apply. */
     val corrections: List<CorrectionRule> = emptyList(),
+    /** The read-aloud pronunciation dictionary in effect, the shared defaults until edited. */
+    val pronunciations: List<PronunciationEntry> = emptyList(),
+    /** The read-aloud voice, a `VoiceSelection` encoding. */
+    val readAloudVoice: String = VoiceSelection.SYSTEM,
     /** Whether the keyboard learns corrections from the user's edits. */
     val learnCorrections: Boolean = AutoCorrectionLearningPolicy.ENABLED_BY_DEFAULT,
     /** Edits seen before one becomes a correction automatically. */
@@ -113,6 +134,8 @@ data class DictationUiState(
     val transfer: ConfigTransferState = ConfigTransferState(),
     /** Downloaded Whisper models, their state on this phone and the one Downloaded mode uses. */
     val localModels: LocalModelsState = LocalModelsState(),
+    /** Downloaded cleanup models (#1660) and the one cleanup uses instead of a cloud model. */
+    val localCleanup: CleanupModelsState = CleanupModelsState(),
 ) {
     val audioInputChoice: AudioInputChoice get() = AudioInputChoice.resolve(audioInputId, audioInputs)
 
@@ -122,6 +145,23 @@ data class DictationUiState(
     val sessionCleanupEnabled: Boolean get() = profile?.cleanupEnabled ?: cleanupEnabled
 
     val sessionCleanupModel: CleanupModel get() = profile?.cleanupModel ?: cleanupModel
+
+    /**
+     * The downloaded model a session's cleanup uses: the user's, unless the active profile names a cloud
+     * cleanup model. Null means cleanup uses [sessionCleanupModel].
+     */
+    val sessionLocalCleanupModelId: String?
+        get() = if (profile?.cleanupModel != null) null else localCleanup.selectedId
+
+    /**
+     * The downloaded model a session hands to cleanup: the chosen one when cleanup is on and it is on the
+     * phone. A runtime that did not load still gets it, so cleanup fails visibly and keeps the original;
+     * a model that is not downloaded turns cleanup off for the session instead, as Settings says.
+     */
+    val sessionDownloadedCleanupModelId: String?
+        get() = sessionLocalCleanupModelId?.takeIf {
+            sessionCleanupEnabled && localCleanup.selected?.state == ModelInstallState.Installed
+        }
 
     /** The base cleanup prompt a session uses: the profile's, else the user's, else null for the built-in one. */
     val sessionCleanupPrompt: String?
@@ -156,15 +196,25 @@ data class DictationUiState(
     val armsHandsFree: Boolean
         get() = handsFreeEnabled && activeMode == RecognitionMode.Cloud
 
-    /** Cleanup runs only when switched on (by the profile or the user) and its model's provider has a key. */
+    /**
+     * Cleanup runs only when switched on (by the profile or the user) and its model can run: a downloaded
+     * model must be on the phone with its runtime, a cloud model's provider must have a key. Gemini Nano
+     * needs no key; when the phone cannot run it, the session says why and keeps the transcript.
+     */
     val cleanupReady: Boolean
-        get() = sessionCleanupEnabled && sessionCleanupModel.provider in savedKeys
+        get() = sessionCleanupEnabled && if (sessionLocalCleanupModelId != null) {
+            localCleanup.ready
+        } else {
+            sessionCleanupModel.let { it.isOnDevice || it.cloudProvider in savedKeys }
+        }
 }
 
 /** Deadlines and polling for the session's blocking work; tests shorten them. */
 internal data class DictationTimings(
     val transcribeMs: Long = 180_000L,
     val cleanupMs: Long = 60_000L,
+    /** Loading and running a downloaded cleanup model on the phone, as the desktop's native deadline. */
+    val localCleanupMs: Long = 120_000L,
     val importMs: Long = 60_000L,
     val downloadCheckIntervalMs: Long = 5_000L,
     val downloadChecks: Int = 60,

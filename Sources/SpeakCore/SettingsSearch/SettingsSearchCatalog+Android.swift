@@ -61,6 +61,26 @@ extension SettingsSearchCatalog {
             platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.readAloudVoice", title: "Read aloud voice", section: .voiceOutput,
+            systemImage: "speaker.wave.3",
+            summary: "The voice that reads transcripts aloud: the phone's text-to-speech or a cloud voice.",
+            keywords: [
+                "voice output", "text to speech", "tts", "speak", "read aloud", "voice", "elevenlabs", "azure",
+                "deepgram", "cartesia", "gemini", "groq", "speechmatics", "soniox"
+            ],
+            settingKeys: ["readAloudVoice"], platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.pronunciation", title: "Pronunciation dictionary", section: .pronunciation,
+            systemImage: "character.book.closed",
+            summary: "Words read aloud differently from how they are written, such as names and acronyms.",
+            keywords: [
+                "pronunciation dictionary", "pronounce", "say as", "read aloud", "acronyms", "names",
+                "text to speech", "tts", "regex"
+            ],
+            settingKeys: ["pronunciationDictionary"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.cleanup", title: "Clean up transcripts", section: .postProcessing,
             systemImage: "wand.and.stars",
             summary: "Send the final transcript to the chosen cleanup model to fix punctuation and filler words.",
@@ -68,9 +88,20 @@ extension SettingsSearchCatalog {
                 "post-processing", "polish", "cleanup", "llm", "openrouter", "grammar", "cleanup model",
                 "anthropic", "claude", "openai", "gemini", "groq", "mistral", "browse openrouter models",
                 "openrouter models", "model browser", "model pricing", "zero listed prices",
-                "discover models", "model discovery", "live models", "newest models"
+                "discover models", "model discovery", "live models", "newest models", "gemini nano", "nano",
+                "on-device cleanup", "on this phone", "offline cleanup", "local cleanup", "private cleanup", "aicore"
             ],
             settingKeys: ["cleanup_enabled", "cleanup_model", "cleanupModelDiscoveryEnabled"], platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.downloadedCleanup", title: "Downloaded cleanup models", section: .postProcessing,
+            systemImage: "arrow.down.circle",
+            summary: "Download a small language model to clean up transcripts on the phone, without a key or network.",
+            keywords: [
+                "downloaded cleanup", "local cleanup", "local llm", "llama", "llama.cpp", "gguf", "qwen",
+                "smollm", "on device", "offline", "private", "post-processing", "remove model", "storage"
+            ],
+            settingKeys: ["localCleanupModel"], platforms: .android
         ),
         SettingsSearchEntry(
             id: "android.cleanupPrompt", title: "Cleanup prompt", section: .postProcessing,
@@ -137,6 +168,16 @@ extension SettingsSearchCatalog {
                 "automatic start", "pre-roll", "listen", "VAD"
             ],
             settingKeys: ["handsFreeDictationEnabled"], platforms: .android
+        ),
+        SettingsSearchEntry(
+            id: "android.keyboardLiveCloud", title: "Dictation keyboard", section: .general,
+            systemImage: "keyboard",
+            summary: "Let the keyboard stream to your live Cloud model, showing text as you speak.",
+            keywords: [
+                "keyboard", "IME", "live", "streaming", "cloud", "BYOK", "partial", "real-time",
+                "use live cloud models in the keyboard"
+            ],
+            settingKeys: ["keyboardLiveCloudEnabled"], platforms: .android
         ),
         SettingsSearchEntry(
             id: "android.appearance", title: "Appearance", section: .general, systemImage: "paintpalette",

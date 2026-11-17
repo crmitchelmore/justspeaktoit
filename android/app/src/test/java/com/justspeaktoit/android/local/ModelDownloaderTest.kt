@@ -9,6 +9,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayInputStream
+import java.io.IOException
 
 class ModelDownloaderTest {
     @get:Rule val folder = TemporaryFolder()
@@ -16,7 +17,7 @@ class ModelDownloaderTest {
     private val content = ByteArray(1_000) { (it * 7 % 256).toByte() }
     private val model = pinnedModel(content = content)
     private val source = FakeModelSource(content)
-    private val store by lazy { WhisperModelStore(folder.newFolder("models")) }
+    private val store by lazy { ModelStore(folder.newFolder("models")) }
 
     private fun download(cancelled: () -> Boolean = { false }, space: Long = Long.MAX_VALUE): DownloadFailure? =
         ModelDownloader(source) { space }.download(model, store, cancelled = cancelled)
@@ -67,7 +68,7 @@ class ModelDownloaderTest {
         assertEquals(listOf(model.url, cdn), source.requests.map { it.url })
 
         for (target in listOf("https://evil.example/model.bin", "http://cdn-lfs.hf.co/model.bin")) {
-            val other = WhisperModelStore(folder.newFolder())
+            val other = ModelStore(folder.newFolder())
             source.requests.clear()
             source.respond = { if (it.url == model.url) ModelResponse(302, target, null) else source.serve(it) }
             assertEquals(
@@ -106,6 +107,13 @@ class ModelDownloaderTest {
         source.respond = source::serve
         assertNull(download())
         assertEquals(300L, source.requests.last().offset)
+        assertTrue(store.isInstalled(model))
+    }
+
+    @Test
+    fun testResponseThatFailsToClose_stillInstallsAVerifiedBody() {
+        source.respond = { ModelResponse(200, null, ByteArrayInputStream(content)) { throw IOException("reset") } }
+        assertNull(download())
         assertTrue(store.isInstalled(model))
     }
 

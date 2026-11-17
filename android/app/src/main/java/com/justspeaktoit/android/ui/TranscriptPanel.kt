@@ -24,9 +24,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.justspeaktoit.android.R
 import com.justspeaktoit.android.dictation.CleanupStatus
+import com.justspeaktoit.android.dictation.DictationLanguages
 import com.justspeaktoit.android.dictation.DictationState
 import com.justspeaktoit.android.dictation.DictationUiState
 import com.justspeaktoit.android.dictation.RecognitionMode
+import com.justspeaktoit.android.ondevice.GeminiNanoFailure
 import com.justspeaktoit.android.output.TranscriptOutput
 import kotlinx.coroutines.launch
 
@@ -56,7 +58,7 @@ internal fun TranscriptCard(state: DictationUiState) {
             if (dictation is DictationState.Failed && text.isNotEmpty()) {
                 Text(stringResource(R.string.unfinished_label), style = MaterialTheme.typography.labelMedium)
             }
-            CleanupNote(state.cleanup)
+            CleanupNote(state.cleanup, state.cleanupOnDevice, state.cleanupFailure)
             Text(
                 text = text.ifEmpty { stringResource(R.string.transcript_placeholder) },
                 style = MaterialTheme.typography.bodyLarge,
@@ -72,22 +74,29 @@ internal fun TranscriptCard(state: DictationUiState) {
 }
 
 @Composable
-private fun CleanupNote(cleanup: CleanupStatus) {
+private fun CleanupNote(cleanup: CleanupStatus, onDevice: Boolean, failure: GeminiNanoFailure?) {
     val text = when (cleanup) {
-        CleanupStatus.Running -> R.string.cleanup_running
-        CleanupStatus.Applied -> R.string.cleanup_applied
-        CleanupStatus.Failed -> R.string.cleanup_failed
+        CleanupStatus.Running -> stringResource(if (onDevice) R.string.cleanup_running_on_device else R.string.cleanup_running)
+        CleanupStatus.Applied -> stringResource(if (onDevice) R.string.cleanup_applied_on_device else R.string.cleanup_applied)
+        // Gemini Nano says why it kept the original; a downloaded model's failure has no reason to give.
+        CleanupStatus.Failed -> if (failure != null) {
+            stringResource(R.string.cleanup_failed_on_device, stringResource(failure.message()))
+        } else {
+            stringResource(R.string.cleanup_failed)
+        }
         CleanupStatus.None -> return
     }
     Text(
-        stringResource(text),
+        text,
         style = MaterialTheme.typography.labelMedium,
         color = if (cleanup == CleanupStatus.Failed) {
             MaterialTheme.colorScheme.error
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },
-        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        modifier = Modifier
+            .testTag(AutomationIds.CLEANUP_STATUS)
+            .semantics { liveRegion = LiveRegionMode.Polite },
     )
 }
 
@@ -136,7 +145,11 @@ internal fun ResultActions(state: DictationUiState, snackbar: SnackbarHostState,
             Text(stringResource(R.string.action_clear))
         }
     }
-    if (final && text.isNotBlank()) ReadAloudButton(text, snackbar)
+    if (final && text.isNotBlank()) {
+        // A chosen dictation language is the transcript's; with automatic, the voice detects it.
+        val language = state.languageTag.takeIf { state.languageId != DictationLanguages.AUTOMATIC }
+        ReadAloudButton(text, language, state.readAloudVoice, state.pronunciations, snackbar)
+    }
 }
 
 @Composable

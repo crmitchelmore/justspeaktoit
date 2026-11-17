@@ -127,6 +127,7 @@ public enum DesktopPostProcessing {
         let lower = identifier.lowercased()
         return lower.hasPrefix("local/") || lower.hasPrefix("apple/local/")
             || lower == AppleLocalModels.foundationModelID.lowercased()
+            || AndroidLocalModels.isGeminiNano(identifier)
     }
 
     public static func process(

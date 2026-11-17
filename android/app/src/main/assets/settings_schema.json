@@ -62,6 +62,8 @@
         "deepgram/flux-general-en-streaming",
         "deepgram/flux-general-multi-streaming",
         "assemblyai/universal-3-6-pro-streaming",
+        "elevenlabs/scribe-v3-live-streaming",
+        "elevenlabs/scribe-v2-streaming",
         "openai/gpt-live-transcribe-streaming",
         "openai/gpt-realtime-whisper-streaming"
       ],
@@ -174,6 +176,14 @@
       "type" : "boolean"
     },
     {
+      "default" : false,
+      "description" : "Let the dictation keyboard stream audio to the live Cloud model's provider.",
+      "key" : "keyboardLiveCloudEnabled",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "boolean"
+    },
+    {
       "allowedValues" : [
         "Off",
         "Week",
@@ -216,6 +226,19 @@
       "readOnly" : false,
       "sensitive" : false,
       "type" : "boolean"
+    },
+    {
+      "allowedValues" : [
+        "local/post-processing/qwen3-1.7b-q4",
+        "local/post-processing/qwen3-0.6b-q4",
+        "local/post-processing/smollm2-360m-instruct-q4"
+      ],
+      "default" : null,
+      "description" : "Downloaded model that cleans up transcripts on the phone; null uses cleanup_model.",
+      "key" : "localCleanupModel",
+      "readOnly" : false,
+      "sensitive" : false,
+      "type" : "optionalString"
     },
     {
       "default" : false,
@@ -383,6 +406,8 @@
     "postRecordingTailDuration",
     "preferredAudioInputUID",
     "preferredLocaleIdentifier",
+    "pronunciationDictionary",
+    "readAloudVoice",
     "recordingsDirectory",
     "recoveredTranscriptionKeywords",
     "rememberedLocalTranscriptionSource",

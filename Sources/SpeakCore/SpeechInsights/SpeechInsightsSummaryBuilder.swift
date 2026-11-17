@@ -90,13 +90,14 @@ extension SpeechInsightsEngine {
             }
     }
 
-    private struct WPMBucketBound: Sendable {
+    struct WPMBucketBound: Sendable {
         let label: String
         let lower: Double
         let upper: Double
     }
 
-    private static let wpmBucketBounds: [WPMBucketBound] = [
+    /// Words-per-minute ranges for the pace distribution, also exported to Android.
+    static let wpmBucketBounds: [WPMBucketBound] = [
         WPMBucketBound(label: "<60", lower: 0, upper: 60),
         WPMBucketBound(label: "60–89", lower: 60, upper: 90),
         WPMBucketBound(label: "90–119", lower: 90, upper: 120),

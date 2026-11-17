@@ -31,6 +31,9 @@ enum class DictationFailure {
     Server,
     Client,
     TooManyRequests,
+
+    /** The provider account has no credit or quota left; waiting will not help. */
+    OutOfCredit,
     LanguageNotSupported,
     LanguageUnavailable,
     LeftApp,

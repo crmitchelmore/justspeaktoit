@@ -13,6 +13,9 @@ import java.io.RandomAccessFile
 class BatchTranscriberTest {
     private val audio: File = File.createTempFile("batch", ".wav")
     private val wav = SharedAudio.Format("wav", "audio/wav")
+
+    /** One sample loud enough to count as speech, so general audio models are not skipped as silent. */
+    private val speech = WavFormat.header(2) + byteArrayOf(0, 0x40)
     private val sent = mutableListOf<BatchWire.Request>()
     private var pauses = 0
 
@@ -50,7 +53,7 @@ class BatchTranscriberTest {
 
     @Test
     fun testEveryCatalogueModel_hasATranscriptionRoute() {
-        audio.writeBytes(WavFormat.header(2) + ByteArray(2))
+        audio.writeBytes(speech)
         val failing = BatchTranscriber(transport = { _, _ -> BatchWire.Response(401, "") }, background = {})
         for (model in CloudCatalog.batchTranscriptionModels.filterNot { it.provider.isOpenAICompatible }) {
             val error = assertThrows(CloudException::class.java) {
@@ -257,7 +260,7 @@ class BatchTranscriberTest {
         assertEquals(DictationFailure.UnsupportedAudio, unreadable.failure)
         assertTrue(sent.isEmpty())
 
-        audio.writeBytes(WavFormat.header(2) + ByteArray(2))
+        audio.writeBytes(speech)
         val rejected = transcriber(listOf("POST ${CloudProvider.Meta.baseUrl}/asr/transcribe" to BatchWire.Response(413, "")))
         val error = assertThrows(CloudException::class.java) {
             rejected.transcribe(meta, "k", audio, null, CallHandle(), wav, emptyList())
@@ -274,7 +277,7 @@ class BatchTranscriberTest {
         }
         assertEquals(DictationFailure.UnsupportedAudio, error.failure)
 
-        audio.writeBytes(WavFormat.header(2) + ByteArray(2))
+        audio.writeBytes(speech)
         val text = transcriber(
             listOf("POST ${CloudProvider.OpenRouter.baseUrl}/chat/completions" to ok("""{"choices":[{"message":{"content":"Hi"}}]}""")),
         ).transcribe(inkling, "k", audio, null, CallHandle(), wav, emptyList())
@@ -284,7 +287,7 @@ class BatchTranscriberTest {
     @Test
     fun testOpenRouter_sendsALiveSpeechToTextModelToTheTranscriptionEndpoint() {
         val live = CloudCatalog.transcriptionModel("openrouter/transcription/openai/whisper-large-v3")
-        audio.writeBytes(WavFormat.header(2) + ByteArray(2))
+        audio.writeBytes(speech)
         val text = transcriber(
             listOf("POST ${CloudProvider.OpenRouter.baseUrl}/audio/transcriptions" to ok("""{"text":" Hello "}""")),
         ).transcribe(live, "k", audio, null, CallHandle(), wav, emptyList())
@@ -310,7 +313,7 @@ class BatchTranscriberTest {
     @Test
     fun testAzure_sendsToTheSavedEndpointAndTakesOnly200AsATranscript() {
         val fast = model(BatchWire.AZURE_FAST)
-        audio.writeBytes(WavFormat.header(2) + byteArrayOf(1, 0))
+        audio.writeBytes(speech)
         val endpoint = "https://speak.cognitiveservices.azure.com"
         val url = "POST $endpoint/speechtotext/transcriptions:transcribe"
         val text = transcriber(listOf(url to ok("""{"combinedPhrases":[{"text":" Hello "}]}""")), azureEndpoint = endpoint)
@@ -327,7 +330,7 @@ class BatchTranscriberTest {
 
     @Test
     fun testAzure_refusesALocalProxyTokenAndABadEndpointWithoutSending() {
-        audio.writeBytes(WavFormat.header(2) + byteArrayOf(1, 0))
+        audio.writeBytes(speech)
         for ((key, endpoint) in listOf("local-proxy/token" to "", "secret" to "https://example.com")) {
             val error = assertThrows(CloudException::class.java) {
                 transcriber(emptyList(), azureEndpoint = endpoint)
@@ -340,6 +343,16 @@ class BatchTranscriberTest {
 
     private fun alibabaKey(region: AlibabaCredential.Region): String =
         checkNotNull(AlibabaCredential.credentialsForSaving("sk-1", region, "llm-abc"))
+
+    @Test
+    fun testGeneralAudioModels_returnNothingForAQuietRecordingWithoutSending() {
+        audio.writeBytes(WavFormat.header(3_200) + ByteArray(3_200) { (if (it % 2 == 0) 12 else 0).toByte() })
+        val inkling = CloudCatalog.transcriptionModels.first { it.catalogId == "thinkingmachines/inkling" }
+        for (model in listOf(model("google/gemini-3.5-transcribe"), inkling)) {
+            assertEquals("", transcriber(emptyList()).transcribe(model, "k", audio, null, CallHandle(), wav, emptyList()))
+        }
+        assertTrue(sent.isEmpty())
+    }
 
     @Test
     fun testAlibaba_neverSendsSilenceAndRefusesARegionTheModelDoesNotServe() {
@@ -360,7 +373,7 @@ class BatchTranscriberTest {
 
     @Test
     fun testAlibaba_sendsQwenOmniToTheWorkspaceInItsRegion() {
-        audio.writeBytes(WavFormat.header(2) + byteArrayOf(1, 0))
+        audio.writeBytes(speech)
         val stream = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hal\"}}]}\n" +
             "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n" +
             "data: [DONE]\n"
@@ -383,7 +396,7 @@ class BatchTranscriberTest {
     fun testStepFun_usesTheKeysRegionAndNeedsAnEventStream() {
         val stepFun = model("stepfun/stepaudio-3-asr-max")
         val key = checkNotNull(StepFunCredential.credentialsForSaving("sk", StepFunCredential.Region.International))
-        audio.writeBytes(WavFormat.header(2) + byteArrayOf(1, 0))
+        audio.writeBytes(speech)
         val url = "POST https://api.stepfun.ai/v1/audio/asr/sse"
         val events = mapOf("content-type" to "text/event-stream; charset=utf-8")
         val done = "data: {\"type\":\"transcript.text.done\",\"text\":\" Hi \"}\n\n"

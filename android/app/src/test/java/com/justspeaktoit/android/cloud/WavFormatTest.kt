@@ -1,8 +1,10 @@
 package com.justspeaktoit.android.cloud
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -32,5 +34,31 @@ class WavFormatTest {
         val mid = WavFormat.level(ShortArray(160) { 1000 }, 160)
         assertTrue(mid > -2f && mid < 10f)
         assertEquals(-2f, WavFormat.level(ShortArray(0), 0), 0.001f)
+    }
+
+    private fun wav(samples: ShortArray): File = File.createTempFile("quiet", ".wav").apply {
+        deleteOnExit()
+        val pcm = ByteBuffer.allocate(samples.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+        samples.forEach { pcm.putShort(it) }
+        writeBytes(WavFormat.header(pcm.capacity().toLong()) + pcm.array())
+    }
+
+    @Test
+    fun testIsQuiet_treatsRoomNoiseAsSilenceButNotOneSpokenWindow() {
+        assertTrue(WavFormat.isQuiet(wav(ShortArray(0))))
+        assertTrue(WavFormat.isQuiet(wav(ShortArray(16_000))))
+        val noise = ShortArray(16_000) { if (it % 2 == 0) 20 else -20 }
+        assertTrue(WavFormat.isQuiet(wav(noise)))
+        val spoken = noise.copyOf().also { for (i in 8_000 until 9_600) it[i] = if (i % 2 == 0) 3_000 else -3_000 }
+        assertFalse(WavFormat.isQuiet(wav(spoken)))
+    }
+
+    @Test
+    fun testIsQuiet_cannotJudgeAFileThatIsNotTheRecorderWav() {
+        val other = File.createTempFile("quiet", ".m4a").apply { deleteOnExit() }
+        other.writeBytes(ByteArray(4_000))
+        assertFalse(WavFormat.isQuiet(other))
+        other.writeBytes(ByteArray(10))
+        assertFalse(WavFormat.isQuiet(other))
     }
 }

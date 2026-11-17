@@ -56,6 +56,7 @@
     <string name="failure_server">The speech service reported an error.</string>
     <string name="failure_client">The speech service stopped unexpectedly.</string>
     <string name="failure_too_many_requests">The speech service is limiting requests. Try again later.</string>
+    <string name="failure_out_of_credit">This provider account has no credit left. Add credit or billing with the provider, then try again.</string>
     <string name="failure_language_not_supported">This language is not supported by the selected recognition.</string>
     <string name="failure_language_unavailable">This language is not installed for on-device recognition.</string>
     <string name="failure_left_app">Dictation stopped because the app left the screen.</string>

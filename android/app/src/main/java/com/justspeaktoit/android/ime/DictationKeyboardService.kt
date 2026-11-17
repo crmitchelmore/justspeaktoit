@@ -22,18 +22,27 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.justspeaktoit.android.MainActivity
 import com.justspeaktoit.android.R
+import com.justspeaktoit.android.cloud.AndroidAudioInputs
+import com.justspeaktoit.android.cloud.AzureSpeechCredential
 import com.justspeaktoit.android.cloud.CallHandle
 import com.justspeaktoit.android.cloud.CleanupModel
+import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudClient
+import com.justspeaktoit.android.cloud.CloudModel
+import com.justspeaktoit.android.cloud.WavRecorder
 import com.justspeaktoit.android.corrections.PersonalCorrections
+import com.justspeaktoit.android.dictation.AndroidAudioInterruptions
 import com.justspeaktoit.android.dictation.AndroidSpeechEngine
+import com.justspeaktoit.android.dictation.CloudCapture
 import com.justspeaktoit.android.dictation.DictationEvent
 import com.justspeaktoit.android.dictation.DictationFailure
 import com.justspeaktoit.android.dictation.DictationLanguages
 import com.justspeaktoit.android.dictation.DictationReducer
 import com.justspeaktoit.android.dictation.DictationState
+import com.justspeaktoit.android.dictation.DictationTimings
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.dictation.RecognizerAvailability
+import com.justspeaktoit.android.dictation.SessionRequests
 import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.resources.SystemResourceToken
@@ -43,6 +52,11 @@ import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.DictationProfiles
 import com.justspeaktoit.android.ui.label
 import com.justspeaktoit.android.ui.message
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -50,10 +64,15 @@ import java.util.concurrent.Executors
  * A minimal dictation keyboard: the Android equivalent of the Mac's insert-at-cursor. Live partial
  * text is shown as composing text; only a final transcript is committed. A failed or cancelled
  * session removes only its own composing text. Dictation inserts after a selection rather than
- * replacing it, so a failure can never lose the user's existing text. The
- * keyboard never sends audio to the app's Cloud (BYOK) providers; the phone's speech service, which may
- * send audio to its provider, is used only after the user has been told so. The profile key switches the
- * shared active profile; for dictation only its language applies.
+ * replacing it, so a failure can never lose the user's existing text. The phone's speech service, which
+ * may send audio to its provider, is used only after the user has been told so. The profile key switches
+ * the shared active profile; for dictation its language and Cloud model apply.
+ *
+ * Live Cloud dictation (#1668) is an explicit opt-in in Settings: with it on and Cloud chosen in the app,
+ * the keyboard streams to the session's live Cloud model through the app's own session controller
+ * ([KeyboardLiveDictation]), reading the key in process. Partials are composing text and the final text is
+ * committed. A batch Cloud model, a missing key or a stream that has not settled within
+ * [KeyboardPolicy.FINISH_TIMEOUT_MS] fails visibly; no other recogniser is tried instead.
  *
  * Edit rewrites the selection by voice (feature F22): the spoken instruction is recognised like
  * dictation, then the selected text and the instruction (never audio) go to the user's cleanup model,
@@ -69,6 +88,16 @@ class DictationKeyboardService : InputMethodService() {
 
     /** No on-device or speech-service recognition is usable; the keyboard never falls back to the cloud. */
     private var unavailable = false
+
+    /** Cloud is chosen and opted in, but the session's model is batch only; named in the status line. */
+    private var batchCloudModel: CloudModel? = null
+
+    /** The provider the running live Cloud session streams to, named while listening. */
+    private var cloudProvider: String? = null
+
+    /** Main-thread scope for the live Cloud session; cancelled with the keyboard. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var liveDictation: KeyboardLiveDictation? = null
 
     /** Bumped whenever the editor changes, so a pending start cannot reach a different field. */
     private var inputGeneration = 0L
@@ -124,6 +153,8 @@ class DictationKeyboardService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         engine = AndroidSpeechEngine(this)
+        // A keyboard killed mid-stream leaves its local copy of the audio behind; nothing ever reads it.
+        File(cacheDir, LIVE_DIR).listFiles()?.forEach(File::delete)
     }
 
     override fun onDestroy() {
@@ -131,6 +162,9 @@ class DictationKeyboardService : InputMethodService() {
         voiceEdit?.call?.cancel()
         voiceEdit = null
         voiceEditWork.shutdownNow()
+        liveDictation?.close()
+        liveDictation = null
+        scope.cancel()
         engine.close()
         microphoneHold?.end()
         microphoneHold = null
@@ -306,7 +340,7 @@ class DictationKeyboardService : InputMethodService() {
         if (!cloudEditDisclosed) {
             // Say where the selected text goes before sending anything; the next tap confirms.
             cloudEditDisclosed = true
-            showVoiceEditNotice(getString(R.string.keyboard_voice_edit_cloud_disclosure, model.provider.displayName))
+            showVoiceEditNotice(getString(R.string.keyboard_voice_edit_cloud_disclosure, model.cloudProvider.displayName))
             return
         }
         val run = VoiceEditRun(target, inputGeneration, model)
@@ -435,15 +469,26 @@ class DictationKeyboardService : InputMethodService() {
                 return@checkOnDeviceLanguage
             }
             val options = RecognizerAvailability.evaluate(caps, resolution.support)
-            val chosen = AppPreferences(this).chosenMode
-            val mode = KeyboardPolicy.mode(chosen, options)
+            val current = AppPreferences(this)
+            val chosen = current.chosenMode
+            val cloudModel = DictationProfiles.active(current)?.cloudModel
+                ?: CloudCatalog.transcriptionModel(current.cloudModelId)
+            // A voice edit's instruction is always heard on the phone.
+            val cloud = if (edit != null) {
+                KeyboardCloud.Off
+            } else {
+                KeyboardPolicy.cloud(current.keyboardLiveCloudEnabled, cloudModel.live != null)
+            }
+            val mode = KeyboardPolicy.mode(chosen, options, cloud)
             if (mode == null) {
                 unavailable = true
+                batchCloudModel = cloudModel.takeIf { KeyboardPolicy.blamesBatchCloud(chosen, cloud) }
                 voiceEdit = null
                 render()
                 return@checkOnDeviceLanguage
             }
             unavailable = false
+            batchCloudModel = null
             if (KeyboardPolicy.needsDisclosure(mode, chosen) && !speechServiceDisclosed) {
                 // Say where audio goes before any capture; the next tap confirms.
                 speechServiceDisclosed = true
@@ -460,6 +505,12 @@ class DictationKeyboardService : InputMethodService() {
             if (edit == null && selectionStart != selectionEnd && selectionEnd >= 0) {
                 currentInputConnection?.setSelection(selectionEnd, selectionEnd)
             }
+            if (mode == RecognitionMode.Cloud) {
+                cloudProvider = cloudModel.provider.displayName
+                live().start(cloudModel, tag)
+                return@checkOnDeviceLanguage
+            }
+            cloudProvider = null
             dispatch(DictationEvent.Start(mode))
             val language = if (mode == RecognitionMode.OnDevice) resolution.languageTag else tag
             engine.start(mode, language, onEvent = ::dispatch, onLevel = {})
@@ -467,14 +518,57 @@ class DictationKeyboardService : InputMethodService() {
     }
 
     private fun stopSession() {
+        val live = liveDictation
+        if (live != null && live.isRunning) {
+            // The session's own Finishing state arrives through onLiveState.
+            live.stop()
+            return
+        }
         dispatch(DictationEvent.StopRequested)
         engine.stop()
     }
 
     private fun cancelSession() {
         engine.cancel()
+        liveDictation?.cancel()
         removeOwnComposingText()
         dispatch(DictationEvent.Cancelled)
+    }
+
+    /** The live Cloud session, built on first use so a keyboard that never streams opens nothing. */
+    private fun live(): KeyboardLiveDictation = liveDictation ?: run {
+        val secrets = KeystoreSecretStore.create(this)
+        val inputs = AndroidAudioInputs(this)
+        val dir = File(cacheDir, LIVE_DIR).apply { mkdirs() }
+        val capture = CloudCapture(
+            recorders = { file, onLevel, onLimitReached, onCaptureFailed ->
+                // A saved microphone that is not connected records from the system default, as in the app.
+                val input = AppPreferences(this).audioInputId?.let(inputs::route)
+                WavRecorder(file, onLevel, onLimitReached, onCaptureFailed, input = input)
+            },
+            cacheDir = dir,
+            io = Dispatchers.IO,
+            resources = SystemResourceRegistry.shared,
+        )
+        val cloud = CloudClient(azureEndpoint = { secrets.read(AzureSpeechCredential.ENDPOINT_SECRET).orEmpty() })
+        KeyboardLiveDictation(
+            engine = engine,
+            capture = capture,
+            requests = SessionRequests(cloud, secrets, capture, Dispatchers.IO, DictationTimings()) { _, _ -> },
+            resources = SystemResourceRegistry.shared,
+            scope = scope,
+            cacheDir = dir,
+            corrections = { AppPreferences(this).corrections },
+            silence = { AppPreferences(this).silence },
+            onState = ::onLiveState,
+            interruptions = AndroidAudioInterruptions(this),
+        ).also { liveDictation = it }
+    }
+
+    /** The live Cloud session's state; personal corrections are already applied to its final text. */
+    private fun onLiveState(next: DictationState) {
+        state = next
+        applyState(corrected = true)
     }
 
     /** Removes provisional text the session wrote; text it does not own is never touched. */
@@ -518,7 +612,13 @@ class DictationKeyboardService : InputMethodService() {
     }
 
     private fun dispatch(event: DictationEvent) {
+        if (event == DictationEvent.EndOfSpeech) return
         state = DictationReducer.reduce(state, event)
+        applyState(corrected = false)
+    }
+
+    /** Writes the session's [state] to the field: partials as composing text, then the final text. */
+    private fun applyState(corrected: Boolean) {
         val edit = voiceEdit
         if (edit != null) {
             dispatchForEdit(edit)
@@ -535,15 +635,20 @@ class DictationKeyboardService : InputMethodService() {
                     // Remove the provisional text first, so the spacing check sees the real preceding character.
                     if (ownsComposing) ic.setComposingText("", 1)
                     editorShowedComposing = false
-                    val corrected = PersonalCorrections.apply(s.transcript, AppPreferences(this).corrections)
-                    val text = KeyboardPolicy.textToCommit(corrected, ic.getTextBeforeCursor(1, 0))
+                    val transcript = if (corrected) {
+                        s.transcript
+                    } else {
+                        PersonalCorrections.apply(s.transcript, AppPreferences(this).corrections)
+                    }
+                    val text = KeyboardPolicy.textToCommit(transcript, ic.getTextBeforeCursor(1, 0))
                     ic.commitText(text, 1)
                     corrections.inserted(text, currentInputEditorInfo)
                 }
                 ownsComposing = false
                 state = DictationState.Idle
             }
-            is DictationState.Failed -> removeOwnComposingText()
+            // Idle also arrives when Settings > System resources stops a live Cloud session.
+            is DictationState.Failed, DictationState.Idle -> removeOwnComposingText()
             else -> Unit
         }
         reconcileMicrophoneHold()
@@ -570,7 +675,8 @@ class DictationKeyboardService : InputMethodService() {
 
     /** Lists the keyboard's capture in Settings > System resources in use, with a way to stop it. */
     private fun reconcileMicrophoneHold() {
-        if (!state.holdsMicrophone) {
+        // A live Cloud session's controller lists its own hold, released with Settings > System resources.
+        if (!state.holdsMicrophone || liveDictation?.isRunning == true) {
             microphoneHold?.end()
             microphoneHold = null
             return
@@ -598,13 +704,16 @@ class DictationKeyboardService : InputMethodService() {
             disclosing -> getString(R.string.keyboard_speech_service_disclosure)
             run != null -> voiceEditStatus(run)
             notice != null -> notice
-            unavailable && !state.isActive -> getString(R.string.keyboard_unavailable)
+            unavailable && !state.isActive -> batchCloudModel?.let {
+                getString(R.string.keyboard_cloud_not_live, it.displayName)
+            } ?: getString(R.string.keyboard_unavailable)
             else -> when (val s = state) {
                 DictationState.Idle, is DictationState.Done -> getString(R.string.keyboard_ready)
                 is DictationState.Starting -> getString(R.string.state_starting)
-                is DictationState.Listening -> getString(R.string.keyboard_listening, getString(s.mode.label()))
+                is DictationState.Listening ->
+                    if (liveDictation?.isPaused == true) getString(R.string.state_paused) else listeningStatus(s.mode)
                 is DictationState.Finishing -> getString(R.string.state_finishing)
-                is DictationState.Failed -> getString(s.failure.message())
+                is DictationState.Failed -> failureStatus(s)
             }
         }
         statusView.text = text
@@ -647,6 +756,26 @@ class DictationKeyboardService : InputMethodService() {
                     else -> R.string.keyboard_voice_edit_cancel_description
                 },
             )
+        }
+    }
+
+    /** A live Cloud session names where the audio is going while it streams. */
+    private fun listeningStatus(mode: RecognitionMode): String {
+        val provider = cloudProvider
+        return if (mode == RecognitionMode.Cloud && provider != null) {
+            getString(R.string.keyboard_listening_cloud, provider)
+        } else {
+            getString(R.string.keyboard_listening, getString(mode.label()))
+        }
+    }
+
+    private fun failureStatus(failed: DictationState.Failed): String {
+        val provider = cloudProvider
+        if (failed.mode != RecognitionMode.Cloud || provider == null) return getString(failed.failure.message())
+        return when (failed.failure) {
+            DictationFailure.MissingKey -> getString(R.string.keyboard_cloud_missing_key, provider)
+            DictationFailure.NetworkTimeout -> getString(R.string.keyboard_cloud_timeout, provider)
+            else -> getString(R.string.keyboard_cloud_failed, getString(failed.failure.message()))
         }
     }
 
@@ -693,6 +822,11 @@ class DictationKeyboardService : InputMethodService() {
     /** A keyboard cannot ask for runtime permissions, so the app is opened to do it. */
     private fun openApp() {
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    private companion object {
+        /** Where a live Cloud session keeps its local copy of the audio until the session ends. */
+        const val LIVE_DIR = "keyboard-live"
     }
 
     /** One voice edit: what it may replace, where it started and the request that rewrites it. */

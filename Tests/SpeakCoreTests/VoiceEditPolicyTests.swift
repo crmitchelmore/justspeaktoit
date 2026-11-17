@@ -7,7 +7,7 @@ final class VoiceEditPolicyTests: XCTestCase {
         let local = LocalPostProcessingModel.huggingFaceModelID(
             repoID: "fixture/model", filename: "model.gguf"
         )
-        for model in ["", " \n", AppleLocalModels.foundationModelID,
+        for model in ["", " \n", AppleLocalModels.foundationModelID, AndroidLocalModels.geminiNanoID,
                       LocalPostProcessingModel.builtInRulesModelID.uppercased(), local, local.uppercased()] {
             XCTAssertEqual(VoiceEditPolicy.modelIdentifier(configured: model), ModelCatalog.defaultPostProcessingModel)
         }

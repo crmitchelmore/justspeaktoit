@@ -26,7 +26,9 @@ object AndroidTroubleshooting {
                 TroubleshootingProvider.None
             },
             postProcessingEnabled = state.sessionCleanupEnabled,
-            postProcessing = TroubleshootingProvider(cleanup.displayName, keyState(cleanup, state)),
+            // Gemini Nano runs on the phone and needs no key.
+            postProcessing = cleanup?.let { TroubleshootingProvider(it.displayName, keyState(it, state)) }
+                ?: TroubleshootingProvider.None,
             keyboard = if (keyboardEnabled) KeyboardState.Ready else KeyboardState.NotAdded,
         )
     }

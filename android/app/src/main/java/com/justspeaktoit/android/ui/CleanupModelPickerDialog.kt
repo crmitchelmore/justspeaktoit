@@ -34,10 +34,11 @@ import com.justspeaktoit.android.cloud.OpenRouterBrowserFilter
 import com.justspeaktoit.android.cloud.OpenRouterBrowserItem
 
 /**
- * Native cleanup models first, then a separate **Browse OpenRouter models…** button that opens a
- * searchable OpenRouter browser with provider and price filters; each row opens a details page
- * where the model is chosen, matching the Mac and iPhone pickers. With live discovery on, the browser
- * also lists OpenAI models OpenRouter offers today.
+ * **On this phone** first (Gemini Nano where AICore offers it, then downloaded llama.cpp cleanup models
+ * when [downloaded] has any), then native cleanup models, then a separate **Browse OpenRouter models…**
+ * button that opens a searchable OpenRouter browser with provider and price filters; each row opens a
+ * details page where the model is chosen, matching the Mac and iPhone pickers. With live discovery on,
+ * the browser also lists OpenAI models OpenRouter offers today.
  */
 @Composable
 fun CleanupModelPickerDialog(
@@ -45,14 +46,21 @@ fun CleanupModelPickerDialog(
     savedKeys: Set<CloudProvider>,
     onChoose: (CleanupModel) -> Unit,
     onDismiss: () -> Unit,
+    geminiNano: GeminiNanoUi,
+    downloaded: DownloadedCleanupChoices = DownloadedCleanupChoices(),
     discovery: OpenRouterDiscoveryUi = OpenRouterDiscoveryUi(),
 ) {
+    // A chosen downloaded model replaces [selected], so no other row shows as chosen.
+    val chosenId = selected.selectionId.takeIf { downloaded.state.selectedId == null }
+    // Asks AICore once per opening whether this phone offers Gemini Nano.
+    LaunchedEffect(Unit) { geminiNano.onCheck() }
     var browsing by remember { mutableStateOf(false) }
     var detail by remember { mutableStateOf<OpenRouterBrowserItem?>(null) }
     var filter by remember { mutableStateOf(OpenRouterBrowserFilter()) }
     val direct = remember { CleanupModelPicker.direct() }
     val found = discovery.state.cleanupModels
     val openRouterModels = remember(found, discovery.cleanupEnabled, selected.selectionId) {
+        // The saved OpenRouter choice stays listed even while a downloaded model is used instead.
         OpenRouterBrowser.cleanupItems(found, discovery.cleanupEnabled, selected.selectionId)
     }
     val copy = OpenRouterBrowserCopy.Cleanup
@@ -83,7 +91,7 @@ fun CleanupModelPickerDialog(
             shown != null -> OpenRouterModelDetail(
                 copy = copy,
                 item = shown,
-                isSelected = shown.selectionId == selected.selectionId,
+                isSelected = shown.selectionId == chosenId,
                 hasKey = CloudProvider.OpenRouter in savedKeys,
                 needsKey = needsKeyText(CloudProvider.OpenRouter, cleanup = true),
                 onChoose = { choose(shown) },
@@ -92,7 +100,7 @@ fun CleanupModelPickerDialog(
                 copy = copy,
                 models = openRouterModels,
                 filter = filter,
-                isSelected = { it.selectionId == selected.selectionId },
+                isSelected = { it.selectionId == chosenId },
                 discovery = OpenRouterDiscoveryControls(
                     loading = discovery.state.cleanupLoading,
                     failed = discovery.state.cleanupFailed,
@@ -104,14 +112,22 @@ fun CleanupModelPickerDialog(
                 onOpen = { detail = it },
             )
             else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                item {
+                    GeminiNanoPickerSection(
+                        geminiNano,
+                        isSelected = chosenId == CloudCatalog.geminiNano.selectionId,
+                        onChoose = { onChoose(CloudCatalog.geminiNano) },
+                    ) { DownloadedCleanupPickerRows(downloaded) }
+                }
                 items(direct, key = { it.selectionId }) { model ->
-                    ModelRow(model, model == selected, model.provider in savedKeys) { onChoose(model) }
+                    ModelRow(model, model.selectionId == chosenId, model.cloudProvider in savedKeys) { onChoose(model) }
                 }
                 item {
                     HorizontalDivider()
                     BrowseOpenRouterRow(
                         count = openRouterModels.size,
-                        selectedLabel = selected.takeIf { it.isOpenRouter }?.let(CleanupModelPicker::selectionLabel),
+                        selectedLabel = selected.takeIf { it.isOpenRouter && chosenId != null }
+                            ?.let(CleanupModelPicker::selectionLabel),
                         onOpen = { browsing = true },
                         modifier = Modifier.testTag(copy.ids.openRouter),
                     )

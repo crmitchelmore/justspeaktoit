@@ -254,6 +254,17 @@ releases therefore include the full initial history. Paired reverts cancel only
 within the unpublished range. Candidate receipt hashes guard source, build and
 notes; direct assets are checked against recorded SHA-256 before promotion.
 
+For hand-written store text, commit `Config/StoreNotes/<surface>.md` (for example
+`Config/StoreNotes/ios.md`) before selecting the Alpha source. Prepare Stable
+reads the file from that exact source commit, not the current checkout. Non-empty,
+trimmed content replaces only that surface's `storeNotes` and is hashed into the
+candidate as usual; cumulative in-app notes stay unchanged. The text must be at
+most 4,000 characters after trimming: longer overrides fail rather than being
+truncated. Missing or whitespace-only files keep the existing generated store
+text. Alpha ignores these files. Update or remove each file for every Stable
+release so an old release's text is not reused. Changing it after a candidate is
+frozen requires selecting a new source and preparing a new candidate.
+
 ## Required rollout evidence
 
 To complete distribution verification, verify Alpha profiles contain only Alpha groups and

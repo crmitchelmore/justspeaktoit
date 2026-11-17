@@ -66,7 +66,7 @@ object CloudWire {
         return Multipart(boundary, head.toByteArray(), tail.toByteArray())
     }
 
-    fun cleanupUrl(model: CleanupModel): String = "${model.provider.baseUrl}/chat/completions"
+    fun cleanupUrl(model: CleanupModel): String = "${model.cloudProvider.baseUrl}/chat/completions"
 
     /** Anthropic rejects requests without an output limit; other routes keep their default. */
     const val ANTHROPIC_MAX_TOKENS = 8_192

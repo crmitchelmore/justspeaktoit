@@ -66,3 +66,45 @@ internal object NoAudioInterruptions : AudioInterruptions {
 
     override fun stop() = Unit
 }
+
+/**
+ * Keeps [interruptions] watching while a session captures and applies [InterruptionPolicy] to what it
+ * reports, for every surface that runs a [DictationSessionController] (the app and the keyboard's live
+ * Cloud sessions). Hand it every state the controller publishes; watching starts when capture starts
+ * and stops, abandoning audio focus, when capture ends. [session] is read only when a signal arrives.
+ */
+internal class SessionInterruptionWatch(
+    private val interruptions: AudioInterruptions,
+    private val session: () -> DictationSessionController,
+) {
+    private var watching = false
+
+    fun onSessionChanged(s: SessionState) {
+        val capturing = s.dictation is DictationState.Starting || s.dictation is DictationState.Listening
+        if (capturing == watching) return
+        watching = capturing
+        if (capturing) {
+            interruptions.start(requestFocus = s.dictation.modeOrNull()?.recordsAudio == true, ::onInterruption)
+        } else {
+            interruptions.stop()
+        }
+    }
+
+    /** Stops watching when the owner goes away. */
+    fun stop() {
+        watching = false
+        interruptions.stop()
+    }
+
+    private fun onInterruption(signal: InterruptionSignal) {
+        val session = session()
+        if (!session.isCapturing) return
+        val mode = session.state.dictation.modeOrNull() ?: return
+        when (val action = InterruptionPolicy.decide(signal, mode, session.state.paused)) {
+            InterruptionAction.None -> Unit
+            InterruptionAction.Pause -> session.pause()
+            InterruptionAction.Resume -> session.resume()
+            is InterruptionAction.Stop -> session.interrupt(action.failure)
+        }
+    }
+}

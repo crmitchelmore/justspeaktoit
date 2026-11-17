@@ -23,6 +23,16 @@ object AutomationIds {
     const val HISTORY_BACK = "history.back"
     const val HISTORY_CLEAR = "history.clear"
     const val HISTORY_INSIGHTS = "history.insights"
+    const val HISTORY_INSIGHTS_OPEN = "history.insights.open"
+    const val INSIGHTS_SCREEN = "insights.screen"
+    const val INSIGHTS_BACK = "insights.back"
+    const val INSIGHTS_LOADING = "insights.loading"
+    const val INSIGHTS_EMPTY = "insights.empty"
+    const val INSIGHTS_USAGE = "insights.usage"
+    const val INSIGHTS_PHRASES = "insights.phrases"
+    const val INSIGHTS_FILLERS = "insights.fillers"
+    const val INSIGHTS_PACE = "insights.pace"
+    const val INSIGHTS_RECORDS = "insights.records"
     const val HISTORY_CLEAR_ALL = "history.clear.all"
     const val HISTORY_CLEAR_KEEP_RECORDINGS = "history.clear.keepRecordings"
     const val HISTORY_SEARCH = "history.search"
@@ -40,14 +50,15 @@ object AutomationIds {
 
     /** One per History entry, keyed by its generated ID, never by its text. */
     fun historyPlay(entryId: String) = "history.play.$entryId"
+    fun historyReadAloud(entryId: String) = "history.readAloud.$entryId"
     const val SETTINGS_BACK = "settings.back"
     const val SETTINGS_DOWNLOADED_MOBILE_DATA = "settings.downloadedModels.mobileData"
     const val SETTINGS_DOWNLOADED_UNAVAILABLE = "settings.downloadedModels.unavailable"
     const val MODE_CHOOSE_DOWNLOADED_MODEL = "dictation.mode.chooseDownloadedModel"
     const val SETTINGS_DOWNLOADED_CLEANUP_UNAVAILABLE = "settings.downloadedCleanup.unavailable"
     const val SETTINGS_DOWNLOADED_CLEANUP_NOT_READY = "settings.downloadedCleanup.notReady"
-    const val SETTINGS_DOWNLOADED_CLEANUP_USE_CLOUD = "settings.downloadedCleanup.useCloud"
-    const val SETTINGS_CLEANUP_MODEL_UNUSED = "settings.cleanupModel.unused"
+    const val SETTINGS_DOWNLOADED_CLEANUP_USE_OTHER = "settings.downloadedCleanup.useOther"
+    const val CLEANUP_PICKER_DOWNLOADED_STATUS = "cleanupPicker.downloaded.status"
 
     /** One set per downloaded model, keyed by its catalogue ID such as `local/whisperkit/base`. */
     fun downloadedModelUse(id: String) = "settings.downloadedModels.use.$id"
@@ -109,6 +120,7 @@ object AutomationIds {
     const val SETTINGS_SILENCE_DURATION = "settings.silenceDuration"
     const val SETTINGS_SILENCE_THRESHOLD = "settings.silenceThreshold"
     const val SETTINGS_HANDS_FREE = "settings.handsFreeDictation"
+    const val SETTINGS_KEYBOARD_LIVE_CLOUD = "settings.keyboardLiveCloud"
     const val HANDS_FREE_STATUS = "dictation.handsFree.status"
     const val HANDS_FREE_OFF = "dictation.handsFree.turnOff"
 
@@ -179,6 +191,11 @@ object AutomationIds {
     const val SETTINGS_CLEANUP_MODEL = "settings.cleanupModel"
     const val SETTINGS_CLEANUP_PROMPT = "settings.cleanupPrompt"
     const val SETTINGS_CLEANUP_PROMPT_RESET = "settings.cleanupPrompt.reset"
+
+    /** Gemini Nano's status under the cleanup model row, its line in the cleanup picker, and the cleanup note. */
+    const val SETTINGS_CLEANUP_GEMINI_NANO_STATUS = "settings.cleanupModel.geminiNano.status"
+    const val CLEANUP_PICKER_GEMINI_NANO_STATUS = "cleanupPicker.geminiNano.status"
+    const val CLEANUP_STATUS = "dictation.cleanup.status"
     const val SETTINGS_PROFILE_ADD = "settings.profiles.add"
     const val PROFILE_CHOOSER = "dictation.profile"
     const val PROFILE_CHOOSER_NONE = "dictation.profile.none"
@@ -222,6 +239,20 @@ object AutomationIds {
 
     /** One per correction, keyed by its position in the list, never by the user's own text. */
     fun correctionRemove(index: Int) = "settings.corrections.remove.$index"
+    const val READ_ALOUD_VOICE = "settings.readAloudVoice"
+    const val READ_ALOUD_VOICE_CANCEL = "settings.readAloudVoice.cancel"
+
+    /** One per voice in the read aloud picker, keyed by its saved `VoiceSelection` value. */
+    fun readAloudVoiceOption(selection: String) = "settings.readAloudVoice.option.$selection"
+    const val PRONUNCIATION_WORD = "settings.pronunciation.word"
+    const val PRONUNCIATION_SAY_AS = "settings.pronunciation.sayAs"
+    const val PRONUNCIATION_CASE_SENSITIVE = "settings.pronunciation.caseSensitive"
+    const val PRONUNCIATION_REGEX = "settings.pronunciation.regex"
+    const val PRONUNCIATION_ADD = "settings.pronunciation.add"
+    const val PRONUNCIATION_PROBLEM = "settings.pronunciation.problem"
+
+    /** One per pronunciation, keyed by its position in the list, never by the user's own text. */
+    fun pronunciationRemove(index: Int) = "settings.pronunciation.remove.$index"
     const val LEARNED_CORRECTIONS_TOGGLE = "settings.learnedCorrections.toggle"
     const val LEARNED_CORRECTIONS_FEWER = "settings.learnedCorrections.fewer"
     const val LEARNED_CORRECTIONS_MORE = "settings.learnedCorrections.more"

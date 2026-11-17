@@ -78,14 +78,16 @@ internal fun DownloadedModelsSection(local: LocalModelsState, sessionActive: Boo
 
 /**
  * Downloaded cleanup models (llama.cpp): the same rows as Whisper's, where Use makes the model clean up
- * every recording in place of the cloud model, with the cleanup prompt as its instructions. There is no
- * fallback: if the model fails, the original transcript is kept.
+ * every recording in place of the cleanup model picked above ([otherLabel], a cloud model or Gemini
+ * Nano), with the cleanup prompt as its instructions. There is no fallback: if the model fails, the
+ * original transcript is kept.
  */
 @Composable
 internal fun DownloadedCleanupSection(
     local: CleanupModelsState,
     cleanupEnabled: Boolean,
     sessionActive: Boolean,
+    otherLabel: String,
     actions: SettingsActions,
 ) {
     Text(stringResource(R.string.settings_downloaded_cleanup_note), style = MaterialTheme.typography.bodyMedium)
@@ -95,8 +97,8 @@ internal fun DownloadedCleanupSection(
             color = MaterialTheme.colorScheme.error,
             modifier = Modifier.testTag(AutomationIds.SETTINGS_DOWNLOADED_CLEANUP_UNAVAILABLE),
         )
-        // A saved choice can still be cleared, so cleanup goes back to the cloud model.
-        if (local.selectedId != null) UseCloudCleanupButton(sessionActive, actions)
+        // A saved choice can still be cleared, so cleanup goes back to the picked model.
+        if (local.selectedId != null) UseOtherCleanupButton(sessionActive, otherLabel, actions)
         return
     }
     val rowActions = DownloadedModelActions(
@@ -121,16 +123,77 @@ internal fun DownloadedCleanupSection(
                 .semantics { liveRegion = LiveRegionMode.Polite },
         )
     }
-    UseCloudCleanupButton(sessionActive, actions)
+    UseOtherCleanupButton(sessionActive, otherLabel, actions)
 }
 
 @Composable
-private fun UseCloudCleanupButton(sessionActive: Boolean, actions: SettingsActions) {
+private fun UseOtherCleanupButton(sessionActive: Boolean, otherLabel: String, actions: SettingsActions) {
     OutlinedButton(
         onClick = { actions.onChooseLocalCleanupModel(null) },
         enabled = !sessionActive,
-        modifier = Modifier.testTag(AutomationIds.SETTINGS_DOWNLOADED_CLEANUP_USE_CLOUD),
-    ) { Text(stringResource(R.string.settings_downloaded_cleanup_use_cloud)) }
+        modifier = Modifier.testTag(AutomationIds.SETTINGS_DOWNLOADED_CLEANUP_USE_OTHER),
+    ) { Text(stringResource(R.string.settings_downloaded_cleanup_use_other, otherLabel)) }
+}
+
+/** The downloaded cleanup models the cleanup picker's **On this phone** section offers, and choosing one. */
+class DownloadedCleanupChoices(
+    val state: CleanupModelsState = CleanupModelsState(),
+    val onChoose: (String) -> Unit = {},
+)
+
+/**
+ * The downloaded cleanup models in the cleanup picker, under Gemini Nano: each downloaded one can be
+ * chosen; models still to download are reached from Downloaded cleanup models in Settings. Nothing is
+ * shown where the phone offers no downloaded cleanup models.
+ */
+@Composable
+internal fun DownloadedCleanupPickerRows(choices: DownloadedCleanupChoices) {
+    val local = choices.state
+    if (local.names.isEmpty()) return
+    if (!local.runtimeAvailable) {
+        PickerNote(stringResource(R.string.settings_downloaded_cleanup_unavailable))
+        return
+    }
+    val installed = local.models.filter { it.state == ModelInstallState.Installed }
+    if (installed.isEmpty()) {
+        PickerNote(stringResource(R.string.cleanup_picker_downloaded_none))
+        return
+    }
+    installed.forEach { item ->
+        val id = item.model.catalogId
+        val isSelected = id == local.selectedId
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(AutomationIds.CLEANUP_PICKER.model(id))
+                .selectable(selected = isSelected, role = Role.RadioButton, onClick = { choices.onChoose(id) })
+                .padding(vertical = 8.dp),
+        ) {
+            RadioButton(selected = isSelected, onClick = null)
+            Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                Text(item.model.displayName, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    stringResource(R.string.cleanup_picker_downloaded_model),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PickerNote(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(AutomationIds.CLEANUP_PICKER_DOWNLOADED_STATUS)
+            .padding(vertical = 8.dp),
+    )
 }
 
 /** What a [DownloadedModelRow]'s controls do, each given the model's catalogue ID. */

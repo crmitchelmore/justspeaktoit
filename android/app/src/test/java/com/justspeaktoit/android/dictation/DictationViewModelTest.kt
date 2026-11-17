@@ -19,11 +19,14 @@ import com.justspeaktoit.android.local.ModelDownloader
 import com.justspeaktoit.android.local.ModelInstallState
 import com.justspeaktoit.android.local.ModelStore
 import com.justspeaktoit.android.local.llamaModel
+import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.ondevice.GeminiNanoAvailability
 import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.DictationProfile
 import com.justspeaktoit.android.settings.RawConfigurationValues
 import com.justspeaktoit.android.settings.RecordingSoundProfile
 import com.justspeaktoit.android.settings.RecordingSoundSettings
+import com.justspeaktoit.android.transfer.TransferOutcome
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -33,6 +36,8 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
@@ -111,6 +116,18 @@ class DictationViewModelTest {
 
         h.clear()
         assertFalse("the device watch ends with the ViewModel", h.audioInputs.watching)
+    }
+
+    @Test
+    fun testClearing_closesGeminiNano() {
+        val nano = FakeGeminiNano()
+        h.geminiNano = nano
+        h.onMain { h.viewModel.checkGeminiNano() }
+        h.awaitState { it.geminiNano == GeminiNanoAvailability.Available }
+
+        h.clear()
+
+        assertEquals(1, nano.closes)
     }
 
     @Test
@@ -710,6 +727,7 @@ class DictationViewModelTest {
             "cleanupModelDiscoveryEnabled" to true,
             "keepAudioOnCancel" to false,
             "handsFreeDictationEnabled" to true,
+            "keyboardLiveCloudEnabled" to true,
             "history_retention" to "Forever",
             "keepRecordingsInHistory" to true,
             "silenceDetectionEnabled" to true,
@@ -739,6 +757,7 @@ class DictationViewModelTest {
         assertTrue(h.prefs.cleanupModelDiscoveryEnabled)
         assertFalse(h.prefs.keepAudioOnCancel)
         assertTrue(h.prefs.handsFreeEnabled)
+        assertTrue(h.prefs.keyboardLiveCloudEnabled)
         assertEquals(Retention.Forever, h.prefs.retention)
         assertTrue(h.prefs.keepRecordings)
         assertEquals(SilenceSettings(enabled = true, threshold = 0.1, durationSeconds = 3.5), h.prefs.silence)
@@ -758,6 +777,26 @@ class DictationViewModelTest {
         h.onMain { applied = vm.applyConfiguration(mapOf("history_retention" to "Week")) }
         assertFalse(applied)
         assertEquals(before, h.prefs.retention)
+    }
+
+    @Test
+    fun testPronunciationEdit_dismissesAnImportPlannedAgainstTheOldDictionary() {
+        val vm = h.ready()
+        val exported = PronunciationEntry(PronunciationEntry.newId(), "SQL", "sequel", "sequel")
+        h.onMain { vm.setPronunciations(listOf(exported)) }
+        val archive = ByteArrayOutputStream()
+        h.onMain { vm.exportConfiguration({ archive }, {}) }
+        h.awaitState { it.transfer.outcome == TransferOutcome.Exported }
+        h.onMain { vm.setPronunciations(emptyList()) }
+        h.onMain { vm.inspectConfiguration { ByteArrayInputStream(archive.toByteArray()) } }
+        h.awaitState { !it.transfer.busy && it.transfer.preview != null }
+
+        val edited = listOf(PronunciationEntry(PronunciationEntry.newId(), "API", "A P I", "A P I"))
+        h.onMain { vm.setPronunciations(edited) }
+        h.onMain { vm.applyConfigurationImport() }
+
+        assertNull(vm.state.value.transfer.preview)
+        assertEquals(edited, h.prefs.pronunciations)
     }
 
     private companion object {

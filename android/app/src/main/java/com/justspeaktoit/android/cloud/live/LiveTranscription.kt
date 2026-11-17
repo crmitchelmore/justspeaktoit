@@ -33,6 +33,7 @@ object LiveTranscription {
                 sockets,
                 listener,
             )
+            CloudProvider.ElevenLabs -> ElevenLabsLiveSession(model, language, words, scheduler, sockets, listener)
             else -> throw IllegalArgumentException("${model.provider} has no live client")
         }
     }

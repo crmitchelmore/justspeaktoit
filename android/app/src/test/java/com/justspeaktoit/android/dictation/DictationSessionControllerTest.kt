@@ -11,6 +11,9 @@ import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.ondevice.GeminiNanoCleanup
+import com.justspeaktoit.android.ondevice.GeminiNanoFailure
+import com.justspeaktoit.android.ondevice.GeminiNanoReply
 import com.justspeaktoit.android.local.LocalTranscriptionException
 import com.justspeaktoit.android.local.pinnedModel
 import com.justspeaktoit.android.resources.SystemResourceHold
@@ -42,6 +45,7 @@ import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 /** Drives the session lifecycle directly, without a ViewModel, on a single test main thread. */
 class DictationSessionControllerTest {
@@ -60,7 +64,12 @@ class DictationSessionControllerTest {
     private var keepAudio = false
     private var rules = emptyList<CorrectionRule>()
     private var cleanup: CleanupModel? = null
+    private val nano = FakeGeminiNano()
+    private var nanoInFront = true
     private val localTranscriber = FakeLocalTranscriber()
+
+    /** The monotonic clock the session times its capture with, in milliseconds. */
+    private val clock = AtomicLong(1_000)
 
     /** Downloaded models on this fake phone, by catalogue ID. */
     private val downloadedModels = mutableMapOf<String, File>()
@@ -77,12 +86,19 @@ class DictationSessionControllerTest {
         capture = CloudCapture(recorders, cacheDir, Dispatchers.IO, RecorderRetirement(Dispatchers.IO), resources)
         val secrets = MemorySecrets(
             "openai.apiKey" to "sk-test",
-            CloudCatalog.cleanupModels.first().provider.credentialId to "sk-cleanup",
+            CloudCatalog.cleanupModels.first().cloudProvider.credentialId to "sk-cleanup",
         )
         DictationSessionController(
             engine = engine,
             capture = capture,
-            requests = SessionRequests(cloud, secrets, capture, Dispatchers.IO, DictationTimings()) { _, _ -> },
+            requests = SessionRequests(
+                cloud,
+                secrets,
+                capture,
+                Dispatchers.IO,
+                DictationTimings(),
+                onDevice = GeminiNanoCleanup(nano, isTopApp = { nanoInFront }),
+            ) { _, _ -> },
             history = DictationHistory(
                 HistoryStore(MemoryHistoryFile(), deleteAudio = { File(it).delete() }),
                 File(folder.root, "recordings"),
@@ -113,6 +129,7 @@ class DictationSessionControllerTest {
                 io = Dispatchers.IO,
                 timeoutMs = ViewModelHarness.TIMEOUT_MS,
             ),
+            clockMs = clock::get,
         )
     }
 
@@ -152,6 +169,37 @@ class DictationSessionControllerTest {
         val entry = await(history) { it.isNotEmpty() }.single()
         assertEquals("bonjour", entry.text)
         assertNull("a recogniser session records no cloud model", entry.model)
+    }
+
+    @Test
+    fun testRecognizerSession_recordsHowLongItListened_withoutTheWaitForItsResult() {
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        clock.addAndGet(700)
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Ready) }
+        clock.addAndGet(12_500)
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.EndOfSpeech) }
+        clock.addAndGet(3_000)
+        assertTrue("the result is still pending", states.value.dictation is DictationState.Listening)
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("twelve and a half seconds")) }
+
+        val entry = await(history) { it.isNotEmpty() }.single()
+        assertEquals(12.5, checkNotNull(entry.durationSeconds), 1e-9)
+    }
+
+    @Test
+    fun testCloudSession_recordsCaptureTimeWithoutPausesOrTheUpload() {
+        startCloud()
+        clock.addAndGet(4_000)
+        onMain { controller.pause() }
+        clock.addAndGet(9_000)
+        onMain { controller.resume() }
+        clock.addAndGet(2_000)
+        onMain { controller.stop() }
+        clock.addAndGet(30_000)
+        await(states) { it.dictation is DictationState.Done }
+
+        val entry = await(history) { it.isNotEmpty() }.single()
+        assertEquals(6.0, checkNotNull(entry.durationSeconds), 1e-9)
     }
 
     @Test
@@ -225,11 +273,13 @@ class DictationSessionControllerTest {
         keepAudio = true
         val rec = startCloud()
         val hold = holds(SystemResourceKind.Microphone).single()
+        clock.addAndGet(3_000)
 
         onMain { resources.release(hold.id) }
 
         val kept = await(history) { it.isNotEmpty() }.single()
         assertEquals(HistoryStatus.Cancelled, kept.status)
+        assertEquals(3.0, checkNotNull(kept.durationSeconds), 1e-9)
         assertTrue(File(checkNotNull(kept.audioPath)).exists())
         assertEquals(DictationState.Idle, states.value.dictation)
         assertEquals(1, rec.stops)
@@ -329,6 +379,33 @@ class DictationSessionControllerTest {
 
         assertEquals(CleanupStatus.None, onMain { states.value.cleanup })
         assertTrue(localCleaner.calls.isEmpty())
+    }
+
+    @Test
+    fun testOnDeviceCleanup_runsOnThePhoneAndNeverCallsTheCloud() {
+        cleanup = CloudCatalog.geminiNano
+        nano.reply = GeminiNanoReply("Ship it.", truncated = false)
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("ship it")) }
+
+        val state = await(states) { it.cleanup == CleanupStatus.Applied }
+        assertTrue(state.cleanupOnDevice)
+        assertEquals("Ship it.", state.dictation.text())
+        assertTrue(cloud.cleanups.isEmpty())
+    }
+
+    @Test
+    fun testOnDeviceCleanupFailure_keepsTheOriginalAndSaysWhyWithoutACloudFallback() {
+        cleanup = CloudCatalog.geminiNano
+        nanoInFront = false
+        onMain { controller.start(SessionPlan.Recognizer(RecognitionMode.SpeechService, "en-GB")) }
+        onMain { checkNotNull(engine.onEvent)(DictationEvent.Final("ship it")) }
+
+        val state = await(states) { it.cleanup == CleanupStatus.Failed }
+        assertEquals(GeminiNanoFailure.NotInForeground, state.cleanupFailure)
+        assertEquals("ship it", state.dictation.text())
+        assertTrue(cloud.cleanups.isEmpty())
+        assertEquals(0, nano.generated)
     }
 
     @Test

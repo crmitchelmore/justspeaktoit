@@ -82,7 +82,7 @@ class DictationUiStateTest {
         val profiled = installed.copy(profile = profile)
         assertNull(profiled.sessionLocalCleanupModelId)
         assertFalse("The profile's cloud model needs its key", profiled.cleanupReady)
-        assertTrue(profiled.copy(savedKeys = setOf(cloud.provider)).cleanupReady)
+        assertTrue(profiled.copy(savedKeys = setOf(cloud.cloudProvider)).cleanupReady)
     }
 
     private companion object {

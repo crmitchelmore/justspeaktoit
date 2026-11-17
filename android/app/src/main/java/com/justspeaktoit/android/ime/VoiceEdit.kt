@@ -92,9 +92,14 @@ internal object VoiceEditRules {
     fun stillTargets(captured: VoiceEditTarget, current: VoiceEditTarget?, sameInput: Boolean): Boolean =
         sameInput && current == captured
 
-    /** The profile's cleanup model, else the user's: the same model dictation cleanup uses. */
+    /**
+     * The profile's cleanup model, else the user's: the same model dictation cleanup uses. Gemini Nano
+     * becomes the default cloud model, as SpeakCore's `VoiceEditPolicy.modelIdentifier` does: the keyboard
+     * is never the top foreground app, which AICore requires.
+     */
     fun model(profileModel: CleanupModel?, savedModelId: String?): CleanupModel =
-        profileModel ?: CloudCatalog.cleanupModel(savedModelId)
+        (profileModel ?: CloudCatalog.cleanupModel(savedModelId)).takeUnless { it.isOnDevice }
+            ?: CloudCatalog.cleanupModel(null)
 }
 
 /**
@@ -106,10 +111,10 @@ internal class VoiceEditRewriter(
     private val secrets: SecretStore,
 ) {
     fun readKey(model: CleanupModel): VoiceEditKey = try {
-        secrets.read(model.provider.credentialId)
+        secrets.read(model.cloudProvider.credentialId)
             ?.takeIf { it.isNotBlank() }
             ?.let { VoiceEditKey.Found(it) }
-            ?: VoiceEditKey.Missing(VoiceEditFailure.MissingKey(model.provider))
+            ?: VoiceEditKey.Missing(VoiceEditFailure.MissingKey(model.cloudProvider))
     } catch (e: GeneralSecurityException) {
         VoiceEditKey.Missing(VoiceEditFailure.KeyUnavailable)
     } catch (e: ProviderException) {

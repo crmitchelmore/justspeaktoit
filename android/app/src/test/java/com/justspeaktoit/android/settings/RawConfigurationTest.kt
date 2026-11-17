@@ -35,6 +35,8 @@ class RawConfigurationTest {
         "autoCorrectionCandidates" to "Learned suggestions are app state, reviewed in Settings.",
         "hasCompletedOnboarding" to "First-run state, reopened from Settings > Setup guide, not a preference.",
         "preferredAudioInputUID" to "A device ID only means something on the phone that saved it.",
+        "pronunciationDictionary" to "Structured entries with their own Pronunciation editor, moved by export.",
+        "readAloudVoice" to "System voices differ per phone; chosen in the Read aloud voice picker.",
     )
 
     private fun validate(settings: String, current: Map<String, Any?> = fresh) =

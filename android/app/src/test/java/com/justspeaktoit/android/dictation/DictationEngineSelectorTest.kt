@@ -94,6 +94,22 @@ class DictationEngineSelectorTest {
     }
 
     @Test
+    fun testRefreshHeldBackBySession_runsWhenTheSessionEnds() {
+        val selector = selector()
+        active = true
+        selector.refresh()
+        assertTrue(published.isEmpty())
+
+        active = false
+        selector.sessionEnded()
+        assertFalse(published.isEmpty())
+
+        published.clear()
+        selector.sessionEnded()
+        assertTrue("nothing was held back this time", published.isEmpty())
+    }
+
+    @Test
     fun testPlan_routesCloudToItsModel_andOnDeviceToTheLanguageTheRecogniserHas() {
         val selector = selector(engine = ResolvingEngine("en-US") { LanguageSupport.Installed })
         selector.refresh()

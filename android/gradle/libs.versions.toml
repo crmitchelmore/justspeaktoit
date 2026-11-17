@@ -11,6 +11,7 @@ okhttp = "5.5.1"
 billing = "9.1.0"
 fragment = "1.9.1"
 sentry = "8.64.0"
+mlkitGenaiPrompt = "1.0.0-beta5"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -31,6 +32,8 @@ android-billing = { module = "com.android.billingclient:billing", version.ref = 
 androidx-fragment = { module = "androidx.fragment:fragment", version.ref = "fragment" }
 # Opt-in crash reports (#1594). Core only: no NDK, replay or performance add-ons.
 sentry-android-core = { module = "io.sentry:sentry-android-core", version.ref = "sentry" }
+# Optional on-device cleanup with Gemini Nano through AICore (#1659). Its AAR's minSdk is 26, below the app's.
+mlkit-genai-prompt = { module = "com.google.mlkit:genai-prompt", version.ref = "mlkitGenaiPrompt" }
 junit = { module = "junit:junit", version.ref = "junit" }
 # The real org.json for JVM unit tests; android.jar only ships stubs.
 org-json = { module = "org.json:json", version.ref = "orgJson" }

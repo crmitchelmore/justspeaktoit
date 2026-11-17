@@ -25,6 +25,25 @@ internal fun pinnedModel(
     minimumDeviceMemoryBytes = minimumDeviceMemoryBytes,
 )
 
+/** A small pinned cleanup model (GGUF) whose bytes and SHA-256 are known. */
+internal fun llamaModel(
+    id: String = "local/post-processing/smollm2-360m-instruct-q4",
+    content: ByteArray = ByteArray(1_000) { (it % 241).toByte() },
+) = LlamaModel(
+    catalogId = id,
+    displayName = "Cleanup ${id.substringAfterLast('/')}",
+    summary = "Test cleanup model",
+    repository = "example/model-GGUF",
+    revision = "abc",
+    url = "https://huggingface.co/example/model-GGUF/resolve/abc/${id.substringAfterLast('/')}.gguf",
+    filename = "${id.substringAfterLast('/')}.gguf",
+    bytes = content.size.toLong(),
+    sha256 = MessageDigest.getInstance("SHA-256").digest(content).joinToString("") { "%02x".format(it) },
+    license = "Apache-2.0",
+    allowedHosts = listOf(".hf.co", ".huggingface.co", "huggingface.co"),
+    minimumDeviceMemoryBytes = null,
+)
+
 /** Serves model bytes as an HTTP server would, recording each request's URL and range offset. */
 internal class FakeModelSource(private val content: ByteArray) : ModelSource {
     data class Request(val url: String, val offset: Long)

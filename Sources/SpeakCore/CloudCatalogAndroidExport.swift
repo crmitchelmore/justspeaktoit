@@ -15,9 +15,10 @@ import Foundation
 /// so it never starts offering a model that is about to shut down.
 ///
 /// Android also streams the live routes whose protocols it implements natively (Deepgram,
-/// AssemblyAI Universal-3.6 Pro and OpenAI Realtime), with the canonical identifiers, sample rates,
-/// language-hint and vocabulary fields and post-stop finalise budgets, so the Kotlin clients never
-/// keep a second list. Retired live models are not offered, for the same reason as batch models.
+/// AssemblyAI Universal-3.6 Pro, OpenAI Realtime and ElevenLabs Scribe realtime), with the
+/// canonical identifiers, sample rates, language-hint and vocabulary fields and post-stop finalise
+/// budgets, so the Kotlin clients never keep a second list. Retired live models are not offered,
+/// for the same reason as batch models.
 ///
 /// `CloudCatalogAndroidExportTests` fails when the committed asset is stale; regenerate it with
 /// `UPDATE_CLOUD_CATALOG_ANDROID=1 swift test --filter CloudCatalogAndroidExportTests`.
@@ -202,6 +203,7 @@ public enum CloudCatalogAndroidExport {
         let profiles: Profiles
         let openRouterBrowser: OpenRouterBrowser
         let voiceEdit: VoiceEdit
+        let geminiNano: OnDeviceCleanupModel
     }
 
     public static func json() throws -> Data {
@@ -236,7 +238,8 @@ public enum CloudCatalogAndroidExport {
                 quoteTerms: VoiceEditFormattingIntent.quoteTerms,
                 codeFenceTerms: VoiceEditFormattingIntent.codeFenceTerms,
                 whitespaceTerms: VoiceEditFormattingIntent.whitespaceTerms
-            )
+            ),
+            geminiNano: .geminiNano
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -349,5 +352,21 @@ extension CloudCatalogAndroidExport {
             || AzureTranscriptionModels.batchIDs.contains(catalogID)
             || AlibabaSpeechModels.batchIDs.contains(catalogID)
             || OpenRouterInlineAudioTranscriptionClient.requiresCanonicalPCM16WAV(model: catalogID)
+    }
+}
+
+extension CloudCatalogAndroidExport {
+    /// Android's on-device cleanup model; see `AndroidLocalModels` for the capability rule. It is kept
+    /// out of `cleanupModels`, whose rows are all cloud routes that need a key.
+    fileprivate struct OnDeviceCleanupModel: Encodable {
+        static let geminiNano = OnDeviceCleanupModel(
+            selectionId: AndroidLocalModels.geminiNano.id,
+            displayName: AndroidLocalModels.geminiNano.displayName,
+            description: AndroidLocalModels.geminiNano.description ?? "",
+            inputTokenLimit: AndroidLocalModels.geminiNanoInputTokenLimit
+        )
+
+        let selectionId, displayName, description: String
+        let inputTokenLimit: Int
     }
 }

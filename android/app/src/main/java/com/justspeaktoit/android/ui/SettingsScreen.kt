@@ -71,6 +71,8 @@ import com.justspeaktoit.android.cloud.OpenRouterDiscovery
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.dictation.DictationUiState
 import com.justspeaktoit.android.dictation.SilenceSettings
+import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.readaloud.VoiceSelection
 import com.justspeaktoit.android.sendtomac.SendToMacState
 import com.justspeaktoit.android.settings.ApiKeyStatusFilter
 import com.justspeaktoit.android.settings.AppAppearance
@@ -94,6 +96,9 @@ class SettingsActions(
     val onKeepAudioOnCancelChanged: (Boolean) -> Unit,
     val onKeepRecordingsChanged: (Boolean) -> Unit = {},
     val onChooseCleanupModel: (CleanupModel) -> Unit,
+    /** Asks AICore whether this phone offers Gemini Nano, and downloads it. */
+    val onCheckGeminiNano: () -> Unit = {},
+    val onDownloadGeminiNano: () -> Unit = {},
     /** Chooses a transcription model by ID, including one from the OpenRouter browser. */
     val onChooseTranscriptionId: (String) -> Unit = {},
     /** Live OpenRouter discovery; `true` is a Refresh press, which skips the fresh-cache check. */
@@ -104,6 +109,8 @@ class SettingsActions(
     val onReleaseEverything: () -> Unit = {},
     val onChooseLanguage: (String) -> Unit = {},
     val onCorrectionsChanged: (List<CorrectionRule>) -> Unit = {},
+    val onPronunciationsChanged: (List<PronunciationEntry>) -> Unit = {},
+    val onReadAloudVoiceChanged: (VoiceSelection) -> Unit = {},
     val onLearnCorrectionsChanged: (Boolean) -> Unit = {},
     val onCorrectionThresholdChanged: (Int) -> Unit = {},
     val onAcceptCorrection: (String) -> Unit = {},
@@ -122,6 +129,7 @@ class SettingsActions(
     val onPreviewRecordingSound: () -> Unit = {},
     val onSilenceChanged: (SilenceSettings) -> Unit = {},
     val onHandsFreeChanged: (Boolean) -> Unit = {},
+    val onKeyboardLiveCloudChanged: (Boolean) -> Unit = {},
     val onRunSetup: () -> Unit = {},
     val onAppearanceChanged: (AppearanceChoice) -> Unit = {},
     val onCheckBalance: (CloudProvider) -> Unit = {},
@@ -153,6 +161,11 @@ class SettingsActions(
     val onCancelModelDownload: (String) -> Unit = {},
     val onRemoveLocalModel: (String) -> Unit = {},
     val onDownloadModelsOnMobileDataChanged: (Boolean) -> Unit = {},
+    /** Picks a downloaded cleanup model by catalogue ID, or null to clean up with the cloud model. */
+    val onChooseLocalCleanupModel: (String?) -> Unit = {},
+    val onDownloadCleanupModel: (String) -> Unit = {},
+    val onCancelCleanupModelDownload: (String) -> Unit = {},
+    val onRemoveCleanupModel: (String) -> Unit = {},
 )
 
 /** The app-wide theme choice: light, dark or the phone's, and wallpaper colours where supported. */
@@ -204,6 +217,7 @@ fun SettingsScreen(
         onRefreshCleanup = actions.onRefreshCleanupModels,
         onRefreshTranscription = actions.onRefreshTranscriptionModels,
     )
+    val geminiNano = GeminiNanoUi(state.geminiNano, actions.onCheckGeminiNano, actions.onDownloadGeminiNano)
     LaunchedEffect(highlighted) {
         if (highlighted != null) {
             delay(2_500)
@@ -329,11 +343,24 @@ fun SettingsScreen(
                 Switch(checked = state.cleanupEnabled, onCheckedChange = null)
             }
             Text(stringResource(R.string.settings_cleanup_note), style = MaterialTheme.typography.bodyMedium)
-            CleanupModelRow(state, actions, discovery)
-            if (state.cleanupEnabled && state.cleanupModel.provider !in state.savedKeys) {
-                Text(
-                    stringResource(R.string.settings_cleanup_needs_key, state.cleanupModel.provider.displayName),
+            CleanupModelRow(state, actions, discovery, geminiNano)
+            when {
+                // A chosen downloaded model's state is shown under Downloaded cleanup models below.
+                state.localCleanup.selectedId != null -> Unit
+                state.cleanupModel.isOnDevice -> GeminiNanoSettingsNote(state.geminiNano, actions.onCheckGeminiNano)
+                state.cleanupEnabled && state.cleanupModel.cloudProvider !in state.savedKeys -> Text(
+                    stringResource(R.string.settings_cleanup_needs_key, state.cleanupModel.cloudProvider.displayName),
                     color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (state.localCleanup.names.isNotEmpty()) {
+                SectionTitle(R.string.settings_downloaded_cleanup_title, anchor("android.downloadedCleanup"))
+                DownloadedCleanupSection(
+                    state.localCleanup,
+                    state.cleanupEnabled,
+                    state.dictation.isActive,
+                    CleanupModelPicker.selectionLabel(state.cleanupModel),
+                    actions,
                 )
             }
             CleanupPromptField(
@@ -352,6 +379,7 @@ fun SettingsScreen(
                 savedKeys = state.savedKeys,
                 onSave = actions.onSaveProfile,
                 onDelete = actions.onDeleteProfile,
+                geminiNano = geminiNano,
                 discovery = discovery,
             )
 
@@ -457,6 +485,31 @@ fun SettingsScreen(
             Text(stringResource(R.string.settings_hands_free_note), style = MaterialTheme.typography.bodyMedium)
 
             HorizontalDivider()
+            SectionTitle(R.string.settings_keyboard_title, anchor("android.keyboardLiveCloud"))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(AutomationIds.SETTINGS_KEYBOARD_LIVE_CLOUD)
+                    .toggleable(
+                        value = state.keyboardLiveCloudEnabled,
+                        role = Role.Switch,
+                        onValueChange = actions.onKeyboardLiveCloudChanged,
+                    ),
+            ) {
+                Text(
+                    stringResource(R.string.settings_keyboard_live_cloud),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = state.keyboardLiveCloudEnabled, onCheckedChange = null)
+            }
+            Text(
+                stringResource(R.string.settings_keyboard_live_cloud_note, state.sessionCloudModel.provider.displayName),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+
+            HorizontalDivider()
             SectionTitle(R.string.settings_history_sync_title, anchor("android.historySync"))
             HistorySyncSection(historySync, actions)
 
@@ -476,6 +529,18 @@ fun SettingsScreen(
                 candidates = state.correctionCandidates,
                 actions = actions,
             )
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_read_aloud_voice_title, anchor("android.readAloudVoice"))
+            ReadAloudVoiceRow(
+                selection = state.readAloudVoice,
+                savedCredentials = state.savedKeys.mapTo(mutableSetOf()) { it.credentialId },
+                onChoose = actions.onReadAloudVoiceChanged,
+            )
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_pronunciation_title, anchor("android.pronunciation"))
+            PronunciationEditor(state.pronunciations, actions.onPronunciationsChanged)
 
             HorizontalDivider()
             SectionTitle(R.string.settings_appearance_title, anchor("android.appearance"))
@@ -593,10 +658,17 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions, discovery: OpenRouterDiscoveryUi) {
+private fun CleanupModelRow(
+    state: DictationUiState,
+    actions: SettingsActions,
+    discovery: OpenRouterDiscoveryUi,
+    geminiNano: GeminiNanoUi,
+) {
     var picking by remember { mutableStateOf(false) }
     val title = stringResource(R.string.settings_cleanup_model)
-    val label = CleanupModelPicker.selectionLabel(state.cleanupModel)
+    // A chosen downloaded model replaces the picker's model, so the row names it.
+    val label = state.localCleanup.selectedId?.let { state.localCleanup.displayName(it) ?: it }
+        ?: CleanupModelPicker.selectionLabel(state.cleanupModel)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -622,10 +694,17 @@ private fun CleanupModelRow(state: DictationUiState, actions: SettingsActions, d
             selected = state.cleanupModel,
             savedKeys = state.savedKeys,
             onChoose = {
+                // One cleanup choice: a picked cloud model or Gemini Nano replaces a downloaded model.
+                if (state.localCleanup.selectedId != null) actions.onChooseLocalCleanupModel(null)
                 actions.onChooseCleanupModel(it)
                 picking = false
             },
             onDismiss = { picking = false },
+            geminiNano = geminiNano,
+            downloaded = DownloadedCleanupChoices(state.localCleanup) {
+                actions.onChooseLocalCleanupModel(it)
+                picking = false
+            },
             discovery = discovery,
         )
     }

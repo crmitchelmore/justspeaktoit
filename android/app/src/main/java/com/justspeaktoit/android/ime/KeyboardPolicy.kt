@@ -31,15 +31,32 @@ object KeyboardPolicy {
             (imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
 
     /**
-     * The keyboard uses only the platform recognisers, so a saved Cloud or Downloaded choice is treated as
-     * no choice. It never uses the app's Cloud (BYOK) providers until their privacy UX is reviewed (see
-     * Docs/android-input-surfaces.md). Downloaded Whisper models stay out of the keyboard until their
-     * load time, memory and transcription speed are measured on real phones (#1658,
-     * Docs/android-on-device-models.md): the keyboard's process has a tighter memory budget than the app
-     * and the user is waiting in another app's text field. An explicit on-device or speech-service choice
-     * is honoured and never silently replaced if unusable.
+     * How long a stopped keyboard session may take to produce its final text, for every route. It
+     * matches the speech recogniser's own finalise deadline; a live Cloud stream that has not settled
+     * by then fails visibly.
      */
-    fun mode(chosen: RecognitionMode?, options: List<ModeAvailability>): RecognitionMode? {
+    const val FINISH_TIMEOUT_MS = 10_000L
+
+    /**
+     * Picks the keyboard's recogniser. A saved Cloud choice is used only after the user opted the
+     * keyboard in to live Cloud models in Settings, and only when the session's Cloud model streams
+     * live ([KeyboardCloud.Live]); a batch model is never uploaded instead and returns null, so the
+     * keyboard says why rather than switching route. Without the opt-in a Cloud choice is treated as
+     * no choice. Automatic never picks Cloud. Downloaded Whisper models stay out of the keyboard until
+     * their load time, memory and transcription speed are measured on real phones (#1658,
+     * Docs/android-on-device-models.md): the keyboard's process has a tighter memory budget than the
+     * app and the user is waiting in another app's text field, so a Downloaded choice is treated as no
+     * choice. An explicit on-device or speech-service choice is honoured and never silently replaced
+     * if unusable.
+     */
+    fun mode(
+        chosen: RecognitionMode?,
+        options: List<ModeAvailability>,
+        cloud: KeyboardCloud = KeyboardCloud.Off,
+    ): RecognitionMode? {
+        if (chosen == RecognitionMode.Cloud && cloud != KeyboardCloud.Off) {
+            return RecognitionMode.Cloud.takeIf { cloud == KeyboardCloud.Live }
+        }
         val platform = options.filter { it.mode !in APP_ONLY_MODES }
         return if (chosen != null && chosen !in APP_ONLY_MODES) {
             chosen.takeIf { mode -> platform.any { it.mode == mode && it.usable } }
@@ -48,7 +65,21 @@ object KeyboardPolicy {
         }
     }
 
-    /** Modes the app offers but the keyboard does not. */
+    /** What the opt-in allows for a session, given whether the session's Cloud model streams live. */
+    fun cloud(optedIn: Boolean, liveModel: Boolean): KeyboardCloud = when {
+        !optedIn -> KeyboardCloud.Off
+        liveModel -> KeyboardCloud.Live
+        else -> KeyboardCloud.NotLive
+    }
+
+    /**
+     * Whether an unavailable keyboard should name the batch Cloud model as the reason: only when the user
+     * chose Cloud and the opt-in is on, so an unusable on-device or speech-service choice never blames Cloud.
+     */
+    fun blamesBatchCloud(chosen: RecognitionMode?, cloud: KeyboardCloud): Boolean =
+        chosen == RecognitionMode.Cloud && cloud == KeyboardCloud.NotLive
+
+    /** Modes the keyboard never uses outside the Cloud opt-in: Cloud (BYOK) and Downloaded models. */
     private val APP_ONLY_MODES = setOf(RecognitionMode.Cloud, RecognitionMode.Downloaded)
 
     /**
@@ -65,4 +96,16 @@ object KeyboardPolicy {
         val last = before?.lastOrNull() ?: return text
         return if (last.isWhitespace() || last in "([{\"'") text else " $text"
     }
+}
+
+/** Whether the keyboard may use the app's Cloud (BYOK) mode for a session. */
+enum class KeyboardCloud {
+    /** The user has not opted the keyboard in, so a Cloud choice is treated as no choice. */
+    Off,
+
+    /** Opted in, and the session's Cloud model streams live. */
+    Live,
+
+    /** Opted in, but the session's Cloud model is batch only, which the keyboard does not upload. */
+    NotLive,
 }

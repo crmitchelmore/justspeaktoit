@@ -31,10 +31,21 @@ import com.justspeaktoit.android.history.AtomicHistoryFile
 import com.justspeaktoit.android.history.HistoryEntry
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.ondevice.GeminiNanoAvailability
+import com.justspeaktoit.android.ondevice.GeminiNanoCleanup
+import com.justspeaktoit.android.ondevice.GeminiNanoException
+import com.justspeaktoit.android.ondevice.GeminiNanoFailure
+import com.justspeaktoit.android.ondevice.GeminiNanoModel
+import com.justspeaktoit.android.ondevice.MlKitGeminiNano
 import com.justspeaktoit.android.local.AndroidLocalModels
+import com.justspeaktoit.android.local.CleanupModelsState
 import com.justspeaktoit.android.local.LocalModelSetup
 import com.justspeaktoit.android.local.LocalModelsState
 import com.justspeaktoit.android.local.ModelInstallState
+import com.justspeaktoit.android.readaloud.PronunciationDictionary
+import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.readaloud.VoiceSelection
+import com.justspeaktoit.android.readaloud.readVoiceCatalog
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.security.KeystoreSecretStore
 import com.justspeaktoit.android.security.SecretStore
@@ -125,7 +136,11 @@ class DictationViewModel internal constructor(
     historySync: (SyncHistoryEntries) -> HistorySyncService? = { null },
     // Downloads OpenRouter's public model list for the browsers; tests pass a fake.
     openRouterFetch: (String) -> String = OpenRouterDiscovery::download,
-    // Downloaded Whisper models (#1658); null leaves Downloaded mode out of the app.
+    // SpeakCore's shared pronunciation defaults, from voice_catalog.json.
+    private val pronunciationDefaults: List<PronunciationEntry> = emptyList(),
+    // Gemini Nano through ML Kit for on-device cleanup; null leaves it unavailable (tests pass a fake).
+    private val geminiNano: GeminiNanoModel? = null,
+    // Downloaded Whisper (#1658) and cleanup (#1660) models; null leaves both out of the app.
     localModelSetup: LocalModelSetup? = null,
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     /** Hands-free dictation (#1632): its recordings take their audio from its microphone, pre-roll first. */
@@ -155,6 +170,21 @@ class DictationViewModel internal constructor(
         DownloadedTranscription({ id -> localModels?.installedFile(id) }, setup.transcriber)
     } ?: DownloadedTranscription.Unavailable
     private val localTranscriber = localModelSetup?.transcriber
+
+    /** Downloaded cleanup models (#1660), stored apart from the Whisper models. */
+    private val cleanupSetup = localModelSetup?.cleanup
+    private val cleanupModels = localModelSetup?.cleanupManager(scope, io)
+
+    /** Cleans up with a downloaded model; a failure keeps the transcript and nothing else is tried. */
+    private val downloadedCleanup = cleanupSetup?.let { setup ->
+        DownloadedCleanup(
+            installed = { id -> cleanupModels?.installedModel(id) },
+            verify = setup.verifier::verify,
+            cleaner = setup.cleaner,
+            io = io,
+            timeoutMs = timings.localCleanupMs,
+        )
+    } ?: DownloadedCleanup.Unavailable
     private val historyRetry = HistoryRetry(cloud, secrets, capture, io, timings.transcribeMs, downloaded)
 
     /** Shares the keyboard's preferences, so edits it learned appear on [refreshLearnedCorrections]. */
@@ -188,8 +218,11 @@ class DictationViewModel internal constructor(
             keepAudioOnCancel = prefs.keepAudioOnCancel,
             silence = prefs.silence,
             handsFreeEnabled = prefs.handsFreeEnabled,
+            keyboardLiveCloudEnabled = prefs.keyboardLiveCloudEnabled,
             keepRecordings = prefs.keepRecordings,
             corrections = prefs.corrections,
+            pronunciations = prefs.pronunciations ?: pronunciationDefaults,
+            readAloudVoice = VoiceSelection.parse(prefs.readAloudVoice).encoded,
             learnCorrections = prefs.learnCorrections,
             correctionPromotionThreshold = prefs.correctionPromotionThreshold,
             correctionCandidates = learner.pending(),
@@ -204,6 +237,10 @@ class DictationViewModel internal constructor(
             localModels = LocalModelsState(
                 downloadOnMobileData = prefs.downloadedModelsOnMobileData,
                 names = localModelSetup?.names.orEmpty(),
+            ),
+            localCleanup = CleanupModelsState(
+                selectedId = prefs.localCleanupModelId,
+                names = localModelSetup?.cleanup?.names.orEmpty(),
             ),
         ).withSelection(selector.selection),
     )
@@ -269,6 +306,7 @@ class DictationViewModel internal constructor(
 
     /** The import the preview describes, applied only when the user confirms it. */
     private var pendingImport: ImportPlan? = null
+    private var pronunciationEdits = 0
 
     private val sync: HistorySyncService? = historySync(
         object : SyncHistoryEntries {
@@ -286,21 +324,31 @@ class DictationViewModel internal constructor(
     private var historySignIn: Job? = null
     private var pendingHistorySync: Job? = null
 
+    private val interruptionWatch = SessionInterruptionWatch(interruptions) { session }
+
     private val session: DictationSessionController = DictationSessionController(
         engine = engine,
         capture = capture,
-        requests = SessionRequests(cloud, secrets, capture, io, timings, onKeyFailure = { provider, failure ->
-            _state.update {
-                it.copy(
-                    keyErrors = it.keyErrors + provider,
-                    rejectedKeys = if (failure == DictationFailure.InvalidKey) {
-                        it.rejectedKeys + provider
-                    } else {
-                        it.rejectedKeys
-                    },
-                )
-            }
-        }),
+        requests = SessionRequests(
+            cloud,
+            secrets,
+            capture,
+            io,
+            timings,
+            onDevice = geminiNano?.let { GeminiNanoCleanup(it, isTopApp = { appInFront }) },
+            onKeyFailure = { provider, failure ->
+                _state.update {
+                    it.copy(
+                        keyErrors = it.keyErrors + provider,
+                        rejectedKeys = if (failure == DictationFailure.InvalidKey) {
+                            it.rejectedKeys + provider
+                        } else {
+                            it.rejectedKeys
+                        },
+                    )
+                }
+            },
+        ),
         history = historyOwner,
         resources = resources,
         scope = scope,
@@ -310,7 +358,10 @@ class DictationViewModel internal constructor(
             override val keepAudioOnCancel: Boolean get() = _state.value.keepAudioOnCancel
             override val keepRecordings: Boolean get() = _state.value.keepRecordings
             override val cleanupModel: CleanupModel?
-                get() = _state.value.let { if (it.cleanupReady) it.sessionCleanupModel else null }
+                get() = _state.value.let {
+                    if (it.cleanupReady && it.sessionLocalCleanupModelId == null) it.sessionCleanupModel else null
+                }
+            override val localCleanupModelId: String? get() = _state.value.sessionDownloadedCleanupModelId
             override val cleanupPrompt: String? get() = _state.value.sessionCleanupPrompt
             override val corrections: List<CorrectionRule> get() = _state.value.corrections
             // A hands-free recording always ends on silence, after the user's silence duration.
@@ -318,6 +369,7 @@ class DictationViewModel internal constructor(
                 get() = _state.value.silence.let { if (handsFree.startingUtterance) it.copy(enabled = true) else it }
         },
         downloaded = downloaded,
+        downloadedCleanup = downloadedCleanup,
         cues = { cue ->
             val choice = _state.value.recordingSounds
             // Hands-free plays no cues, as on the desktop: they would be heard by the listening microphone.
@@ -335,6 +387,8 @@ class DictationViewModel internal constructor(
                 it.copy(
                     dictation = s.dictation,
                     cleanup = s.cleanup,
+                    cleanupOnDevice = s.cleanupOnDevice,
+                    cleanupFailure = s.cleanupFailure,
                     originalTranscript = s.originalTranscript,
                     releasingMicrophone = s.releasingMicrophone,
                     paused = s.paused,
@@ -353,7 +407,10 @@ class DictationViewModel internal constructor(
     private var handsFreeStartPending = false
 
     private var appVisible = true
-    private var watchingInterruptions = false
+
+    /** Resumed: the top foreground app, which AICore requires before it runs Gemini Nano. */
+    private var appInFront = false
+    private var geminiNanoDownload: Job? = null
     private var foregroundPhase: ForegroundPhase? = null
 
     /** True while Android lets the foreground service keep the session running off screen. */
@@ -379,6 +436,7 @@ class DictationViewModel internal constructor(
         }
         historyOwner.load(prefs.retention, capture::recoverable)
         watchLocalModels()
+        watchCleanupModels()
         sync?.let { service ->
             scope.launch {
                 service.prepare()
@@ -398,11 +456,28 @@ class DictationViewModel internal constructor(
             // Loading the native library reads the APK, so it happens off the main thread.
             val runtime = withContext(io) { transcriber.available }
             _state.update { it.copy(localModels = it.localModels.copy(runtimeAvailable = runtime)) }
+            // An availability check that ran before the runtime loaded reported Downloaded as not provided.
+            selector.refresh()
             manager.refresh()
             manager.models.collect { items ->
                 val before = _state.value.localModels.installedIds
                 _state.update { it.copy(localModels = it.localModels.copy(models = items)) }
                 if (_state.value.localModels.installedIds != before) selector.refresh()
+            }
+        }
+    }
+
+    /** Publishes the downloaded cleanup models and whether the llama.cpp runtime loaded. */
+    private fun watchCleanupModels() {
+        val manager = cleanupModels ?: return
+        val cleaner = cleanupSetup?.cleaner ?: return
+        scope.launch {
+            // Loading the native library reads the APK, so it happens off the main thread.
+            val runtime = withContext(io) { cleaner.available }
+            _state.update { it.copy(localCleanup = it.localCleanup.copy(runtimeAvailable = runtime)) }
+            manager.refresh()
+            manager.models.collect { items ->
+                _state.update { it.copy(localCleanup = it.localCleanup.copy(models = items)) }
             }
         }
     }
@@ -483,6 +558,22 @@ class DictationViewModel internal constructor(
         _state.update { it.copy(corrections = rules) }
     }
 
+    /** Saves the whole pronunciation dictionary; read aloud uses it from the next reading. */
+    fun setPronunciations(entries: List<PronunciationEntry>) {
+        if (PronunciationDictionary.validate(entries) != null) return
+        // A previewed import was planned against the old dictionary; applying it would undo this edit.
+        pronunciationEdits++
+        if (pendingImport != null) dismissConfigurationImport()
+        prefs.pronunciations = entries
+        _state.update { it.copy(pronunciations = entries) }
+    }
+
+    /** Saves the read-aloud voice; a cloud voice uses the provider key already saved for it. */
+    fun setReadAloudVoice(selection: VoiceSelection) {
+        prefs.readAloudVoice = selection.encoded
+        _state.update { it.copy(readAloudVoice = selection.encoded) }
+    }
+
     /** Saves the shared start/stop sound settings; they apply from the next cue. */
     fun setRecordingSounds(choice: RecordingSoundSettings) {
         prefs.recordingSounds = choice
@@ -533,6 +624,51 @@ class DictationViewModel internal constructor(
     fun chooseCleanupModel(model: CleanupModel) {
         prefs.cleanupModelId = model.selectionId
         _state.update { it.copy(cleanupModel = model) }
+    }
+
+    /**
+     * Checks whether this phone offers Gemini Nano, when Settings or a cleanup picker opens; never at app
+     * start, so a phone that never looks at it never binds to AICore. A model AICore is already
+     * downloading reports its progress.
+     */
+    fun checkGeminiNano() {
+        val model = geminiNano
+        if (model == null) {
+            _state.update { it.copy(geminiNano = GeminiNanoAvailability.Unavailable(GeminiNanoFailure.Unavailable)) }
+            return
+        }
+        when (_state.value.geminiNano) {
+            GeminiNanoAvailability.Checking, GeminiNanoAvailability.Available, is GeminiNanoAvailability.Downloading ->
+                return
+            else -> Unit
+        }
+        _state.update { it.copy(geminiNano = GeminiNanoAvailability.Checking) }
+        scope.launch {
+            val checked = try {
+                GeminiNanoAvailability.of(model.status())
+            } catch (e: GeminiNanoException) {
+                GeminiNanoAvailability.Unavailable(e.failure)
+            }
+            _state.update { it.copy(geminiNano = checked) }
+            if (checked is GeminiNanoAvailability.Downloading) downloadGeminiNano()
+        }
+    }
+
+    /** Downloads Gemini Nano through AICore, showing progress beside it; a failed download can be retried. */
+    fun downloadGeminiNano() {
+        val model = geminiNano ?: return
+        if (geminiNanoDownload?.isActive == true) return
+        _state.update { it.copy(geminiNano = GeminiNanoAvailability.Downloading(0, 0)) }
+        geminiNanoDownload = scope.launch {
+            model.download().collect { update ->
+                _state.update { it.copy(geminiNano = GeminiNanoAvailability.after(update, it.geminiNano)) }
+            }
+            // A download that ended without a final status is checked again rather than left showing progress.
+            if (_state.value.geminiNano is GeminiNanoAvailability.Downloading) {
+                _state.update { it.copy(geminiNano = GeminiNanoAvailability.Unchecked) }
+                checkGeminiNano()
+            }
+        }
     }
 
     fun setCleanupEnabled(enabled: Boolean) {
@@ -606,6 +742,7 @@ class DictationViewModel internal constructor(
                 "chosen_mode" -> selector.chooseMode((value as String?)?.let(RecognitionMode::valueOf))
                 "downloadedTranscriptionModel" -> selector.chooseDownloadedModel(value as String?)
                 "downloadedModelsOnMobileData" -> setDownloadModelsOnMobileData(value as Boolean)
+                "localCleanupModel" -> chooseLocalCleanupModel(value as String?)
                 "cloud_model" -> chooseCloudModel(CloudCatalog.transcriptionModel(value as String))
                 "preferredLocale" -> chooseLanguage(value as String)
                 "personal_corrections" ->
@@ -615,6 +752,7 @@ class DictationViewModel internal constructor(
                 "cleanupModelDiscoveryEnabled" -> setCleanupModelDiscovery(value as Boolean)
                 "keepAudioOnCancel" -> setKeepAudioOnCancel(value as Boolean)
                 "handsFreeDictationEnabled" -> setHandsFree(value as Boolean)
+                "keyboardLiveCloudEnabled" -> setKeyboardLiveCloud(value as Boolean)
                 "history_retention" -> setRetention(Retention.valueOf(value as String))
                 "keepRecordingsInHistory" -> setKeepRecordings(value as Boolean)
                 "silenceDetectionEnabled" -> setSilence(_state.value.silence.copy(enabled = value as Boolean))
@@ -655,6 +793,12 @@ class DictationViewModel internal constructor(
         prefs.handsFreeEnabled = enabled
         _state.update { it.copy(handsFreeEnabled = enabled) }
         if (!enabled) handsFree.disarm()
+    }
+
+    /** Lets the dictation keyboard stream to the live Cloud model; it reads this when a session starts. */
+    fun setKeyboardLiveCloud(enabled: Boolean) {
+        prefs.keyboardLiveCloudEnabled = enabled
+        _state.update { it.copy(keyboardLiveCloudEnabled = enabled) }
     }
 
     fun setAppearance(appearance: AppAppearance, dynamicColor: Boolean) {
@@ -749,6 +893,30 @@ class DictationViewModel internal constructor(
     /** Deletes a downloaded model; Downloaded mode then needs a model again if it was the chosen one. */
     fun removeLocalModel(id: String) {
         localModels?.remove(id)
+    }
+
+    /**
+     * Cleans up with a downloaded model instead of the cloud one, from the next cleanup; null goes back to
+     * the cloud model. A profile's own cloud cleanup model still wins for its sessions.
+     */
+    fun chooseLocalCleanupModel(id: String?) {
+        if (id != null && cleanupModels?.find(id) == null) return
+        prefs.localCleanupModelId = id
+        _state.update { it.copy(localCleanup = it.localCleanup.copy(selectedId = id)) }
+    }
+
+    /** Starts or resumes a cleanup model download; on mobile data only when the user allows it. */
+    fun downloadCleanupModel(id: String) {
+        cleanupModels?.download(id, _state.value.localModels.downloadOnMobileData)
+    }
+
+    fun cancelCleanupModelDownload(id: String) {
+        cleanupModels?.cancel(id)
+    }
+
+    /** Deletes a downloaded cleanup model; it stays chosen, and cleanup is skipped until it is back. */
+    fun removeCleanupModel(id: String) {
+        cleanupModels?.remove(id)
     }
 
     fun setDownloadModelsOnMobileData(allowed: Boolean) {
@@ -909,6 +1077,16 @@ class DictationViewModel internal constructor(
         appVisible = true
     }
 
+    /** MainActivity's onResume: the app is the top foreground app, so Gemini Nano may run. */
+    fun onAppResumed() {
+        appInFront = true
+    }
+
+    /** MainActivity's onPause: AICore refuses Gemini Nano requests from an app that is not on top. */
+    fun onAppPaused() {
+        appInFront = false
+    }
+
     /**
      * A session protected by the foreground service carries on; without it, capture cannot continue
      * once the app is hidden (see [DictationSessionController.leaveApp]).
@@ -1007,13 +1185,22 @@ class DictationViewModel internal constructor(
         if (current.transfer.busy || current.dictation.isActive) return
         pendingImport = null
         updateTransfer { it.copy(busy = true, preview = null, importCredentials = false, outcome = null, detail = null) }
+        val edits = pronunciationEdits
         scope.launch {
             val history = historyOwner.snapshot(_state.value.retention)
             var detail: String? = null
             val plan = withContext(transferIo) {
                 try {
                     val contents = transferFiles.read(open)
-                    ConfigImporter.plan(contents, prefs, history, secrets.names(), System.currentTimeMillis())
+                    ConfigImporter.plan(
+                        contents,
+                        prefs,
+                        history,
+                        secrets.names(),
+                        System.currentTimeMillis(),
+                        pronunciationDefaults,
+                        localCleanupIds = cleanupSetup?.names?.keys.orEmpty(),
+                    )
                 } catch (e: ConfigArchiveException) {
                     detail = e.message
                     null
@@ -1022,6 +1209,12 @@ class DictationViewModel internal constructor(
                 } catch (_: SecurityException) {
                     null
                 }
+            }
+            if (plan != null && edits != pronunciationEdits) {
+                // The dictionary changed while the archive was read, so this plan is already stale.
+                updateTransfer { it.copy(busy = false) }
+                withContext(transferIo) { transferFiles.clear() }
+                return@launch
             }
             pendingImport = plan
             updateTransfer {
@@ -1075,9 +1268,11 @@ class DictationViewModel internal constructor(
                 retention = prefs.retention,
                 keepAudioOnCancel = prefs.keepAudioOnCancel,
                 corrections = prefs.corrections,
+                pronunciations = prefs.pronunciations ?: pronunciationDefaults,
                 cleanupPrompt = prefs.cleanupPrompt,
                 profiles = prefs.profiles,
                 localModels = it.localModels.copy(downloadOnMobileData = prefs.downloadedModelsOnMobileData),
+                localCleanup = it.localCleanup.copy(selectedId = prefs.localCleanupModelId),
             )
         }
         selector.reload()
@@ -1090,17 +1285,10 @@ class DictationViewModel internal constructor(
 
     /** Keeps the foreground service and interruption watching in step with the session. */
     private fun onSessionChanged(s: SessionState) {
-        val capturing = s.dictation is DictationState.Starting || s.dictation is DictationState.Listening
-        if (capturing != watchingInterruptions) {
-            watchingInterruptions = capturing
-            if (capturing) {
-                interruptions.start(requestFocus = s.dictation.modeOrNull()?.recordsAudio == true, ::onInterruption)
-            } else {
-                interruptions.stop()
-            }
-        }
+        interruptionWatch.onSessionChanged(s)
         followHandsFreeSession(s)
         syncForeground(s)
+        if (!s.dictation.isActive) selector.sessionEnded()
     }
 
     /** Shows the service while a session needs it and, between hands-free recordings, while listening. */
@@ -1118,26 +1306,16 @@ class DictationViewModel internal constructor(
         }
     }
 
-    private fun onInterruption(signal: InterruptionSignal) {
-        if (!session.isCapturing) return
-        val mode = session.state.dictation.modeOrNull() ?: return
-        when (val action = InterruptionPolicy.decide(signal, mode, session.state.paused)) {
-            InterruptionAction.None -> Unit
-            InterruptionAction.Pause -> session.pause()
-            InterruptionAction.Resume -> session.resume()
-            is InterruptionAction.Stop -> session.interrupt(action.failure)
-        }
-    }
-
     override fun onCleared() {
         handsFree.disarm()
-        interruptions.stop()
+        interruptionWatch.stop()
         if (foregroundPhase != null) foreground.hide()
         if (ForegroundDictation.listener === foregroundListener) ForegroundDictation.listener = null
         engine.close()
         session.close()
         sounds?.close()
         inputWatch.close()
+        geminiNano?.close()
     }
 
     companion object {
@@ -1188,8 +1366,25 @@ class DictationViewModel internal constructor(
                 historySync = { entries ->
                     AndroidHistorySync.create(application, KeystoreSecretStore.create(application), entries, Dispatchers.IO)
                 },
-                localModelSetup = AndroidLocalModels.setup(application, Dispatchers.IO),
+                pronunciationDefaults = loadPronunciationDefaults(application),
+                geminiNano = MlKitGeminiNano(),
+                localModelSetup = AndroidLocalModels.setup(
+                    application,
+                    Dispatchers.IO,
+                    cleanupTimeoutMs = DictationTimings().localCleanupMs,
+                ),
             )
+        }
+
+        /** A missing or unreadable asset leaves the dictionary empty rather than stopping the app. */
+        private fun loadPronunciationDefaults(application: Application): List<PronunciationEntry> = try {
+            readVoiceCatalog(application).pronunciationDefaults
+        } catch (e: java.io.IOException) {
+            emptyList()
+        } catch (e: org.json.JSONException) {
+            emptyList()
+        } catch (e: IllegalStateException) {
+            emptyList()
         }
 
         /** A missing or unreadable asset hides balances rather than stopping the app. */

@@ -9,11 +9,16 @@ import SwiftUI
 /// browser, laid out like the voice and transcription pickers.
 struct PostProcessingModelPickerRows: View {
     @ObservedObject var settings: AppSettings
+    @ObservedObject private var cleanupModels = IOSLocalCleanupModelManager.shared
     var showsDescriptions = true
     var onSelect: () -> Void = {}
 
     private var groups: ModelPickerGrouping.Groups {
         ModelPickerGrouping.groups(Self.options(selected: settings.postProcessingModel), purpose: .postProcessing)
+    }
+
+    private var downloadedCleanupModels: [LlamaCppModel] {
+        cleanupModels.models.filter { cleanupModels.state(for: $0) == .installed }
     }
 
     /// The iOS catalogue plus discovered or saved OpenRouter choices.
@@ -28,6 +33,13 @@ struct PostProcessingModelPickerRows: View {
     var body: some View {
         ForEach(groups.direct) { model in
             PostProcessingModelRow(
+                settings: settings, model: model, showsDescription: showsDescriptions, onSelect: onSelect
+            )
+        }
+        // Downloaded cleanup models are listed once downloaded; Model & Prompt
+        // downloads and removes them.
+        ForEach(downloadedCleanupModels, id: \.catalogueID) { model in
+            LocalCleanupModelRow(
                 settings: settings, model: model, showsDescription: showsDescriptions, onSelect: onSelect
             )
         }
@@ -55,6 +67,44 @@ struct PostProcessingModelPickerRows: View {
             Label("Browse OpenRouter models…", systemImage: "network")
         }
         .accessibilityIdentifier("postProcessingModel.openRouter")
+    }
+}
+
+private struct LocalCleanupModelRow: View {
+    @ObservedObject var settings: AppSettings
+    let model: LlamaCppModel
+    let showsDescription: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button {
+            settings.postProcessingModel = model.catalogueID
+            onSelect()
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.displayName)
+                        .foregroundStyle(.primary)
+                    if showsDescription {
+                        Text("Downloaded · runs on \(DeviceCopy.thisDevice), no API key")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if settings.postProcessingModel == model.catalogueID {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .accessibilityAddTraits(settings.postProcessingModel == model.catalogueID ? .isSelected : [])
+        .accessibilityIdentifier("postProcessingModel.\(suffix)")
+    }
+
+    private var suffix: String {
+        IOSDownloadedModelRow.identifierSuffix(for: IOSDownloadedCleanupModelsList.rowModel(model))
     }
 }
 

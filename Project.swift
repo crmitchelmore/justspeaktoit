@@ -339,6 +339,8 @@ var iosAppDependencies: [TargetDependency] = [
     .package(product: "Sentry"),
     // Downloaded local transcription models (issue #1650); runs Core ML in process.
     .package(product: "WhisperKit"),
+    // Downloaded local cleanup models (issue #1650); llama.cpp compiled in, never downloaded code.
+    .package(product: "SpeakiOSLlama"),
     .target(name: "JustSpeakToItWidgetExtension")
 ]
 if isIOSKeyboardEnabled {
@@ -651,6 +653,7 @@ let iosTestsTarget: Target = .target(
         .target(name: "SpeakiOS"),
         .package(product: "SpeakCore"),
         .package(product: "SpeakiOSLib"),
+        .package(product: "SpeakiOSLlama"),
         // Shared URLProtocol stub (issue #1124).
         .package(product: "SpeakTestSupport")
     ],

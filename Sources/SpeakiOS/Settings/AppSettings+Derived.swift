@@ -224,8 +224,16 @@ extension AppSettings {
     func postProcessingAvailability(for modelID: String) -> TranscriptionModelAvailability {
         let listed = Self.postProcessingModels.contains { $0.id == modelID }
             || CleanupModelSelection.modelID(from: modelID) != nil
-        let executable = listed
-            && (modelID != AppleLocalModels.foundationModelID || AppleFoundationModelPolisher.isAvailable)
+        // A downloaded model runs only where it is offered and the compiled-in
+        // engine is registered; a missing download is reported when cleanup
+        // runs, keeping the original transcript.
+        let executable: Bool
+        if let local = IOSLocalCleanupModels.model(for: modelID) {
+            executable = IOSLocalCleanupModels.isOffered(local) && IOSLocalCleanupEngines.current != nil
+        } else {
+            executable = listed
+                && (modelID != AppleLocalModels.foundationModelID || AppleFoundationModelPolisher.isAvailable)
+        }
         return .evaluate(
             requirement: ModelCredentialResolver.requirement(for: modelID, purpose: .postProcessing),
             isExecutableHere: executable,

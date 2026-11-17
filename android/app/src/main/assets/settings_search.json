@@ -392,6 +392,27 @@
       "title" : "Hands-free dictation"
     },
     {
+      "id" : "android.keyboardLiveCloud",
+      "keywords" : [
+        "keyboard",
+        "IME",
+        "live",
+        "streaming",
+        "cloud",
+        "BYOK",
+        "partial",
+        "real-time",
+        "use live cloud models in the keyboard"
+      ],
+      "section" : "general",
+      "sectionTitle" : "General",
+      "settingKeys" : [
+        "keyboardLiveCloudEnabled"
+      ],
+      "summary" : "Let the keyboard stream to your live Cloud model, showing text as you speak.",
+      "title" : "Dictation keyboard"
+    },
+    {
       "id" : "android.appearance",
       "keywords" : [
         "theme",

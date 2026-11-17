@@ -126,6 +126,7 @@ class SettingsActions(
     val onPreviewRecordingSound: () -> Unit = {},
     val onSilenceChanged: (SilenceSettings) -> Unit = {},
     val onHandsFreeChanged: (Boolean) -> Unit = {},
+    val onKeyboardLiveCloudChanged: (Boolean) -> Unit = {},
     val onRunSetup: () -> Unit = {},
     val onAppearanceChanged: (AppearanceChoice) -> Unit = {},
     val onCheckBalance: (CloudProvider) -> Unit = {},
@@ -459,6 +460,31 @@ fun SettingsScreen(
                 Switch(checked = state.handsFreeEnabled, onCheckedChange = null)
             }
             Text(stringResource(R.string.settings_hands_free_note), style = MaterialTheme.typography.bodyMedium)
+
+            HorizontalDivider()
+            SectionTitle(R.string.settings_keyboard_title, anchor("android.keyboardLiveCloud"))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(AutomationIds.SETTINGS_KEYBOARD_LIVE_CLOUD)
+                    .toggleable(
+                        value = state.keyboardLiveCloudEnabled,
+                        role = Role.Switch,
+                        onValueChange = actions.onKeyboardLiveCloudChanged,
+                    ),
+            ) {
+                Text(
+                    stringResource(R.string.settings_keyboard_live_cloud),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = state.keyboardLiveCloudEnabled, onCheckedChange = null)
+            }
+            Text(
+                stringResource(R.string.settings_keyboard_live_cloud_note, state.sessionCloudModel.provider.displayName),
+                style = MaterialTheme.typography.bodyMedium,
+            )
 
             HorizontalDivider()
             SectionTitle(R.string.settings_history_sync_title, anchor("android.historySync"))

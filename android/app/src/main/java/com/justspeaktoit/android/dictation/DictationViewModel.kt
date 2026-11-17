@@ -194,6 +194,7 @@ class DictationViewModel internal constructor(
             keepAudioOnCancel = prefs.keepAudioOnCancel,
             silence = prefs.silence,
             handsFreeEnabled = prefs.handsFreeEnabled,
+            keyboardLiveCloudEnabled = prefs.keyboardLiveCloudEnabled,
             keepRecordings = prefs.keepRecordings,
             corrections = prefs.corrections,
             pronunciations = prefs.pronunciations ?: pronunciationDefaults,
@@ -295,6 +296,8 @@ class DictationViewModel internal constructor(
     private var historySignIn: Job? = null
     private var pendingHistorySync: Job? = null
 
+    private val interruptionWatch = SessionInterruptionWatch(interruptions) { session }
+
     private val session: DictationSessionController = DictationSessionController(
         engine = engine,
         capture = capture,
@@ -362,7 +365,6 @@ class DictationViewModel internal constructor(
     private var handsFreeStartPending = false
 
     private var appVisible = true
-    private var watchingInterruptions = false
     private var foregroundPhase: ForegroundPhase? = null
 
     /** True while Android lets the foreground service keep the session running off screen. */
@@ -640,6 +642,7 @@ class DictationViewModel internal constructor(
                 "cleanupModelDiscoveryEnabled" -> setCleanupModelDiscovery(value as Boolean)
                 "keepAudioOnCancel" -> setKeepAudioOnCancel(value as Boolean)
                 "handsFreeDictationEnabled" -> setHandsFree(value as Boolean)
+                "keyboardLiveCloudEnabled" -> setKeyboardLiveCloud(value as Boolean)
                 "history_retention" -> setRetention(Retention.valueOf(value as String))
                 "keepRecordingsInHistory" -> setKeepRecordings(value as Boolean)
                 "silenceDetectionEnabled" -> setSilence(_state.value.silence.copy(enabled = value as Boolean))
@@ -680,6 +683,12 @@ class DictationViewModel internal constructor(
         prefs.handsFreeEnabled = enabled
         _state.update { it.copy(handsFreeEnabled = enabled) }
         if (!enabled) handsFree.disarm()
+    }
+
+    /** Lets the dictation keyboard stream to the live Cloud model; it reads this when a session starts. */
+    fun setKeyboardLiveCloud(enabled: Boolean) {
+        prefs.keyboardLiveCloudEnabled = enabled
+        _state.update { it.copy(keyboardLiveCloudEnabled = enabled) }
     }
 
     fun setAppearance(appearance: AppAppearance, dynamicColor: Boolean) {
@@ -1130,15 +1139,7 @@ class DictationViewModel internal constructor(
 
     /** Keeps the foreground service and interruption watching in step with the session. */
     private fun onSessionChanged(s: SessionState) {
-        val capturing = s.dictation is DictationState.Starting || s.dictation is DictationState.Listening
-        if (capturing != watchingInterruptions) {
-            watchingInterruptions = capturing
-            if (capturing) {
-                interruptions.start(requestFocus = s.dictation.modeOrNull()?.recordsAudio == true, ::onInterruption)
-            } else {
-                interruptions.stop()
-            }
-        }
+        interruptionWatch.onSessionChanged(s)
         followHandsFreeSession(s)
         syncForeground(s)
     }
@@ -1158,20 +1159,9 @@ class DictationViewModel internal constructor(
         }
     }
 
-    private fun onInterruption(signal: InterruptionSignal) {
-        if (!session.isCapturing) return
-        val mode = session.state.dictation.modeOrNull() ?: return
-        when (val action = InterruptionPolicy.decide(signal, mode, session.state.paused)) {
-            InterruptionAction.None -> Unit
-            InterruptionAction.Pause -> session.pause()
-            InterruptionAction.Resume -> session.resume()
-            is InterruptionAction.Stop -> session.interrupt(action.failure)
-        }
-    }
-
     override fun onCleared() {
         handsFree.disarm()
-        interruptions.stop()
+        interruptionWatch.stop()
         if (foregroundPhase != null) foreground.hide()
         if (ForegroundDictation.listener === foregroundListener) ForegroundDictation.listener = null
         engine.close()

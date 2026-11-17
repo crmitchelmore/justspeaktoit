@@ -237,17 +237,11 @@ static gboolean avahi_collision(GError *failure) {
 }
 
 static void avahi_unreachable(char *error, size_t capacity, GError *failure) {
-    if (g_file_test("/.flatpak-info", G_FILE_TEST_EXISTS)) {
-        jsti_set_error(
-            error, capacity,
-            "Phones cannot find this computer from the Flatpak sandbox, which cannot reach Avahi. "
-            "Use the native package to receive from a phone.");
-    } else {
-        jsti_set_error(
-            error, capacity,
-            "Phones cannot find this computer because Avahi (avahi-daemon) is not running: %s",
-            failure != NULL ? failure->message : "no reply.");
-    }
+    /* The Flatpak reaches the host's daemon through --system-talk-name. */
+    jsti_set_error(
+        error, capacity,
+        "Phones cannot find this computer because Avahi (avahi-daemon) is not running: %s",
+        failure != NULL ? failure->message : "no reply.");
 }
 
 /* Avahi's EntryGroup states. */

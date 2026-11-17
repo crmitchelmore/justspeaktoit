@@ -522,6 +522,7 @@ class RuntimeCleanupTests(unittest.TestCase):
         manifest = {'finish-args': [
             '--share=network', '--share=ipc', '--socket=wayland', '--socket=fallback-x11',
             '--socket=pulseaudio', '--device=dri', '--talk-name=org.kde.StatusNotifierWatcher',
+        '--system-talk-name=org.freedesktop.Avahi',
             '--env=JSTI_WHISPER_RUNTIME_DIRECTORY=/app/lib/justspeaktoit', '--env=GGML_NO_BACKTRACE=1'],
             'modules': [{'name': 'whisper-cpp', 'sources': [dict(type='git', **pin),
                 {'type': 'file', 'path': 'verify-flatpak-manifest.py', 'dest-filename': 'jsti-flatpak-runtime.py'},

@@ -168,7 +168,7 @@ internal fun ReadAloudControls(
 }
 
 @Composable
-private fun failureMessage(failure: ReadAloudFailure): String = when (failure) {
+internal fun failureMessage(failure: ReadAloudFailure): String = when (failure) {
     is ReadAloudFailure.MissingKey -> stringResource(R.string.read_aloud_missing_key, failure.provider)
     is ReadAloudFailure.KeyUnreadable -> stringResource(R.string.read_aloud_key_unreadable, failure.provider)
     is ReadAloudFailure.KeyRejected -> stringResource(R.string.read_aloud_key_rejected, failure.provider)
@@ -179,6 +179,11 @@ private fun failureMessage(failure: ReadAloudFailure): String = when (failure) {
     is ReadAloudFailure.InvalidAudio -> stringResource(R.string.read_aloud_invalid_audio, failure.provider)
     is ReadAloudFailure.TooLong -> stringResource(R.string.read_aloud_too_long, failure.provider)
     is ReadAloudFailure.NeedsConsent -> CloudSharingConsent.blockedMessage(failure.requests)
+    is ReadAloudFailure.InvalidVoiceList -> stringResource(R.string.read_aloud_invalid_voice_list, failure.provider)
+    is ReadAloudFailure.NotAReading -> stringResource(R.string.read_aloud_not_a_reading, failure.provider)
+    is ReadAloudFailure.ServiceMessage ->
+        stringResource(R.string.read_aloud_service_message, failure.provider, failure.message)
+    is ReadAloudFailure.TimedOut -> stringResource(R.string.read_aloud_timed_out, failure.provider)
     ReadAloudFailure.VoiceUnavailable -> stringResource(R.string.read_aloud_voice_unavailable)
     ReadAloudFailure.SystemUnavailable -> stringResource(R.string.read_aloud_unavailable)
     ReadAloudFailure.AudioBusy -> stringResource(R.string.read_aloud_audio_busy)

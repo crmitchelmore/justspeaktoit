@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-17"
+updated: "2026-11-18"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -401,15 +401,15 @@ sessions:
         issues:
           - 1624
           - 1744
-        title: "Windows and Linux: stamp the PostHog project key in the release workflows"
-        minutes: 10
+        title: "Windows and Linux: confirm the PostHog project key secret the release workflows stamp"
+        minutes: 2
         core: false
-        build: "GitHub repository settings and workflows"
+        build: "GitHub repository settings"
         steps:
-          - "Check the POSTHOG_PROJECT_KEY repository secret holds the public PostHog Production project key."
-          - "Apply the workflow patch and guard test from #1744 to windows-cross-proof.yml, windows-arm64.yml and linux-flatpak.yml."
-          - "Install the next Windows or Linux Alpha, turn on Share anonymous usage analytics in Settings \u203a General and look in PostHog Production for its analytics_opt_in event."
-        expected: "One analytics_opt_in event arrives from the Alpha, with the app version but no transcript text, file path or user name."
+          - "Check the POSTHOG_PROJECT_KEY repository secret holds the public PostHog Production project key (phc_\u2026), not a personal or staging key."
+          - "Open the first windows-cross-proof, windows-arm64 and linux-flatpak runs on main after #1744 merges."
+          - "In each, check the Stamp the PostHog project key into release builds step ran and printed no key."
+        expected: "The secret is the Production project key, and each run stamped it without printing it. windows-cross-proof.yml, windows-arm64.yml and linux-flatpak.yml stamp it into main and Alpha/Stable manifest builds (#1744)."
         final_gate: false
       - id: "owner-android-cloudkit-token"
         issues:
@@ -418,13 +418,13 @@ sessions:
         title: "Android: give Android builds the CloudKit web API token"
         minutes: 5
         core: false
-        build: "GitHub repository settings and CloudKit Console"
+        build: "Alpha build that includes #1741"
         prerequisites:
           - "Steps: Docs/windows-cloudkit-sync.md (Android)"
         steps:
-          - "Check the CloudKit Console API token for iCloud.com.justspeaktoit that the desktop builds use still lists http://127.0.0.1:47823/cloudkit-sign-in as its sign-in callback."
-          - "Save the token as the CLOUDKIT_WEB_API_TOKEN repository secret, add it to the Android build step in android.yml and alpha-release.yml as #1741 shows, and make sure the Production schema has the TranscriptionHistory record type."
-          - "Run the Android workflow on main, install the Alpha APK and open Settings \u203a History sync."
+          - "Check the CloudKit Console API token for iCloud.com.justspeaktoit that the desktop builds use lists https://justspeaktoit.com/cloudkit-sign-in as its URL Redirect sign-in callback."
+          - "Save the token as the CLOUDKIT_WEB_API_TOKEN repository secret (android.yml and alpha-release.yml already pass it to the Android build) and make sure the Production schema has the TranscriptionHistory record type."
+          - "Install the APK from the first Alpha build that includes #1741 (the secret is already saved), then open Settings \u203a History sync."
         expected: "The next Android Alpha shows Sign in to iCloud under Settings \u203a History sync instead of saying sync is not set up for this build."
         final_gate: false
       - id: "android-play-tip-jar"
@@ -1901,6 +1901,22 @@ sessions:
           - "Tap Sign out, dictate again and check nothing more reaches the Mac. Search Settings for iCloud and check it opens History sync."
         expected: "Sign-in completes and the status shows a sync time. Mac entries appear on the phone without audio and phone entries appear on the Mac without audio. Deletions on either side stay deleted and never come back. After signing out nothing more is sent, and TalkBack reads the status as it changes."
         final_gate: false
+      - id: "android-icloud-sign-in-callback"
+        issues:
+          - 1815
+          - 1741
+        title: "Android: iCloud sign-in returns to the app through justspeaktoit.com"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha built with the CloudKit web API token (#1741) that includes #1815"
+        steps:
+          - "Open Settings \u203a History sync and tap Sign in to iCloud."
+          - "Finish signing in to Apple in the browser and watch the address bar: it passes through https://justspeaktoit.com/cloudkit-sign-in and lands on http://127.0.0.1:47823/cloudkit-sign-in."
+          - "Check the browser tab says you are signed in to iCloud and can return to Just Speak to It, then return to the app and wait for its status to show a sync time."
+          - "Open https://justspeaktoit.com/cloudkit-sign-in in a new tab with no query and check it says to start iCloud sign-in again from the app."
+          - "Turn on TalkBack, sign out and sign in again, and check the status change is read out."
+        expected: "Apple's redirect goes to justspeaktoit.com, which forwards straight to the app's loopback page without showing its own page, and the app signs in and syncs. Opening the site address directly shows only the start-again message and signs nothing in."
+        final_gate: false
       - id: "android-battery-latency"
         issues:
           - 1328
@@ -2098,6 +2114,27 @@ sessions:
           - "Open History and tap Read aloud on an entry, then tap Play recording on another entry while it reads."
           - "With TalkBack on, open the voice picker and move through it, then read aloud once, listening to the buttons and the status line."
         expected: "Each voice reads the text in that voice, and pause, resume and stop act at once. The other app's audio pauses the reading, and it resumes when that audio ends; a call stops it. The missing key shows that provider's key message and nothing is read in another voice. History reads its entry, and playing a recording stops the reading. Search Settings for \"voice\" and it opens Read aloud voice. TalkBack names each voice with its provider, says when a key is needed and announces Reading aloud and Reading paused."
+        final_gate: false
+      - id: "android-read-aloud-account-voices"
+        issues:
+          - 1775
+          - 1793
+        title: "Read aloud: account voices (Mistral, xAI, Soniox) and OpenAI Realtime voices"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, the first Alpha APK that includes account and Realtime read-aloud voices for #1775"
+        prerequisites:
+          - "Saved keys for Mistral and OpenAI, and if possible an xAI or Soniox key whose account has a custom voice. Use made-up sentences only."
+          - "An xAI or Soniox key whose account has no custom voices, to see the no-voices status."
+        steps:
+          - "Settings: open Read aloud voice and scroll to Your Mistral voices, Your xAI voices and Your Soniox voices."
+          - "Pick a Mistral account voice and tap Read aloud on a transcript of a few sentences."
+          - "With that Mistral voice still chosen, replace the Mistral key in Settings with an invalid one, reopen Read aloud voice, close it without choosing and read aloud."
+          - "If you have an xAI key whose team has a cloned voice, check Your xAI voices lists it, pick it and read aloud."
+          - "Restore the Mistral key, pick an OpenAI Realtime voice and read a transcript that includes a time such as 5pm, a number such as 2026 and a negative number such as -5."
+          - "With the Realtime voice still chosen, turn on aeroplane mode, reopen Read aloud voice, close it and read aloud."
+          - "With TalkBack on, move through the account voice groups and their status lines."
+        expected: "Each account group lists its voices by name, says when it is loading, has no saved key or has no voices. The Mistral, Realtime and any xAI cloned voice read the text word for word in that voice, times and numbers as written, minus sign included. An invalid key shows the key-rejected message in the group and when reading, and Read aloud voice shows the identifier, not the old name; offline shows the can't-reach message. Nothing is read in another voice. TalkBack reads each group heading, voice name and status line."
         final_gate: false
       - id: "android-pronunciation-dictionary"
         issues:
@@ -2385,6 +2422,22 @@ sessions:
           - "Press Ctrl+K, type silence, choose the setting and check its page opens with that preference highlighted. Press Ctrl+K, type zzqx and check No results is shown and announced, then press Escape."
         expected: "Ctrl+K always focuses the search box. Results list actions first, then History, then settings, each read as its title then its kind (Action, History or the settings page). Choosing an action runs it, a History result selects that recording, and a setting opens and highlights its field. Escape restores the sidebar pages."
         final_gate: true
+      - id: "windows-icloud-sign-in-callback"
+        issues:
+          - 1815
+          - 1741
+        title: "Windows: iCloud sign-in returns to the app through justspeaktoit.com"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Windows, an Alpha built with the CloudKit web API token (#1741) that includes #1815"
+        steps:
+          - "Open Settings \u203a iCloud Sync and choose Sign in, with Edge or Chrome as the default browser."
+          - "Finish signing in to Apple in the browser and watch the address bar: it passes through https://justspeaktoit.com/cloudkit-sign-in and lands on http://127.0.0.1:47823/cloudkit-sign-in."
+          - "Check the browser tab says you are signed in to iCloud and can return to Just Speak to It, then return to the app and wait for its status to show a sync time."
+          - "Open https://justspeaktoit.com/cloudkit-sign-in in a new tab with no query and check it says to start iCloud sign-in again from the app."
+          - "Sign out, switch the default browser to Firefox, sign in again and check it completes the same way."
+        expected: "Apple's redirect goes to justspeaktoit.com, which forwards straight to the app's loopback page without showing its own page, and the app signs in and syncs. Opening the site address directly shows only the start-again message and signs nothing in."
+        final_gate: false
       - id: "windows-telemetry-consent"
         issues:
           - 1624
@@ -2398,6 +2451,20 @@ sessions:
           - "Turn on only Send crash reports and diagnostics, apply, quit and reopen the app; then turn it off again."
           - "With Narrator on, move focus to each switch and listen to what it announces."
         expected: "Both switches are off on a fresh install and stay off after the import. Each switch changes only its own choice and keeps it after a restart. A screen reader reads each switch's name and on or off state."
+        final_gate: false
+      - id: "windows-analytics-opt-in-delivered"
+        issues:
+          - 1624
+          - 1744
+        title: "Opting in to analytics sends one event to PostHog Production"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Windows, an Alpha built after #1744 (release workflows stamp the PostHog key)"
+        steps:
+          - "Turn on Share anonymous usage analytics in Settings \u203a General and apply."
+          - "Make one short recording, then quit the app."
+          - "Tell the owner the time you opted in, so an agent can look for the event in PostHog Production."
+        expected: "One analytics_opt_in event from Windows arrives in PostHog Production with the app version and platform=windows, and no transcript text, file path or user name."
         final_gate: false
       - id: "windows-crash-report-unclean-exit"
         issues:
@@ -2482,6 +2549,36 @@ sessions:
           - "Press Ctrl+K, type silence, choose the setting and check its page opens with that preference highlighted. Press Ctrl+K, type zzqx and check No results is shown and announced, then press Escape."
         expected: "Ctrl+K always focuses the search box. Results list actions first, then History, then settings, each read as its title then its kind (Action, History or the settings page). Choosing an action runs it, a History result selects that recording, and a setting opens and highlights its field. Escape restores the sidebar pages."
         final_gate: true
+      - id: "linux-analytics-opt-in-delivered"
+        issues:
+          - 1624
+          - 1744
+        title: "Opting in to analytics sends one event to PostHog Production"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Linux, an Alpha built after #1744 (release workflows stamp the PostHog key)"
+        steps:
+          - "Turn on Share anonymous usage analytics in Settings \u203a General and apply."
+          - "Make one short recording, then quit the app."
+          - "Tell the owner the time you opted in, so an agent can look for the event in PostHog Production."
+        expected: "One analytics_opt_in event from Linux arrives in PostHog Production with the app version and platform=linux, and no transcript text, file path or user name."
+        final_gate: false
+      - id: "linux-icloud-sign-in-callback"
+        issues:
+          - 1815
+          - 1741
+        title: "Linux: iCloud sign-in returns to the app through justspeaktoit.com"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Linux, an Alpha built with the CloudKit web API token (#1741) that includes #1815, native package or Flatpak"
+        steps:
+          - "Open Settings \u203a iCloud Sync and choose Sign in\u2026 with Firefox or Chrome as the default browser."
+          - "Finish signing in to Apple in the browser and watch the address bar: it passes through https://justspeaktoit.com/cloudkit-sign-in and lands on http://127.0.0.1:47823/cloudkit-sign-in."
+          - "Check the browser tab says you are signed in to iCloud and can return to Just Speak to It, then return to the app and wait for its status to show a sync time."
+          - "Open https://justspeaktoit.com/cloudkit-sign-in in a new tab with no query and check it says to start iCloud sign-in again from the app."
+          - "Sign out, repeat with the other install type (Flatpak or native package) or the other browser, and check it completes the same way."
+        expected: "Apple's redirect goes to justspeaktoit.com, which forwards straight to the app's loopback page without showing its own page, and the app signs in and syncs. Opening the site address directly shows only the start-again message and signs nothing in."
+        final_gate: false
       - id: "linux-telemetry-consent"
         issues:
           - 1624

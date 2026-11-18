@@ -1690,7 +1690,8 @@ What the Windows app does:
   Apple's sign-in page, opens it in the default browser (only `https` pages on
   `apple.com` or `icloud.com`), and listens on
   `http://127.0.0.1:47823/cloudkit-sign-in` for the redirect carrying
-  `ckWebAuthToken`. The listener runs only during sign-in, for at most ten
+  `ckWebAuthToken`, which Apple sends to the token's registered
+  `https://justspeaktoit.com/cloudkit-sign-in` and the site forwards there. The listener runs only during sign-in, for at most ten
   minutes, and takes the redirect only from a process of the signed-in
   Windows user and only as a top-level browser navigation (see
   [Sign-in callback](windows-cloudkit-sync.md#sign-in-callback)). The token rotates on every response and is kept in Credential
@@ -1746,7 +1747,10 @@ to use the Development environment) before starting the app.
    new **API Token**:
    - Name: `Just Speak to It for Windows`.
    - **Sign in Callback**: choose **URL Redirect** and enter exactly
-     `http://127.0.0.1:47823/cloudkit-sign-in`.
+     `https://justspeaktoit.com/cloudkit-sign-in`. The Console refuses
+     `http://` callbacks, so this site page forwards the token to the app's
+     loopback listener, `http://127.0.0.1:47823/cloudkit-sign-in` (see
+     [Sign-in callback](windows-cloudkit-sync.md#sign-in-callback)).
    - Allowed origins: leave the default. The Windows client is not a browser
      and sends no `Origin` header.
    - Save it and copy the token value.

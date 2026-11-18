@@ -86,6 +86,7 @@ final class OpenAIRealtimeSpeechTests: XCTestCase {
         XCTAssertTrue(faithful("Hello, world!", "hello world"))
         XCTAssertTrue(faithful("The year is 2026.", "The year is two thousand and twenty six."))
         XCTAssertTrue(faithful("It costs 5 dollars.", "It costs five dollars."))
+        XCTAssertTrue(faithful("Café au lait", "café au lait"))
         XCTAssertFalse(faithful(
             "Do not open the door until the alarm stops.", "Do open the door until the alarm stops."),
             "Dropping one word, such as a negation, changes the meaning")
@@ -113,8 +114,35 @@ final class OpenAIRealtimeSpeechTests: XCTestCase {
         XCTAssertTrue(faithful("It costs $5", "It costs five dollars"))
         XCTAssertTrue(faithful("Salt & pepper", "Salt and pepper"))
         XCTAssertTrue(faithful("Finish 1st", "Finish first"))
+        XCTAssertTrue(faithful("Call me at 5pm.", "Call me at five p m."))
         XCTAssertTrue(faithful("Es kostet 5 Euro", "Es kostet fünf Euro"),
                       "A reading in another language is a bounded slot")
+    }
+
+    func testReadingCheckKeepsASignADecimalPointAndAnOverflowingScale() {
+        let faithful = OpenAIRealtimeSpeech.isFaithfulReading
+        XCTAssertTrue(faithful("The balance is -5", "The balance is minus five"))
+        XCTAssertTrue(faithful("The balance is -5", "The balance is -5"))
+        XCTAssertFalse(faithful("The balance is -5", "The balance is five"), "A dropped minus sign changes the number")
+        XCTAssertTrue(faithful("Add 3.5 cups", "Add 3.5 cups"))
+        XCTAssertTrue(faithful("Add 3.5 cups", "Add three dot five cups"))
+        XCTAssertFalse(faithful("Add 35 cups", "Add three point five cups"), "35 is not three point five")
+        XCTAssertTrue(faithful("Add 3.5 cups", "Add three point five cups"))
+        XCTAssertTrue(faithful("Add 3.5 cups", "Add three five cups"))
+        XCTAssertFalse(faithful("Add 3.5 cups", "Add three minus five cups"), "A sign word is not a decimal point")
+        XCTAssertFalse(faithful("Add 3.5 cups", "Add three plus five cups"), "An operator word is not a decimal point")
+        XCTAssertFalse(faithful("The balance is -5", "The balance is point five"), "A point word is not a minus")
+        XCTAssertFalse(faithful("Pay 290448384 now", "Pay 18446744074 billion now"),
+                       "A scale past the limit is refused before it can overflow")
+        XCTAssertTrue(faithful("Caf\u{65}\u{301} au lait", "caf\u{e9} au lait"))
+    }
+
+    func testResponseDoneWithoutAStatusIsNotACompletedReading() throws {
+        let frame = Data(#"{"type":"response.done","response":{}}"#.utf8)
+        guard case .done(let status, _, _) = try XCTUnwrap(OpenAIRealtimeSpeechEvent(frame: frame)) else {
+            return XCTFail("Expected response.done")
+        }
+        XCTAssertNotEqual(status, "completed")
     }
 
     func testAChunkWithoutAudioFailsInsteadOfDroppingItsText() async {

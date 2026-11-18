@@ -190,6 +190,18 @@ final class XAITTSTransportTests: XCTestCase {
         XCTAssertEqual(voices.map(\.id), ["eve"])
     }
 
+    func testListVoices_failsWhenALaterCustomPageIsRefused() async throws {
+        let session = TTSTransportStub.session()
+        StubURLProtocol.respond { request in
+            let later = request.url?.query?.contains("pagination_token") == true
+            let body = request.url?.path == "/v1/custom-voices"
+                ? #"{"voices":[{"voice_id":"nlbqfwie","name":"Custom"}],"pagination_token":"p2"}"#
+                : #"{"voices":[{"voice_id":"eve"}]}"#
+            return (TTSTransportStub.response(for: request, statusCode: later ? 403 : 200), Data(body.utf8))
+        }
+        await XCTAssertTTSThrowsAsync(try await XAITTSAPI(session: session).listVoices(apiKey: "fixture")) { _ in }
+    }
+
     func testDecodeVoices_reportsAResponseItCannotRead() {
         XCTAssertThrowsError(try XAITTSAPI.decodeVoices(Data(#"{"unexpected":true}"#.utf8))) { error in
             XCTAssertEqual(error as? XAITTSAPIError, .invalidResponse)

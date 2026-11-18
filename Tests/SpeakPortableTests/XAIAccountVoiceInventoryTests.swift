@@ -142,6 +142,16 @@ final class XAIAccountVoiceInventoryTests: DeepgramSpeechStubTestCase {
             let inventory = try await fetch()
             XCTAssertEqual(inventory.voices.map(\.id), ["Built-in-B"])
         }
+        StubURLProtocol.handler = { request in
+            let url = try XCTUnwrap(request.url)
+            let body = url.path == "/v1/tts/voices" ? #"{"voices":[]}"#
+                : #"{"voices":[{"voice_id":"nlbqfwie","name":"Narrator"}],"pagination_token":"p2"}"#
+            let refused = url.query?.contains("pagination_token") == true
+            return .respond(DeepgramSpeechFixture.response(request, status: refused ? 403 : 200), Data(body.utf8))
+        }
+        do { _ = try await fetch(); XCTFail("A refused later page admitted a partial list") } catch {
+            XCTAssertEqual(error as? XAIAccountVoiceDiscoveryError, .service(403))
+        }
         route(builtIn: #"{"voices":[]}"#, custom: "", customStatus: 500)
         do { _ = try await fetch(); XCTFail("Failed custom listing admitted") } catch {
             XCTAssertEqual(error as? XAIAccountVoiceDiscoveryError, .service(500))

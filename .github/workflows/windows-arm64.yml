@@ -39,6 +39,7 @@ on:
       - Tests/SpeakTestSupport/**
       - scripts/ci/verify-portable-core-boundary.py
       - scripts/loopback/**
+      - scripts/desktop-analytics/**
       - scripts/windows-bundle/**
       - scripts/windows-cross/**
       - scripts/windows-local-runtime/**
@@ -119,6 +120,18 @@ jobs:
         with:
           path: local-models
           key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}
+
+      # The public PostHog project key for opt-in analytics (#1624), compiled in
+      # from the existing secret. Only main and release manifest tags (which the
+      # Alpha/Stable desktop qualification dispatches) get it; pull request,
+      # merge-batch and other branch builds stay keyless and send nothing.
+      - name: Stamp the PostHog project key into release builds
+        if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/alpha-build-') || startsWith(github.ref, 'refs/tags/stable-candidate-')) }}
+        env:
+          POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
+        run: |
+          python -B scripts/desktop-analytics/configure-posthog-key.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build native Windows ARM64 executable
         id: native-build

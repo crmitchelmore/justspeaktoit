@@ -51,6 +51,33 @@ class CloudKitSignInTest {
         assertEquals(CallbackDecision.Accept("tok"), decision)
     }
 
+    /**
+     * The registered callback, https://justspeaktoit.com/cloudkit-sign-in, answers Apple's redirect with a
+     * 302 to the loopback address, re-encoding the token with encodeURIComponent and sending
+     * `Referrer-Policy: no-referrer`, so the browser's forwarded navigation is cross-site with no Referer.
+     */
+    @Test
+    fun testCallback_acceptsTheSitesForwardedRedirectButDoesNotTrustTheSite() {
+        assertEquals("https://justspeaktoit.com/cloudkit-sign-in", CloudKitSignIn.REGISTERED_CALLBACK_URL)
+        val forwarded = "/cloudkit-sign-in?ckWebAuthToken=158__a%2Bb%2Fc%3D%3D"
+        val navigation = arrayOf(
+            "Sec-Fetch-Site" to "cross-site",
+            "Sec-Fetch-Mode" to "navigate",
+            "Sec-Fetch-Dest" to "document",
+            "Upgrade-Insecure-Requests" to "1",
+        )
+        assertEquals(
+            CallbackDecision.Accept("158__a+b/c=="),
+            CloudKitSignIn.evaluateCallback(head(forwarded, *navigation)),
+        )
+        assertEquals(
+            CallbackDecision.Refuse(CallbackRefusal.UntrustedInitiator),
+            CloudKitSignIn.evaluateCallback(
+                head(forwarded, *navigation, "Referer" to "https://justspeaktoit.com/cloudkit-sign-in"),
+            ),
+        )
+    }
+
     @Test
     fun testCallback_refusesUntrustedRequests() {
         val target = "/cloudkit-sign-in?ckWebAuthToken=tok"

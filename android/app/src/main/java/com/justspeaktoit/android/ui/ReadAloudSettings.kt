@@ -26,7 +26,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -38,7 +40,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -47,14 +51,36 @@ import com.justspeaktoit.android.readaloud.CloudVoice
 import com.justspeaktoit.android.readaloud.PronunciationDictionary
 import com.justspeaktoit.android.readaloud.PronunciationEntry
 import com.justspeaktoit.android.readaloud.PronunciationProblem
+import com.justspeaktoit.android.readaloud.ReadAloudException
+import com.justspeaktoit.android.readaloud.ReadAloudFailure
 import com.justspeaktoit.android.readaloud.SystemSpeech
 import com.justspeaktoit.android.readaloud.SystemVoice
 import com.justspeaktoit.android.readaloud.VoiceCatalog
 import com.justspeaktoit.android.readaloud.VoiceSelection
+import com.justspeaktoit.android.readaloud.cachedAccountVoice
+import com.justspeaktoit.android.readaloud.listAccountVoices
 import com.justspeaktoit.android.readaloud.readVoiceCatalog
+import kotlinx.coroutines.launch
 
 /** One choice in the voice picker. */
 private data class VoiceOption(val selection: VoiceSelection, val label: String, val note: String?)
+
+/** One heading of the picker, its voices, and a note about them (loading, empty or why they are missing). */
+private data class VoiceGroup(
+    val heading: String,
+    val options: List<VoiceOption>,
+    val status: String? = null,
+    val statusTag: String? = null,
+    val failed: Boolean = false,
+)
+
+/** Where an account's voice listing stands while the picker is open. */
+private sealed interface AccountListing {
+    data object Loading : AccountListing
+    data object NoKey : AccountListing
+    data class Listed(val voices: List<CloudVoice>) : AccountListing
+    data class Failed(val failure: ReadAloudFailure) : AccountListing
+}
 
 /** The read aloud voice under its heading, opening a picker of the phone's and the cloud voices. */
 @Composable
@@ -66,7 +92,13 @@ internal fun ReadAloudVoiceRow(selection: String, savedCredentials: Set<String>,
     val chosen = VoiceSelection.parse(selection)
     val label = when (chosen) {
         is VoiceSelection.System -> chosen.voiceName ?: stringResource(R.string.read_aloud_voice_system_default)
-        is VoiceSelection.Cloud -> catalog.voice(chosen.key)?.let(::cloudLabel) ?: chosen.key
+        is VoiceSelection.Cloud -> {
+            // Only the listing made with the provider's current key names it; the key is read off the main thread.
+            val listed by produceState<CloudVoice?>(null, chosen.key, savedCredentials, picking) {
+                value = cachedAccountVoice(context, catalog, chosen.key)
+            }
+            chosenCloudLabel(catalog, chosen.key, listed)
+        }
     }
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -95,6 +127,14 @@ internal fun ReadAloudVoiceRow(selection: String, savedCredentials: Set<String>,
 
 private fun cloudLabel(voice: CloudVoice) = "${voice.providerName} · ${voice.label}"
 
+/** A catalogue, Realtime or [listed] account voice; one not listed for the current key shows its identifier. */
+private fun chosenCloudLabel(catalog: VoiceCatalog, key: String, listed: CloudVoice?): String {
+    catalog.voice(key)?.let { return cloudLabel(it) }
+    catalog.realtime?.let { realtime -> realtime.voice(key)?.let { return "${realtime.providerName} · ${it.label}" } }
+    listed?.let { return cloudLabel(it) }
+    return catalog.accountVoice(key)?.let { (provider, apiId) -> "${provider.providerName} · $apiId" } ?: key
+}
+
 @Composable
 private fun VoicePicker(
     chosen: VoiceSelection,
@@ -108,6 +148,23 @@ private fun VoicePicker(
     var systemVoices by remember { mutableStateOf<List<SystemVoice>?>(null) }
     LaunchedEffect(speech) { systemVoices = speech.voices() }
     DisposableEffect(speech) { onDispose(speech::release) }
+    val accounts = remember { mutableStateMapOf<String, AccountListing>() }
+    LaunchedEffect(catalog, savedCredentials) {
+        catalog.accountProviders.forEach { provider ->
+            if (provider.credentialId !in savedCredentials) {
+                accounts[provider.provider] = AccountListing.NoKey
+                return@forEach
+            }
+            accounts[provider.provider] = AccountListing.Loading
+            launch {
+                accounts[provider.provider] = try {
+                    listAccountVoices(context, provider)?.let { AccountListing.Listed(it) } ?: AccountListing.NoKey
+                } catch (error: ReadAloudException) {
+                    AccountListing.Failed(error.failure)
+                }
+            }
+        }
+    }
     val needsNetwork = stringResource(R.string.read_aloud_voice_needs_network)
     val groups = buildList {
         val phone = buildList {
@@ -116,17 +173,50 @@ private fun VoicePicker(
                 add(VoiceOption(VoiceSelection.System(it.name), it.label, needsNetwork.takeIf { _ -> it.needsNetwork }))
             }
         }
-        add(stringResource(R.string.read_aloud_voice_system_group) to phone)
+        add(VoiceGroup(stringResource(R.string.read_aloud_voice_system_group), phone))
         catalog.providers.forEach { (provider, voices) ->
             val note = stringResource(R.string.read_aloud_voice_needs_key, provider)
             add(
-                provider to voices.map { voice ->
-                    VoiceOption(
-                        VoiceSelection.Cloud(voice.key),
-                        voice.label,
-                        note.takeIf { voice.credentialId !in savedCredentials },
-                    )
-                },
+                VoiceGroup(
+                    provider,
+                    voices.map { voice ->
+                        VoiceOption(
+                            VoiceSelection.Cloud(voice.key),
+                            voice.label,
+                            note.takeIf { voice.credentialId !in savedCredentials },
+                        )
+                    },
+                ),
+            )
+        }
+        catalog.realtime?.let { realtime ->
+            val note = stringResource(R.string.read_aloud_voice_needs_key, realtime.providerName)
+                .takeIf { realtime.credentialId !in savedCredentials }
+            add(
+                VoiceGroup(
+                    stringResource(R.string.read_aloud_voice_realtime_group, realtime.providerName),
+                    realtime.voices.map { VoiceOption(VoiceSelection.Cloud(it.key), it.label, note) },
+                ),
+            )
+        }
+        catalog.accountProviders.forEach { provider ->
+            val name = provider.providerName
+            val listing = accounts[provider.provider] ?: AccountListing.Loading
+            val voices = (listing as? AccountListing.Listed)?.voices.orEmpty()
+            add(
+                VoiceGroup(
+                    heading = stringResource(R.string.read_aloud_voice_account_group, name),
+                    options = voices.map { VoiceOption(VoiceSelection.Cloud(it.key), it.label, null) },
+                    status = when (listing) {
+                        AccountListing.Loading -> stringResource(R.string.read_aloud_voice_account_loading, name)
+                        AccountListing.NoKey -> stringResource(R.string.read_aloud_voice_account_needs_key, name)
+                        is AccountListing.Failed -> failureMessage(listing.failure)
+                        is AccountListing.Listed ->
+                            stringResource(R.string.read_aloud_voice_account_empty, name).takeIf { voices.isEmpty() }
+                    },
+                    statusTag = AutomationIds.readAloudVoiceAccountStatus(provider.provider),
+                    failed = listing is AccountListing.Failed,
+                ),
             )
         }
     }
@@ -135,16 +225,32 @@ private fun VoicePicker(
         title = { Text(stringResource(R.string.read_aloud_voice_picker_title)) },
         text = {
             LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
-                groups.forEach { (heading, options) ->
-                    item(key = "heading.$heading") {
+                groups.forEach { group ->
+                    item(key = "heading.${group.heading}") {
                         Text(
-                            heading,
+                            group.heading,
                             style = MaterialTheme.typography.titleSmall,
                             modifier = Modifier.padding(top = 12.dp, bottom = 4.dp).semantics { heading() },
                         )
                     }
-                    items(options, key = { it.selection.encoded }) { option ->
+                    items(group.options, key = { it.selection.encoded }) { option ->
                         VoiceOptionRow(option, selected = option.selection == chosen) { onChoose(option.selection) }
+                    }
+                    group.status?.let { status ->
+                        item(key = "status.${group.heading}") {
+                            Text(
+                                status,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (group.failed) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier
+                                    .then(group.statusTag?.let { Modifier.testTag(it) } ?: Modifier)
+                                    .semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                        }
                     }
                 }
                 if (systemVoices == null) {

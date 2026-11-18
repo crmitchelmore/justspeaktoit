@@ -181,16 +181,46 @@ extension DesktopHostController {
         publishCloudSharing()
     }
 
-    package func withdrawCloudSharing(providerID: String) {
+    package func withdrawCloudSharing(providerID: String) async {
         guard !closed else { return }
         do {
             try cloudSharing.withdraw(providerID: providerID)
             let name = CloudSharingProviderCatalogue.provider(id: providerID)?.displayName ?? providerID
-            update("Withdrew consent for \(name). Nothing more is sent to it until you allow it again.")
+            let stopped = await stopSessions(sharingWith: providerID)
+            update("Withdrew consent for \(name). "
+                + (stopped ? "The session sending to it stopped and its audio was kept. " : "")
+                + "Nothing more is sent to it until you allow it again.")
         } catch {
             update("Consent was not withdrawn: \(error.localizedDescription) Try again.")
         }
         publishCloudSharing()
+    }
+
+    /// Withdrawing must stop what is already streaming to the provider, not only block the next request.
+    /// Cancelling keeps the captured audio, so nothing is lost.
+    private func stopSessions(sharingWith providerID: String) async -> Bool {
+        func transcribes(_ model: String) -> Bool {
+            DesktopHostCloudSharing.transcription(model: model)?.provider.id == providerID
+        }
+        var stopped = false
+        let editing = voiceEdit.active.map { run in
+            run.phase != .retired && (
+                (run.live != nil && transcribes(run.profile.modelIdentifier))
+                    || DesktopHostCloudSharing.postProcessing(model: run.rewriteModel)?.provider.id == providerID)
+        } ?? false
+        let dictating = recording.map { $0.live != nil && transcribes($0.profile.modelIdentifier) } ?? false
+        let ownedDictating = ownedDictation.map {
+            $0.request.live != nil && transcribes($0.request.profile.modelIdentifier)
+        } ?? false
+        if editing || dictating || ownedDictating {
+            await cancelTranscription()
+            stopped = true
+        }
+        if comparisonLive?.modelIDs.contains(where: transcribes) == true {
+            await cancelComparison()
+            stopped = true
+        }
+        return stopped
     }
 
     /// Gives the native Privacy settings the providers currently allowed.

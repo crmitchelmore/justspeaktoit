@@ -33,6 +33,8 @@ public final class DesktopComparisonLive: @unchecked Sendable {
 
     public let captureSampleRate = 24_000
     private let lanes: [State]
+    /// The models this fan-out streams audio to.
+    public var modelIDs: [String] { lanes.map(\.lane.candidate.modelID) }
     private let calls = NSLock()
     private var capturing = false
     private var preparing = false

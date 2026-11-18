@@ -26,6 +26,9 @@ final class PostProcessingManager: ObservableObject {
   /// Session-scoped custom polish prompt from the active dictation profile.
   /// Set by `SessionProfileApplier` for the duration of a session; never persisted.
   var sessionPromptOverride: String?
+  /// Refuses, and asks for, a send to a provider the user has not allowed
+  /// (issue #1805). The raw transcript is kept and the retry stays offered.
+  var requireCloudSharingConsent: CloudSharingConsentCheck?
 
   init(client: ChatLLMClient, settings: AppSettings, personalLexicon: PersonalLexiconService) {
     self.client = client
@@ -68,6 +71,12 @@ final class PostProcessingManager: ObservableObject {
 
     if let localResult = await local.process(model: model, rawText: rawText, systemPrompt: systemPrompt) {
       return localResult
+    }
+
+    do {
+      try checkCloudSharingConsent(model: model)
+    } catch {
+      return .failure(error)
     }
 
     let promptPayload = PostProcessingPromptPayload(
@@ -128,6 +137,7 @@ final class PostProcessingManager: ObservableObject {
       }
     }
 
+    try checkCloudSharingConsent(model: model)
     let response = try await client.sendChat(
       systemPrompt: systemPrompt,
       messages: [ChatMessage(role: .user, content: userMessage)],
@@ -135,6 +145,12 @@ final class PostProcessingManager: ObservableObject {
       temperature: settings.postProcessingTemperature
     )
     return response.messages.last(where: { $0.role == .assistant })?.content ?? ""
+  }
+
+  private func checkCloudSharingConsent(model: String) throws {
+    if let request = CloudSharingConsent.request(forModel: model, purpose: .postProcessing) {
+      try requireCloudSharingConsent?([request])
+    }
   }
 
   /// The system prompt a polish with no lexicon context would use: the user's

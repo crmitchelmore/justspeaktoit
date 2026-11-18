@@ -242,6 +242,16 @@ extension SettingsSearchCatalog {
             platforms: .android
         ),
         SettingsSearchEntry(
+            id: "android.cloudSharing", title: "AI providers you allowed", section: .about,
+            systemImage: "arrow.up.circle",
+            summary: "The cloud AI providers you allowed to receive your audio or text. Withdraw any of them.",
+            keywords: [
+                "ai providers", "third-party ai", "consent", "withdraw consent", "data sharing", "cloud",
+                "privacy policy"
+            ],
+            settingKeys: ["cloudSharingConsent"], platforms: .android
+        ),
+        SettingsSearchEntry(
             id: "android.analytics", title: "Share anonymous analytics", section: .about,
             systemImage: "chart.bar",
             summary: "Off until you turn it on. Sends typed usage events to PostHog EU, never transcripts or audio.",

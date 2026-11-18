@@ -639,6 +639,9 @@
     <string name="keyboard_voice_edit_network">The cleanup provider could not be reached.</string>
     <string name="keyboard_voice_edit_failed">The cleanup model could not rewrite the selection.</string>
     <string name="settings_privacy_title">Privacy</string>
+    <string name="cloud_sharing_policy_link">%1$s privacy policy</string>
+    <string name="cloud_sharing_withdraw">Withdraw</string>
+    <string name="cloud_sharing_withdraw_description">Withdraw consent for %1$s</string>
     <string name="settings_analytics_title">Share anonymous analytics</string>
     <string name="settings_analytics_note">Helps improve the app with a few typed usage events, such as a daily active ping and your first successful transcription. Transcripts, audio, prompts, clipboard text, keystrokes, API keys, screen content and personal identity are never collected. Off unless you turn it on.</string>
     <string name="settings_diagnostics_title">Send crash reports and diagnostics</string>

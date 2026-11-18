@@ -129,6 +129,11 @@ extension SettingsView {
             }
             #endif
           }
+          Divider()
+          Text(CloudSharingConsent.withdrawalTitle)
+            .font(.headline)
+            .accessibilityAddTraits(.isHeader)
+          CloudSharingConsentList(store: environment.main.cloudSharingConsent)
           Link("Privacy policy", destination: PrivacyPolicy.url)
             .font(.callout)
         }

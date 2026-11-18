@@ -48,6 +48,8 @@ final class TranscriberCoordinator: ObservableObject {
     }
     /// The cloud model this run would have used had the network been up.
     private var offlineIntendedModel: String?
+    /// Consent per cloud AI provider (issue #1805); nil only in test harnesses.
+    private let cloudSharingConsent: IOSCloudSharingConsentPrompt?
 
     init(
         sharedState: SharedTranscriptionState = .shared,
@@ -61,8 +63,10 @@ final class TranscriberCoordinator: ObservableObject {
         },
         networkSnapshot: @escaping CaptureNetworkPathMonitor.SnapshotProvider = { .unknown },
         localRecognitionCapability: @escaping @MainActor (String) -> AppleLocalRecognitionCapability =
-            { _ in .available }
+            { _ in .available },
+        cloudSharingConsent: IOSCloudSharingConsentPrompt? = nil
     ) {
+        self.cloudSharingConsent = cloudSharingConsent
         let observation = ForegroundRunObservation()
         self.mirror = ForegroundTranscriptMirror(sharedState: sharedState)
         self.finalisation = ForegroundCaptureFinalisation(sharedState: sharedState, historyManager: historyManager)
@@ -336,6 +340,8 @@ private extension TranscriberCoordinator {
         mirror.begin()
 
         let route = try launcher.route(for: request)
+        // Before the microphone opens, so a refusal loses no audio (#1805).
+        try requireCloudSharingConsent(modelID: route.modelID, usesBatch: request.usesBatch, runID: runID)
         offlineIntendedModel = route.offlineIntendedModelID
         currentModel = route.modelID
         recordingWarning = route.notice
@@ -393,4 +399,24 @@ extension TranscriberCoordinator {
         onCapturePresentationChanged?()
     }
 }
+extension TranscriberCoordinator {
+    func requireCloudSharingConsent(modelID: String, usesBatch: Bool, runID: UUID) throws {
+        guard let cloudSharingConsent else { return }
+        let settings = AppSettings.shared
+        let transcription = CloudSharingConsent.request(
+            forModel: modelID, purpose: usesBatch ? .batchTranscription : .liveTranscription
+        )
+        let polish = settings.postProcessingEnabled
+            ? CloudSharingConsent.request(forModel: settings.postProcessingModel, purpose: .postProcessing)
+            : nil
+        do {
+            try cloudSharingConsent.require(CloudSharingConsent.merged([transcription, polish].compactMap { $0 }))
+        } catch {
+            observation.finishStartup(runID, error: error)
+            finishPresentation()
+            throw error
+        }
+    }
+}
+
 #endif

@@ -29,6 +29,9 @@ import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudClient
 import com.justspeaktoit.android.cloud.CloudModel
+import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.CloudSharedDataKind
+import com.justspeaktoit.android.cloud.CloudSharingConsent
 import com.justspeaktoit.android.cloud.WavRecorder
 import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.dictation.AndroidAudioInterruptions
@@ -409,6 +412,7 @@ class DictationKeyboardService : InputMethodService() {
         }
         val prefs = AppPreferences(this)
         val model = VoiceEditRules.model(DictationProfiles.active(prefs)?.cleanupModel, prefs.cleanupModelId)
+        if (blockedWithoutConsent(prefs, model.cloudProvider, CloudSharedDataKind.TranscriptText)) return
         if (!cloudEditDisclosed) {
             // Say where the selected text goes before sending anything; the next tap confirms.
             cloudEditDisclosed = true
@@ -495,6 +499,22 @@ class DictationKeyboardService : InputMethodService() {
         showVoiceEditNotice(notice)
     }
 
+    /**
+     * The keyboard never asks for cloud consent itself (#1805): without it nothing is sent, the notice says
+     * why, and the app opens so the user can allow the provider or switch to on-device.
+     */
+    private fun blockedWithoutConsent(
+        prefs: AppPreferences,
+        provider: CloudProvider,
+        kind: CloudSharedDataKind,
+    ): Boolean {
+        val missing = prefs.cloudSharingConsent.missing(listOf(CloudSharingConsent.request(provider, kind)))
+        if (missing.isEmpty()) return false
+        showVoiceEditNotice(CloudSharingConsent.blockedMessage(missing))
+        openApp()
+        return true
+    }
+
     private fun showVoiceEditNotice(notice: String) {
         voiceEditNotice = notice
         render()
@@ -564,6 +584,13 @@ class DictationKeyboardService : InputMethodService() {
             }
             unavailable = false
             batchCloudModel = null
+            val audioBlocked = mode == RecognitionMode.Cloud &&
+                blockedWithoutConsent(current, cloudModel.provider, CloudSharedDataKind.Audio)
+            if (audioBlocked) {
+                voiceEdit = null
+                render()
+                return@checkOnDeviceLanguage
+            }
             if (KeyboardPolicy.needsDisclosure(mode, chosen) && !speechServiceDisclosed) {
                 // Say where audio goes before any capture; the next tap confirms.
                 speechServiceDisclosed = true

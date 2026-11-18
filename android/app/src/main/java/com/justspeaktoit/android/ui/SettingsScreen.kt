@@ -121,6 +121,7 @@ class SettingsActions(
     val onDeleteProfile: (String) -> Unit = {},
     val onAnalyticsChanged: (Boolean) -> Unit = {},
     val onDiagnosticsChanged: (Boolean) -> Unit = {},
+    val onWithdrawCloudSharing: (String) -> Unit = {},
     val onTip: (String) -> Unit = {},
     /** Applies validated raw-configuration changes all or none; false when they cannot apply now. */
     val onApplyConfiguration: (Map<String, Any?>) -> Boolean = { false },
@@ -610,6 +611,11 @@ fun SettingsScreen(
                 anchor("android.diagnostics").testTag(AutomationIds.SETTINGS_DIAGNOSTICS),
             )
             Text(stringResource(R.string.settings_diagnostics_note), style = MaterialTheme.typography.bodyMedium)
+            CloudSharingSettingsSection(
+                allowed = state.cloudSharingAllowed,
+                onWithdraw = actions.onWithdrawCloudSharing,
+                modifier = anchor("android.cloudSharing").testTag(AutomationIds.SETTINGS_CLOUD_SHARING),
+            )
 
             HorizontalDivider()
             SectionTitle(R.string.settings_support_title, anchor("android.tipJar"))

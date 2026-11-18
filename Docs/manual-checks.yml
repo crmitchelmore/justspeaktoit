@@ -2088,7 +2088,7 @@ sessions:
           - "Restore the Mistral key, pick an OpenAI Realtime voice and read a transcript that includes a time such as 5pm, a number such as 2026 and a negative number such as -5."
           - "With the Realtime voice still chosen, turn on aeroplane mode, reopen Read aloud voice, close it and read aloud."
           - "With TalkBack on, move through the account voice groups and their status lines."
-        expected: "Each account group lists that account's voices by name, says it is loading first, says when no key is saved, and says when the account has no voices. The Mistral and Realtime voices, and the xAI cloned voice if you have one, read the whole text word for word in the chosen voice, with the time and numbers read as written, including the minus sign. The invalid key shows the key-rejected message in the Mistral group and when reading, and Read aloud voice shows the Mistral voice's identifier rather than its old listed name, and offline shows the can't-reach message; nothing is read in another voice. TalkBack reads each group heading, voice name and status line."
+        expected: "Each account group lists its voices by name, says when it is loading, has no saved key or has no voices. The Mistral, Realtime and any xAI cloned voice read the text word for word in that voice, times and numbers as written, minus sign included. An invalid key shows the key-rejected message in the group and when reading, and Read aloud voice shows the identifier, not the old name; offline shows the can't-reach message. Nothing is read in another voice. TalkBack reads each group heading, voice name and status line."
         final_gate: false
       - id: "android-pronunciation-dictionary"
         issues:

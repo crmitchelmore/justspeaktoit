@@ -140,6 +140,23 @@ final class PostProcessingManager: ObservableObject {
       if let localResult = await local.process(model: model, rawText: text, systemPrompt: systemPrompt) {
         return try localResult.get().processed
       }
+    } else {
+      switch await CloudSharingPrompt.resolve(modelID: model, purpose: .postProcessing) {
+      case .proceed:
+        break
+      case .useOnDevice:
+        let rules = LocalPostProcessingModel.builtInRulesModelID
+        settings.postProcessingModel = rules
+        if usesCustomPrompt {
+          throw CloudSharingSwitchedOnDevice()
+        }
+        if let localResult = await local.process(model: rules, rawText: text, systemPrompt: systemPrompt) {
+          return try localResult.get().processed
+        }
+        throw CloudSharingSwitchedOnDevice()
+      case .refused(let request):
+        throw CloudSharingBlocked(request: request)
+      }
     }
 
     let response = try await client.sendChat(

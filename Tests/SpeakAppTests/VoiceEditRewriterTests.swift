@@ -6,6 +6,16 @@ import SpeakCore
 
 @MainActor
 final class VoiceEditRewriterTests: XCTestCase {
+    override func setUp() async throws {
+        try await super.setUp()
+        for provider in CloudSharingProviderCatalogue.all {
+            guard let request = CloudSharingConsent.request(
+                providerID: provider.id, kind: .transcript, purpose: .postProcessing, canUseOnDevice: false
+            ) else { continue }
+            CloudSharingConsentStore.shared.grant(request)
+        }
+    }
+
     func testRewrite_usesVoiceEditPromptModelAndTemperature() async throws {
         let client = RecordingChatClient(responseText: "Shorter.")
         let settings = makeSettings()

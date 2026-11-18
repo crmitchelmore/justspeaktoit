@@ -127,8 +127,11 @@ extension TranscriptionRecordingService {
             modelID: currentModel, usesBatch: usesBatchTranscription, run: runID
         )
         if waitingForConsent { armWatchdogs(run: runID, entry: nil) }
+        let replacedByConsent = consented.modelID != currentModel || consented.usesBatch != usesBatchTranscription
         usesBatchTranscription = consented.usesBatch
         currentModel = consented.modelID
+        // A named cloud model must not be re-checked as if it were the on-device replacement.
+        let namedModel = replacedByConsent ? nil : runParameters.modelID
         try validateCredentialAvailability(
             settings: settings,
             usesBatchTranscription: usesBatchTranscription,
@@ -157,7 +160,7 @@ extension TranscriptionRecordingService {
         // Batch and live are both covered here; ordinary live runs are checked
         // below, after offline routing.
         try refuseUnusableRequestedModel(
-            runParameters.modelID,
+            namedModel,
             usesBatch: usesBatchTranscription,
             settings: settings,
             run: runID

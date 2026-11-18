@@ -61,9 +61,16 @@ internal class AndroidReadAloudEngines(
             val voice = catalog.voice(selection.key) ?: throw ReadAloudException(ReadAloudFailure.VoiceUnavailable)
             val key = readKey(voice)?.takeIf { it.isNotBlank() }
                 ?: throw ReadAloudException(ReadAloudFailure.MissingKey(voice.providerName))
-            CloudReadAloudEngine(voice, key, CloudSpeechSynthesizer(http), AudioTrackOutput()) { text ->
-                ReadAloudLanguage.resolve(null, detector(text), Locale.getDefault().language)
-            }
+            CloudReadAloudEngine(
+                voice, key, CloudSpeechSynthesizer(http), AudioTrackOutput(),
+                allowsText = {
+                    com.justspeaktoit.android.cloud.CloudSharingConsentStore.preferences(context)
+                        .allows(voice.provider, com.justspeaktoit.android.cloud.CloudSharedDataKind.TextToSpeak)
+                },
+                languageOf = { text ->
+                    ReadAloudLanguage.resolve(null, detector(text), Locale.getDefault().language)
+                },
+            )
         }
     }
 

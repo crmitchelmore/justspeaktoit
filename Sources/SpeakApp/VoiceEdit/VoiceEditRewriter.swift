@@ -32,6 +32,18 @@ final class VoiceEditRewriter {
   }
 
   func rewrite(selection: String, instruction: String) async throws -> String {
+    // Voice edit cannot run on the built-in rules, so the sheet is Allow or Not now.
+    let availability = CloudSharingOnDeviceAvailability(
+      transcription: false, postProcessing: false, voice: false
+    )
+    switch await CloudSharingPrompt.resolve(
+      modelID: model, purpose: .postProcessing, availability: availability
+    ) {
+    case .proceed:
+      break
+    case .useOnDevice(let request), .refused(let request):
+      throw CloudSharingBlocked(request: request)
+    }
     let userMessage = VoiceEditPolicy.userMessage(selection: selection, instruction: instruction)
     let response = try await client.sendChat(
       systemPrompt: VoiceEditPolicy.systemPrompt,

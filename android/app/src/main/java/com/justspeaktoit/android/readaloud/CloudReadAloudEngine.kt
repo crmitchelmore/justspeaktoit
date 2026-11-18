@@ -33,9 +33,12 @@ class CloudReadAloudEngine(
     private val credential: String,
     private val synthesizer: CloudSpeechSynthesizer,
     private val output: PcmOutput,
+    /** Production checks text-to-speak consent. Tests that exercise synthesis allow the request. */
+    private val allowsText: () -> Boolean = { true },
     private val languageOf: (String) -> String = { ReadAloudLanguage.resolve(null, null, Locale.getDefault().language) },
 ) : ReadAloudEngine {
     override suspend fun play(text: String, language: String?, onAudible: () -> Unit) {
+        if (!allowsText()) throw ReadAloudException(ReadAloudFailure.NeedsConsent(voice.providerName))
         val segments = synthesizer.plan(voice, text)
         try {
             coroutineScope {

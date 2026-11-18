@@ -188,7 +188,10 @@ class DictationViewModel internal constructor(
             timeoutMs = timings.localCleanupMs,
         )
     } ?: DownloadedCleanup.Unavailable
-    private val historyRetry = HistoryRetry(cloud, secrets, capture, io, timings.transcribeMs, downloaded)
+    private val historyRetry = HistoryRetry(
+        cloud, secrets, capture, io, timings.transcribeMs, downloaded,
+        allowsSharing = { id, kind -> cloudSharing.allows(id, kind) },
+    )
 
     /** Shares the keyboard's preferences, so edits it learned appear on [refreshLearnedCorrections]. */
     private val learner = AutoCorrectionLearner(prefs)
@@ -537,6 +540,13 @@ class DictationViewModel internal constructor(
 
     fun confirmSharedAudio() {
         val offer = _state.value.sharedAudio ?: return
+        val model = _state.value.sessionCloudModel
+        if (!cloudSharing.allows(model.provider.id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio)) {
+            presentCloudSharing(model.provider.id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio) {
+                confirmSharedAudio()
+            }
+            return
+        }
         _state.update { it.copy(sharedAudio = null) }
         // Confirming takes priority over an optional cleanup; the transcript is already in History.
         session.cancelCleanup()
@@ -944,6 +954,7 @@ class DictationViewModel internal constructor(
         if (!current.canStart || handsFree.armed) return
         if (current.armsHandsFree) {
             session.clearResult()
+            if (!ensureCloudSharing(mode) { start() }) return
             handsFree.arm()
         } else if (!ensureCloudSharing(mode) { start() }) {
             return
@@ -958,7 +969,7 @@ class DictationViewModel internal constructor(
      */
     private fun ensureCloudSharing(mode: RecognitionMode, resume: () -> Unit): Boolean {
         if (mode == RecognitionMode.Cloud) {
-            val provider = _state.value.cloudModel.provider
+            val provider = _state.value.sessionCloudModel.provider
             if (!cloudSharing.allows(provider.id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio)) {
                 presentCloudSharing(provider.id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio, resume)
                 return false
@@ -995,7 +1006,12 @@ class DictationViewModel internal constructor(
         _cloudSharingPrompt.value = com.justspeaktoit.android.cloud.CloudSharingRequest(
             provider,
             listOf(kind),
-            canUseOnDevice = kind != com.justspeaktoit.android.cloud.CloudSharedDataKind.TextToSpeak,
+            canUseOnDevice = when (kind) {
+            com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio -> true
+            com.justspeaktoit.android.cloud.CloudSharedDataKind.Transcript ->
+                com.justspeaktoit.android.cloud.CloudCatalog.cleanupModels.any { it.isOnDevice }
+            com.justspeaktoit.android.cloud.CloudSharedDataKind.TextToSpeak -> false
+        },
         )
     }
 
@@ -1017,6 +1033,7 @@ class DictationViewModel internal constructor(
     /** Switches the blocked step to an on-device route and continues when that route can run. */
     fun useOnDeviceInstead() {
         val request = _cloudSharingPrompt.value ?: return
+        val resume = resumeAfterConsent
         _cloudSharingPrompt.value = null
         resumeAfterConsent = null
         val audio = com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio
@@ -1025,9 +1042,22 @@ class DictationViewModel internal constructor(
             start()
             return
         }
-        com.justspeaktoit.android.cloud.CloudCatalog.cleanupModels.firstOrNull { it.isOnDevice }?.let {
-            chooseCleanupModel(it)
+        if (applyOnDeviceCleanup()) resume?.invoke()
+    }
+
+    /** Points cleanup at the on-device model, including an active profile that named a cloud one. */
+    private fun applyOnDeviceCleanup(): Boolean {
+        val model = com.justspeaktoit.android.cloud.CloudCatalog.cleanupModels.firstOrNull { it.isOnDevice }
+            ?: return false
+        val profile = _state.value.profile
+        if (profile?.cleanupModel != null) {
+            val updated = profile.copy(cleanupModelId = model.selectionId)
+            prefs.profiles = prefs.profiles.map { if (it.id == profile.id) updated else it }
+            _state.update { it.copy(profile = updated, cleanupModel = model) }
+        } else {
+            chooseCleanupModel(model)
         }
+        return true
     }
 
     /** Stops listening; a hands-free recording under way stops and is transcribed. */
@@ -1214,6 +1244,12 @@ class DictationViewModel internal constructor(
         val model = current.sessionCloudModel
         val language = current.languageTag
         val local = HistoryRetry.usesDownloadedModel(entry, current.activeMode)
+        if (!local && !cloudSharing.allows(model.provider.id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio)) {
+            presentCloudSharing(model.provider.id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio) {
+                transcribeHistoryEntry(id)
+            }
+            return
+        }
         _state.update { it.copy(transcribingEntryId = id) }
         scope.launch {
             val updated = if (local) {

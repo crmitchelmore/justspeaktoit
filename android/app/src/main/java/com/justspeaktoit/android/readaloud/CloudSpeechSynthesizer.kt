@@ -40,6 +40,9 @@ sealed interface ReadAloudFailure {
     data object SystemUnavailable : ReadAloudFailure
     data object AudioBusy : ReadAloudFailure
     data object PlaybackFailed : ReadAloudFailure
+
+    /** The text was not sent. The person has not allowed this provider to speak it. */
+    data class NeedsConsent(val provider: String) : ReadAloudFailure
 }
 
 class ReadAloudException(val failure: ReadAloudFailure) : Exception(failure.toString())

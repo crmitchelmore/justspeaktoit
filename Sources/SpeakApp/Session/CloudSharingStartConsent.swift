@@ -56,7 +56,8 @@ enum CloudSharingStartConsent {
   /// Selects a downloaded model when one is remembered, otherwise Apple Speech.
   static func applyOnDeviceTranscription(_ settings: AppSettings) {
     let local = settings.localTranscriptionModel
-    if ModelRouting.family(for: local).isDownloadedLocal {
+    // The saved id defaults to Whisper Tiny even when those weights were never downloaded.
+    if ModelRouting.family(for: local).isDownloadedLocal, LocalModelManager.shared.isInstalled(local) {
       settings.selectLocalTranscriptionSource(.downloaded)
     } else {
       settings.selectLocalTranscriptionSource(.apple)

@@ -2,6 +2,7 @@ package com.justspeaktoit.android.dictation
 
 import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.CloudModel
+import com.justspeaktoit.android.cloud.CloudSharedDataKind
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.cloud.CloudService
@@ -30,6 +31,8 @@ internal class HistoryRetry(
     private val io: CoroutineDispatcher,
     private val deadlineMs: Long,
     private val downloaded: DownloadedTranscription = DownloadedTranscription.Unavailable,
+    /** Production passes the device store. Tests of the retry itself allow the upload. */
+    private val allowsSharing: (String, CloudSharedDataKind) -> Boolean = { _, _ -> true },
 ) {
     suspend fun transcribe(
         entry: HistoryEntry,
@@ -42,6 +45,9 @@ internal class HistoryRetry(
         val file = File(entry.audioPath ?: return entry)
         // A streaming model cannot transcribe a file; the audio stays for a retry with a batch model.
         if (model.live != null) return entry.copy(failure = DictationFailure.LiveOnlyModel.name)
+        if (!allowsSharing(model.provider.id, CloudSharedDataKind.Audio)) {
+            return entry.copy(failure = DictationFailure.CloudSharingConsent.name)
+        }
         return try {
             if (!withContext(io) { file.isFile }) {
                 // The audio is gone, so the entry can no longer be transcribed.

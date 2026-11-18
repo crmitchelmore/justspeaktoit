@@ -158,4 +158,5 @@ private fun failureMessage(failure: ReadAloudFailure): String = when (failure) {
     ReadAloudFailure.SystemUnavailable -> stringResource(R.string.read_aloud_unavailable)
     ReadAloudFailure.AudioBusy -> stringResource(R.string.read_aloud_audio_busy)
     ReadAloudFailure.PlaybackFailed -> stringResource(R.string.read_aloud_playback_failed)
+    is ReadAloudFailure.NeedsConsent -> stringResource(R.string.failure_cloud_sharing_consent)
 }

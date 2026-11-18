@@ -1,5 +1,14 @@
 import Foundation
 
+/// The user chose on-device, so this send stopped. The saved choice is already the on-device one.
+public struct CloudSharingSwitchedOnDevice: Error, Equatable, Sendable, LocalizedError {
+    public init() {}
+
+    public var errorDescription: String? {
+        "Nothing was sent. This step now stays on this device; start again to use it."
+    }
+}
+
 /// Device-local store for `CloudSharingConsent`.
 ///
 /// The JSON lives under `CloudSharingConsent.storageKey` and is not an app

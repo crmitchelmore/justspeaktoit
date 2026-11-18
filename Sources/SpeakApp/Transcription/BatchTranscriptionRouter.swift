@@ -166,7 +166,9 @@ extension BatchTranscriptionRouter {
   /// otherwise a downloaded model.
   fileprivate static func onDeviceFileModel(settings: AppSettings) -> String? {
     let downloaded = settings.localTranscriptionModel
-    if ModelRouting.family(for: downloaded).isDownloadedLocal { return downloaded }
+    if ModelRouting.family(for: downloaded).isDownloadedLocal, LocalModelManager.shared.isInstalled(downloaded) {
+      return downloaded
+    }
     if #available(macOS 26.0, *) { return AppleLocalModels.speechTranscriberModelID }
     return nil
   }

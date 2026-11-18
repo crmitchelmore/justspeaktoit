@@ -316,10 +316,14 @@ private extension TranscriberCoordinator {
 
     func emptyResult() -> TranscriptionResult { .shown("", confidence: nil, duration: 0, model: currentModel) }
 
+    func abandonOwnedStart(_ error: Error, run: UUID) {
+        observation.finishStartup(run, error: error); finishPresentation()
+    }
     func startOwnedRun(
         _ runID: UUID, preRollBuffers: [AVAudioPCMBuffer], analyzerFallbackAllowed: Bool
     ) async throws {
         let request = try await launcher.request(for: runID)
+        try await requireCloudSharingConsent(modelID: request.modelID, run: runID)
         captureStopNotice = nil
         recordingWarning = nil
         currentModel = request.modelID

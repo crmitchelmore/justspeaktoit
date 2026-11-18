@@ -2589,7 +2589,7 @@ sessions:
           - "Press the shortcut again, then close the question with Escape."
           - "Search Settings for withdraw consent and choose the result."
         expected: "Before anything is recorded the question names each provider, what it gets and its privacy policy, and Narrator reads each by name. Not now and Escape record and send nothing. After Allow, dictation works and the question never shows again for that provider. Withdraw removes it from the list, announces the change and the next start asks again. The search result opens About."
-        final_gate: false
+        final_gate: true
   - id: "linux"
     device: "Linux"
     title: "Linux"
@@ -2748,7 +2748,7 @@ sessions:
           - "Press the shortcut again, then close the question with Escape."
           - "Search Settings for withdraw consent and choose the result."
         expected: "Before anything is recorded the question names each provider, what it gets and its privacy policy, and Orca reads each by name. Not now and Escape record and send nothing. After Allow, dictation works and the question never shows again for that provider. Withdraw removes it from the list, announces the change and the next start asks again. The search result opens About."
-        final_gate: false
+        final_gate: true
   - id: "decisions"
     device: "Decision"
     title: "Decisions"

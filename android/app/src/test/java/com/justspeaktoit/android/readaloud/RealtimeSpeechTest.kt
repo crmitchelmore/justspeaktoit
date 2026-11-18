@@ -105,6 +105,12 @@ class RealtimeSpeechTest {
             ReadAloudFailure.ServiceMessage(spec.providerName, "incomplete"),
             failureOf { RealtimeSpeechSynthesizer(spec) { _, _ -> incomplete }.open(voice, "k").speak("Hi") },
         )
+        val statusless = JSONObject().put("type", "response.done").put("response", JSONObject()).toString()
+        val unstated = FakeSocket(listOf(listOf(updated), listOf(statusless)))
+        assertEquals(
+            ReadAloudFailure.ServiceMessage(spec.providerName, "no status"),
+            failureOf { RealtimeSpeechSynthesizer(spec) { _, _ -> unstated }.open(voice, "k").speak("Hi") },
+        )
     }
 
     @Test
@@ -155,5 +161,20 @@ class RealtimeSpeechTest {
         assertTrue(faithful("Finish 1st", "Finish first"))
         assertTrue(faithful("Call me at 5pm.", "Call me at five p m."))
         assertTrue(faithful("Es kostet 5 Euro", "Es kostet fünf Euro"))
+    }
+
+    @Test
+    fun testFaithfulReading_keepsASignADecimalPointAndAnOverflowingScale() {
+        assertTrue(faithful("The balance is -5", "The balance is minus five"))
+        assertTrue(faithful("The balance is -5", "The balance is -5"))
+        assertFalse("A dropped minus sign changes the number", faithful("The balance is -5", "The balance is five"))
+        assertTrue(faithful("Add 3.5 cups", "Add 3.5 cups"))
+        assertTrue(faithful("Add 3.5 cups", "Add three dot five cups"))
+        assertFalse("35 is not three point five", faithful("Add 35 cups", "Add three point five cups"))
+        assertFalse(
+            "A scale past the limit is refused before it can overflow",
+            faithful("Pay 290448384 now", "Pay 18446744074 billion now"),
+        )
+        assertTrue(faithful("Cafe\u0301 au lait", "caf\u00e9 au lait"))
     }
 }

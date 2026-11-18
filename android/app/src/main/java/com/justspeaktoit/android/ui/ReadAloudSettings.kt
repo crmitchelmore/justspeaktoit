@@ -28,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -46,7 +47,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.justspeaktoit.android.R
-import com.justspeaktoit.android.readaloud.AccountVoiceDirectory
 import com.justspeaktoit.android.readaloud.CloudVoice
 import com.justspeaktoit.android.readaloud.PronunciationDictionary
 import com.justspeaktoit.android.readaloud.PronunciationEntry
@@ -57,6 +57,7 @@ import com.justspeaktoit.android.readaloud.SystemSpeech
 import com.justspeaktoit.android.readaloud.SystemVoice
 import com.justspeaktoit.android.readaloud.VoiceCatalog
 import com.justspeaktoit.android.readaloud.VoiceSelection
+import com.justspeaktoit.android.readaloud.cachedAccountVoice
 import com.justspeaktoit.android.readaloud.listAccountVoices
 import com.justspeaktoit.android.readaloud.readVoiceCatalog
 import kotlinx.coroutines.launch
@@ -91,7 +92,13 @@ internal fun ReadAloudVoiceRow(selection: String, savedCredentials: Set<String>,
     val chosen = VoiceSelection.parse(selection)
     val label = when (chosen) {
         is VoiceSelection.System -> chosen.voiceName ?: stringResource(R.string.read_aloud_voice_system_default)
-        is VoiceSelection.Cloud -> chosenCloudLabel(catalog, chosen.key)
+        is VoiceSelection.Cloud -> {
+            // Only the listing made with the provider's current key names it; the key is read off the main thread.
+            val listed by produceState<CloudVoice?>(null, chosen.key, savedCredentials, picking) {
+                value = cachedAccountVoice(context, catalog, chosen.key)
+            }
+            chosenCloudLabel(catalog, chosen.key, listed)
+        }
     }
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -120,11 +127,11 @@ internal fun ReadAloudVoiceRow(selection: String, savedCredentials: Set<String>,
 
 private fun cloudLabel(voice: CloudVoice) = "${voice.providerName} · ${voice.label}"
 
-/** A catalogue, Realtime or listed account voice; an account voice not listed yet shows its identifier. */
-private fun chosenCloudLabel(catalog: VoiceCatalog, key: String): String {
+/** A catalogue, Realtime or [listed] account voice; one not listed for the current key shows its identifier. */
+private fun chosenCloudLabel(catalog: VoiceCatalog, key: String, listed: CloudVoice?): String {
     catalog.voice(key)?.let { return cloudLabel(it) }
     catalog.realtime?.let { realtime -> realtime.voice(key)?.let { return "${realtime.providerName} · ${it.label}" } }
-    AccountVoiceDirectory.cachedVoice(key)?.let { return cloudLabel(it) }
+    listed?.let { return cloudLabel(it) }
     return catalog.accountVoice(key)?.let { (provider, apiId) -> "${provider.providerName} · $apiId" } ?: key
 }
 

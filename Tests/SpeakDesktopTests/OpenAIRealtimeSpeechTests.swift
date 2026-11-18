@@ -119,6 +119,27 @@ final class OpenAIRealtimeSpeechTests: XCTestCase {
                       "A reading in another language is a bounded slot")
     }
 
+    func testReadingCheckKeepsASignADecimalPointAndAnOverflowingScale() {
+        let faithful = OpenAIRealtimeSpeech.isFaithfulReading
+        XCTAssertTrue(faithful("The balance is -5", "The balance is minus five"))
+        XCTAssertTrue(faithful("The balance is -5", "The balance is -5"))
+        XCTAssertFalse(faithful("The balance is -5", "The balance is five"), "A dropped minus sign changes the number")
+        XCTAssertTrue(faithful("Add 3.5 cups", "Add 3.5 cups"))
+        XCTAssertTrue(faithful("Add 3.5 cups", "Add three dot five cups"))
+        XCTAssertFalse(faithful("Add 35 cups", "Add three point five cups"), "35 is not three point five")
+        XCTAssertFalse(faithful("Pay 290448384 now", "Pay 18446744074 billion now"),
+                       "A scale past the limit is refused before it can overflow")
+        XCTAssertTrue(faithful("Caf\u{65}\u{301} au lait", "caf\u{e9} au lait"))
+    }
+
+    func testResponseDoneWithoutAStatusIsNotACompletedReading() throws {
+        let frame = Data(#"{"type":"response.done","response":{}}"#.utf8)
+        guard case .done(let status, _, _) = try XCTUnwrap(OpenAIRealtimeSpeechEvent(frame: frame)) else {
+            return XCTFail("Expected response.done")
+        }
+        XCTAssertNotEqual(status, "completed")
+    }
+
     func testAChunkWithoutAudioFailsInsteadOfDroppingItsText() async {
         let socket = ScriptedRealtimeSpeechSocket { text in
             .reply(audio: text.contains("Omega") ? Data() : Data([1]), transcript: text, audioTokens: 1)

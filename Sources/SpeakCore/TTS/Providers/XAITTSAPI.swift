@@ -178,7 +178,8 @@ public struct XAITTSAPI: Sendable {
 
     /// The built-in voices from `GET /v1/tts/voices`, then the team's custom
     /// voices from `GET /v1/custom-voices`. Custom voices are region-gated, so
-    /// a 403 or 404 there means the team has none rather than a failure.
+    /// a 403 or 404 on the first page means the team has none rather than a
+    /// failure; on a later page it fails the listing rather than cutting it short.
     public func listVoices(apiKey: String) async throws -> [XAITTSVoice] {
         var voices = try Self.decodedVoices(from: try await data(for: Self.voiceListRequest(apiKey: apiKey)))
         var token: String?
@@ -188,7 +189,7 @@ public struct XAITTSAPI: Sendable {
             guard let status = (response as? HTTPURLResponse)?.statusCode else {
                 throw XAITTSAPIError.invalidResponse
             }
-            if Self.customVoicesUnavailableStatuses.contains(status) { break }
+            if token == nil, Self.customVoicesUnavailableStatuses.contains(status) { break }
             guard (200..<300).contains(status) else { throw Self.error(from: data, statusCode: status) }
             let page = try Self.decodedCustomVoicePage(from: data)
             voices += page.voices

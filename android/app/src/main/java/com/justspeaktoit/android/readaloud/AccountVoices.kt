@@ -67,7 +67,8 @@ class AccountVoiceDirectory(
         val cursors = mutableSetOf<String>()
         var cursor: String? = null
         for (page in 0 until list.maxPages) {
-            val body = fetch(provider, list, key, pageUrl(list, page, cursor)) ?: return voices
+            // Only the first page may say the account has no library; a later refusal fails the listing.
+            val body = fetch(provider, list, key, pageUrl(list, page, cursor), absentAllowed = page == 0) ?: return voices
             val parsed = accept(list, body)
             when (list.pageParameter) {
                 OFFSET -> if (parsed.entries.size < checkNotNull(list.pageSize)) return voices
@@ -92,13 +93,20 @@ class AccountVoiceDirectory(
     }
 
     /** The body at [url], or null when the status says the account has no such library. */
-    private suspend fun fetch(provider: AccountVoiceProvider, list: AccountListRequest, key: String, url: String): ByteArray? {
+    private suspend fun fetch(
+        provider: AccountVoiceProvider,
+        list: AccountListRequest,
+        key: String,
+        url: String,
+        absentAllowed: Boolean = true,
+    ): ByteArray? {
         val values = mapOf("key" to key)
         val request = SpeechHttpRequest(
             method = list.method,
             url = fill(url, values),
             headers = list.headers.mapValues { fill(it.value, values) },
             body = ByteArray(0),
+            maxResponseBytes = list.maxResponseBytes.toLong(),
         )
         val response = try {
             http.send(request)
@@ -107,7 +115,7 @@ class AccountVoiceDirectory(
         } catch (_: IOException) {
             throw ReadAloudException(ReadAloudFailure.Unreachable(provider.providerName))
         }
-        if (response.status in list.absentStatuses) return null
+        if (absentAllowed && response.status in list.absentStatuses) return null
         if (response.status !in 200..299) {
             throw ReadAloudException(
                 when (response.status) {
@@ -135,10 +143,9 @@ class AccountVoiceDirectory(
         /** Listings for the life of the process, so a chosen voice keeps its listed name. */
         val sharedCache: MutableMap<String, List<CloudVoice>> = ConcurrentHashMap()
 
-        /** A listed voice with the saved [key], from any listing this process has made. */
-        fun cachedVoice(key: String): CloudVoice? = sharedCache.values.firstNotNullOfOrNull { voices ->
-            voices.firstOrNull { it.key == key }
-        }
+        /** The voice saved as [key] in the listing made with [credential], so another key's names never show. */
+        fun cachedVoice(provider: AccountVoiceProvider, credential: String, key: String): CloudVoice? =
+            sharedCache[cacheKey(provider, credential.trim())]?.firstOrNull { it.key == key }
 
         private fun fill(text: String, values: Map<String, String>) =
             PLACEHOLDER.replace(text) { values.getValue("key") }
@@ -197,7 +204,7 @@ internal object AccountVoiceListing {
                 validText(name, MAX_NAME_BYTES) &&
                 listOfNotNull(item.optStringOrNull("slug"), gender).all { validText(it, MAX_SHORT_BYTES) } &&
                 (item.optStringOrNull("description")?.let { validText(it, MAX_DESCRIPTION_BYTES) } ?: true) &&
-                languagesValid(item.optJSONArray("languages"))
+                languagesValid(item, "languages")
             if (!valid) return null
             val shown = if (gender.isNullOrEmpty()) name else "$name (${capitalized(gender)})"
             Listed(AccountVoice(id, shown), usable = true)
@@ -212,7 +219,8 @@ internal object AccountVoiceListing {
         val entries = (0 until array.length()).map { index ->
             val item = array.optJSONObject(index) ?: return null
             val id = item.optStringOrNull("voice_id") ?: return null
-            val name = item.optStringOrNull("name") ?: capitalized(id)
+            // A missing or null name falls back to the identifier; a name of another type is invalid.
+            val name = if (item.isNull("name")) capitalized(id) else item.opt("name") as? String ?: return null
             if (!validText(id, MAX_NAME_BYTES) || id.isEmpty() || !validText(name, MAX_NAME_BYTES) || name.isEmpty() ||
                 id.lowercase(Locale.ROOT).startsWith(XAI_PREFIX)
             ) {
@@ -232,7 +240,12 @@ internal object AccountVoiceListing {
             val id = item.optStringOrNull("id") ?: return null
             val name = item.optStringOrNull("name") ?: return null
             val models = item.optJSONArray("models") ?: return null
-            val modelNames = (0 until models.length()).map { models.optJSONObject(it)?.optStringOrNull("model") ?: return null }
+            // Every model needs a string name and status, as SpeakCore's decoder requires.
+            val modelNames = (0 until models.length()).map { index ->
+                val model = models.optJSONObject(index) ?: return null
+                model.optStringOrNull("status") ?: return null
+                model.optStringOrNull("model") ?: return null
+            }
             val valid = id.isNotEmpty() && id.toByteArray().size <= MAX_NAME_BYTES &&
                 id.all { it.isLetterOrDigit() || it == '-' || it == '_' } &&
                 id.lowercase(Locale.ROOT) !in fixed &&
@@ -253,8 +266,10 @@ internal object AccountVoiceListing {
     private fun cursor(root: JSONObject, field: String): Cursor? =
         if (root.isNull(field)) Cursor(null) else (root.opt(field) as? String)?.let(::Cursor)
 
-    private fun languagesValid(languages: JSONArray?): Boolean {
-        if (languages == null) return true
+    /** Missing or null, or an array of short language codes; any other type is invalid, as SpeakCore decodes it. */
+    private fun languagesValid(item: JSONObject, field: String): Boolean {
+        if (item.isNull(field)) return true
+        val languages = item.opt(field) as? JSONArray ?: return false
         if (languages.length() > MAX_LANGUAGES) return false
         return (0 until languages.length()).all { index ->
             val language = languages.opt(index) as? String ?: return false

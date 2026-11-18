@@ -1,5 +1,6 @@
 package com.justspeaktoit.android.readaloud
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import okhttp3.ResponseBody.Companion.asResponseBody
 import okio.Buffer
@@ -9,6 +10,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.SocketTimeoutException
@@ -60,6 +62,73 @@ class OkHttpSpeechHttpTest {
                 }
                 assertFalse("the redirect was followed to another host", followed)
             }
+        }
+    }
+
+    /** Answers [times] connections with [response], ignoring each request. */
+    private fun answering(server: ServerSocket, times: Int, response: String) = thread(isDaemon = true) {
+        repeat(times) {
+            server.accept().use { socket ->
+                val reader = socket.getInputStream().bufferedReader()
+                while (reader.readLine()?.isNotEmpty() == true) Unit
+                socket.getOutputStream().write(response.toByteArray())
+                socket.getOutputStream().flush()
+            }
+        }
+    }
+
+    @Test(timeout = 20_000)
+    fun testSend_stopsReadingAtTheRequestsOwnLimit() = runBlocking {
+        val loopback = InetAddress.getLoopbackAddress()
+        ServerSocket(0, 1, loopback).use { server ->
+            val body = "x".repeat(100)
+            answering(server, 1, "HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body")
+            val request = SpeechHttpRequest(
+                method = "GET",
+                url = "http://${loopback.hostAddress}:${server.localPort}/voices",
+                headers = emptyMap(),
+                body = ByteArray(0),
+                maxResponseBytes = 10,
+            )
+            val refused = try {
+                OkHttpSpeechHttp().send(request)
+                false
+            } catch (_: SpeechResponseTooLarge) {
+                true
+            }
+            assertTrue("a listing larger than its own limit was read", refused)
+        }
+    }
+
+    @Test(timeout = 20_000)
+    fun testRealtimeConnector_reportsARefusedHandshakeWhetherItReceivesOrSendsFirst() = runBlocking {
+        val loopback = InetAddress.getLoopbackAddress()
+        ServerSocket(0, 2, loopback).use { server ->
+            answering(server, 2, "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            val url = "ws://${loopback.hostAddress}:${server.localPort}/realtime"
+
+            val receiving = OkHttpRealtimeConnector().open(url, emptyMap())
+            val received = try {
+                receiving.receive()
+                null
+            } catch (error: IOException) {
+                error
+            }
+            assertEquals(401, (received as? RealtimeHandshakeRefused)?.status)
+
+            // Send until OkHttp has seen the refusal: the failed send must say why, not just that it is closed.
+            val sending = OkHttpRealtimeConnector().open(url, emptyMap())
+            var sent: IOException? = null
+            while (sent == null) {
+                sent = try {
+                    sending.send("{}")
+                    null
+                } catch (error: IOException) {
+                    error
+                }
+                if (sent == null) delay(10)
+            }
+            assertEquals(401, (sent as? RealtimeHandshakeRefused)?.status)
         }
     }
 

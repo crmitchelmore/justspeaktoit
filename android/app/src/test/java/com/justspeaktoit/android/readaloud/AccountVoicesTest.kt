@@ -162,6 +162,50 @@ class AccountVoicesTest {
     }
 
     @Test
+    fun testXai_aRefusalAfterTheFirstCustomPageFailsAndIsNotCached() {
+        val xai = provider("xai")
+        val first = JSONObject().put("voices", JSONArray().put(JSONObject().put("voice_id", "clone")))
+            .put("pagination_token", "p2").toString()
+        val directory = directory(FakeHttp(listOf(200 to xaiBuiltIns(), 200 to first, 403 to "{}")))
+        assertEquals(ReadAloudFailure.KeyRejected(xai.providerName), failureOf { directory.voices(xai, "k") })
+        assertNull(directory.cached(xai, "k"))
+    }
+
+    @Test
+    fun testListing_wrongTypedFieldsRejectTheWholeList() {
+        val mistral = provider("mistral")
+        val languages = JSONObject().put(
+            "items",
+            JSONArray().put(JSONObject().put("id", UUID.randomUUID().toString()).put("name", "A").put("languages", 17)),
+        ).toString()
+        assertEquals(
+            ReadAloudFailure.InvalidVoiceList(mistral.providerName),
+            failureOf { directory(FakeHttp(languages)).voices(mistral, "k") },
+        )
+
+        val xai = provider("xai")
+        val name = JSONObject().put("voices", JSONArray().put(JSONObject().put("voice_id", "clone").put("name", 17)))
+            .toString()
+        assertEquals(
+            ReadAloudFailure.InvalidVoiceList(xai.providerName),
+            failureOf { directory(FakeHttp(xaiBuiltIns(), name)).voices(xai, "k") },
+        )
+
+        val soniox = provider("soniox")
+        val statusless = JSONObject().put(
+            "voices",
+            JSONArray().put(
+                JSONObject().put("id", "other").put("name", "Other")
+                    .put("models", JSONArray().put(JSONObject().put("model", "another-model"))),
+            ),
+        ).toString()
+        assertEquals(
+            ReadAloudFailure.InvalidVoiceList(soniox.providerName),
+            failureOf { directory(FakeHttp(statusless)).voices(soniox, "k") },
+        )
+    }
+
+    @Test
     fun testXai_aCustomVoiceRepeatingABuiltInRejectsTheWholeList() {
         val xai = provider("xai")
         val custom = JSONObject().put("voices", JSONArray().put(JSONObject().put("voice_id", "extra"))).toString()
@@ -229,6 +273,25 @@ class AccountVoicesTest {
 
         assertEquals(2, directory.cached(mistral, "k")?.size)
         assertNull(directory.cached(mistral, "other"))
+    }
+
+    @Test
+    fun testListing_asksTheTransportToStopAtTheListingLimit() = runBlocking {
+        val mistral = provider("mistral")
+        val http = FakeHttp(mistralPage(1))
+        directory(http).voices(mistral, "k")
+        assertEquals(mistral.list.maxResponseBytes.toLong(), http.sent.single().maxResponseBytes)
+    }
+
+    @Test
+    fun testCachedVoice_isScopedToTheKeyThatListedIt() = runBlocking {
+        val mistral = provider("mistral")
+        val credential = "scoped-${UUID.randomUUID()}"
+        val voices = AccountVoiceDirectory(FakeHttp(mistralPage(1))).voices(mistral, credential)
+        val key = voices.single().key
+
+        assertEquals(voices.single(), AccountVoiceDirectory.cachedVoice(mistral, " $credential ", key))
+        assertNull(AccountVoiceDirectory.cachedVoice(mistral, "another key", key))
     }
 
     @Test

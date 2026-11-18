@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -134,6 +135,20 @@ internal suspend fun listAccountVoices(context: Context, provider: AccountVoiceP
         if (key.isNullOrBlank()) null else AccountVoiceDirectory(OkHttpSpeechHttp()).voices(provider, key)
     }
 
+/** The listed name of the account voice saved as [key], from the listing made with the provider's current key. */
+internal suspend fun cachedAccountVoice(context: Context, catalog: VoiceCatalog, key: String): CloudVoice? =
+    withContext(Dispatchers.IO) {
+        val provider = catalog.accountVoice(key)?.first ?: return@withContext null
+        val credential = try {
+            KeystoreSecretStore.create(context).read(provider.credentialId)
+        } catch (_: GeneralSecurityException) {
+            null
+        } catch (_: ProviderException) {
+            null
+        }
+        if (credential.isNullOrBlank()) null else AccountVoiceDirectory.cachedVoice(provider, credential, key)
+    }
+
 internal fun readVoiceCatalog(context: Context): VoiceCatalog =
     context.assets.open(VoiceCatalog.ASSET).bufferedReader().use { VoiceCatalog.parse(it.readText()) }
 
@@ -187,7 +202,8 @@ internal class OkHttpSpeechHttp(private val client: OkHttpClient = sharedClient)
 
             override fun onResponse(call: Call, response: Response) {
                 val result = try {
-                    response.use { SpeechHttpResponse(it.code, boundedBytes(it.body, MAX_RESPONSE_BYTES)) }
+                    val limit = request.maxResponseBytes ?: MAX_RESPONSE_BYTES
+                    response.use { SpeechHttpResponse(it.code, boundedBytes(it.body, limit)) }
                 } catch (error: IOException) {
                     if (continuation.isActive) continuation.resumeWithException(error)
                     return
@@ -232,6 +248,12 @@ internal class OkHttpSpeechHttp(private val client: OkHttpClient = sharedClient)
 internal class OkHttpRealtimeConnector(private val client: OkHttpClient = sharedClient) : RealtimeConnector {
     override fun open(url: String, headers: Map<String, String>): RealtimeSocket {
         val frames = Channel<String>(Channel.UNLIMITED)
+        // Why the socket ended, so a send that fails reports a refused handshake rather than a closed socket.
+        val ended = CompletableDeferred<IOException>()
+        fun end(cause: IOException) {
+            ended.complete(cause)
+            frames.close(cause)
+        }
         val builder = Request.Builder().url(url)
         headers.forEach { (name, value) -> builder.header(name, value) }
         val socket = client.newWebSocket(
@@ -247,17 +269,17 @@ internal class OkHttpRealtimeConnector(private val client: OkHttpClient = shared
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                     webSocket.close(NORMAL_CLOSURE, null)
-                    frames.close(IOException("WebSocket closed ($code)"))
+                    end(IOException("WebSocket closed ($code)"))
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    frames.close(IOException("WebSocket closed ($code)"))
+                    end(IOException("WebSocket closed ($code)"))
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     val status = response?.code
                     response?.close()
-                    frames.close(
+                    end(
                         if (status != null && status != SWITCHING_PROTOCOLS) {
                             RealtimeHandshakeRefused(status)
                         } else {
@@ -269,7 +291,10 @@ internal class OkHttpRealtimeConnector(private val client: OkHttpClient = shared
         )
         return object : RealtimeSocket {
             override suspend fun send(text: String) {
-                if (!socket.send(text)) throw IOException("WebSocket is closed")
+                // OkHttp refuses a send once the socket has failed, just before it reports why.
+                if (!socket.send(text)) {
+                    throw withTimeoutOrNull(END_WAIT_MILLIS) { ended.await() } ?: IOException("WebSocket is closed")
+                }
             }
 
             override suspend fun receive(): String = try {
@@ -280,6 +305,7 @@ internal class OkHttpRealtimeConnector(private val client: OkHttpClient = shared
 
             override fun close() {
                 if (!socket.close(NORMAL_CLOSURE, null)) socket.cancel()
+                ended.complete(IOException("WebSocket closed"))
                 frames.close()
             }
         }
@@ -288,6 +314,7 @@ internal class OkHttpRealtimeConnector(private val client: OkHttpClient = shared
     companion object {
         private const val NORMAL_CLOSURE = 1000
         private const val SWITCHING_PROTOCOLS = 101
+        private const val END_WAIT_MILLIS = 2_000L
 
         val sharedClient: OkHttpClient by lazy {
             OkHttpSpeechHttp.sharedClient.newBuilder()

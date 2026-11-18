@@ -9,8 +9,17 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Base64
 
-/** One HTTP exchange, without a client library, so tests can answer with fakes. */
-data class SpeechHttpRequest(val method: String, val url: String, val headers: Map<String, String>, val body: ByteArray)
+/**
+ * One HTTP exchange, without a client library, so tests can answer with fakes. [maxResponseBytes] caps the body
+ * the transport reads; null keeps its speech-response limit.
+ */
+data class SpeechHttpRequest(
+    val method: String,
+    val url: String,
+    val headers: Map<String, String>,
+    val body: ByteArray,
+    val maxResponseBytes: Long? = null,
+)
 
 data class SpeechHttpResponse(val status: Int, val body: ByteArray)
 

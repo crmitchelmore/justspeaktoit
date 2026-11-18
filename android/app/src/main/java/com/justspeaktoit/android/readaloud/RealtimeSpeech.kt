@@ -11,6 +11,7 @@ import org.json.JSONException
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.text.Normalizer
 import java.util.Base64
 
 /** A WebSocket carrying text frames, so tests can answer with fakes. */
@@ -77,7 +78,8 @@ class RealtimeSpeechSynthesizer(private val spec: RealtimeSpeechSpec, private va
                     "error" -> throw serviceMessage(event)
                     "response.done" -> {
                         val response = event.optJSONObject("response")
-                        val status = response?.optString("status")?.takeIf { it.isNotEmpty() } ?: COMPLETED
+                        // Only an explicit "completed" is a finished reading.
+                        val status = response?.optString("status")?.takeIf { it.isNotEmpty() } ?: NO_STATUS
                         if (status != COMPLETED) {
                             val details = response?.optJSONObject("status_details")
                             val reason = details?.optJSONObject("error")?.optString("message")?.takeIf { it.isNotEmpty() }
@@ -159,6 +161,7 @@ class RealtimeSpeechSynthesizer(private val spec: RealtimeSpeechSpec, private va
         const val TEXT = "{text}"
         const val VOICE = "{voice}"
         const val COMPLETED = "completed"
+        const val NO_STATUS = "no status"
         const val UNKNOWN_ERROR = "Unknown OpenAI error"
         const val MILLIS = 1000L
 
@@ -180,8 +183,10 @@ class RealtimeSpeechSynthesizer(private val spec: RealtimeSpeechSpec, private va
  * SpeakCore's `RealtimeReadingCheck`; change both. The input is aligned with the transcript in order:
  * every word must be spoken; an all-digit numeral must be read as the same digits, as digits or English
  * number words, or (with neither) as up to `perNumeral` words of another language, never a negation;
- * a token mixing letters and digits is that bounded slot; and unmatched spoken words are allowed only
- * for symbols read aloud, `perSymbol` each.
+ * a token mixing letters and digits is that bounded slot; a numeral's minus sign must be read as one word
+ * carrying no number ("minus"); a decimal point between digits may be read as one such word ("point") or
+ * left out, never inside an integer; and unmatched spoken words are allowed only for symbols read aloud,
+ * `perSymbol` each.
  */
 object RealtimeReading {
     /** Longer digit runs are not parsed as numbers; they become bounded slots. */
@@ -191,7 +196,13 @@ object RealtimeReading {
         data class Word(val text: String) : Token
         data class Number(val digits: String) : Token
         data object Mixed : Token
+        data object Minus : Token
+        data object Point : Token
     }
+
+    /** What [words] emits for a minus sign and a decimal point; no alphanumeric run can produce either. */
+    private const val MINUS_WORD = "-"
+    private const val POINT_WORD = "."
 
     fun isFaithful(expected: String, spoken: String, perNumeral: Int, perSymbol: Int): Boolean {
         val tokens = words(expected).map(::token)
@@ -214,7 +225,13 @@ object RealtimeReading {
     }
 
     private fun slotEnds(token: Token, heard: List<String>, start: Int, perNumeral: Int): List<Int> {
-        if (token is Token.Word) return if (start < heard.size && heard[start] == token.text) listOf(start + 1) else emptyList()
+        val next = heard.getOrNull(start)
+        when (token) {
+            is Token.Word -> return if (next == token.text) listOf(start + 1) else emptyList()
+            Token.Minus -> return if (next != null && carriesNoNumber(next)) listOf(start + 1) else emptyList()
+            Token.Point -> return if (next != null && carriesNoNumber(next)) listOf(start, start + 1) else listOf(start)
+            is Token.Number, Token.Mixed -> Unit
+        }
         val longest = minOf(heard.size, start + perNumeral)
         return (start + 1..longest).filter { accepts(token, heard.subList(start, it)) }
     }
@@ -226,9 +243,14 @@ object RealtimeReading {
         return NumberWords.canRead(heard, token.digits)
     }
 
+    /** A spoken sign or decimal point: a word with no digits, number or negation in it. */
+    private fun carriesNoNumber(word: String) = !isDigits(word) && NumberWords.value(word) == null && word !in NEGATIONS
+
     private val NEGATIONS = setOf("not", "no", "never", "none", "nothing", "nobody", "neither", "nor", "without")
 
     private fun token(word: String): Token = when {
+        word == MINUS_WORD -> Token.Minus
+        word == POINT_WORD -> Token.Point
         isDigits(word) -> if (word.length <= MAX_NUMERAL_DIGITS) Token.Number(word) else Token.Mixed
         word.codePoints().anyMatch { Character.getType(it) == Character.DECIMAL_DIGIT_NUMBER.toInt() } -> Token.Mixed
         else -> Token.Word(word)
@@ -236,47 +258,59 @@ object RealtimeReading {
 
     internal fun isDigits(word: String): Boolean = word.isNotEmpty() && word.all { it in '0'..'9' }
 
-    /** Case-folded alphanumeric runs, with thousands separators removed so "2,026" is one numeral. */
+    /**
+     * Case-folded NFC alphanumeric runs, so a composed and a decomposed "café" match, with thousands separators
+     * removed so "2,026" is one numeral, and [MINUS_WORD] and [POINT_WORD] for a numeral's sign and decimal point.
+     */
     private fun words(text: String): List<String> {
-        val lower = text.lowercase()
-        val kept = StringBuilder()
-        lower.forEachIndexed { index, char -> if (char != ',' || !isThousandsSeparator(lower, index)) kept.append(char) }
+        val points = Normalizer.normalize(text, Normalizer.Form.NFC).lowercase().codePoints().toArray()
         val words = mutableListOf<String>()
         val current = StringBuilder()
-        var index = 0
-        while (index < kept.length) {
-            val point = Character.codePointAt(kept, index)
-            if (isAlphanumeric(point)) {
-                current.appendCodePoint(point)
-            } else if (current.isNotEmpty()) {
-                words += current.toString()
-                current.clear()
-            }
-            index += Character.charCount(point)
+        fun flush() {
+            if (current.isNotEmpty()) words += current.toString()
+            current.clear()
         }
-        if (current.isNotEmpty()) words += current.toString()
+        points.forEachIndexed { index, point ->
+            when {
+                point == ','.code && isThousandsSeparator(points, index) -> Unit
+                isMinusSign(points, index) || isDecimalPoint(points, index) -> {
+                    flush()
+                    words += if (point == '.'.code) POINT_WORD else MINUS_WORD
+                }
+                isAlphanumeric(point) -> current.appendCodePoint(point)
+                else -> flush()
+            }
+        }
+        flush()
         return words
     }
 
-    private fun isThousandsSeparator(text: String, index: Int): Boolean {
-        fun digit(offset: Int) = offset in text.indices && text[offset] in '0'..'9'
-        return digit(index - 1) && (1..3).all { digit(index + it) } && !digit(index + 4)
+    private fun isDigit(points: IntArray, index: Int) = index in points.indices && points[index] in '0'.code..'9'.code
+
+    private fun isThousandsSeparator(points: IntArray, index: Int): Boolean =
+        isDigit(points, index - 1) && (1..3).all { isDigit(points, index + it) } && !isDigit(points, index + 4)
+
+    /** A hyphen or minus sign starting a word, directly before a digit. */
+    private fun isMinusSign(points: IntArray, index: Int): Boolean {
+        if (points[index] != '-'.code && points[index] != MINUS_SIGN) return false
+        return (index == 0 || Character.isWhitespace(points[index - 1])) && isDigit(points, index + 1)
     }
+
+    private fun isDecimalPoint(points: IntArray, index: Int): Boolean =
+        points[index] == '.'.code && isDigit(points, index - 1) && isDigit(points, index + 1)
+
+    private const val MINUS_SIGN = 0x2212
 
     private const val PUNCTUATION = ".,;:!?'\"’‘“”()[]{}-–—…"
 
-    /** Symbols read aloud as words; a hyphen counts only as a minus sign directly before a digit. */
+    /** Symbols read aloud as words; a numeral's minus sign is not one, as it is a slot that must be read. */
     private fun symbolCount(text: String): Int {
         val points = text.codePoints().toArray()
         return points.indices.count { index ->
             val point = points[index]
-            if (point == '-'.code) {
-                val startsWord = index == 0 || Character.isWhitespace(points[index - 1])
-                startsWord && index + 1 < points.size && isNumber(points[index + 1])
-            } else {
+            !isMinusSign(points, index) &&
                 !Character.isLetter(point) && !isNumber(point) && !Character.isWhitespace(point) && !isMark(point) &&
-                    (point > Char.MAX_VALUE.code || point.toChar() !in PUNCTUATION)
-            }
+                (point > Char.MAX_VALUE.code || point.toChar() !in PUNCTUATION)
         }
     }
 
@@ -332,8 +366,8 @@ internal object NumberWords {
         "million" to 1_000_000L, "millionth" to 1_000_000L, "billion" to 1_000_000_000L, "billionth" to 1_000_000_000L,
     )
 
-    /** Words between numbers that carry no digits ("three point five"). */
-    private val SEPARATORS = setOf("and", "point", "dot", "comma", "colon", "dash", "hyphen")
+    /** Words between numbers that carry no digits ("ten colon thirty"); never a decimal point inside an integer. */
+    private val SEPARATORS = setOf("and", "comma", "colon", "dash", "hyphen")
     private val ZERO_WORDS = setOf("oh", "o", "nought")
     private const val LIMIT = 1_000_000_000_000_000L
     private const val MAX_DIGITS = 15
@@ -391,10 +425,16 @@ internal object NumberWords {
                 }
                 RealtimeReading.isDigits(word) && word.length <= MAX_DIGITS -> current += word.toLong()
                 small != null && word !in ZERO_WORDS -> current += small
-                scale == 100L -> current = maxOf(current, 1L) * 100
                 scale != null -> {
-                    total += maxOf(current, 1L) * scale
-                    current = 0
+                    // Checked before multiplying, which would otherwise wrap.
+                    val base = maxOf(current, 1L)
+                    if (base > (LIMIT - 1 - total) / scale) return null
+                    if (scale == 100L) {
+                        current = base * 100
+                    } else {
+                        total += base * scale
+                        current = 0
+                    }
                 }
                 else -> return null
             }

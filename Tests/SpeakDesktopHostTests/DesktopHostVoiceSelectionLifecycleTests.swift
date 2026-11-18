@@ -16,7 +16,7 @@ final class DesktopHostVoiceSelectionLifecycleTests: XCTestCase {
         access.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-selection-\(UUID())")
         effects = SettingsWriteEffects()
-        controller = try DesktopHostController(directory: directory, effects: effects)
+        controller = try DesktopHostController.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         let access = access
         FakeLog.shared.installKeyReadHook { _ in access.record(0) }
@@ -50,7 +50,7 @@ final class DesktopHostVoiceSelectionLifecycleTests: XCTestCase {
         XCTAssertEqual(document.preferences.values[VoiceSelectionPreference.modelKey],
                        saved.modelID.map { AnyCodable(.string($0)) })
         await controller.close()
-        controller = try DesktopHostController(directory: directory, effects: effects)
+        controller = try DesktopHostController.consented(directory: directory, effects: effects)
         let restarted = await controller.voiceOutputSettings()
         XCTAssertEqual(restarted, saved)
         XCTAssertEqual(access.counts, [0, 0, 0])

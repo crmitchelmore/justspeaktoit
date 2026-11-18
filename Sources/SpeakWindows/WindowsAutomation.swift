@@ -1,6 +1,7 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
+import SpeakDesktopHost
 import SpeakWindowsPlatform
 import CWindowsSupport
 
@@ -67,6 +68,7 @@ extension WindowsAppController {
         guard DesktopTranscription.provider(for: model) != nil else {
             throw AutomationError(code: .transcriptionFailed, message: "Choose a batch transcription model first.")
         }
+        try requireAutomationCloudSharing([DesktopHostCloudSharing.transcription(model: model)])
         let key = try effects.apiKey(name: credentialIdentifier(for: model))
         guard !key.isEmpty else {
             throw AutomationError(
@@ -89,6 +91,8 @@ extension WindowsAppController {
     /// once capture is live.
     func automationStartDictation() async throws -> AutomationResult {
         guard dictationSessionID == nil, !busy else { throw AutomationError.dictationAlreadyRunning }
+        let profile = captureProfile(modelIndex: selectedIndex(), executablePath: nil)
+        try requireAutomationCloudSharing(cloudSharingRequests(for: profile, polish: captureLivePolish(profile)))
         await toggle(
             target: nil, modelIndex: selectedIndex(), deviceID: selectedMicrophone(), targetExecutablePath: nil,
             textOutput: textOutputOptions()

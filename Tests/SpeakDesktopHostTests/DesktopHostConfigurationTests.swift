@@ -13,7 +13,8 @@ final class DesktopHostConfigurationTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("configuration-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
     }
 
@@ -32,7 +33,8 @@ final class DesktopHostConfigurationTests: XCTestCase {
         entries[try index(key)] = "0"
         try await controller.saveConfiguration(entries)
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restored = try await controller.configuration()
         XCTAssertFalse(restored.enabled(key.rawValue))
         let file = directory.appendingPathComponent("sidebar.json")
@@ -48,7 +50,7 @@ final class DesktopHostConfigurationTests: XCTestCase {
         await controller.close()
         let effects = SettingsWriteEffects()
         effects.refusesWrites = true
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         do { try await controller.saveConfiguration(entries); XCTFail("Failed write accepted") } catch {
             XCTAssertEqual((error as NSError).code, CocoaError.fileWriteOutOfSpace.rawValue)
         }
@@ -64,7 +66,8 @@ final class DesktopHostConfigurationTests: XCTestCase {
         ]
         let settingsURL = directory.appendingPathComponent("settings.json")
         try JSONEncoder().encode(values).write(to: settingsURL)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         var entries = try await controller.configuration().entries
         entries[try index(.preferredLocale)] = "fr_FR"
         entries[try index(.postProcessingTemperature)] = "0.6"
@@ -77,7 +80,8 @@ final class DesktopHostConfigurationTests: XCTestCase {
         XCTAssertEqual(polish.outputLanguage, "French")
         XCTAssertEqual(polish.mode, .disabled)
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restored = try await controller.configuration()
         XCTAssertEqual(restored.language, "fr_FR")
     }
@@ -146,7 +150,7 @@ final class DesktopHostConfigurationTests: XCTestCase {
     func testWriteFailureLeavesAppliedAndImportedSettingsUnchanged() async throws {
         await controller.close()
         let effects = SettingsWriteEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         let before = try await controller.configuration()
         try await controller.saveConfiguration(before.entries)
         let settingsURL = directory.appendingPathComponent("settings.json")
@@ -298,7 +302,8 @@ extension DesktopHostConfigurationTests {
         let saved = try await controller.configuration()
         XCTAssertEqual(saved.visualDensity, .compact)
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restarted = try await controller.configuration()
         XCTAssertEqual(restarted.visualDensity, .compact)
         XCTAssertEqual(restarted.values["futureAppearance"], unsupported)
@@ -319,7 +324,7 @@ extension DesktopHostConfigurationTests {
     func testVisualDensity_RefusedWritesAndInvalidImportsPreserveAppliedValueAndDisk() async throws {
         await controller.close()
         let effects = SettingsWriteEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         var entries = try await controller.configuration().entries
         entries[try index(.visualDensity)] = "compact"
         try await controller.saveConfiguration(entries)

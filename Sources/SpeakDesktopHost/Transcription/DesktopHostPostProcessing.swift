@@ -116,6 +116,7 @@ extension DesktopHostController {
                 throw DesktopPostProcessingError.unsupportedModel
             }
             if let failure = captured?.failure { throw DesktopHostError(message: failure) }
+            try requireCloudSharing([DesktopHostCloudSharing.postProcessing(options)])
             let key: String
             if let captured { key = captured.key } else {
                 key = options.mode == .remote

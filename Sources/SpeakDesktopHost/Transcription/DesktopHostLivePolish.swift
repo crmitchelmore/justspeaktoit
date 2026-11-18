@@ -18,7 +18,7 @@ extension DesktopHostController {
 
     // exhaustive owned live-polish admission gating; no behavior change.
     // swiftlint:disable:next cyclomatic_complexity
-    func captureLivePolish(_ profile: DesktopProfileSession) -> DesktopHostLivePolishInput? {
+    package func captureLivePolish(_ profile: DesktopProfileSession) -> DesktopHostLivePolishInput? {
         guard DesktopHostModels.isLive(profile.modelIdentifier) else { return nil }
         let selection = profile.livePolish ?? livePolishSelection()
         guard let configuration = selection.configuration else { return nil }
@@ -50,6 +50,7 @@ extension DesktopHostController {
             guard case .apiKey(let identifier, _) = ModelCredentialResolver.requirement(
                 for: model, purpose: .postProcessing
             ) else { throw LivePolishError.unsupportedModel }
+            try cloudSharing.require(DesktopHostCloudSharing.postProcessing(model: model))
             let key = try effects.apiKey(name: identifier).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !key.isEmpty else { throw LivePolishError.missingCredential }
             return .init(preferences: preferences, model: model, key: key, failure: nil)
@@ -62,10 +63,15 @@ extension DesktopHostController {
         guard let input else { return nil }
         let effects = effects
         let localCleanup = localCleanup
+        let consent = cloudSharing
         return LivePolishSession(
             recordingID: id, preferences: input.preferences, modelIdentifier: input.model
         ) { text in
             if let failure = input.failure { throw DesktopHostError(message: failure) }
+            // Consent can be withdrawn while a recording is running.
+            if DesktopPostProcessing.mode(for: input.model) == .remote {
+                try consent.require(DesktopHostCloudSharing.postProcessing(model: input.model))
+            }
             return try await effects.polishLive(
                 text: text, model: input.model, key: input.key, localLLM: localCleanup
             )

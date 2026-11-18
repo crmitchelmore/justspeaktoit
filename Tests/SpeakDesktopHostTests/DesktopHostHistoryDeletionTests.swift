@@ -8,7 +8,7 @@ final class DesktopHostHistoryDeletionTests: XCTestCase {
     func testConfirmedSnapshot_DoesNotDeleteLaterArrivalsAndKeepsRequestedAudio() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("history-clear-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         let first = try await seed(controller)
         let second = try await seed(controller)
@@ -33,7 +33,7 @@ final class DesktopHostHistoryDeletionTests: XCTestCase {
     func testMalformedDuplicateAndBusyDeletion_DoNotRemoveHistory() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("history-invalid-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         let recording = try await seed(controller)
         for payload in ["", "not-an-id", recording.id.uuidString + "\n" + recording.id.uuidString] {
@@ -52,7 +52,7 @@ final class DesktopHostHistoryDeletionTests: XCTestCase {
     func testOwnershipFailure_RetainsTheRowAndReportsFailure() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("history-ownership-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         let first = try await seed(controller)
         let other = DesktopRecordingStore.Record(
@@ -89,7 +89,7 @@ final class DesktopHostHistoryDeletionTests: XCTestCase {
     func testCancelDuringConfirmedClear_FinishesAdmittedDeletionAndKeepsRemainingRows() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("history-cancel-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         let first = try await seed(controller)
         let second = try await seed(controller)
@@ -120,7 +120,7 @@ final class DesktopHostHistoryDeletionTests: XCTestCase {
     func testNativeAdmission_DrainsEventQueueAndBoundsShutdownDuringHeldDeletion() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("history-native-close-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(
+        let controller = try DesktopHostController<FakePlatform>.consented(
             directory: root, effects: SyntheticEffects(), shutdownGrace: .milliseconds(20)
         )
         await controller.markReadyForSelfTest()
@@ -160,7 +160,7 @@ final class DesktopHostHistoryDeletionTests: XCTestCase {
             defer { try? FileManager.default.removeItem(at: root) }
             let effects = BlockingOutputEffects()
             defer { effects.release() }
-            let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+            let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
             await controller.markReadyForSelfTest()
             let owner = try await seed(controller)
             let other = try await seed(controller)
@@ -197,7 +197,7 @@ final class DesktopHostHistoryDeletionTests: XCTestCase {
             account: nil, localCleanupPending: true, cloudPending: false
         )
         try ledger.save(in: directory)
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.ready()
         let visible = await controller.history
         XCTAssertEqual(Set(visible.keys), [retained.id])

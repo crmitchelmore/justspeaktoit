@@ -21,6 +21,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let selection: DesktopSpeechSelection
         do {
             selection = try currentVoiceSelection()
+            try requireCloudSharing([DesktopHostCloudSharing.voice(selection.voice)])
         } catch {
             update("Read aloud failed: \(error.localizedDescription)"); return
         }
@@ -100,20 +101,23 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         output: Platform.VoiceOutput?, speech: Platform.Playback.Speech
     ) async throws {
         let effects = effects
+        let consent = cloudSharing
         let playback = playback
         if case .deepgram(let voice) = selection.voice, let output {
             for segment in SpeechTextSegmenter.segments(source.text) {
                 try Task.checkCancellation()
                 let request = try DeepgramSpeechRequest(text: segment, voice: voice, speed: selection.options.speed)
                 _ = try await output.speak(request, credential: {
-                    try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
+                    try await Self.readVoiceSynthesisKey(
+                        effects: effects, name: selection.voice.apiKeyIdentifier, consent: consent)
                 }, through: { file in
                     try await playback.playToCompletion(speech, path: file.path)
                 })
             }
         } else {
             let wav = try await Platform.synthesizeVoiceOutput(source, selection: selection) {
-                try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
+                try await Self.readVoiceSynthesisKey(
+                    effects: effects, name: selection.voice.apiKeyIdentifier, consent: consent)
             }
             try await DesktopVoicePlaybackFile.play(
                 VoiceGeneratedAudio(validating: wav, sampleRate: selection.sampleRate),

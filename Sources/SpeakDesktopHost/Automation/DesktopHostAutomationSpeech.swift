@@ -189,9 +189,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         ticket: DesktopPlaybackRequests.Ticket
     ) async throws -> VoiceGeneratedAudio {
         let effects = effects
+        let consent = cloudSharing
         let prepared = try await prepareVoiceSynthesisSource(snapshot, selection: selection, ticket: ticket)
         let wav = try await Platform.synthesizeVoiceOutput(prepared, selection: selection) {
-            try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
+            try await Self.readVoiceSynthesisKey(
+                effects: effects, name: selection.voice.apiKeyIdentifier, consent: consent)
         }
         try checkAutomationSpeech(ticket)
         return try VoiceGeneratedAudio(validating: wav, sampleRate: selection.sampleRate)

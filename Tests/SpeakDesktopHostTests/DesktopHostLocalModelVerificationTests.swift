@@ -23,7 +23,8 @@ final class DesktopHostLocalModelVerificationTests: XCTestCase {
         DesktopHostModels.setLocalLabels([:])
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("verify-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakeLocalPlatform>(directory: directory, effects: LocalEffects())
+        controller = try DesktopHostController<FakeLocalPlatform>.consented(
+            directory: directory, effects: LocalEffects())
         await controller.markReadyForSelfTest()
         await controller.configureLocalModels()
     }

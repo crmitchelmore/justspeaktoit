@@ -86,6 +86,7 @@ extension DesktopHostController {
             )
         }
         try DesktopComparisonRunner.validate(candidates)
+        try requireCloudSharing(identifiers.map { DesktopHostCloudSharing.transcription(model: $0) })
         guard !live || candidates.count <= 8 else {
             throw DesktopHostError(message: "Live comparison supports at most eight simultaneous models.")
         }

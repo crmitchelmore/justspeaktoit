@@ -58,6 +58,7 @@ extension DesktopHostController {
                 if let error = result.error { throw DesktopHostError(message: error) }
                 raw = result.text
             } else {
+                try requireCloudSharing([DesktopHostCloudSharing.transcription(model: run.profile.modelIdentifier)])
                 var request = DesktopHostTranscriptionRequest(
                     audio: file.url, model: run.profile.modelIdentifier, key: run.transcriptionKey,
                     duration: duration, language: run.profile.language, keywords: run.keywords,
@@ -70,6 +71,7 @@ extension DesktopHostController {
             try checkVoiceEdit(run)
             let instruction = VoiceEditPolicy.normalizedInstruction(raw)
             guard !instruction.isEmpty else { throw DesktopVoiceEditError.emptyInput }
+            try requireCloudSharing([DesktopHostCloudSharing.postProcessing(model: run.rewriteModel)])
             update("Voice edit: applying your instruction to the captured text.", state: 2)
             hud(run.id, .init(
                 phase: .postProcessing, headline: "Editing selection", subheadline: "Applying your spoken instruction"

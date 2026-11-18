@@ -29,6 +29,7 @@
 #include "WindowsWindowChrome.hpp"
 #include "WindowsHistoryFilters.hpp"
 #include "WindowsOnboarding.hpp"
+#include "WindowsCloudSharing.hpp"
 #include "WindowsAppIcon.hpp"
 #include "WindowsMigrationRestore.hpp"
 #include "WindowsGlobalEscape.hpp"
@@ -219,7 +220,7 @@ constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, a
 constexpr int aboutLinkBaseID = 480, aboutDetailsID = 490;
 // About's Support development row: its label and up to four web tip links.
 constexpr int tipJarLabelID = 454, tipLinkBaseID = 455, maximumTipLinks = 4;
-constexpr int setupGuideID = 451, permissionsID = 452, troubleshootingID = 453;
+constexpr int setupGuideID = 451, permissionsID = 452, troubleshootingID = 453, privacyID = 493;
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
 constexpr UINT hudMessage = WM_APP + 21;
 constexpr UINT sidebarMessage = WM_APP + 30;
@@ -229,6 +230,7 @@ constexpr UINT shellMessage = WM_APP + 32;
 // openAPIKeys() request (jsti_window_request_api_keys).
 constexpr int apiKeysID = 491;
 constexpr UINT apiKeysMessage = WM_APP + 98;
+constexpr UINT cloudSharingMessage = WM_APP + 130;
 // The sidebar's settings search: its label (the box's accessible name), the box,
 // the results list and the empty state. UI Automation exposes these control IDs
 // as the elements' AutomationId, so they stay fixed.

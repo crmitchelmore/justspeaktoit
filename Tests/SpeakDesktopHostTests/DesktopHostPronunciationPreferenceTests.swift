@@ -48,7 +48,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         try await prepareNativeEditor(controller, root: root)
         let before = try await controller.configuration()
         let settings = root.appendingPathComponent("settings.json")
@@ -71,7 +71,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         try await prepareNativeEditor(controller, root: root)
         let before = try await controller.configuration()
         for intent in [DesktopConfigurationSaveIntent.apply, .persistOnly] {
@@ -89,7 +89,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
             XCTAssertEqual(after.liveOptions.keywords, ["Explicit"])
         }
         await controller.close()
-        let restarted = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let restarted = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let restored = try await restarted.nativeConfigurationEditorSnapshot()
         XCTAssertEqual(restored.entries[try fieldIndex("assemblyAIKeyterms")], "Explicit, Modern, Legacy")
         XCTAssertEqual(restored.preferences.liveOptions.keywords, ["Explicit"])
@@ -100,7 +100,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         try await prepareNativeEditor(controller, root: root)
         let snapshot = try await controller.nativeConfigurationEditorSnapshot()
         try await controller.activateConfigurationEditorSnapshot(snapshot)
@@ -126,7 +126,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         try await prepareNativeEditor(controller, root: root)
         let before = try await controller.configuration()
         let first = try await controller.nativeConfigurationEditorSnapshot()
@@ -157,7 +157,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         try await prepareNativeEditor(controller, root: root)
         let original = try await controller.nativeConfigurationEditorSnapshot()
         try await controller.activateConfigurationEditorSnapshot(original)
@@ -188,7 +188,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         try await prepareNativeEditor(controller, root: root)
         let original = try await controller.nativeConfigurationEditorSnapshot()
         try await controller.activateConfigurationEditorSnapshot(original)
@@ -215,7 +215,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = SettingsWriteEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         try await prepareNativeEditor(controller, root: root)
         let snapshot = try await controller.nativeConfigurationEditorSnapshot()
         try await controller.activateConfigurationEditorSnapshot(snapshot)
@@ -249,7 +249,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         try await prepareNativeEditor(controller, root: root)
         for (explicit, seed) in [(String(repeating: "x", count: 65_535), "Legacy"), ("Explicit", "Bad\0Word")] {
             let configuration = try DesktopConfiguration(values: [
@@ -332,7 +332,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
             ignoredKey: AnyCodable(.array([.string("beta")]))
         ]
         try JSONEncoder().encode(settings).write(to: root.appendingPathComponent("settings.json"))
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let configuration = try await controller.configuration()
         XCTAssertEqual(configuration.liveOptions.keywords, [])
         XCTAssertEqual(configuration.liveOptions.assemblyAIKeyterms, ["Alpha"])
@@ -356,7 +356,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
             "configuration": AnyCodable(.object([dictionaryKey: nested, ignoredKey: .array([])]))
         ]
         try JSONEncoder().encode(settings).write(to: root.appendingPathComponent("settings.json"))
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let effective = try await controller.configuration()
         XCTAssertEqual(effective.liveOptions.assemblyAIKeyterms, ["Nested"])
         XCTAssertEqual(effective.values[dictionaryKey], AnyCodable(nested))
@@ -367,7 +367,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
         XCTAssertEqual(document.preferences.values[dictionaryKey], AnyCodable(nested))
         XCTAssertEqual(document.preferences.values[ignoredKey], AnyCodable(.array([])))
         await controller.close()
-        let restarted = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let restarted = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let restored = try await restarted.configuration()
         XCTAssertEqual(restored.liveOptions.assemblyAIKeyterms, ["Nested"])
         XCTAssertEqual(restored.values[dictionaryKey], AnyCodable(nested))
@@ -379,7 +379,7 @@ final class DesktopHostPronunciationPreferenceTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = SettingsWriteEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         let dictionaryKey = ApplicationPreferenceKey.ttsPronunciationDictionary.rawValue
         let initial = try DesktopConfiguration(values: [
             "transcriptionKeywords": AnyCodable(.string("Explicit")),

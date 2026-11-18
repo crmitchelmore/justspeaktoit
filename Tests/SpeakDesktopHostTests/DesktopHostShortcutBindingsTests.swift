@@ -12,7 +12,8 @@ final class DesktopHostShortcutBindingsTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("shortcuts-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
     }
 
@@ -28,7 +29,8 @@ final class DesktopHostShortcutBindingsTests: XCTestCase {
         changed[.stopTTS] = DesktopShortcutBinding(keyCode: 1, modifiers: [.command, .shift], isGlobal: false)
         try await controller.saveShortcutBindings(changed)
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restored = await controller.shortcutBindings
         XCTAssertEqual(restored, changed)
 
@@ -63,7 +65,7 @@ final class DesktopHostShortcutBindingsTests: XCTestCase {
         await controller.close()
         let effects = SettingsWriteEffects()
         effects.refusesWrites = true
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         do {
             try await controller.saveShortcutBindings(DesktopShortcutBindings(preset: .off))
             XCTFail("Failed write accepted")

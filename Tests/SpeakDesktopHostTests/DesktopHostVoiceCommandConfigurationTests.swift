@@ -27,7 +27,7 @@ final class DesktopHostVoiceCommandConfigTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-config-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
         let effects = VoiceCommandEffects()
-        let first = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        let first = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         var entries = try await first.configuration().entries
         let enabledIndex = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == "voiceCommandsEnabled" })
         let triggersIndex = try XCTUnwrap(DesktopConfiguration.fields.firstIndex {
@@ -39,7 +39,7 @@ final class DesktopHostVoiceCommandConfigTests: XCTestCase {
         let exported = directory.appendingPathComponent("preferences.json")
         try await first.exportConfiguration(path: exported.path)
         await first.close()
-        let second = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        let second = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         let restored = try await second.configuration()
         XCTAssertFalse(restored.enabled("voiceCommandsEnabled"))
         XCTAssertEqual(restored.text("clipboardInsertionTriggers"), "my snippet, paste")

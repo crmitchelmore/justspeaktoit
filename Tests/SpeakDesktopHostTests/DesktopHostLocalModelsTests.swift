@@ -21,7 +21,8 @@ final class DesktopHostLocalModelsTests: XCTestCase {
         DesktopHostModels.setLocalLabels([:])
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("local-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakeLocalPlatform>(directory: directory, effects: LocalEffects())
+        controller = try DesktopHostController<FakeLocalPlatform>.consented(
+            directory: directory, effects: LocalEffects())
         await controller.markReadyForSelfTest()
         await controller.configureLocalModels()
     }
@@ -268,7 +269,8 @@ extension DesktopHostLocalModelsTests {
         XCTAssertEqual(preferences.local, tiny.catalogueID)
         XCTAssertEqual(preferences.localLive, localLive)
         await controller.close()
-        controller = try DesktopHostController<FakeLocalPlatform>(directory: directory, effects: LocalEffects())
+        controller = try DesktopHostController<FakeLocalPlatform>.consented(
+            directory: directory, effects: LocalEffects())
         let restored = await controller.preferredModelIDs()
         XCTAssertEqual(restored.batch, batch)
         XCTAssertEqual(restored.live, remoteLive)

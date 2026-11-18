@@ -20,7 +20,7 @@ final class DesktopHostVoiceEditTests: XCTestCase {
         )
         #endif
         effects = VoiceEditFixtureEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         let index = try XCTUnwrap(DesktopHostModels.all.firstIndex { $0.id == "openai/whisper-1" })
         let selected = await controller.selectModel(index)
@@ -219,7 +219,7 @@ final class DesktopHostVoiceEditTests: XCTestCase {
 
     func testCloseWithHeldRewrite_RetainsScratchOwnershipUntilTheProviderActuallyReturns() async throws {
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: effects, shutdownGrace: .milliseconds(30)
         )
         await controller.markReadyForSelfTest()

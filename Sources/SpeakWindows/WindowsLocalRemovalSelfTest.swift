@@ -37,6 +37,7 @@ enum WindowsLocalRemovalSelfTest {
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = SyntheticEffects()
         let controller = try WindowsAppController(directory: root, effects: effects)
+        await controller.allowCloudSharingForSelfTest()
         do {
             try await body(controller, effects, root)
         } catch {

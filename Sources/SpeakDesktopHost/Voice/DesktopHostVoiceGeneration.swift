@@ -65,6 +65,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let conversionID: UUID?
         do {
             selection = try currentVoiceSelection()
+            try requireCloudSharing([DesktopHostCloudSharing.voice(selection.voice)])
             format = try options.format ?? VoiceAudioFormat.storedValue(voiceOutputSettings().format)
             conversionID = try admitVoiceAudioConversion(format)
         } catch {
@@ -110,6 +111,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let ticket = job.ticket
         let format = job.format
         let effects = effects
+        let consent = cloudSharing
         var saveWarning: String?
         var published = false
         do {
@@ -118,7 +120,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             guard voiceTicketIsCurrent(ticket) else { return }
             let prepared = try await prepareVoiceSynthesisSource(snapshot, selection: selection, ticket: ticket)
             let wav = try await synthesize(prepared, selection) {
-                try await Self.readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier)
+                try await Self.readVoiceSynthesisKey(
+                    effects: effects, name: selection.voice.apiKeyIdentifier, consent: consent)
             }
 
             try Task.checkCancellation()

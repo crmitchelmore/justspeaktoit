@@ -12,7 +12,8 @@ final class DesktopHostTroubleshootingTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("troubleshooting-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         FakeLog.shared.setKey("", name: "openrouter.apiKey")
         await controller.saveOpenRouterPostProcessing(enabled: true, prompt: "Synthetic prompt.", key: "")
@@ -32,7 +33,8 @@ final class DesktopHostTroubleshootingTests: XCTestCase {
         XCTAssertEqual(saved.modelIdentifier, snapshot.processing.modelIdentifier)
         XCTAssertEqual(saved.customPrompt, snapshot.processing.customPrompt)
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restarted = await controller.postProcessingOptions()
         XCTAssertEqual(restarted, saved)
     }

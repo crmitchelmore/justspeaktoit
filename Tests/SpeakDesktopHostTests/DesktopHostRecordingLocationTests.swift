@@ -15,7 +15,7 @@ final class DesktopHostRecordingLocationTests: XCTestCase {
             try? FileManager.default.removeItem(at: chosen)
         }
         try FileManager.default.createDirectory(at: chosen, withIntermediateDirectories: true)
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.ready()
         await controller.chooseRecordingsDirectory(chosen.path)
         XCTAssertTrue(FakeLog.shared.allStatuses.contains(DesktopHostRecordingLocation.unavailable))
@@ -31,7 +31,7 @@ final class DesktopHostRecordingLocationTests: XCTestCase {
     func testUseDefault_KeepsHistoryAndMovesNothing() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("location-default-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.chooseRecordingsDirectory("   ")
         XCTAssertTrue(FakeLog.shared.allStatuses.contains("New recordings are saved in History."))
         let folder = await controller.recordingsFolderToReveal()

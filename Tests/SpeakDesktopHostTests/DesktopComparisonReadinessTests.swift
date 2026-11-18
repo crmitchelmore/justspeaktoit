@@ -14,7 +14,7 @@ final class DesktopComparisonReadinessTests: XCTestCase {
     func testReadyPickerUsesCanonicalRequirementsAndRefreshesAfterKeyWrites() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.openComparison()
         XCTAssertEqual(ComparisonPresentations.shared.latest?.models, "")
         XCTAssertTrue(ComparisonPresentations.shared.latest?.detail.contains("No OpenAI API key") == true)
@@ -44,7 +44,7 @@ final class DesktopComparisonReadinessTests: XCTestCase {
     func testUnavailableSavedSelectionsSurviveReadyOnlyEditsAndRelaunch() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.openComparison()
         let states = await controller.comparisonModelStates()
         let file = try XCTUnwrap(states.first { $0.option.id == "openai/whisper-1" }).option
@@ -80,7 +80,7 @@ final class DesktopComparisonReadinessTests: XCTestCase {
     func testPostProcessingKeyWriteRefreshesComparisonEvenWhenSettingsWriteFails() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(
+        let controller = try DesktopHostController<FakePlatform>.consented(
             directory: root, effects: ReadinessEffects(credentialReadFails: false)
         )
         await controller.openComparison()
@@ -101,7 +101,7 @@ final class DesktopComparisonReadinessTests: XCTestCase {
     func testFreshAdmissionRejectsRevokedKeysAfterPlaybackSuspensionBeforeAnyWork() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         FakeLog.shared.setKey("synthetic-key", name: "openai.apiKey")
         await controller.openComparison()
         let ids = DesktopHostModels.visible.filter {
@@ -135,7 +135,7 @@ final class DesktopComparisonReadinessTests: XCTestCase {
     func testAzureSettingsAndCredentialReadFailuresAreExplicitAndCannotAdmit() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         FakeLog.shared.setKey("synthetic-key:uksouth", name: AzureSpeechConfiguration.credentialIdentifier)
         await controller.openComparison()
         let azure = try XCTUnwrap(DesktopHostModels.live.first {
@@ -150,7 +150,7 @@ final class DesktopComparisonReadinessTests: XCTestCase {
         await controller.saveAzureResourceEndpoint("")
         XCTAssertFalse(ComparisonPresentations.shared.latest?.models.contains(azure.id + "\t") == true)
         await controller.close()
-        let failing = try DesktopHostController<FakePlatform>(directory: root, effects: ReadinessEffects())
+        let failing = try DesktopHostController<FakePlatform>.consented(directory: root, effects: ReadinessEffects())
         await failing.openComparison()
         XCTAssertEqual(ComparisonPresentations.shared.latest?.models, "")
         XCTAssertTrue(
@@ -166,7 +166,7 @@ final class DesktopComparisonReadinessTests: XCTestCase {
     func testFreshAdmissionRejectsAzureEndpointClearedDuringPlaybackSuspension() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         FakeLog.shared.setKey("synthetic-key:uksouth", name: AzureSpeechConfiguration.credentialIdentifier)
         FakeLog.shared.setKey("synthetic-key", name: "openai.apiKey")
         await controller.saveAzureResourceEndpoint("http://127.0.0.1:9999")
@@ -196,7 +196,7 @@ final class DesktopComparisonReadinessTests: XCTestCase {
     func testClosingDuringPlaybackSuspensionCannotAdmitLateComparison() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         FakeLog.shared.setKey("synthetic-key", name: "openai.apiKey")
         let ids = DesktopHostModels.visible.filter {
             !DesktopHostModels.isLive($0.id)
@@ -231,7 +231,8 @@ extension DesktopComparisonReadinessTests {
         for event: Int32 in [105, 123] {
             let root = temporaryRoot()
             defer { try? FileManager.default.removeItem(at: root) }
-            let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+            let controller = try DesktopHostController<FakePlatform>.consented(
+                directory: root, effects: SyntheticEffects())
             FakeLog.shared.setKey("synthetic-key", name: "openai.apiKey")
             let ids = DesktopHostModels.visible.filter {
                 !DesktopHostModels.isLive($0.id)
@@ -266,7 +267,8 @@ extension DesktopComparisonReadinessTests {
         for event: Int32 in [105, 123] {
             let root = temporaryRoot()
             defer { try? FileManager.default.removeItem(at: root) }
-            let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+            let controller = try DesktopHostController<FakePlatform>.consented(
+                directory: root, effects: SyntheticEffects())
             FakeLog.shared.setKey("synthetic-key", name: "openai.apiKey")
             let ids = DesktopHostModels.visible.filter {
                 !DesktopHostModels.isLive($0.id)

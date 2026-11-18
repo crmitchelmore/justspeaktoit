@@ -228,7 +228,7 @@ final class DesktopHostPreferenceArchiveTests: XCTestCase {
     func testActualControllerProjection_IsReadOnlyAndCategoryBounded() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let effects = SettingsWriteEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         let before = await controller.settings
         let projected = try await controller.preferenceArchiveProjection(categories: [.vocabulary])
         let all = try await controller.preferenceArchiveProjection(categories: categories)

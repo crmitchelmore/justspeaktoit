@@ -69,7 +69,8 @@ final class DesktopHostLivePolishConfigurationTests: XCTestCase {
         let entries = try await fixture.host.configurationForNativeEditor().entries
         try await fixture.host.saveConfiguration(entries)
         await fixture.host.close()
-        let restarted = try DesktopHostController<FakePlatform>(directory: fixture.directory, effects: fixture.effects)
+        let restarted = try DesktopHostController<FakePlatform>.consented(
+            directory: fixture.directory, effects: fixture.effects)
         let restored = try await restarted.configuration()
         XCTAssertEqual(try restored.livePolishPreferences.debounceMilliseconds, 250)
         XCTAssertEqual(restored.values["livePolishTailWindowChars"], AnyCodable(.int(321)))

@@ -14,7 +14,8 @@ final class DesktopHostAzureResourceTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("azure-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
     }
 
@@ -64,7 +65,8 @@ final class DesktopHostAzureResourceTests: XCTestCase {
     func testTheSavedEndpointPersistsAndAnEmptyEntryClearsIt() async throws {
         await controller.saveAzureResourceEndpoint("https://example.cognitiveservices.azure.com")
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restored = await controller.azureResourceEndpoint()
         XCTAssertEqual(restored, "https://example.cognitiveservices.azure.com")
 

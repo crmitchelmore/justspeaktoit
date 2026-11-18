@@ -12,7 +12,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = KeywordDeliveryEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         try await saveWords("Before", controller: controller)
         let captured = await controller.resolvedProfile(executablePath: nil)
@@ -52,7 +52,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = KeywordDeliveryEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         try await saveWords("Captured", controller: controller)
         let profile = await controller.resolvedProfile(executablePath: nil)
         try await saveWords("New configuration", controller: controller)
@@ -70,7 +70,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = KeywordDeliveryEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         let model = CartesiaBatchClient.catalogID
         let index = try XCTUnwrap(DesktopHostModels.all.firstIndex { $0.id == model })
@@ -98,7 +98,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = KeywordDeliveryEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         let model = try XCTUnwrap(DesktopTranscription.batchModels.first { $0.id.hasPrefix("assemblyai/") }).id
         let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
         FakeLog.shared.setKey("synthetic", name: credential)
@@ -122,7 +122,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = KeywordDeliveryEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         let dictionaryKey = ApplicationPreferenceKey.ttsPronunciationDictionary.rawValue
         let ignoredKey = ApplicationPreferenceKey.assemblyAIIgnoredPronunciationTerms.rawValue
         let transfer = root.appendingPathComponent("legacy-pronunciation-transfer.json")
@@ -176,7 +176,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = KeywordDeliveryEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         var entries = try await controller.configuration().entries
         for key in DesktopConfiguration.modulatePreferenceKeys {
             let index = try XCTUnwrap(DesktopConfiguration.fields.firstIndex { $0.key == key })
@@ -211,7 +211,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = KeywordDeliveryEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         let configuration = try DesktopConfiguration(values: [
             "transcriptionKeywords": AnyCodable(.string("Explicit")),
@@ -271,7 +271,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = KeywordDeliveryEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         try await replacePronunciations([
             PronunciationEntry(word: "Later", pronunciation: "Not sent")
         ], controller: controller, root: root)
@@ -311,7 +311,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = KeywordDeliveryEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         let model = "modulate/velma-2-stt-batch"
         let index = try XCTUnwrap(DesktopHostModels.all.firstIndex { $0.id == model })
@@ -375,7 +375,7 @@ final class DesktopHostKeywordDeliveryTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = KeywordDeliveryEffects(liveClient: KeywordLiveClient())
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         let index = try XCTUnwrap(DesktopHostModels.all.firstIndex { $0.id == model })
         let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier

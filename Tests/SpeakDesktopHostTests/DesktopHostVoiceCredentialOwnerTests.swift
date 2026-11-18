@@ -16,7 +16,7 @@ final class DesktopHostVoiceCredentialOwnerTests: XCTestCase {
         FakeLog.shared.reset()
         CredentialOwnerReplies.shared.reset(recording: true)
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("credential-owner-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: SyntheticEffects(), shutdownGrace: .milliseconds(40))
         await controller.markReadyForSelfTest()
         await controller.selectVoiceOutput(.cartesia(CartesiaTTSCatalog.voices[0]))

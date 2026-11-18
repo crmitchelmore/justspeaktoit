@@ -13,7 +13,7 @@ final class DesktopHostAppSwitchDeliveryTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("app-switch-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         effects = AppSwitchEffects()
-        host = try DesktopHostController(directory: directory, effects: effects)
+        host = try DesktopHostController.consented(directory: directory, effects: effects)
     }
 
     override func tearDown() async throws {
@@ -42,7 +42,7 @@ final class DesktopHostAppSwitchDeliveryTests: XCTestCase {
             let document = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: Data(contentsOf: file))
             XCTAssertEqual(document.preferences.values[key], AnyCodable(.string(policy.rawValue)))
             await host.close()
-            host = try DesktopHostController(directory: directory, effects: effects)
+            host = try DesktopHostController.consented(directory: directory, effects: effects)
             let restarted = await host.settings
             XCTAssertEqual(restarted.textOutput?.appSwitchDelivery, policy)
             XCTAssertNil(restarted.configuration?.values[key])
@@ -70,7 +70,7 @@ final class DesktopHostAppSwitchDeliveryTests: XCTestCase {
         try JSONEncoder().encode(DesktopConfigurationDocument(preferences: source)).write(to: file)
         try await host.importConfiguration(path: file.path)
         await host.close()
-        host = try DesktopHostController(directory: directory, effects: effects)
+        host = try DesktopHostController.consented(directory: directory, effects: effects)
         let stored = await host.settings
         XCTAssertEqual(stored.textOutput?.appSwitchDelivery, .onlyIfOriginalAppInFront)
         XCTAssertNil(stored.configuration?.values[key])
@@ -87,7 +87,7 @@ final class DesktopHostAppSwitchDeliveryTests: XCTestCase {
         legacy.configuration = try DesktopConfiguration(values: [key: AnyCodable(.string("originalApp"))])
         await host.close()
         try JSONEncoder().encode(legacy).write(to: directory.appendingPathComponent("settings.json"))
-        host = try DesktopHostController(directory: directory, effects: effects)
+        host = try DesktopHostController.consented(directory: directory, effects: effects)
         let migrated = await host.settings
         XCTAssertEqual(migrated.textOutput?.appSwitchDelivery, .originalApp)
         XCTAssertNil(migrated.configuration?.values[key])

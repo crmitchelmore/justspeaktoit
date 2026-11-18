@@ -18,7 +18,8 @@ final class DesktopHostAutomationSpeechTests: XCTestCase {
         output = FileManager.default.temporaryDirectory.appendingPathComponent("automation-speech-out-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         FakeLog.shared.setKey("deepgram-key", name: VoiceOutputProvider.deepgram.apiKeyIdentifier)
     }

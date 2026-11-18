@@ -16,7 +16,7 @@ final class DesktopHostAutomationTests: XCTestCase {
             .appendingPathComponent("automation-host-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         effects = SyntheticEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         let model = ModelCatalog.defaultBatchTranscriptionModel
         let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
@@ -169,7 +169,7 @@ final class DesktopHostAutomationTests: XCTestCase {
         await controller.close()
         let refusing = SettingsWriteEffects()
         refusing.refusesWrites = true
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: refusing)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: refusing)
         do {
             try await controller.saveAutomationPreference(enabled: true)
             XCTFail("Write failure accepted")
@@ -185,7 +185,7 @@ final class DesktopHostAutomationTests: XCTestCase {
     func testFalseImport_WriteFailureStillRevokesRuntimeAndDisclosesRestartRisk() async throws {
         await controller.close()
         let refusing = SettingsWriteEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: refusing)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: refusing)
         try await controller.saveAutomationPreference(enabled: true)
         let revoked = expectation(description: "runtime revoked before failed write")
         await controller.setAutomationPreferenceHandler { revoked.fulfill() }
@@ -206,7 +206,7 @@ final class DesktopHostAutomationTests: XCTestCase {
     func testFailedNativeOff_LaterReconcileAndImportsCannotRegrantThisRun() async throws {
         await controller.close()
         let refusing = SettingsWriteEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: refusing)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: refusing)
         try await controller.saveAutomationPreference(enabled: true)
         let app = controller!
         let runtime = Gate(open: true)
@@ -255,7 +255,7 @@ extension DesktopHostAutomationTests {
 
     func restart() async throws {
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
     }
 
@@ -290,7 +290,7 @@ extension DesktopHostAutomationTests {
 
     func use(_ fixture: AutomationFixtureEffects) async throws {
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: fixture)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: fixture)
         await controller.markReadyForSelfTest()
     }
 

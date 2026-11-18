@@ -54,6 +54,7 @@ extension DesktopHostController {
         defer { isReady = true; reconcileCapturePreparation() }
         guard !closed else { return }
         preparePlayback()
+        publishCloudSharing()
         await prepareRecordingFeedback()
         refreshModels(force: false)
         activeOperations += 1

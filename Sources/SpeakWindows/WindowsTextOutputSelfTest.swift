@@ -80,6 +80,7 @@ private final class TextOutputWorkflow {
 
     func run() async throws {
         await controller.markReadyForSelfTest()
+        await controller.allowCloudSharingForSelfTest()
         try WindowsNative.configureTextOutput(WindowsTextOutputOptions(), context: context)
         // Every step drains its settings refresh, so clearing on the way out
         // leaves no native callback holding this workflow's context.
@@ -222,6 +223,7 @@ private final class TextOutputWorkflow {
         let saved = WindowsTextOutputOptions(method: .clipboardOnly, insertion: .replaceField, restoreClipboard: false)
         await apply(saved)
         let reopened = try WindowsAppController(directory: directory, effects: SyntheticEffects())
+        await reopened.allowCloudSharingForSelfTest()
         let reopenedOptions = await reopened.textOutputOptions()
         let reopenedSettings = try await reopened.encodedSettings()
         await reopened.close()

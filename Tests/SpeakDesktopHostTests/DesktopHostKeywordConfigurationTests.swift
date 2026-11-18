@@ -15,7 +15,7 @@ final class DesktopHostKeywordConfigurationTests: XCTestCase {
             .appendingPathComponent("keyword-settings-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         effects = SettingsWriteEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
     }
 
     override func tearDown() async throws {
@@ -51,7 +51,7 @@ final class DesktopHostKeywordConfigurationTests: XCTestCase {
         let exported = try JSONSerialization.jsonObject(with: Data(contentsOf: export)) as? [String: Any]
         XCTAssertNotNil(exported?["preferences"])
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         let reloaded = try await controller.configuration()
         for field in DesktopConfiguration.fields {
             switch field.kind {

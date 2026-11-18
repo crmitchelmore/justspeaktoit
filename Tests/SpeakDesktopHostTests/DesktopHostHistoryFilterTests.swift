@@ -8,7 +8,8 @@ final class DesktopHostHistoryFilterTests: XCTestCase {
     func testHiddenSelectionIsClearedAndStaleSelectionIsRefusedWithoutChangingHistory() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("history-filter-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         let first = record()
         var failed = record()
@@ -38,7 +39,8 @@ final class DesktopHostHistoryFilterTests: XCTestCase {
     func testMalformedAndUnknownModelFiltersDoNotReplaceTheCurrentFilter() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("history-filter-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         var entry = record()
         entry.failure = "Synthetic failure"
@@ -61,7 +63,8 @@ final class DesktopHostHistoryFilterTests: XCTestCase {
     func testHistoryList_showsOnePageAndGrowsWhileSearchCoversEveryRecord() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("history-page-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
-        let controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         var records: [DesktopRecordingStore.Record] = []

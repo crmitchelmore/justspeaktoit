@@ -9,7 +9,7 @@ final class DesktopHostVocabularyTests: XCTestCase {
     func testVocabularyLoadCompletesWhileNativeMainThreadIsBlocked() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let task = await MainActor.run {
             let done = DispatchSemaphore(value: 0)
             let load = Task.detached {
@@ -33,7 +33,7 @@ final class DesktopHostVocabularyTests: XCTestCase {
         FakeLog.shared.reset()
         DesktopHostModels.configure(streamingQualified: false)
         defer { DesktopHostModels.configure(streamingQualified: true) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         let index = try XCTUnwrap(
             DesktopHostModels.all.firstIndex { DesktopTranscription.provider(for: $0.id) != nil }
@@ -97,7 +97,7 @@ final class DesktopHostVocabularyTests: XCTestCase {
     func testEmptyProviderResultDoesNotBecomeVocabularyText() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         var record = DesktopRecordingStore.Record(id: UUID(), audioFilename: "fixture.wav", modelIdentifier: "fixture")
         record.result = TranscriptionResult(
             text: "   ", segments: [], confidence: nil, duration: 0, modelIdentifier: "fixture",
@@ -114,7 +114,7 @@ final class DesktopHostVocabularyTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         FakeLog.shared.reset()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let presented = NativeVocabularyPresentations()
         await controller.nativeVocabularyEvent(
             71, payload: "", kind: 0, targetAvailability: { "Targets: test" }, present: presented.append

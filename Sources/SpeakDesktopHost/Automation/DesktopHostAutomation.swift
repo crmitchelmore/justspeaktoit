@@ -65,6 +65,7 @@ extension DesktopHostController: AutomationCommandHost where Platform: DesktopHo
         if let limitation = profile.blockingLimitation { throw DesktopHostError(message: limitation.message) }
         try DesktopHostImport.validate(url)
         try checkUploadSize(url, model: model)
+        try requireAutomationCloudSharing([DesktopHostCloudSharing.transcription(model: model)])
         var request = DesktopHostTranscriptionRequest(
             audio: url, model: model, key: try requireCredentialOrLocalModel(model), duration: 0,
             language: profile.language, keywords: batchKeywords(for: model, options: profile.transcriptionOptions),
@@ -119,6 +120,7 @@ extension DesktopHostController: AutomationCommandHost where Platform: DesktopHo
         }
         let index = selectedIndex()
         let profile = captureProfile(modelIndex: index, executablePath: nil)
+        try requireAutomationCloudSharing(cloudSharingRequests(for: profile, polish: captureLivePolish(profile)))
         await toggleCaptured(
             target: nil, modelIndex: index, deviceID: selectedMicrophone(),
             textOutput: settings.textOutput ?? Platform.defaultTextOutput, profile: profile

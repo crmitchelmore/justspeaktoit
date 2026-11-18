@@ -12,7 +12,7 @@ final class DesktopHostProfileEditorTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("gtk-profiles-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController.consented(directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         let provider = try XCTUnwrap(DesktopHostModels.provider(for: ModelCatalog.defaultBatchTranscriptionModel))
         FakeLog.shared.setKey("synthetic-key", name: provider.apiKeyIdentifier)
@@ -46,7 +46,7 @@ final class DesktopHostProfileEditorTests: XCTestCase {
     private func restartController(with profiles: [DictationProfile]? = nil) async throws {
         if let profiles { try DesktopDictationProfileStore(directory: directory).save(profiles) }
         await controller.close()
-        controller = try DesktopHostController(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController.consented(directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
     }
 
@@ -71,7 +71,7 @@ final class DesktopHostProfileEditorTests: XCTestCase {
         )
         _ = try await controller.profileEditorEvent(event(token(renamed), "delete", two[1].id))
         await controller.close()
-        controller = try DesktopHostController(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController.consented(directory: directory, effects: SyntheticEffects())
         let restored = await controller.profiles
         XCTAssertEqual(restored.map(\.name), ["Renamed"])
         XCTAssertEqual(restored.first?.id, original.id)
@@ -90,7 +90,7 @@ final class DesktopHostProfileEditorTests: XCTestCase {
         let second = DictationProfile(name: "Second", polishEnabled: false)
         try store.save([first, second])
         await controller.close()
-        controller = try DesktopHostController(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController.consented(directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         let opened = try await controller.profileEditorEvent("refresh")
         let activated = try await controller.profileEditorEvent(event(token(opened), "activate", first.id))

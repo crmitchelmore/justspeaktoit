@@ -14,7 +14,7 @@ final class DesktopHostPostProcessingContextTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("post-context-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         effects = LocalRulesEffects()
-        controller = try DesktopHostController(directory: directory, effects: effects)
+        controller = try DesktopHostController.consented(directory: directory, effects: effects)
         guard case .apiKey(let identifier, _) = ModelCredentialResolver.requirement(
             for: ModelCatalog.defaultPostProcessingModel, purpose: .postProcessing
         ) else { throw DesktopPostProcessingError.unsupportedModel }
@@ -81,7 +81,7 @@ final class DesktopHostPostProcessingContextTests: XCTestCase {
         try JSONEncoder().encode(DesktopConfigurationDocument(preferences: preferences)).write(to: file)
         try await controller.importConfiguration(path: file.path)
         await controller.close()
-        controller = try DesktopHostController(directory: directory, effects: effects)
+        controller = try DesktopHostController.consented(directory: directory, effects: effects)
         let restored = await controller.postProcessingOptions()
         XCTAssertEqual(restored.mode, .local)
         XCTAssertEqual(restored.modelIdentifier, rules)
@@ -123,7 +123,7 @@ final class DesktopHostPostProcessingContextTests: XCTestCase {
         for restart in [false, true] {
             if restart {
                 await controller.close()
-                controller = try DesktopHostController(directory: directory, effects: effects)
+                controller = try DesktopHostController.consented(directory: directory, effects: effects)
             }
             let options = await controller.postProcessingOptions()
             let view = try await controller.configuration()
@@ -155,7 +155,7 @@ final class DesktopHostPostProcessingContextTests: XCTestCase {
         XCTAssertFalse(local.includeLexiconDirectives)
         XCTAssertFalse(local.includeContextTags)
         await controller.close()
-        controller = try DesktopHostController(directory: directory, effects: effects)
+        controller = try DesktopHostController.consented(directory: directory, effects: effects)
         let restarted = await controller.postProcessingOptions()
         XCTAssertEqual(restarted, local)
         let index = try XCTUnwrap(DesktopPostProcessing.remoteSelection(for: restarted))

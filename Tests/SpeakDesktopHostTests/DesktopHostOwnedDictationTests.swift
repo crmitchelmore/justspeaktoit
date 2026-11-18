@@ -27,7 +27,7 @@ final class OwnedDictationHostFixture {
             capability: qualified ? .qualified : .unavailable("fixture not qualified"),
             permission: .granted, makeWorker: { worker }
         )
-        host = try DesktopHostController(
+        host = try DesktopHostController.consented(
             directory: directory, effects: effects, shutdownGrace: .milliseconds(30),
             ownedDictationCapability: owned ? capability : nil
         )

@@ -92,6 +92,7 @@ extension DesktopHostController {
             if let limitation = profile.blockingLimitation { throw DesktopHostError(message: limitation.message) }
             _ = try requireCredentialOrLocalModel(profile.modelIdentifier)
             try requireAzureResource(forLive: profile.modelIdentifier)
+            try requireCloudSharing(cloudSharingRequests(for: profile, polish: nil))
             let configuration = try configuration()
             let rate = DesktopLiveTranscription.route(forID: profile.modelIdentifier)?.sampleRate
                 ?? PCMRecordingFile.sampleRate

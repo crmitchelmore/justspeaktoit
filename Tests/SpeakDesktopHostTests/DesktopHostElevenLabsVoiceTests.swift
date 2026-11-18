@@ -17,7 +17,8 @@ final class DesktopHostElevenLabsVoiceTests: XCTestCase {
         FakeLog.shared.reset()
         FakeSpeech.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("elevenlabs-voice-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         session = StubURLProtocol.makeSession()
         await controller.markReadyForSelfTest()
     }
@@ -87,7 +88,8 @@ final class DesktopHostElevenLabsVoiceTests: XCTestCase {
         }
         let before = await controller.voiceOutputSettings()
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restored = await controller.voiceOutputSettings()
         XCTAssertEqual(restored, before)
         XCTAssertEqual(try restored.synthesisSelection().voice, explicit)
@@ -222,7 +224,8 @@ final class DesktopHostElevenLabsVoiceTests: XCTestCase {
         XCTAssertTrue(editor.qualityEnabled)
         XCTAssertTrue(editor.qualityTitle.contains("unavailable"))
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restored = await controller.voiceOutputSettings()
         XCTAssertEqual(restored, saved)
         XCTAssertTrue(StubURLProtocol.recordedRequests.isEmpty)

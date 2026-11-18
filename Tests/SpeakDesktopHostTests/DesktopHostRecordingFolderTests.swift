@@ -7,7 +7,7 @@ final class DesktopHostRecordingFolderTests: XCTestCase {
     func testReveal_UsesActualStorageDirectoryWithoutChangingHistory() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("folder-reveal-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let folder = await controller.store.directory
         let id = UUID()
         let record = DesktopRecordingStore.Record(
@@ -31,7 +31,7 @@ final class DesktopHostRecordingFolderTests: XCTestCase {
     func testMissingDirectory_ReportsFailureRatherThanOpeningAnAlternative() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("folder-missing-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let folder = await controller.store.directory
         try FileManager.default.removeItem(at: folder)
         await controller.revealRecordingsDirectory()
@@ -43,7 +43,7 @@ final class DesktopHostRecordingFolderTests: XCTestCase {
     func testClosedController_DoesNotLaunchFolder() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("folder-closed-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let folder = await controller.store.directory
         await controller.close()
         await controller.revealRecordingsDirectory()
@@ -53,7 +53,7 @@ final class DesktopHostRecordingFolderTests: XCTestCase {
     func testNativeLaunchFailure_IsReported() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("folder-launch-failure-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let folder = await controller.store.directory
         FakeLog.shared.setDirectoryLauncher { url in
             if url == folder { throw DesktopHostError(message: "Synthetic file manager failure.") }
@@ -69,7 +69,7 @@ final class DesktopHostRecordingFolderTests: XCTestCase {
     func testHeldNativeLaunch_DeduplicatesAndDoesNotBlockClosing() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("folder-held-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(
+        let controller = try DesktopHostController<FakePlatform>.consented(
             directory: root, effects: SyntheticEffects(), shutdownGrace: .milliseconds(20)
         )
         let folder = await controller.store.directory

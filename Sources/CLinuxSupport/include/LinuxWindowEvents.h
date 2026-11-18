@@ -66,7 +66,11 @@ enum {
     JSTI_EVENT_ISSUE_REPORT_OPEN = 154,
     JSTI_EVENT_ISSUE_REPORT_CLOSE = 155,
     JSTI_EVENT_HISTORY_LOAD_MORE = 156, /* the History page scrolled to its end; no text */
-    JSTI_EVENT_PROFILES = 140
+    JSTI_EVENT_PROFILES = 140,
+    /* Cloud sharing consent (CloudSharing.h): RESPONSE's text is the question's token and
+     * index 1 allows, 0 is not now; WITHDRAW's text is the provider identifier. */
+    JSTI_EVENT_CLOUD_CONSENT_RESPONSE = 190,
+    JSTI_EVENT_CLOUD_SHARING_WITHDRAW = 191
 };
 
 /* Read aloud, Appearance, Launch at login, automation and the recordings

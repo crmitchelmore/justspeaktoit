@@ -250,11 +250,8 @@ internal object AccountVoiceListing {
     private class Cursor(val value: String?)
 
     /** The next page's cursor; null when it is present but not a string, as SpeakCore's decoder rejects it. */
-    private fun cursor(root: JSONObject, field: String): Cursor? = when (val value = root.opt(field)) {
-        null, JSONObject.NULL -> Cursor(null)
-        is String -> Cursor(value)
-        else -> null
-    }
+    private fun cursor(root: JSONObject, field: String): Cursor? =
+        if (root.isNull(field)) Cursor(null) else (root.opt(field) as? String)?.let(::Cursor)
 
     private fun languagesValid(languages: JSONArray?): Boolean {
         if (languages == null) return true

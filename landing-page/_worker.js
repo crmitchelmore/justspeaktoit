@@ -215,9 +215,73 @@ async function alphaPointer() {
   return pointer.value;
 }
 
+// CloudKit Console accepts only https:// (or a custom scheme) as an API
+// token's sign-in callback, so the token's registered callback is this page,
+// and it forwards Apple's redirect to the loopback listener the Windows, Linux
+// and Android apps open only while sign-in runs. Only the single
+// ckWebAuthToken goes on; nothing else from the query is kept, logged or echoed.
+const cloudKitSignInPath = '/cloudkit-sign-in';
+const cloudKitLoopbackCallback = 'http://127.0.0.1:47823/cloudkit-sign-in';
+const cloudKitTokenPattern = /^[A-Za-z0-9+/=_.~:|-]{1,4096}$/;
+const cloudKitHeaders = {
+  'Cache-Control': 'no-store',
+  'Referrer-Policy': 'no-referrer',
+  'X-Robots-Tag': 'noindex',
+};
+
+/**
+ * The one `ckWebAuthToken` in a raw query string, percent-decoded with `+`
+ * kept as `+` (as the apps read it), or null when it is missing, empty,
+ * repeated, malformed or not a plausible token.
+ */
+function cloudKitWebAuthToken(search) {
+  const tokens = [];
+  for (const item of search.replace(/^\?/, '').split('&')) {
+    const separator = item.indexOf('=');
+    const rawName = separator === -1 ? item : item.slice(0, separator);
+    let name;
+    try {
+      name = decodeURIComponent(rawName);
+    } catch {
+      continue;
+    }
+    if (name !== 'ckWebAuthToken') continue;
+    if (separator === -1) return null;
+    try {
+      tokens.push(decodeURIComponent(item.slice(separator + 1)));
+    } catch {
+      return null;
+    }
+  }
+  return tokens.length === 1 && cloudKitTokenPattern.test(tokens[0]) ? tokens[0] : null;
+}
+
+function cloudKitSignIn(request, url) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response(null, {status: 405, headers: {...cloudKitHeaders, Allow: 'GET, HEAD'}});
+  }
+  const token = cloudKitWebAuthToken(url.search);
+  if (token === null) {
+    const body = request.method === 'HEAD' ? null : '<!doctype html><meta charset="utf-8">'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1">'
+      + '<title>iCloud sign-in did not finish</title>'
+      + '<p>This iCloud sign-in link is incomplete or has expired. '
+      + 'Start iCloud sign-in again from Just Speak to It.</p>';
+    return new Response(body, {status: 400, headers: {
+      ...cloudKitHeaders, 'Content-Type': 'text/html; charset=utf-8', 'X-Content-Type-Options': 'nosniff',
+    }});
+  }
+  return new Response(null, {status: 302, headers: {
+    ...cloudKitHeaders,
+    Location: `${cloudKitLoopbackCallback}?ckWebAuthToken=${encodeURIComponent(token)}`,
+  }});
+}
+
 export default {
   async fetch(request, env) {
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    const path = url.pathname;
+    if (path === cloudKitSignInPath) return cloudKitSignIn(request, url);
     const assets = {
       '/alpha/appcast.xml': 'appcast.xml',
       '/alpha/appcast-arm64.xml': 'appcast-arm64.xml',

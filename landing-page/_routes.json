@@ -2,7 +2,8 @@
   "version": 1,
   "include": [
     "/alpha/*",
-    "/linux/*"
+    "/linux/*",
+    "/cloudkit-sign-in"
   ],
   "exclude": []
 }

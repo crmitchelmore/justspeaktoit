@@ -380,3 +380,59 @@ test('Android route follows its own pointer and refuses a missing or malformed o
     globalThis.fetch = originalFetch;
   }
 });
+
+const signIn = (target, init) => worker.fetch(new Request(`https://justspeaktoit.com${target}`, init),
+  {ASSETS: {fetch: () => new Response('static')}});
+const loopback = 'http://127.0.0.1:47823/cloudkit-sign-in';
+const assertPrivate = response => {
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  assert.equal(response.headers.get('Referrer-Policy'), 'no-referrer');
+  assert.equal(response.headers.get('X-Robots-Tag'), 'noindex');
+};
+
+test('the CloudKit sign-in callback forwards only the token to the loopback listener', async () => {
+  for (const method of ['GET', 'HEAD']) {
+    const response = await signIn('/cloudkit-sign-in?ckWebAuthToken=158__54__abc&utm_source=x&other=1', {method});
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get('Location'), `${loopback}?ckWebAuthToken=158__54__abc`);
+    assertPrivate(response);
+    assert.equal(await response.text(), '');
+  }
+});
+
+test('the CloudKit sign-in callback keeps +, / and = in the token through the redirect', async () => {
+  for (const query of ['ckWebAuthToken=a+b/c=d==', 'ckWebAuthToken=a%2Bb%2Fc%3Dd%3D%3D']) {
+    const response = await signIn(`/cloudkit-sign-in?${query}`);
+    const location = response.headers.get('Location');
+    assert.equal(location, `${loopback}?ckWebAuthToken=a%2Bb%2Fc%3Dd%3D%3D`);
+    // The apps percent-decode the value and keep a literal + as +.
+    assert.equal(decodeURIComponent(new URL(location).search.slice('?ckWebAuthToken='.length)), 'a+b/c=d==');
+  }
+});
+
+test('the CloudKit sign-in callback refuses a missing, empty, repeated, odd or oversized token', async () => {
+  for (const query of ['', '?', '?other=1', '?ckWebAuthToken', '?ckWebAuthToken=', '?ckWebAuthToken=a&ckWebAuthToken=b',
+    '?ckWebAuthToken=a&ckWebAuthToken=a', '?ckWebAuthToken=a%20b', '?ckWebAuthToken=%3Cscript%3E', '?ckWebAuthToken=%zz',
+    `?ckWebAuthToken=${'a'.repeat(4097)}`]) {
+    const response = await signIn(`/cloudkit-sign-in${query}`);
+    assert.equal(response.status, 400, query);
+    assert.equal(response.headers.get('Location'), null);
+    assertPrivate(response);
+    const body = await response.text();
+    assert.match(body, /Start iCloud sign-in again from Just Speak to It/);
+    assert.doesNotMatch(body, /script|zz|aaaa/);
+  }
+  assert.equal((await signIn(`/cloudkit-sign-in?ckWebAuthToken=${'a'.repeat(4096)}`)).status, 302);
+});
+
+test('the CloudKit sign-in callback refuses other methods and leaves other paths alone', async () => {
+  const post = await signIn('/cloudkit-sign-in?ckWebAuthToken=abc', {method: 'POST', body: 'x'});
+  assert.equal(post.status, 405);
+  assert.equal(post.headers.get('Location'), null);
+  assert.equal(post.headers.get('Allow'), 'GET, HEAD');
+  assertPrivate(post);
+  for (const path of ['/cloudkit-sign-in/?ckWebAuthToken=abc', '/cloudkit-sign-in.html?ckWebAuthToken=abc',
+    '/alpha/cloudkit-sign-in?ckWebAuthToken=abc', '/privacy?ckWebAuthToken=abc']) {
+    assert.equal(await (await signIn(path)).text(), 'static', path);
+  }
+});

@@ -738,7 +738,8 @@ API token serves both apps: they share the callback URL.
   page, opens it in the default browser (only `https` pages on `apple.com` or
   `icloud.com`; through the OpenURI portal inside Flatpak) and listens on
   `http://127.0.0.1:47823/cloudkit-sign-in` for the redirect carrying
-  `ckWebAuthToken`, only during sign-in and for at most ten minutes. A
+  `ckWebAuthToken` (Apple redirects to the token's registered
+  `https://justspeaktoit.com/cloudkit-sign-in`, which forwards it there), only during sign-in and for at most ten minutes. A
   connection that sends no complete request within five seconds is dropped,
   so an idle browser preconnection cannot hold the callback. The redirect is
   taken only from a process of this user (read from `/proc/net/tcp`) and only

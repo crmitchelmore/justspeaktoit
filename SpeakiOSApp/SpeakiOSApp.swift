@@ -203,6 +203,9 @@ struct SpeakiOSApp: App {
         ContentView()
             .tint(.brandAccent)
             .environmentObject(deepLinkRouter)
+            .sheet(isPresented: $deepLinkRouter.showsKeyboardConnect) {
+                KeyboardConnectSheet()
+            }
             .environment(\.iOSKeyboardEnabled, FeatureFlags.iOSKeyboardEnabled)
             .environment(
                 \.iOSKeyboardDirectCaptureEnabled,
@@ -211,6 +214,7 @@ struct SpeakiOSApp: App {
             .onOpenURL { url in
                 deepLinkRouter.handle(url)
                 runPendingCaptureAction()
+                runPendingKeyboardConnect()
             }
             .task {
                 // A link that cold-launched the app is queued before the
@@ -222,12 +226,14 @@ struct SpeakiOSApp: App {
                     return
                 }
                 keyboardInstantDictation.activate()
+                runPendingKeyboardConnect()
             }
             .onChange(of: scenePhase) { _, newPhase in
                 guard newPhase == .active else { return }
                 runPendingCaptureAction()
                 if FeatureFlags.iOSKeyboardEnabled {
                     keyboardInstantDictation.activate()
+                    runPendingKeyboardConnect()
                 }
                 // Foreground entry reconciles Watch imports interrupted by
                 // suspension and replays unconfirmed acks (issue #674).
@@ -235,6 +241,20 @@ struct SpeakiOSApp: App {
                     WatchCaptureReceiver.shared.reconcilePendingWork()
                 }
             }
+    }
+
+    /// Starts Instant Dictation for a keyboard that opened the app to connect
+    /// (`KeyboardConnectLink`), once the scene is active enough to take the
+    /// microphone.
+    private func runPendingKeyboardConnect() {
+        guard FeatureFlags.iOSKeyboardEnabled else {
+            deepLinkRouter.showsKeyboardConnect = false
+            return
+        }
+        guard scenePhase == .active, deepLinkRouter.consumePendingKeyboardConnect() else { return }
+        Task { @MainActor in
+            await keyboardInstantDictation.connectFromKeyboard()
+        }
     }
 
     /// Performs a capture deep link once the scene is actually active.

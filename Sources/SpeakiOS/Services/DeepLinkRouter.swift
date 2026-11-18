@@ -18,6 +18,8 @@ import SwiftUI
 ///   justspeaktoit://x-callback-url/dictate?x-success=drafts://create?text=
 ///                                                → dictate, then open the
 ///                                                  caller's URL with the text
+///   justspeaktoit://keyboard-connect             → the keyboard asking the app
+///                                                  to start Instant Dictation
 ///
 /// Capture verbs accept `?destination=clipboard|polish|history` to override the
 /// configured hardware-trigger destination for one capture, and `?lang=`/
@@ -38,6 +40,15 @@ public final class DeepLinkRouter: ObservableObject {
     @Published public var pendingCaptureAction: CaptureDeepLink?
 
     @Published public var pendingHistoryID: UUID?
+
+    /// Set when the keyboard opened the app to connect Instant Dictation and
+    /// the app has not started it yet. Performed once the scene is active,
+    /// because iOS only lets the app start the microphone from the foreground.
+    @Published public var pendingKeyboardConnect = false
+
+    /// Drives the sheet that confirms the keyboard is connected and tells the
+    /// user to go back to the app they were typing in.
+    @Published public var showsKeyboardConnect = false
 
     var reportSupersededCapture: (CaptureDeepLink) -> Void = { capture in
         if let callback = capture.callback { CaptureCommandRunner.reportSuperseded(to: callback) }
@@ -80,6 +91,13 @@ public final class DeepLinkRouter: ObservableObject {
             return true
         }
 
+        if KeyboardConnectLink.matches(url) {
+            self.pendingHistoryID = nil
+            pendingKeyboardConnect = true
+            showsKeyboardConnect = true
+            return true
+        }
+
         switch url.host?.lowercased() {
         case "transcribe":
             self.pendingHistoryID = nil
@@ -113,6 +131,13 @@ public final class DeepLinkRouter: ObservableObject {
         let action = pendingCaptureAction
         pendingCaptureAction = nil
         return action
+    }
+
+    /// Consumes the keyboard's connect request, so it is performed once.
+    public func consumePendingKeyboardConnect() -> Bool {
+        let pending = pendingKeyboardConnect
+        pendingKeyboardConnect = false
+        return pending
     }
 }
 #endif

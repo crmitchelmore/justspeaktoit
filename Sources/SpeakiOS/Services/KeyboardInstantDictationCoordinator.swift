@@ -380,4 +380,21 @@ extension KeyboardInstantDictationCoordinator: KeyboardHandoffReadinessHost {
         }
     }
 }
+
+extension KeyboardInstantDictationCoordinator {
+    /// Starts readiness because the keyboard's Connect key opened the app
+    /// (`KeyboardConnectLink`). That tap is an explicit request, so this
+    /// enables Instant Dictation even if it was never switched on in settings.
+    public func connectFromKeyboard() async {
+        // `activate()` may already be starting it; two starts would race for the microphone.
+        await startTask?.value
+        guard !isReady else { return }
+        let task = Task<Void, Never> { [weak self] in
+            await self?.startSession()
+        }
+        startTask = task
+        await task.value
+        if startTask == task { startTask = nil }
+    }
+}
 #endif

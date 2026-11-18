@@ -86,7 +86,7 @@ struct KeyboardSurfaceState {
             switch presentation {
             case .recording, .transcribing: return "waveform"
             case .inserted: return "checkmark.circle.fill"
-            case .waitingForApp: return "arrow.up.forward.app"
+            case .waitingForApp, .openAppManually: return "arrow.up.forward.app"
             case .unavailable, .targetChanged, .error: return "exclamationmark.triangle.fill"
             default: return "mic"
             }
@@ -128,12 +128,19 @@ struct KeyboardSurfaceState {
         }
     }
 
+    /// The mic opens Just Speak to connect Instant Dictation.
+    var micConnectsApp: Bool {
+        if case .handoff(.waitingForApp, _) = phase { return true }
+        return false
+    }
+
     var micSymbol: String {
         isActivelyCapturing ? "stop.fill" : "mic.fill"
     }
 
     var micAccessibilityLabel: String {
-        isActivelyCapturing ? "Stop dictation" : "Start dictation"
+        if micConnectsApp { return "Connect Just Speak" }
+        return isActivelyCapturing ? "Stop dictation" : "Start dictation"
     }
 
     /// The caption is dropped once both quick-switch chips are on the row, so
@@ -145,6 +152,9 @@ struct KeyboardSurfaceState {
         }
         if isActivelyCapturing {
             return "Stop"
+        }
+        if micConnectsApp {
+            return "Connect"
         }
         return isBlocked ? nil : "Speak"
     }
@@ -165,7 +175,7 @@ struct KeyboardSurfaceState {
         case let .direct(state):
             return state == .stopping
         case let .handoff(presentation, _):
-            return presentation == .transcribing || presentation == .waitingForApp
+            return presentation == .transcribing || presentation == .openAppManually
         case .blocked:
             return true
         }

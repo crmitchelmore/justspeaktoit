@@ -51,6 +51,7 @@ final class KeyboardViewModel: ObservableObject {
     private var isSecureField = false
     private var activeInputModeCount = 0
     private var handBack: (() -> Void)?
+    private var openContainingApp: ((URL) -> Bool)?
     private var readContext: KeyboardProxyReader?
     private let corrections: KeyboardCorrectionObserver
 
@@ -187,6 +188,7 @@ final class KeyboardViewModel: ObservableObject {
         isSecureField: Bool,
         activeInputModeCount: Int = 0,
         handBack: (() -> Void)? = nil,
+        openContainingApp: ((URL) -> Bool)? = nil,
         insertText: @escaping (String) -> Void,
         deleteBackward: @escaping () -> Void,
         contextBeforeInput: @escaping () -> String?,
@@ -200,6 +202,7 @@ final class KeyboardViewModel: ObservableObject {
         self.isSecureField = isSecureField
         self.activeInputModeCount = activeInputModeCount
         self.handBack = handBack
+        self.openContainingApp = openContainingApp
         self.proxyInsert = insertText
         self.proxySetMarkedText = setMarkedText
         self.proxyUnmarkText = unmarkText
@@ -310,6 +313,7 @@ final class KeyboardViewModel: ObservableObject {
         proxySetMarkedText = nil
         proxyUnmarkText = nil
         handBack = nil
+        openContainingApp = nil
         readContext = nil
         corrections.keyboardDidDisappear()
         // No document is open to this keyboard any more, so nothing can be
@@ -385,14 +389,32 @@ final class KeyboardViewModel: ObservableObject {
                 handoff.finish()
             case .idle, .inserted, .cancelled:
                 handoff.start()
+                // Readiness ended since the keyboard appeared: connect now
+                // rather than making the user tap twice.
+                if handoff.presentation == .waitingForApp {
+                    connectToApp()
+                }
             case .unavailable, .targetChanged, .error:
                 handoff.retry()
-            case .starting, .transcribing, .waitingForApp:
+            case .waitingForApp:
+                connectToApp()
+            case .starting, .transcribing, .openAppManually:
                 break
             }
         case .blocked:
             break
         }
+    }
+
+    /// The keyboard cannot record, and only the app in the foreground can
+    /// start the Instant Dictation session that does, so the mic opens the app
+    /// to connect it. Recording starts by itself when the keyboard reappears
+    /// and the session is ready.
+    private func connectToApp() {
+        if let url = KeyboardConnectLink.url(), openContainingApp?(url) == true {
+            return
+        }
+        handoff.noteAppCouldNotBeOpened()
     }
 
     /// Explicit one-tap pickup of the chip (#1003).

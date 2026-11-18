@@ -370,7 +370,12 @@ module AppleRelease
       @client.patch("/v1/appStoreVersions/#{id}", data:{type:'appStoreVersions',id:id,attributes:{releaseType:'AFTER_APPROVAL'},relationships:{build:AppleRelease.relationship('builds',found['id'])}})
       locales=@client.list("/v1/appStoreVersions/#{id}/appStoreVersionLocalizations")
       raise 'App Store localisation missing' if locales.empty?
+      # Apple rejects whatsNew (409) until a version of the app has been released.
+      released_states = %w[READY_FOR_SALE READY_FOR_DISTRIBUTION PROCESSING_FOR_DISTRIBUTION
+        REPLACED_WITH_NEW_VERSION REMOVED_FROM_SALE DEVELOPER_REMOVED_FROM_SALE]
+      first_release = versions.none? { |v| released_states.include?(v.dig('attributes','appStoreState')) }
       locales.each do |locale|
+        break if first_release
         # Notes are reviewed English copy. Do not silently overwrite translations.
         next unless locale.dig('attributes','locale').start_with?('en')
         @client.patch("/v1/appStoreVersionLocalizations/#{locale['id']}", data:{type:'appStoreVersionLocalizations',id:locale['id'],attributes:{whatsNew:@item['storeNotes']}})

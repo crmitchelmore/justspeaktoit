@@ -61,9 +61,10 @@ class ReleaseAppleTest < Minitest::Test
     end
   end
   class StableClient < FakeClient
-    attr_accessor :reviews, :items, :observe_resolution
+    attr_accessor :reviews, :items, :observe_resolution, :released_versions
     def initialize
       super
+      @released_versions=[]
       @bundle_id='com.justspeaktoit.ios'
       @reviews=[{'id'=>'existing-review','attributes'=>{'platform'=>'IOS','state'=>'UNRESOLVED_ISSUES'}}]
       @items=[{'id'=>'rejected-item','attributes'=>{'state'=>'REJECTED'},
@@ -74,7 +75,7 @@ class ReleaseAppleTest < Minitest::Test
       case path
       when '/v1/apps/6758528955/appStoreVersions?limit=200'
         @calls << {method: :list, path: path}
-        [{'id'=>'stable-version','attributes'=>{'platform'=>'IOS','versionString'=>'3.2.0','appStoreState'=>'REJECTED'}}]
+        [{'id'=>'stable-version','attributes'=>{'platform'=>'IOS','versionString'=>'3.2.0','appStoreState'=>'REJECTED'}}] + released_versions
       when '/v1/appStoreVersions/stable-version/appStoreVersionLocalizations'
         @calls << {method: :list, path: path}
         [{'id'=>'english','attributes'=>{'locale'=>'en-US'}}]
@@ -169,6 +170,18 @@ class ReleaseAppleTest < Minitest::Test
     resolution_read=client.calls.index { |call| call[:method] == :get && call[:path] == resolution[:path] }
     submission=client.calls.index { |call| call[:method] == :patch && call[:path] == '/v1/reviewSubmissions/existing-review' }
     assert_operator resolution_read,:<,submission
+  end
+  def test_first_release_skips_whats_new_that_apple_rejects
+    client=StableClient.new
+    delivery(client,train:'stable',klass:ApprovedDelivery).submit
+    refute client.calls.any? { |call| call[:path].start_with?('/v1/appStoreVersionLocalizations/') }
+  end
+  def test_update_after_a_released_version_sets_whats_new
+    client=StableClient.new
+    client.released_versions=[{'id'=>'live','attributes'=>{'platform'=>'IOS','versionString'=>'3.1.0','appStoreState'=>'READY_FOR_SALE'}}]
+    delivery(client,train:'stable',klass:ApprovedDelivery).submit
+    notes=client.calls.find { |call| call[:path] == '/v1/appStoreVersionLocalizations/english' }
+    assert_equal({whatsNew:'Frozen notes'},notes[:body][:data][:attributes])
   end
   def test_stable_resubmission_does_not_submit_when_resolution_is_not_observed
     client=StableClient.new;client.observe_resolution=false

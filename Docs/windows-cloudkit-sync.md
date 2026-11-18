@@ -316,8 +316,9 @@ Kotlin in `android/app/src/main/java/com/justspeaktoit/android/sync/`:
   (`development` or `production`, the default) picks the environment. The
   container is always `iCloud.com.justspeaktoit`. A build without a token
   shows History sync as not set up, and everything else keeps working. The
-  release workflows don't pass the secret yet (#1741), so today every Android
-  build is one of those.
+  Android build steps in `android.yml` and `alpha-release.yml` pass the
+  `CLOUDKIT_WEB_API_TOKEN` repository secret (#1741); until the owner creates
+  that secret, every Android build is one of those.
 - **Sign-in.** Opt-in from Settings › History sync. The app opens Apple's
   sign-in page in the browser and listens on the same loopback callback,
   `http://127.0.0.1:47823/cloudkit-sign-in`, for ten minutes, so the API

@@ -9,6 +9,16 @@ import XCTest
 /// setup is injected; the writer, warning callback and final drain are real.
 @MainActor
 final class RecordingLossOwnerLifecycleTests: XCTestCase {
+    override func setUp() async throws {
+        try await super.setUp()
+        CloudSharingConsentTestSupport.grantAll()
+    }
+
+    override func tearDown() async throws {
+        CloudSharingConsentTestSupport.withdrawAll()
+        try await super.tearDown()
+    }
+
     // One continuous lifecycle proves delayed notifications cannot cross runs.
     // swiftlint:disable:next function_body_length
     func testAllOwners_startStopCancelRestartRetainFinalWriterTruth() async throws {

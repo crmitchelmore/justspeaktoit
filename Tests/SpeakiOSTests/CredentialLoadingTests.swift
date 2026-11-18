@@ -10,6 +10,16 @@ import XCTest
 
 @MainActor
 final class CredentialLoadingTests: XCTestCase {
+    override func setUp() async throws {
+        try await super.setUp()
+        CloudSharingConsentTestSupport.grantAll()
+    }
+
+    override func tearDown() async throws {
+        CloudSharingConsentTestSupport.withdrawAll()
+        try await super.tearDown()
+    }
+
     func testFailedBootstrap_retriesWithoutChangingProviderOrPolish() async throws {
         let fixture = Fixture()
         defer { fixture.cleanUp() }

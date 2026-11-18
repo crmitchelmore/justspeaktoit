@@ -8,6 +8,16 @@ import XCTest
 
 @MainActor
 final class BatchCredentialBoundaryTests: XCTestCase {
+    override func setUp() async throws {
+        try await super.setUp()
+        CloudSharingConsentTestSupport.grantAll()
+    }
+
+    override func tearDown() async throws {
+        CloudSharingConsentTestSupport.withdrawAll()
+        try await super.tearDown()
+    }
+
     func testRestoredManualModel_RejectsResolvedElevenLabsKeyWithoutRequest() async throws {
         let suite = "BatchCredentialBoundaryTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

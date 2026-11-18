@@ -1755,11 +1755,15 @@ to use the Development environment) before starting the app.
      and sends no `Origin` header.
    - Save it and copy the token value.
 3. **Add the CI secret.** In GitHub, open **crmitchelmore/justspeaktoit >
-   Settings > Secrets and variables > Actions > New repository secret**, name
-   it `CLOUDKIT_WEB_API_TOKEN`, and paste the token. The macOS to Windows Swift
-   Proof workflow writes it into the build with
-   `scripts/windows-cloudkit/configure-cloudkit-web.py` on pushes to `main` and
-   manual runs. Pull request builds never receive it.
+   Settings > Environments**, and in both the `cloudkit` and `android-release`
+   environments add an environment secret named `CLOUDKIT_WEB_API_TOKEN` with
+   the token (it is not a repository secret, #1827). The `cloudkit`
+   environment admits `main` and the `alpha-build-*` and `stable-candidate-*`
+   tags. The macOS to Windows Swift Proof workflow writes the token into the
+   build with `scripts/windows-cloudkit/configure-cloudkit-web.py` on pushes to
+   `main` and runs on those tags. Pull request and merge-batch builds never
+   receive it. The 1Password item "CloudKit Web Services API token —
+   iCloud.com.justspeaktoit (Production)" holds the value.
 4. **Check the callback once.** Install a build made with the secret, sign in
    from Settings > iCloud sync, and confirm the browser lands on "Signed in".
    If Console refuses a plain `http://127.0.0.1` callback, record that in issue

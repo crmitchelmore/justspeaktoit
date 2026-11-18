@@ -132,7 +132,8 @@ jobs:
           JSTI_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
           # Public PostHog project key for opt-in analytics; builds without it send nothing.
           POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
-          # CloudKit Web Services API token for History sync; builds without it report sync unavailable.
+          # CloudKit Web Services API token for History sync, from the android-release environment
+          # (#1827); builds without it report sync unavailable.
           CLOUDKIT_WEB_API_TOKEN: ${{ secrets.CLOUDKIT_WEB_API_TOKEN }}
         # Play needs a higher version code for every upload, including a rerun of an older run, so
         # derive it from build time: seconds since 2026-01-01 (fits Play's 2,100,000,000 cap until

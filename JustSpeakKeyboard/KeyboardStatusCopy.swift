@@ -57,13 +57,13 @@ enum KeyboardStatusCopy {
         case .starting:
             return "Connecting to Just Speak…"
         case .waitingForApp:
-            // A recorded terminal reason says which of microphone exhaustion,
-            // session-window expiry or store failure ended readiness; without
-            // one the generic reconnect prompt still stands (issue #995).
-            guard let endReason else {
-                return "Open Just Speak once to reconnect Instant Dictation, then return here."
-            }
-            return endReason.readinessMessage
+            // The mic opens Just Speak to connect, so the prompt says to tap
+            // it. A recorded terminal reason still says which of microphone
+            // exhaustion, session-window expiry or store failure ended
+            // readiness (issue #995).
+            return Self.connectPrompt(endReason)
+        case .openAppManually:
+            return "Open Just Speak once to reconnect Instant Dictation, then return here."
         case .recording:
             return "Listening via Just Speak…"
         case .transcribing:
@@ -78,6 +78,19 @@ enum KeyboardStatusCopy {
             return "The text field changed, so nothing was inserted. Tap the mic to retry."
         case let .error(code):
             return Self.handoffError(code)
+        }
+    }
+
+    static func connectPrompt(_ endReason: InstantDictationReadinessEndReason?) -> String {
+        switch endReason {
+        case nil:
+            return "Tap the mic to connect Just Speak. It opens briefly; come back here and start speaking."
+        case .audioUnavailable:
+            return "Another app took the microphone. Tap the mic to reconnect Just Speak."
+        case .sessionWindowElapsed:
+            return "Instant Dictation ended after four hours. Tap the mic to reconnect Just Speak."
+        case .storeUnavailable:
+            return "Just Speak disconnected. Tap the mic to reconnect."
         }
     }
 

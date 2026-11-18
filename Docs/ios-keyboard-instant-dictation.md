@@ -19,8 +19,16 @@ to place the final transcript at the original text document's cursor.
 
 There is no five-minute timer and no extra **Speak** tap. Readiness lasts until
 the user turns it off, the app is force-quit, the phone restarts, or iOS
-interrupts the audio session. After one of those events, opening Just Speak once
-reconnects the persisted Instant Dictation preference.
+interrupts the audio session. After one of those events, or before Instant
+Dictation was ever enabled, the keyboard's mic key reads **Connect**. Tapping it
+opens Just Speak through its own `justspeaktoit://keyboard-connect` link
+(`KeyboardConnectLink`), and the app starts Instant Dictation and shows a sheet
+saying how to go back. Recording then starts by itself when the keyboard
+reappears. Before this, the keyboard only said "Open Just Speak", and opening
+the app did nothing unless Instant Dictation had already been switched on in
+Keyboard settings, so the keyboard stayed disconnected. If the keyboard cannot
+open the app (`ContainingAppOpener` finds no application object), it falls back
+to asking the user to open it.
 
 In this handoff path the keyboard extension never opens the microphone: the
 containing app owns the foreground-consented audio session and stays alive with
@@ -209,8 +217,13 @@ alive instead of pretending that limitation does not exist.
 
 ## Privacy and review posture
 
-- Enabling Instant Dictation is an explicit user action and can be ended
-  immediately in the app.
+- Enabling Instant Dictation is an explicit user action (the setup screen's
+  button, or tapping **Connect** in the keyboard) and can be ended immediately
+  in the app.
+- The keyboard opens only its own containing app, only from that explicit tap,
+  through the app's public URL scheme. Review Guideline 4.4.1 says keyboards
+  should not launch other apps; this is the containing app, as other dictation
+  keyboards do, but name it in the review notes.
 - The orange microphone indicator is continuously visible while ready.
 - The setup screen explains the always-ready session and discarded idle audio.
 - The keyboard has no audio APIs, microphone entitlement, API keys, or access
@@ -238,6 +251,9 @@ background microphone or custom-keyboard lifecycle. On a real iPhone:
 
 - Enable Instant Dictation once, return to Notes, choose Just Speak, and verify
   recording starts automatically without an app switch or a mic tap.
+- With Instant Dictation off, choose Just Speak in Notes and tap **Connect**:
+  Just Speak opens, shows "Keyboard connected", and going back to Notes starts
+  recording.
 - Confirm live text appears in the keyboard within the selected provider's
   normal streaming latency.
 - Tap **Stop & Insert** and verify one insertion at the original cursor plus one

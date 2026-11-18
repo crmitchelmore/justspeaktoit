@@ -19,15 +19,31 @@ final class KeyboardSurfaceStateTests: XCTestCase {
         XCTAssertEqual(idle.stripAccessibilityLabel, idle.stripText)
     }
 
-    func testWaitingForApp_namesTheRecordedEndReasonWhenThereIsOne() {
+    func testWaitingForApp_asksForTheConnectTapAndNamesTheRecordedEndReason() {
         XCTAssertEqual(
             surface(.handoff(.waitingForApp, endReason: nil)).stripText,
-            "Open Just Speak once to reconnect Instant Dictation, then return here."
+            "Tap the mic to connect Just Speak. It opens briefly; come back here and start speaking."
         )
         XCTAssertEqual(
             surface(.handoff(.waitingForApp, endReason: .sessionWindowElapsed)).stripText,
-            InstantDictationReadinessEndReason.sessionWindowElapsed.readinessMessage
+            "Instant Dictation ended after four hours. Tap the mic to reconnect Just Speak."
         )
+        XCTAssertEqual(
+            surface(.handoff(.openAppManually, endReason: nil)).stripText,
+            "Open Just Speak once to reconnect Instant Dictation, then return here."
+        )
+    }
+
+    func testWaitingForApp_makesTheMicAConnectKey() {
+        let waiting = surface(.handoff(.waitingForApp, endReason: nil))
+        XCTAssertFalse(waiting.micDisabled)
+        XCTAssertEqual(waiting.micCaption, "Connect")
+        XCTAssertEqual(waiting.micAccessibilityLabel, "Connect Just Speak")
+        XCTAssertNil(surface(.handoff(.waitingForApp, endReason: nil), bothChips: true).micCaption)
+
+        let manual = surface(.handoff(.openAppManually, endReason: nil))
+        XCTAssertTrue(manual.micDisabled)
+        XCTAssertEqual(manual.micAccessibilityLabel, "Start dictation")
     }
 
     func testStripSymbolAndTone_followThePhase() {
@@ -56,7 +72,6 @@ final class KeyboardSurfaceStateTests: XCTestCase {
         XCTAssertTrue(surface(.direct(.stopping)).micDisabled)
 
         XCTAssertTrue(surface(.handoff(.transcribing, endReason: nil)).controlsDisabled)
-        XCTAssertTrue(surface(.handoff(.waitingForApp, endReason: nil)).micDisabled)
         XCTAssertFalse(surface(.handoff(.waitingForApp, endReason: nil)).controlsDisabled)
     }
 

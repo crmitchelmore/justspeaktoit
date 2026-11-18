@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-17"
+updated: "2026-11-18"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -1000,6 +1000,21 @@ sessions:
           - "Play music in another app and repeat once in Notes."
           - "If any attempt shows a message, note its exact wording."
         expected: "Each dictation inserts exactly once and music keeps playing. No attempt says to check the microphone permission. If iOS ever refuses, the keyboard says \"iOS paused Just Speak's microphone. Open Just Speak, then return here and tap the mic.\", and doing that makes the next attempt work."
+        final_gate: true
+      - id: "iphone-keyboard-connect"
+        issues:
+          - 661
+        title: "Keyboard: Connect opens Just Speak and dictation starts on return"
+        minutes: 4
+        core: true
+        build: "TestFlight Just Speak to It Alpha that includes the keyboard Connect key"
+        steps:
+          - "Keyboard enabled with Allow Full Access on. In Just Speak, Settings \u203a Keyboard: if Instant Dictation is on, tap Turn Off Instant Dictation. Swipe home."
+          - "In Notes switch to the Just Speak keyboard. Read the status line and the mic key's caption."
+          - "Tap the mic key. Allow the microphone if asked."
+          - "Go back to Notes with the back link at the top left, say \"keyboard connect\" and stop."
+          - "Force-quit Just Speak, return to Notes, and repeat from the Just Speak keyboard."
+        expected: "The status line says to tap the mic to connect and the key reads Connect. Tapping it opens Just Speak with a \"Keyboard connected\" sheet. Back in Notes recording starts by itself and the words insert once. After the force-quit, Connect works the same way. The keyboard never just says to open the app with no way to do it."
         final_gate: true
       - id: "iphone-keyboard-background-repeat"
         issues:

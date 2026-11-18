@@ -238,6 +238,10 @@ the current provider list. Replace them with something like this:
 > the container app and receive the text back. The keyboard is fully usable
 > for editing and switching keyboards without Full Access; dictation is disabled
 > with an explanation. The extension sends nothing to any server of ours.
+> iOS gives keyboards no microphone, so the containing app records. When its
+> microphone session is not running, the keyboard's mic key reads Connect;
+> tapping it opens only Just Speak itself (never another app), which starts
+> the session and asks the user to go back.
 >
 > A Live Activity shows recording progress on the Lock Screen and Dynamic
 > Island. Start Recording, Stop Recording, Toggle Recording and transcript-copy

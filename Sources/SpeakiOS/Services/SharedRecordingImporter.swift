@@ -92,6 +92,14 @@ public final class SharedRecordingImporter: ObservableObject {
             )
             return
         }
+        do {
+            // Not a terminal failure either: the staged audio waits, with its
+            // attempts untouched, until the user allows the provider (#1805).
+            try IOSCloudSharingConsentPrompt.shared.require(model: model, purpose: .batchTranscription)
+        } catch {
+            lastOutcome = .failed(filename: pending[0].originalFilename, message: error.localizedDescription)
+            return
+        }
 
         var imported = 0
         for item in pending {

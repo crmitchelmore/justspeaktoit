@@ -19,6 +19,11 @@ protocol SessionStartHost: AnyObject {
   /// A start rejected before any session existed.
   func publishStartRejection(_ message: String)
   func publishMissingLiveAPIKey(_ alert: MissingLiveAPIKeyAlert)
+  /// Cloud AI providers this start would send content to without the user's
+  /// permission (issue #1805); empty when the start may go ahead.
+  func missingCloudSharingConsent() -> [CloudSharingRequest]
+  /// Asks for that permission. Nothing was captured, so nothing is lost.
+  func publishCloudSharingConsentRequired(_ requests: [CloudSharingRequest])
   /// The admission snapshot for a new session's History entry.
   func makeAdmissionDiagnosticContext() -> HistoryDiagnosticContext
   /// See `MainManager.sessionProcessingShouldContinue(_:)`.

@@ -41,6 +41,7 @@ import com.justspeaktoit.android.sync.AndroidHistorySync
 import com.justspeaktoit.android.telemetry.OptInSurface
 import com.justspeaktoit.android.telemetry.Telemetry
 import com.justspeaktoit.android.tips.PlayBillingTipStore
+import com.justspeaktoit.android.ui.CloudSharingConsentDialog
 import com.justspeaktoit.android.ui.ConsentDialog
 import com.justspeaktoit.android.onboarding.OnboardingGuide
 import com.justspeaktoit.android.onboarding.SetupSystem
@@ -156,6 +157,7 @@ class MainActivity : ComponentActivity() {
                     tipStore.connect()
                     // The keyboard may have learned corrections since the app last looked.
                     viewModel.refreshLearnedCorrections()
+                    viewModel.refreshCloudSharing()
                     // As the Apple key pages do on open; it never blocks typing a key.
                     viewModel.refreshBalances()
                 }
@@ -240,6 +242,7 @@ class MainActivity : ComponentActivity() {
                                     telemetry.crashes.setGranted(granted)
                                     refreshPrivacy()
                                 },
+                                onWithdrawCloudSharing = viewModel::withdrawCloudSharing,
                                 onTip = { productId -> tipStore.purchase(this@MainActivity, productId) },
                                 onApplyConfiguration = viewModel::applyConfiguration,
                                 onRecordingSoundsChanged = viewModel::setRecordingSounds,
@@ -324,8 +327,17 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     // Asked once, on the main screen, never over a recording or another dialog.
+                    state.cloudSharingPrompt?.let { prompt ->
+                        CloudSharingConsentDialog(
+                            requests = prompt.requests,
+                            offersOnDevice = prompt.offersOnDevice,
+                            onAllow = viewModel::allowCloudSharing,
+                            onUseOnDevice = viewModel::useOnDeviceInsteadOfCloud,
+                            onNotNow = viewModel::dismissCloudSharing,
+                        )
+                    }
                     if (askConsent && screen == Screen.Dictation && !state.dictation.isActive &&
-                        state.sharedAudio == null
+                        state.sharedAudio == null && state.cloudSharingPrompt == null
                     ) {
                         ConsentDialog(onDone = { analytics, diagnostics ->
                             telemetry.recordFirstRunChoices(analytics, diagnostics)

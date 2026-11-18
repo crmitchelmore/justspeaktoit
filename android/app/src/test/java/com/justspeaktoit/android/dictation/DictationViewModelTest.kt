@@ -8,6 +8,8 @@ import com.justspeaktoit.android.cloud.CleanupPolicy
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.CloudSharedDataKind
+import com.justspeaktoit.android.cloud.CloudSharingConsent
 import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.Retention
@@ -88,6 +90,33 @@ class DictationViewModelTest {
         h.onMain { h.viewModel.clearResult() }
         assertEquals(DictationState.Idle, h.viewModel.state.value.dictation)
         assertEquals(1, h.viewModel.state.value.history.size)
+    }
+
+    @Test
+    fun testCloudStart_asksConsentFirstAndRecordsOnlyOnceAllowed() {
+        h.prefs.cloudSharingConsent = CloudSharingConsent()
+        val vm = h.ready()
+
+        h.onMain { vm.start() }
+        val prompt = checkNotNull(vm.state.value.cloudSharingPrompt)
+        assertEquals(listOf("openai" to listOf(CloudSharedDataKind.Audio)), prompt.requests.map { it.provider.id to it.kinds })
+        assertTrue(prompt.offersOnDevice)
+        assertTrue("no microphone opens before consent", h.recorders.created.isEmpty())
+
+        h.onMain { vm.dismissCloudSharing() }
+        assertNull(vm.state.value.cloudSharingPrompt)
+        assertEquals(CloudSharingConsent(), h.prefs.cloudSharingConsent)
+        assertTrue(h.recorders.created.isEmpty())
+
+        h.onMain { vm.start() }
+        h.onMain { vm.allowCloudSharing() }
+        h.awaitState { it.dictation is DictationState.Listening }
+        assertTrue(h.prefs.cloudSharingConsent.allows("openai", CloudSharedDataKind.Audio))
+        assertEquals(listOf("openai"), vm.state.value.cloudSharingAllowed.map { it.provider.id })
+
+        h.onMain { vm.withdrawCloudSharing("openai") }
+        assertEquals(CloudSharingConsent(), h.prefs.cloudSharingConsent)
+        assertTrue(vm.state.value.cloudSharingAllowed.isEmpty())
     }
 
     @Test

@@ -366,6 +366,9 @@ extension ContentView {
 
     func sheets(_ content: some View) -> some View {
         content
+            // Any refused upload, including one a Shortcut or the keyboard
+            // made while the app was away, asks here (issue #1805).
+            .cloudSharingConsentSheet()
             .sheet(isPresented: $showingPostProcessing) {
                 PostProcessingView(initialText: currentText) { processedResult in
                     displayText = processedResult

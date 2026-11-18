@@ -35,6 +35,12 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
                 .errorDescription
             return
         }
+        do {
+            try IOSCloudSharingConsentPrompt.shared.require(model: model, purpose: .postProcessing)
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
 
         isProcessing = true
         error = nil
@@ -138,6 +144,7 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
         guard !apiKey.isEmpty else {
             throw PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model))
         }
+        try IOSCloudSharingConsentPrompt.shared.require(model: model, purpose: .postProcessing)
 
         var result = ""
         for try await chunk in sendChatStreaming(
@@ -398,6 +405,7 @@ public struct PostProcessingView: View {
             .sheet(isPresented: $showingModelPicker) {
                 modelPickerSheet
             }
+            .cloudSharingConsentSheet()
         }
     }
 }

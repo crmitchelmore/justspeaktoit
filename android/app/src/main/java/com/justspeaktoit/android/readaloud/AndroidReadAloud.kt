@@ -13,7 +13,11 @@ import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.view.textclassifier.TextClassificationManager
 import android.view.textclassifier.TextLanguage
+import com.justspeaktoit.android.cloud.CloudSharedDataKind
+import com.justspeaktoit.android.cloud.CloudSharingConsent
+import com.justspeaktoit.android.cloud.CloudSharingRequest
 import com.justspeaktoit.android.security.SecretStore
+import com.justspeaktoit.android.settings.AppPreferences
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +55,7 @@ internal class AndroidReadAloudEngines(
     private val secrets: SecretStore,
     private val system: SystemSpeech,
     private val http: SpeechHttp = OkHttpSpeechHttp(),
+    private val consent: () -> CloudSharingConsent = { AppPreferences(context).cloudSharingConsent },
 ) : (VoiceSelection) -> ReadAloudEngine {
     private val catalog by lazy { readVoiceCatalog(context) }
     private val detector = TextLanguageDetector(context)
@@ -59,12 +64,21 @@ internal class AndroidReadAloudEngines(
         is VoiceSelection.System -> SystemReadAloudEngine(system, selection.voiceName)
         is VoiceSelection.Cloud -> {
             val voice = catalog.voice(selection.key) ?: throw ReadAloudException(ReadAloudFailure.VoiceUnavailable)
+            requireConsent(voice)
             val key = readKey(voice)?.takeIf { it.isNotBlank() }
                 ?: throw ReadAloudException(ReadAloudFailure.MissingKey(voice.providerName))
             CloudReadAloudEngine(voice, key, CloudSpeechSynthesizer(http), AudioTrackOutput()) { text ->
                 ReadAloudLanguage.resolve(null, detector(text), Locale.getDefault().language)
             }
         }
+    }
+
+    /** Nothing goes to the voice's provider until the user has allowed it in the app (#1805). */
+    private fun requireConsent(voice: CloudVoice) {
+        val provider = CloudSharingConsent.provider(voice.provider, voice.providerName)
+        val request = CloudSharingRequest(provider, listOf(CloudSharedDataKind.TextToSpeak))
+        val missing = consent().missing(listOf(request))
+        if (missing.isNotEmpty()) throw ReadAloudException(ReadAloudFailure.NeedsConsent(missing))
     }
 
     /** A Keystore or cipher fault is reported as an unreadable key rather than escaping the tap. */

@@ -209,6 +209,10 @@ public final class WatchCaptureImportPipeline: ObservableObject {
             // Loading failed before transcription began. Keep the existing
             // job and retry budget intact until Keychain access recovers.
             return
+        } catch is CloudSharingConsentRequiredError {
+            // Nothing was sent: the audio stays parked, and the job keeps its
+            // retry budget until the user allows the provider (issue #1805).
+            return
         } catch {
             SpeakLogger.logError(error, context: "WatchCaptureImportPipeline.import")
             let urlError = error as? URLError

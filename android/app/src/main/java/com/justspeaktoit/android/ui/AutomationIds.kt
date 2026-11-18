@@ -244,6 +244,9 @@ object AutomationIds {
 
     /** One per voice in the read aloud picker, keyed by its saved `VoiceSelection` value. */
     fun readAloudVoiceOption(selection: String) = "settings.readAloudVoice.option.$selection"
+
+    /** The loading, empty or failure note of one provider's account voices, keyed by provider ID. */
+    fun readAloudVoiceAccountStatus(provider: String) = "settings.readAloudVoice.account.$provider"
     const val PRONUNCIATION_WORD = "settings.pronunciation.word"
     const val PRONUNCIATION_SAY_AS = "settings.pronunciation.sayAs"
     const val PRONUNCIATION_CASE_SENSITIVE = "settings.pronunciation.caseSensitive"

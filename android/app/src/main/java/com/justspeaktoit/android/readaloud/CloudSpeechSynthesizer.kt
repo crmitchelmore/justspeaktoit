@@ -9,8 +9,17 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Base64
 
-/** One HTTP exchange, without a client library, so tests can answer with fakes. */
-data class SpeechHttpRequest(val method: String, val url: String, val headers: Map<String, String>, val body: ByteArray)
+/**
+ * One HTTP exchange, without a client library, so tests can answer with fakes. [maxResponseBytes] caps the body
+ * the transport reads; null keeps its speech-response limit.
+ */
+data class SpeechHttpRequest(
+    val method: String,
+    val url: String,
+    val headers: Map<String, String>,
+    val body: ByteArray,
+    val maxResponseBytes: Long? = null,
+)
 
 data class SpeechHttpResponse(val status: Int, val body: ByteArray)
 
@@ -36,6 +45,13 @@ sealed interface ReadAloudFailure {
     data class Unreachable(val provider: String) : ReadAloudFailure
     data class InvalidAudio(val provider: String) : ReadAloudFailure
     data class TooLong(val provider: String) : ReadAloudFailure
+    /** The account's voice list could not be read, so no account voice is offered. */
+    data class InvalidVoiceList(val provider: String) : ReadAloudFailure
+    /** The model answered or summarised rather than reading the text verbatim. */
+    data class NotAReading(val provider: String) : ReadAloudFailure
+    /** The provider explained why it stopped. */
+    data class ServiceMessage(val provider: String, val message: String) : ReadAloudFailure
+    data class TimedOut(val provider: String) : ReadAloudFailure
     data object VoiceUnavailable : ReadAloudFailure
     data object SystemUnavailable : ReadAloudFailure
     data object AudioBusy : ReadAloudFailure
@@ -100,10 +116,11 @@ class CloudSpeechSynthesizer(private val http: SpeechHttp) {
         val secret = credential.trim()
         if (secret.isEmpty()) throw ReadAloudException(ReadAloudFailure.MissingKey(voice.providerName))
         val usesRegion = voice.request.url.contains(REGION) || voice.request.headers.values.any { REGION in it }
-        if (!usesRegion) return mapOf(KEY to secret, LANGUAGE to language)
+        val voiceValue = voice.voiceValue?.let { mapOf(VOICE to it) }.orEmpty()
+        if (!usesRegion) return mapOf(KEY to secret, LANGUAGE to language) + voiceValue
         val parsed = AzureSpeechCredential.parse(secret)
             ?: throw ReadAloudException(ReadAloudFailure.KeyRejected(voice.providerName))
-        return mapOf(KEY to parsed.apiKey, REGION to parsed.region, LANGUAGE to language)
+        return mapOf(KEY to parsed.apiKey, REGION to parsed.region, LANGUAGE to language) + voiceValue
     }
 
     private suspend fun exchange(
@@ -130,6 +147,7 @@ class CloudSpeechSynthesizer(private val http: SpeechHttp) {
         val audio = when (voice.response) {
             VoiceResponse.Wav -> WavAudio.parse(body)
             VoiceResponse.GeminiInteraction -> geminiAudio(body, voice.sampleRate)
+            VoiceResponse.Base64Wav -> base64Wav(body, voice.audioField ?: return null)
         } ?: return null
         return wholeFrames(audio).takeIf { it.data.isNotEmpty() }
     }
@@ -151,9 +169,10 @@ class CloudSpeechSynthesizer(private val http: SpeechHttp) {
         private const val KEY = "key"
         private const val REGION = "region"
         private const val LANGUAGE = "language"
+        private const val VOICE = "voice"
         private const val SERVER_FAULT = 500
         private const val GEMINI_RETRIES = 1
-        private val PLACEHOLDER = Regex("""\{(text|key|region|language)\}""")
+        private val PLACEHOLDER = Regex("""\{(text|key|region|language|voice)\}""")
 
         /** The request with every placeholder filled in one pass, so text can never become a key. */
         fun request(template: VoiceRequestTemplate, values: Map<String, String>): SpeechHttpRequest {
@@ -216,6 +235,16 @@ class CloudSpeechSynthesizer(private val http: SpeechHttp) {
                 val channels = block.optInt("channels", 1)
                 if (rate <= 0 || channels !in 1..2) null else PcmAudio(rate, channels, bytes.evenLength())
             }
+        } catch (_: JSONException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        }
+
+        /** The WAV in [field] of a JSON body, base64-encoded, as SpeakCore's `MistralTTSAPI` reads `audio_data`. */
+        fun base64Wav(body: ByteArray, field: String): PcmAudio? = try {
+            val encoded = JSONObject(String(body, Charsets.UTF_8)).optString(field)
+            if (encoded.isEmpty()) null else WavAudio.parse(Base64.getMimeDecoder().decode(encoded))
         } catch (_: JSONException) {
             null
         } catch (_: IllegalArgumentException) {

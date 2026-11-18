@@ -2085,6 +2085,27 @@ sessions:
           - "With TalkBack on, open the voice picker and move through it, then read aloud once, listening to the buttons and the status line."
         expected: "Each voice reads the text in that voice, and pause, resume and stop act at once. The other app's audio pauses the reading, and it resumes when that audio ends; a call stops it. The missing key shows that provider's key message and nothing is read in another voice. History reads its entry, and playing a recording stops the reading. Search Settings for \"voice\" and it opens Read aloud voice. TalkBack names each voice with its provider, says when a key is needed and announces Reading aloud and Reading paused."
         final_gate: false
+      - id: "android-read-aloud-account-voices"
+        issues:
+          - 1775
+          - 1793
+        title: "Read aloud: account voices (Mistral, xAI, Soniox) and OpenAI Realtime voices"
+        minutes: 8
+        core: false
+        build: "Just Speak to It for Android, the first Alpha APK that includes account and Realtime read-aloud voices for #1775"
+        prerequisites:
+          - "Saved keys for Mistral and OpenAI, and if possible an xAI or Soniox key whose account has a custom voice. Use made-up sentences only."
+          - "An xAI or Soniox key whose account has no custom voices, to see the no-voices status."
+        steps:
+          - "Settings: open Read aloud voice and scroll to Your Mistral voices, Your xAI voices and Your Soniox voices."
+          - "Pick a Mistral account voice and tap Read aloud on a transcript of a few sentences."
+          - "With that Mistral voice still chosen, replace the Mistral key in Settings with an invalid one, reopen Read aloud voice, close it without choosing and read aloud."
+          - "If you have an xAI key whose team has a cloned voice, check Your xAI voices lists it, pick it and read aloud."
+          - "Restore the Mistral key, pick an OpenAI Realtime voice and read a transcript that includes a time such as 5pm, a number such as 2026 and a negative number such as -5."
+          - "With the Realtime voice still chosen, turn on aeroplane mode, reopen Read aloud voice, close it and read aloud."
+          - "With TalkBack on, move through the account voice groups and their status lines."
+        expected: "Each account group lists its voices by name, says when it is loading, has no saved key or has no voices. The Mistral, Realtime and any xAI cloned voice read the text word for word in that voice, times and numbers as written, minus sign included. An invalid key shows the key-rejected message in the group and when reading, and Read aloud voice shows the identifier, not the old name; offline shows the can't-reach message. Nothing is read in another voice. TalkBack reads each group heading, voice name and status line."
+        final_gate: false
       - id: "android-pronunciation-dictionary"
         issues:
           - 1626

@@ -11,6 +11,11 @@ import Foundation
 ///   with no digits or English number words (another language) is accepted as
 ///   up to `maximumNumeralWords` words, never a negation;
 /// - a token mixing letters and digits ("5kg", "1st") is that same bounded slot;
+/// - a minus sign starting a numeral ("-5") must be read as one word carrying
+///   no number ("minus", "negative"), so "-5" read as "five" fails;
+/// - a decimal point between digits ("3.5") may be read as one such word
+///   ("point") or left out, and is never read inside an integer, so "35" read
+///   as "three point five" fails;
 /// - spoken words that match nothing are allowed only for symbols read aloud
 ///   ("&" as "and", "$5" as "five dollars"), `wordsPerSymbol` each. Anything
 ///   more, such as an inserted "not", an answer or commentary, fails.
@@ -21,8 +26,13 @@ enum RealtimeReadingCheck {
     static let maximumNumeralDigits = 15
 
     enum Token: Equatable {
-        case word(String), number(String), mixed
+        case word(String), number(String), mixed, minus, point
     }
+
+    /// What `words` emits for a minus sign and a decimal point; no alphanumeric
+    /// run can produce either.
+    static let minusWord = "-"
+    static let pointWord = "."
 
     static func isFaithful(expected: String, spoken: String) -> Bool {
         let tokens = words(expected).map(token)
@@ -49,8 +59,16 @@ enum RealtimeReadingCheck {
     }
 
     private static func slotEnds(_ token: Token, heard: [String], from start: Int) -> [Int] {
-        if case .word(let word) = token {
-            return start < heard.count && heard[start] == word ? [start + 1] : []
+        let next = start < heard.count ? heard[start] : nil
+        switch token {
+        case .word(let word):
+            return next == word ? [start + 1] : []
+        case .minus:
+            return next.map(carriesNoNumber) == true ? [start + 1] : []
+        case .point:
+            return next.map(carriesNoNumber) == true ? [start, start + 1] : [start]
+        case .number, .mixed:
+            break
         }
         let longest = min(heard.count, start + maximumNumeralWords)
         guard start < longest else { return [] }
@@ -66,11 +84,19 @@ enum RealtimeReadingCheck {
         return NumberWords.canRead(heard, as: digits)
     }
 
+    /// A spoken sign or decimal point: a word with no digits, number or negation
+    /// in it ("minus", "point", or another language's).
+    private static func carriesNoNumber(_ word: String) -> Bool {
+        !isDigits(word) && NumberWords.value(of: word) == nil && !negations.contains(word)
+    }
+
     private static let negations: Set<String> = [
         "not", "no", "never", "none", "nothing", "nobody", "neither", "nor", "without"
     ]
 
     private static func token(_ word: String) -> Token {
+        if word == minusWord { return .minus }
+        if word == pointWord { return .point }
         if isDigits(word) { return word.count <= maximumNumeralDigits ? .number(word) : .mixed }
         return word.unicodeScalars.contains(where: CharacterSet.decimalDigits.contains) ? .mixed : .word(word)
     }
@@ -80,37 +106,60 @@ enum RealtimeReadingCheck {
     }
 
     /// Case-folded alphanumeric runs, with thousands separators removed so
-    /// "2,026" is one numeral.
+    /// "2,026" is one numeral, and `minusWord` and `pointWord` for a numeral's
+    /// sign and decimal point.
     static func words(_ text: String) -> [String] {
         let characters = Array(text.lowercased())
-        var kept = ""
+        var words: [String] = []
+        var current = ""
+        func flush() {
+            if !current.isEmpty { words.append(current) }
+            current = ""
+        }
         for (index, character) in characters.enumerated() {
             if character == ",", isThousandsSeparator(characters, at: index) { continue }
-            kept.append(character)
+            if isMinusSign(characters, at: index) || isDecimalPoint(characters, at: index) {
+                flush()
+                words.append(character == "." ? pointWord : minusWord)
+                continue
+            }
+            for scalar in character.unicodeScalars {
+                guard CharacterSet.alphanumerics.contains(scalar) else { flush(); continue }
+                current.unicodeScalars.append(scalar)
+            }
         }
-        return kept.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        flush()
+        return words
+    }
+
+    private static func isDigit(_ characters: [Character], at index: Int) -> Bool {
+        characters.indices.contains(index) && characters[index].isASCII && characters[index].isNumber
     }
 
     private static func isThousandsSeparator(_ characters: [Character], at index: Int) -> Bool {
-        let isDigit = { (offset: Int) in
-            characters.indices.contains(offset) && characters[offset].isASCII && characters[offset].isNumber
-        }
-        return isDigit(index - 1) && (1...3).allSatisfy { isDigit(index + $0) } && !isDigit(index + 4)
+        isDigit(characters, at: index - 1) && (1...3).allSatisfy { isDigit(characters, at: index + $0) }
+            && !isDigit(characters, at: index + 4)
+    }
+
+    /// A hyphen or minus sign starting a word, directly before a digit.
+    private static func isMinusSign(_ characters: [Character], at index: Int) -> Bool {
+        guard characters[index] == "-" || characters[index] == "\u{2212}" else { return false }
+        return (index == 0 || characters[index - 1].isWhitespace) && isDigit(characters, at: index + 1)
+    }
+
+    private static func isDecimalPoint(_ characters: [Character], at index: Int) -> Bool {
+        characters[index] == "." && isDigit(characters, at: index - 1) && isDigit(characters, at: index + 1)
     }
 
     private static let punctuation = Set(".,;:!?'\"’‘“”()[]{}-–—…")
 
-    /// Symbols that are read aloud as words. A hyphen counts only as a minus
-    /// sign directly before a digit.
+    /// Symbols that are read aloud as words. A numeral's minus sign is not one:
+    /// it is a slot of its own that must be read.
     static func symbolCount(_ text: String) -> Int {
         let characters = Array(text)
         return characters.indices.filter { index in
             let character = characters[index]
-            if character == "-" {
-                let startsWord = index == 0 || characters[index - 1].isWhitespace
-                let beforeDigit = index + 1 < characters.count && characters[index + 1].isNumber
-                return startsWord && beforeDigit
-            }
+            if isMinusSign(characters, at: index) { return false }
             return !character.isLetter && !character.isNumber && !character.isWhitespace
                 && !punctuation.contains(character)
         }.count
@@ -143,8 +192,10 @@ enum NumberWords {
         "million": 1_000_000, "millionth": 1_000_000, "billion": 1_000_000_000, "billionth": 1_000_000_000
     ]
 
-    /// Words between numbers that carry no digits ("three point five").
-    private static let separators: Set<String> = ["and", "point", "dot", "comma", "colon", "dash", "hyphen"]
+    /// Words between numbers that carry no digits ("ten colon thirty"). A
+    /// decimal point is not one: an integer is never read with one inside it.
+    private static let separators: Set<String> = ["and", "comma", "colon", "dash", "hyphen"]
+    private static let limit = 1_000_000_000_000_000
 
     static func value(of word: String) -> Int? { small[word] ?? scales[word] }
 
@@ -197,18 +248,22 @@ enum NumberWords {
             } else if let number = small[word], !["oh", "o", "nought"].contains(word) {
                 current += number
             } else if let scale = scales[word] {
-                if scale == 100 {
-                    current = max(current, 1) * 100
-                } else {
-                    total += max(current, 1) * scale
-                    current = 0
-                }
+                guard let scaled = scaling(total: total, current: current, by: scale) else { return nil }
+                (total, current) = scaled
             } else {
                 return nil
             }
             sawValue = true
-            guard total + current < 1_000_000_000_000_000 else { return nil }
+            guard total + current < limit else { return nil }
         }
         return sawValue ? total + current : nil
+    }
+
+    /// `current` times `scale`, checked against the limit before multiplying,
+    /// which would otherwise overflow.
+    private static func scaling(total: Int, current: Int, by scale: Int) -> (total: Int, current: Int)? {
+        let base = max(current, 1)
+        guard base <= (limit - 1 - total) / scale else { return nil }
+        return scale == 100 ? (total, base * 100) : (total + base * scale, 0)
     }
 }

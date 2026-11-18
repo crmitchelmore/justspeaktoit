@@ -135,7 +135,8 @@ public enum OpenAIRealtimeSpeechEvent: Equatable, Sendable {
             usage.add(response?["usage"] as? [String: Any])
             let error = (details?["error"] as? [String: Any])?["message"] as? String
             self = .done(
-                status: response?["status"] as? String ?? "completed",
+                // Only an explicit "completed" is a finished reading.
+                status: response?["status"] as? String ?? "no status",
                 reason: error ?? details?["reason"] as? String,
                 usage: usage
             )

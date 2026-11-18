@@ -13,11 +13,13 @@ import FoundationNetworking
 /// the returned 16-bit mono PCM, exactly as the desktop joins WAV segments.
 ///
 /// Offered: the fixed voices of every provider the desktop host synthesises over plain HTTPS
-/// (Deepgram, Azure Speech, xAI, Cartesia, Soniox, Gemini, Groq, Speechmatics and ElevenLabs).
+/// (Deepgram, Azure Speech, xAI, Cartesia, Soniox, Gemini, Groq, Speechmatics and ElevenLabs);
+/// `accountVoices`, how Android lists the voices of a Mistral, xAI or Soniox account with the saved
+/// key and the request each listed voice sends (`{voice}` is its API identifier); and `realtime`,
+/// the OpenAI Realtime WebSocket session and its voices.
 /// Not offered: voices whose model has an announced retirement (Android has no saved-selection
 /// migration, so it never starts offering a model about to shut down, which excludes OpenAI's
-/// speech-API voices), account-discovered voices (Mistral, and xAI and Soniox custom voices) and
-/// OpenAI Realtime, which needs a WebSocket.
+/// speech-API voices).
 ///
 /// `VoiceCatalogAndroidExportTests` fails when the committed asset is stale; regenerate it with
 /// `UPDATE_VOICE_CATALOG_ANDROID=1 swift test --filter VoiceCatalogAndroidExportTests`.
@@ -25,11 +27,15 @@ public enum VoiceCatalogAndroidExport {
     static let textToken = "JSTITEXTTOKEN"
     static let keyToken = "JSTIKEYTOKEN"
     static let regionToken = "jstiregiontoken"
+    static let voiceToken = "JSTIVOICETOKEN"
+    static let nameToken = "JSTINAMETOKEN"
 
     static let textPlaceholder = "{text}"
     static let keyPlaceholder = "{key}"
     static let regionPlaceholder = "{region}"
     static let languagePlaceholder = "{language}"
+    static let voicePlaceholder = "{voice}"
+    static let namePlaceholder = "{name}"
 
     /// HTTP statuses after which a dialogue-only ElevenLabs request is retried on its fallback model.
     static let dialogueFallbackStatuses = [400, 403, 404, 422]
@@ -82,6 +88,8 @@ public enum VoiceCatalogAndroidExport {
     struct Document: Encodable {
         let version: Int
         let voices: [Voice]
+        let accountVoices: [AccountProvider]
+        let realtime: Realtime
         /// `PronunciationEntry.defaultEntries` without identities, which Android assigns on first use.
         let pronunciationDefaults: [PronunciationDefault]
     }
@@ -90,6 +98,8 @@ public enum VoiceCatalogAndroidExport {
         let document = Document(
             version: 1,
             voices: try voices(),
+            accountVoices: try accountProviders(),
+            realtime: try realtime(),
             pronunciationDefaults: pronunciationDefaults
         )
         let encoder = JSONEncoder()
@@ -269,13 +279,16 @@ public enum VoiceCatalogAndroidExport {
         )
     }
 
-    private static func placeholders(_ value: String) -> String {
+    static func placeholders(_ value: String) -> String {
         value.replacingOccurrences(of: textToken, with: textPlaceholder)
             .replacingOccurrences(of: keyToken, with: keyPlaceholder)
             .replacingOccurrences(of: regionToken, with: regionPlaceholder)
+            .replacingOccurrences(of: voiceToken, with: voicePlaceholder)
+            .replacingOccurrences(of: voiceToken.lowercased(), with: voicePlaceholder)
+            .replacingOccurrences(of: nameToken, with: namePlaceholder)
     }
 
-    private static func substituted(_ value: AnyCodable.JSONValue) -> AnyCodable.JSONValue {
+    static func substituted(_ value: AnyCodable.JSONValue) -> AnyCodable.JSONValue {
         switch value {
         case .string(let text): .string(placeholders(text))
         case .array(let items): .array(items.map(substituted))

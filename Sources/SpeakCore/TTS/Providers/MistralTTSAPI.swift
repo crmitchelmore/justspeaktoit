@@ -85,6 +85,8 @@ public struct MistralTTSAPI: Sendable {
     /// than a picker can usefully hold, and the bound keeps a paging endpoint
     /// that never terminates from looping.
     static let maxVoicePages = 10
+    /// The field of a non-streaming speech response that carries the base64 audio.
+    static let audioDataField = "audio_data"
 
     private let session: URLSession
 

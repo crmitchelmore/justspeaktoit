@@ -36,10 +36,11 @@ public struct XAIAccountVoiceInventory: Equatable, Sendable, CustomStringConvert
         var token: String?
         for page in 0..<XAITTSAPI.maximumCustomVoicePages {
             try Task.checkCancellation()
-            // Custom voices are region- and plan-gated: no library means none.
+            // Custom voices are region- and plan-gated: no library means none. A
+            // refusal after the first page is a failure, never a partial list.
             guard let body = try await receive(
                 XAITTSAPI.customVoiceListRequest(apiKey: key, paginationToken: token), session: session,
-                absentStatuses: XAITTSAPI.customVoicesUnavailableStatuses
+                absentStatuses: page == 0 ? XAITTSAPI.customVoicesUnavailableStatuses : []
             ) else { break }
             let custom = try listing { try XAITTSAPI.decodedCustomVoicePage(from: body) }
             listed += custom.voices

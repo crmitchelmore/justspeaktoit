@@ -380,7 +380,6 @@ extension KeyboardInstantDictationCoordinator: KeyboardHandoffReadinessHost {
         }
     }
 }
-#endif
 
 extension KeyboardInstantDictationCoordinator {
     /// Starts readiness because the keyboard's Connect key opened the app
@@ -396,3 +395,4 @@ extension KeyboardInstantDictationCoordinator {
         if startTask == task { startTask = nil }
     }
 }
+#endif

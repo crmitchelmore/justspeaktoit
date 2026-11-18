@@ -7,14 +7,14 @@ export const MAX_NOTE_LENGTH = 2000;
 export const MAX_ISSUE_URL_LENGTH = 7500;
 
 // Backticks would let a note close the fence, so encode them inside the JSON.
-// compact moves passes and skips into id lists, so a full run's link grows by
-// little more than each check's id.
+// compact moves passes and skips into space-separated id strings: a space
+// encodes as one character in a link, so a full run grows by about each id.
 export function encodeResultsBlock(catalogue, results, compact = false) {
   const block = { format: RESULTS_FORMAT, catalogue, results };
   if (compact) {
     const ids = kind => results.filter(entry => entry.result === kind && !entry.note).map(entry => entry.id);
     block.results = results.filter(entry => !(entry.result === 'pass' || entry.result === 'skip') || entry.note);
-    for (const kind of ['pass', 'skip']) if (ids(kind).length) block[kind] = ids(kind);
+    for (const kind of ['pass', 'skip']) if (ids(kind).length) block[kind] = ids(kind).join(' ');
   }
   const json = JSON.stringify(block).replace(/`/g, '\\u0060');
   return `\`\`\`${RESULTS_FENCE}\n${json}\n\`\`\``;

@@ -2,7 +2,9 @@
 import contextlib
 import importlib.util
 import io
+import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +16,11 @@ CONFIGURE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CONFIGURE)
 
 KEY = "phc_Synthetic0123456789abcdefGHIJKLmnopqrst-_"
+STAMP_CONDITION = (
+    "${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || "
+    "startsWith(github.ref, 'refs/tags/alpha-build-') || "
+    "startsWith(github.ref, 'refs/tags/stable-candidate-') }}"
+)
 
 
 class ConfigurePostHogKeyTests(unittest.TestCase):
@@ -63,24 +70,58 @@ class ConfigurePostHogKeyTests(unittest.TestCase):
             CONFIGURE.configured_source("public enum DesktopAnalyticsBuildConfiguration {}\n", KEY)
 
 
-    def test_release_workflows_stamp_only_main_and_manifest_tags_before_building(self):
-        release_only = ("if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || "
-                        "startsWith(github.ref, 'refs/tags/alpha-build-') || "
-                        "startsWith(github.ref, 'refs/tags/stable-candidate-')) }}\n")
+    def load_workflow(self, name):
+        """Parses a workflow with Ruby's YAML, the parser the other tooling tests already rely on."""
+        script = "require 'yaml'; require 'json'; puts JSON.generate(YAML.safe_load(File.read(ARGV[0])))"
+        path = CONFIGURE.ROOT / ".github" / "workflows" / name
+        result = subprocess.run(["ruby", "-e", script, str(path)], capture_output=True, text=True, check=True)
+        return json.loads(result.stdout)
+
+    @staticmethod
+    def evaluate(condition, event_name, ref):
+        """Evaluates the stamp step's `if` for one trigger, in the expression subset the workflows use."""
+        expression = condition.strip()
+        if expression.startswith("${{") and expression.endswith("}}"):
+            expression = expression[3:-2]
+        expression = (expression.replace("&&", " and ").replace("||", " or ")
+                      .replace("github.event_name", "event_name").replace("github.ref", "ref"))
+        names = {"event_name": event_name, "ref": ref, "startsWith": str.startswith}
+        return eval(expression, {"__builtins__": {}}, names)  # noqa: S307 # the expression is this repository's own
+
+    def test_release_workflows_stamp_only_main_pushes_and_manifest_tags_before_building(self):
         builds = {"windows-cross-proof.yml": "Cross-build the Windows app and test suite",
                   "windows-arm64.yml": "Build native Windows ARM64 executable",
                   "linux-flatpak.yml": "Build offline"}
+        triggers = [("push", "refs/heads/main", True),
+                    ("workflow_dispatch", "refs/heads/main", False),
+                    ("workflow_dispatch", "refs/tags/alpha-build-42", True),
+                    ("workflow_dispatch", "refs/tags/stable-candidate-3", True),
+                    ("push", "refs/tags/alpha-build-42", True),
+                    ("pull_request", "refs/pull/1828/merge", False),
+                    ("pull_request_target", "refs/heads/main", False),
+                    ("workflow_dispatch", "refs/heads/feature", False),
+                    ("push", "refs/heads/feature", False),
+                    ("push", "refs/tags/v1.0.0", False),
+                    ("workflow_dispatch", "refs/tags/not-alpha-build-1", False)]
         for name, build in builds.items():
             with self.subTest(workflow=name):
-                workflow = (CONFIGURE.ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
-                self.assertEqual(workflow.count("secrets.POSTHOG_PROJECT_KEY"), 1)
-                start = workflow.index("      - name: Stamp the PostHog project key into release builds\n")
-                step = workflow[start:workflow.index("\n      - ", start + 1)]
-                self.assertIn(release_only, step)
-                self.assertIn("POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}", step)
-                self.assertIn("scripts/desktop-analytics/configure-posthog-key.py", step)
-                self.assertLess(start, workflow.index("      - name: %s\n" % build))
-                self.assertIn("      - scripts/desktop-analytics/**\n", workflow)
+                workflow = self.load_workflow(name)
+                steps = [step for job in workflow["jobs"].values() for step in job.get("steps", [])]
+                keyed = [step for step in steps if "secrets.POSTHOG_PROJECT_KEY" in json.dumps(step.get("env", {}))]
+                self.assertEqual(len(keyed), 1)
+                stamp = keyed[0]
+                self.assertEqual(stamp["name"], "Stamp the PostHog project key into release builds")
+                self.assertEqual(stamp["env"], {"POSTHOG_PROJECT_KEY": "${{ secrets.POSTHOG_PROJECT_KEY }}"})
+                self.assertIn("scripts/desktop-analytics/configure-posthog-key.py", stamp["run"])
+                self.assertEqual(stamp["if"], STAMP_CONDITION)
+                for event_name, ref, stamped in triggers:
+                    self.assertIs(self.evaluate(stamp["if"], event_name, ref), stamped, (event_name, ref))
+                job = next(job for job in workflow["jobs"].values() if stamp in job.get("steps", []))
+                names = [step.get("name") for step in job["steps"]]
+                self.assertLess(names.index(stamp["name"]), names.index(build))
+                trigger_paths = [path for trigger in workflow[next(k for k in ("on", "true") if k in workflow)].values()
+                                 if isinstance(trigger, dict) for path in trigger.get("paths", [])]
+                self.assertIn("scripts/desktop-analytics/**", trigger_paths)
 
 if __name__ == "__main__":
     unittest.main()

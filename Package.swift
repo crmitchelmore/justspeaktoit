@@ -91,6 +91,31 @@ let llamaCppTarget = Target.target(
     linkerSettings: [.linkedLibrary("dl", .when(platforms: [.linux]))]
 )
 
+// llama.cpp compiled from the pinned source subset in
+// Sources/CLlamaRuntime/upstream (see its PROVENANCE.md), CPU backend only.
+// App Store guideline 2.5.2 rules out the desktop's separately provisioned
+// runtime on iOS. Apple package only: portable builds never compile it.
+let llamaRuntimeHeaderPaths = [
+    "upstream/generated", "upstream/include", "upstream/src", "upstream/ggml/include",
+    "upstream/ggml/src", "upstream/ggml/src/ggml-cpu"
+]
+let llamaRuntimeDefines: [String] = [
+    "_XOPEN_SOURCE=600", "_DARWIN_C_SOURCE", "GGML_USE_CPU", "GGML_USE_CPU_REPACK", "GGML_USE_ACCELERATE",
+    "ACCELERATE_NEW_LAPACK", "ACCELERATE_LAPACK_ILP64", "GGML_SCHED_MAX_COPIES=4"
+]
+let llamaRuntimeTarget = Target.target(
+    name: "CLlamaRuntime",
+    exclude: ["PROVENANCE.md", "upstream/LICENSE", "upstream/ggml/src/ggml-cpu/arch"],
+    publicHeadersPath: "include",
+    // Optimised in Debug too: unoptimised ggml is too slow to finish a cleanup
+    // within its time limit. `-w` silences upstream's warnings only.
+    cSettings: llamaRuntimeHeaderPaths.map { CSetting.headerSearchPath($0) }
+        + llamaRuntimeDefines.map { CSetting.define($0) } + [.unsafeFlags(["-O3", "-w"])],
+    cxxSettings: llamaRuntimeHeaderPaths.map { CXXSetting.headerSearchPath($0) }
+        + llamaRuntimeDefines.map { CXXSetting.define($0) } + [.unsafeFlags(["-O3", "-w"])],
+    linkerSettings: [.linkedFramework("Accelerate")]
+)
+
 // Keep the existing root assets in one resource target, without collecting
 // unrelated branding or platform icon directories added by other targets.
 let feedbackResourceDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -428,6 +453,9 @@ let package = portableCoreBuild ? portablePackage : Package(
         .library(name: "SpeakWatchCore", targets: ["SpeakWatchCore"]),
         .library(name: "SpeakSync", targets: ["SpeakSync"]),
         .library(name: "SpeakiOSLib", targets: ["SpeakiOSLib"]),
+        // llama.cpp compiled into the iOS app for downloaded cleanup models
+        // (issue #1650). Only the app links it, never its extensions.
+        .library(name: "SpeakiOSLlama", targets: ["SpeakiOSLlama"]),
         .library(name: "SpeakAutomationKit", targets: ["SpeakAutomationKit"]),
         // Test-only; a product purely so the Tuist-built iOS test bundle can
         // link the same module the SwiftPM test targets import (issue #1124).
@@ -524,6 +552,12 @@ let package = portableCoreBuild ? portablePackage : Package(
             dependencies: ["SpeakCore", "SpeakSync"],
             path: "Sources/SpeakiOS"
         ),
+        llamaRuntimeTarget,
+        .target(
+            name: "SpeakiOSLlama",
+            dependencies: ["SpeakiOSLib", "CLlamaRuntime"],
+            path: "Sources/SpeakiOSLlama"
+        ),
         // Automation client library: parsing, rendering, socket client and the
         // MCP request handler. Split from the `speak` executable so every layer
         // is unit-testable without spawning a process.
@@ -615,11 +649,13 @@ let package = portableCoreBuild ? portablePackage : Package(
         ),
         .testTarget(
             name: "SpeakiOSTests",
-            dependencies: ["SpeakiOSLib", "SpeakTestSupport"]
+            dependencies: ["SpeakiOSLib", "SpeakiOSLlama", "SpeakTestSupport"]
         ),
         .testTarget(
             name: "SpeakAutomationKitTests",
             dependencies: ["SpeakAutomationKit", "SpeakCore", "SpeakTestSupport"]
         )
-    ]
+    ],
+    // llama.cpp (CLlamaRuntime) needs C++17, as the portable package already sets.
+    cxxLanguageStandard: .cxx17
 )

@@ -72,7 +72,8 @@ extension AppSettings {
     static func storedPostProcessingModel(in defaults: UserDefaults) -> String {
         let normalizedPostModel = Shared.postProcessingModel.iOS.value(in: defaults)
         return (Self.postProcessingModels.contains { $0.id == normalizedPostModel }
-            || CleanupModelSelection.modelID(from: normalizedPostModel) != nil)
+            || CleanupModelSelection.modelID(from: normalizedPostModel) != nil
+            || IOSLocalCleanupModels.isCleanupModelID(normalizedPostModel))
             ? normalizedPostModel
             : ModelCatalog.defaultPostProcessingModel
     }

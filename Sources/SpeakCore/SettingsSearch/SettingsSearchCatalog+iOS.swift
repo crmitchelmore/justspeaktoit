@@ -106,6 +106,16 @@ extension SettingsSearchCatalog {
             platforms: .iOS
         ),
         SettingsSearchEntry(
+            id: "ios.onDeviceCleanupModels", title: "On-Device Cleanup Models", section: .postProcessing,
+            systemImage: "arrow.down.circle",
+            summary: "Download a small model to polish transcripts on the device, with no API key.",
+            keywords: [
+                "downloaded cleanup models", "local llm", "local cleanup", "llama", "llama.cpp", "qwen", "smollm",
+                "gguf", "offline", "private", "on device", "download", "remove model", "storage"
+            ],
+            platforms: .iOS
+        ),
+        SettingsSearchEntry(
             id: "ios.apiKeys", title: "API Keys", section: .apiKeys, systemImage: "key.fill",
             summary: "Add and manage provider API keys.",
             keywords: ["manage keys", "credentials", "tokens", "openrouter key", "openai key", "deepgram key"],

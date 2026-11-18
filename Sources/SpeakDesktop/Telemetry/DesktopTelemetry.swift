@@ -149,9 +149,12 @@ public actor DesktopTelemetry {
         removeSentinel()
     }
 
-    /// A clean shutdown: the next launch must not see an abnormal exit.
+    /// A clean shutdown: the next launch must not see an abnormal exit, and
+    /// events queued just before quit (such as `analytics_opt_in`) are sent
+    /// before the sink closes.
     public func finishCleanly() async {
         removeSentinel()
+        await sink?.flush()
         await sink?.close()
     }
 

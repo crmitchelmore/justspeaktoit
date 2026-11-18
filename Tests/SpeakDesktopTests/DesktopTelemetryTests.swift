@@ -289,6 +289,21 @@ final class DesktopTelemetryTests: XCTestCase {
         XCTAssertEqual(DesktopTelemetryStore(directory: directory).snapshot(), DesktopTelemetryState())
     }
 
+    func testFinishCleanly_DeliversEventsQueuedBeforeQuit() async throws {
+        let http = GatedTelemetryHTTP()
+        let telemetry = DesktopTelemetry(directory: directory)
+        await telemetry.activate(configuration(), http: http)
+        await telemetry.updateConsent(analytics: true, diagnostics: nil)
+        // The first request is held, so the second event is still queued when the app quits.
+        Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            await http.release()
+        }
+        await telemetry.finishCleanly()
+        let delivered = await http.count
+        XCTAssertEqual(delivered, 2, "analytics_opt_in and app_active_daily are both sent before the sink closes")
+    }
+
     func testPostHogQueue_IsBoundedAndDropsFailures() async throws {
         let http = GatedTelemetryHTTP()
         let sink = DesktopPostHogSink(projectKey: "phc_test", http: http)

@@ -16,17 +16,27 @@ import java.util.concurrent.ConcurrentHashMap
 class AccountVoicesTest {
     private val catalog = VoiceCatalog.parse(SettingsSearchAsset.locate("app/src/main/assets/${VoiceCatalog.ASSET}").readText())
 
-    private class FakeHttp(vararg bodies: String, private val status: Int = 200) : SpeechHttp {
-        private val queue = ArrayDeque(bodies.toList())
+    /** Responds with each status and body in turn. */
+    private class FakeHttp(responses: List<Pair<Int, String>>) : SpeechHttp {
+        private val queue = ArrayDeque(responses)
         val sent = mutableListOf<SpeechHttpRequest>()
         var unreachable = false
+
+        constructor(vararg bodies: String, status: Int = 200) : this(bodies.map { status to it })
 
         override suspend fun send(request: SpeechHttpRequest): SpeechHttpResponse {
             sent += request
             if (unreachable) throw IOException("offline")
-            return SpeechHttpResponse(status, queue.removeFirst().toByteArray())
+            val (status, body) = queue.removeFirst()
+            return SpeechHttpResponse(status, body.toByteArray())
         }
     }
+
+    /** xAI's built-in listing: the fixed presets and any [extra] built-ins. */
+    private fun xaiBuiltIns(vararg extra: String) = JSONObject().put(
+        "voices",
+        JSONArray((provider("xai").fixedVoiceIds + extra).map { JSONObject().put("voice_id", it) }),
+    ).toString()
 
     private fun provider(id: String) = catalog.accountProviders.first { it.provider == id }
 
@@ -98,38 +108,66 @@ class AccountVoicesTest {
     @Test
     fun testXai_listsCustomVoicesByPaginationTokenAndNamesUnnamedOnes() = runBlocking {
         val xai = provider("xai")
-        val fixed = xai.fixedVoiceIds.first()
-        val first = JSONObject().put(
-            "voices",
-            JSONArray().put(JSONObject().put("voice_id", fixed)).put(JSONObject().put("voice_id", "my voice")),
-        ).put("pagination_token", "next page").toString()
+        val first = JSONObject().put("voices", JSONArray().put(JSONObject().put("voice_id", "my voice")))
+            .put("pagination_token", "next page").toString()
         val second = JSONObject().put("voices", JSONArray().put(JSONObject().put("voice_id", "v2").put("name", "Two")))
             .put("pagination_token", JSONObject.NULL).toString()
-        val http = FakeHttp(first, second)
+        val http = FakeHttp(xaiBuiltIns(), first, second)
 
         val voices = directory(http).voices(xai, "k")
 
         assertEquals(listOf("My Voice", "Two"), voices.map { it.name })
         assertEquals("my voice", xai.apiVoiceId(voices.first().key))
-        assertTrue(http.sent[0].url.startsWith("https://api.x.ai/v1/custom-voices?"))
-        assertTrue(http.sent[1].url.endsWith("&pagination_token=next%20page"))
+        assertEquals("https://api.x.ai/v1/tts/voices", http.sent[0].url)
+        assertTrue(http.sent[1].url.startsWith("https://api.x.ai/v1/custom-voices?"))
+        assertTrue(http.sent[2].url.endsWith("&pagination_token=next%20page"))
+        assertTrue(http.sent.all { it.headers["Authorization"] == "Bearer k" })
     }
 
     @Test
-    fun testXai_noCustomLibraryIsAnEmptyListingButOtherRefusalsFail() = runBlocking {
+    fun testXai_nonPresetBuiltInsAreListedBeforeCustomVoices() = runBlocking {
         val xai = provider("xai")
-        assertEquals(emptyList<CloudVoice>(), directory(FakeHttp("{}", status = 404)).voices(xai, "k"))
-        assertEquals(emptyList<CloudVoice>(), directory(FakeHttp("{}", status = 403)).voices(xai, "k"))
+        val custom = JSONObject().put("voices", JSONArray().put(JSONObject().put("voice_id", "clone").put("name", "Clone")))
+            .toString()
+
+        val voices = directory(FakeHttp(xaiBuiltIns("builtinb"), custom)).voices(xai, "k")
+
+        assertEquals(listOf("builtinb", "clone"), voices.map { xai.apiVoiceId(it.key) })
+        assertEquals(listOf("Builtinb", "Clone"), voices.map { it.name })
+    }
+
+    @Test
+    fun testXai_noCustomLibraryKeepsTheBuiltInsButOtherRefusalsFail() = runBlocking {
+        val xai = provider("xai")
+        for (absent in listOf(403, 404)) {
+            val voices = directory(FakeHttp(listOf(200 to xaiBuiltIns("extra"), absent to "{}"))).voices(xai, "k")
+            assertEquals(listOf("extra"), voices.map { xai.apiVoiceId(it.key) })
+        }
+        // The built-in listing has no absent statuses: a refusal there is the key's.
         assertEquals(
             ReadAloudFailure.KeyRejected(xai.providerName),
-            failureOf { directory(FakeHttp("{}", status = 401)).voices(xai, "k") },
+            failureOf { directory(FakeHttp("{}", status = 403)).voices(xai, "k") },
+        )
+        assertEquals(
+            ReadAloudFailure.KeyRejected(xai.providerName),
+            failureOf { directory(FakeHttp(listOf(200 to xaiBuiltIns(), 401 to "{}"))).voices(xai, "k") },
         )
         val endless = (0..xai.list.maxPages).map { page ->
             JSONObject().put("voices", JSONArray()).put("pagination_token", "t$page").toString()
         }
         assertEquals(
             ReadAloudFailure.InvalidVoiceList(xai.providerName),
-            failureOf { directory(FakeHttp(*endless.toTypedArray())).voices(xai, "k") },
+            failureOf { directory(FakeHttp(xaiBuiltIns(), *endless.toTypedArray())).voices(xai, "k") },
+        )
+    }
+
+    @Test
+    fun testXai_aCustomVoiceRepeatingABuiltInRejectsTheWholeList() {
+        val xai = provider("xai")
+        val custom = JSONObject().put("voices", JSONArray().put(JSONObject().put("voice_id", "extra"))).toString()
+        assertEquals(
+            ReadAloudFailure.InvalidVoiceList(xai.providerName),
+            failureOf { directory(FakeHttp(xaiBuiltIns("extra"), custom)).voices(xai, "k") },
         )
     }
 

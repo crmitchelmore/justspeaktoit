@@ -85,6 +85,11 @@ data class AccountVoiceProvider(
     /** Soniox: a clone speaks only once its status for this model is `ready`. */
     val readyModel: String?,
     val maxVoices: Int,
+    /**
+     * xAI: the single-page built-in listing, read before [list]. Its voices that are not [fixedVoiceIds]
+     * join the account's, and [maxVoices] and the duplicate check span both listings.
+     */
+    val builtInList: AccountListRequest?,
     val list: AccountListRequest,
     val sampleRate: Int,
     val maxCharacters: Int,
@@ -239,9 +244,8 @@ class VoiceCatalog(
             else -> error("Unknown voice response $name")
         }
 
-        private fun accountProvider(item: JSONObject): AccountVoiceProvider {
-            val list = item.getJSONObject("list")
-            return AccountVoiceProvider(
+        private fun accountProvider(item: JSONObject): AccountVoiceProvider =
+            AccountVoiceProvider(
                 provider = item.getString("provider"),
                 providerName = item.getString("providerName"),
                 listing = item.getString("listing"),
@@ -254,19 +258,8 @@ class VoiceCatalog(
                 fixedVoiceIds = item.getJSONArray("fixedVoiceIDs").let { array -> (0 until array.length()).map(array::getString) },
                 readyModel = item.optStringOrNull("readyModel"),
                 maxVoices = item.getInt("maxVoices"),
-                list = AccountListRequest(
-                    method = list.getString("method"),
-                    url = list.getString("url"),
-                    headers = list.getJSONObject("headers").strings(),
-                    pageParameter = list.optStringOrNull("pageParameter"),
-                    pageSize = if (list.has("pageSize")) list.getInt("pageSize") else null,
-                    maxPages = list.getInt("maxPages"),
-                    maxResponseBytes = list.getInt("maxResponseBytes"),
-                    timeoutSeconds = list.getInt("timeoutSeconds"),
-                    absentStatuses = list.getJSONArray("absentStatuses").let { array ->
-                        (0 until array.length()).map(array::getInt).toSet()
-                    },
-                ),
+                builtInList = item.optJSONObject("builtInList")?.let(::listRequest),
+                list = listRequest(item.getJSONObject("list")),
                 sampleRate = item.getInt("sampleRate"),
                 maxCharacters = item.getInt("maxCharacters"),
                 maxSegments = if (item.has("maxSegments")) item.getInt("maxSegments") else null,
@@ -274,7 +267,20 @@ class VoiceCatalog(
                 audioField = item.optStringOrNull("audioField"),
                 request = template(item.getJSONObject("request")),
             )
-        }
+
+        private fun listRequest(list: JSONObject) = AccountListRequest(
+            method = list.getString("method"),
+            url = list.getString("url"),
+            headers = list.getJSONObject("headers").strings(),
+            pageParameter = list.optStringOrNull("pageParameter"),
+            pageSize = if (list.has("pageSize")) list.getInt("pageSize") else null,
+            maxPages = list.getInt("maxPages"),
+            maxResponseBytes = list.getInt("maxResponseBytes"),
+            timeoutSeconds = list.getInt("timeoutSeconds"),
+            absentStatuses = list.getJSONArray("absentStatuses").let { array ->
+                (0 until array.length()).map(array::getInt).toSet()
+            },
+        )
 
         private fun realtime(item: JSONObject) = RealtimeSpeechSpec(
             provider = item.getString("provider"),

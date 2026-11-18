@@ -86,6 +86,7 @@ final class OpenAIRealtimeSpeechTests: XCTestCase {
         XCTAssertTrue(faithful("Hello, world!", "hello world"))
         XCTAssertTrue(faithful("The year is 2026.", "The year is two thousand and twenty six."))
         XCTAssertTrue(faithful("It costs 5 dollars.", "It costs five dollars."))
+        XCTAssertTrue(faithful("Café au lait", "café au lait"))
         XCTAssertFalse(faithful(
             "Do not open the door until the alarm stops.", "Do open the door until the alarm stops."),
             "Dropping one word, such as a negation, changes the meaning")
@@ -113,6 +114,7 @@ final class OpenAIRealtimeSpeechTests: XCTestCase {
         XCTAssertTrue(faithful("It costs $5", "It costs five dollars"))
         XCTAssertTrue(faithful("Salt & pepper", "Salt and pepper"))
         XCTAssertTrue(faithful("Finish 1st", "Finish first"))
+        XCTAssertTrue(faithful("Call me at 5pm.", "Call me at five p m."))
         XCTAssertTrue(faithful("Es kostet 5 Euro", "Es kostet fünf Euro"),
                       "A reading in another language is a bounded slot")
     }

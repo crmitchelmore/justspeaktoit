@@ -44,14 +44,11 @@ class AccountVoiceDirectory(
     private suspend fun list(provider: AccountVoiceProvider, key: String): List<AccountVoice> {
         val voices = mutableListOf<AccountVoice>()
         val identifiers = mutableSetOf<String>()
-        val cursors = mutableSetOf<String>()
         var listed = 0
-        var cursor: String? = null
-        for (page in 0 until provider.list.maxPages) {
-            val body = fetch(provider, key, page, cursor) ?: return voices
+        fun accept(list: AccountListRequest, body: ByteArray): AccountVoiceListing.ParsedPage {
             val parsed = AccountVoiceListing.parse(provider, body) ?: throw invalid(provider)
             val entries = parsed.entries
-            val pageSize = provider.list.pageSize
+            val pageSize = list.pageSize
             if (entries.size > provider.maxVoices - listed || (pageSize != null && entries.size > pageSize)) {
                 throw invalid(provider)
             }
@@ -62,8 +59,18 @@ class AccountVoiceDirectory(
                 if (!identifiers.add(id)) throw invalid(provider)
             }
             voices += entries.filter { it.usable }.map { it.voice }
-            when (provider.list.pageParameter) {
-                OFFSET -> if (entries.size < checkNotNull(pageSize)) return voices
+            return parsed
+        }
+        // xAI: built-ins beyond the fixed presets come first, then the team's custom voices.
+        provider.builtInList?.let { builtIn -> fetch(provider, builtIn, key, builtIn.url)?.let { accept(builtIn, it) } }
+        val list = provider.list
+        val cursors = mutableSetOf<String>()
+        var cursor: String? = null
+        for (page in 0 until list.maxPages) {
+            val body = fetch(provider, list, key, pageUrl(list, page, cursor)) ?: return voices
+            val parsed = accept(list, body)
+            when (list.pageParameter) {
+                OFFSET -> if (parsed.entries.size < checkNotNull(list.pageSize)) return voices
                 null -> return voices
                 else -> {
                     val next = parsed.nextCursor?.takeIf { it.isNotEmpty() } ?: return voices
@@ -78,14 +85,14 @@ class AccountVoiceDirectory(
         throw invalid(provider)
     }
 
-    /** The page's body, or null when the status says the account has no such library. */
-    private suspend fun fetch(provider: AccountVoiceProvider, key: String, page: Int, cursor: String?): ByteArray? {
-        val list = provider.list
-        val url = when {
-            list.pageParameter == OFFSET && page > 0 -> "${list.url}&$OFFSET=${page * checkNotNull(list.pageSize)}"
-            list.pageParameter != null && cursor != null -> "${list.url}&${list.pageParameter}=${queryValue(cursor)}"
-            else -> list.url
-        }
+    private fun pageUrl(list: AccountListRequest, page: Int, cursor: String?) = when {
+        list.pageParameter == OFFSET && page > 0 -> "${list.url}&$OFFSET=${page * checkNotNull(list.pageSize)}"
+        list.pageParameter != null && cursor != null -> "${list.url}&${list.pageParameter}=${queryValue(cursor)}"
+        else -> list.url
+    }
+
+    /** The body at [url], or null when the status says the account has no such library. */
+    private suspend fun fetch(provider: AccountVoiceProvider, list: AccountListRequest, key: String, url: String): ByteArray? {
         val values = mapOf("key" to key)
         val request = SpeechHttpRequest(
             method = list.method,

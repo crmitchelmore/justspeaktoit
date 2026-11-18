@@ -126,6 +126,7 @@ class RealtimeSpeechTest {
     fun testFaithfulReading_requiresEveryWordButToleratesPunctuationAndSpokenNumerals() {
         assertTrue(faithful("Hello, world!", "hello world"))
         assertTrue(faithful("The year is 2026.", "The year is two thousand and twenty six."))
+        assertTrue(faithful("It costs 5 dollars.", "It costs five dollars."))
         assertTrue(faithful("Café au lait", "café au lait"))
         assertFalse(faithful("Do not open the door.", "Do open the door."))
         assertFalse(faithful("Is it raining?", "Is it raining? I can't check the weather, sorry."))
@@ -144,6 +145,7 @@ class RealtimeSpeechTest {
     @Test
     fun testFaithfulReading_acceptsCommonReadingsOfNumbersAndSymbols() {
         assertTrue(faithful("The year is 2026.", "The year is twenty twenty-six."))
+        assertTrue(faithful("The year is 2026.", "The year is 2026."))
         assertTrue(faithful("We sold 2,026 units.", "We sold two thousand and twenty-six units."))
         assertTrue(faithful("Add 3.5 cups", "Add three point five cups"))
         assertTrue(faithful("Meet at 10:30", "Meet at ten thirty"))

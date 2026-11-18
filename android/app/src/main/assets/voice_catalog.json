@@ -50,6 +50,19 @@
       "sampleRate" : 24000
     },
     {
+      "builtInList" : {
+        "absentStatuses" : [
+
+        ],
+        "headers" : {
+          "Authorization" : "Bearer {key}"
+        },
+        "maxPages" : 1,
+        "maxResponseBytes" : 65536,
+        "method" : "GET",
+        "timeoutSeconds" : 20,
+        "url" : "https://api.x.ai/v1/tts/voices"
+      },
       "credentialID" : "xai.apiKey",
       "fixedVoiceIDs" : [
         "eve",

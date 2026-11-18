@@ -42,6 +42,9 @@ extension VoiceCatalogAndroidExport {
         /// Soniox: only clones whose status for this model is `ready` can speak.
         let readyModel: String?
         let maxVoices: Int
+        /// xAI: the single-page built-in listing, read before `list`. Its voices that are not
+        /// `fixedVoiceIDs` join the account's, and `maxVoices` and duplicate checks span both listings.
+        let builtInList: ListRequest?
         let list: ListRequest
         let sampleRate: Int
         let maxCharacters: Int
@@ -119,8 +122,12 @@ extension VoiceCatalogAndroidExport {
         ))
         return try account(
             voice, provider: .xai, request: request,
+            // Built-ins beyond the fixed presets are listed here; the team's clones come from custom voices.
+            builtInList: listRequest(
+                XAITTSAPI.voiceListRequest(apiKey: keyToken), pageParameter: nil, pageSize: nil, maxPages: 1,
+                maxResponseBytes: XAIAccountVoiceInventory.maximumResponseBytes
+            ),
             list: listRequest(
-                // Built-in voices are the fixed presets; the account's own come only from custom voices.
                 XAITTSAPI.customVoiceListRequest(apiKey: keyToken, paginationToken: nil),
                 pageParameter: "pagination_token", pageSize: XAITTSAPI.customVoicePageSize,
                 maxPages: XAITTSAPI.maximumCustomVoicePages,
@@ -164,7 +171,8 @@ extension VoiceCatalogAndroidExport {
 
     // swiftlint:disable:next function_parameter_count
     private static func account(
-        _ voice: DesktopSpeechVoice, provider: VoiceAccountProvider, request: Template, list: ListRequest,
+        _ voice: DesktopSpeechVoice, provider: VoiceAccountProvider, request: Template,
+        builtInList: ListRequest? = nil, list: ListRequest,
         fixedVoiceIDs: [String], readyModel: String?, maxVoices: Int, maxCharacters: Int,
         response: String = "wav", audioField: String? = nil
     ) throws -> AccountProvider {
@@ -177,7 +185,7 @@ extension VoiceCatalogAndroidExport {
             modelID: voice.modelID, credentialID: voice.apiKeyIdentifier,
             keyTemplate: placeholders("\(voice.modelID)|\(voice.id)"), idTemplate: placeholders(voice.id),
             labelTemplate: placeholders(voice.label), lowercaseVoiceID: lowercased, fixedVoiceIDs: fixedVoiceIDs,
-            readyModel: readyModel, maxVoices: maxVoices, list: list,
+            readyModel: readyModel, maxVoices: maxVoices, builtInList: builtInList, list: list,
             sampleRate: voice.sampleRate(quality: nil), maxCharacters: maxCharacters, maxSegments: nil,
             response: response, audioField: audioField, request: request
         )

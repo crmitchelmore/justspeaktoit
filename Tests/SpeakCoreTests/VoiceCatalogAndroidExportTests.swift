@@ -136,6 +136,20 @@ final class VoiceCatalogAndroidExportTests: XCTestCase {
         XCTAssertEqual(mistral.list.absentStatuses, [])
     }
 
+    /// xAI reads its built-in listing first, as `XAIAccountVoiceInventory.fetch` does, so built-ins
+    /// beyond the fixed presets still reach Android.
+    func testXAIBuiltInListingIsReadBeforeCustomVoices() throws {
+        let accounts = try VoiceCatalogAndroidExport.accountProviders()
+        let xai = try XCTUnwrap(accounts.first { $0.provider == "xai" })
+        let builtIn = try XCTUnwrap(xai.builtInList)
+        XCTAssertEqual(builtIn.url, XAITTSAPI.voiceListRequest(apiKey: "k").url?.absoluteString)
+        XCTAssertEqual(builtIn.headers["Authorization"], "Bearer {key}")
+        XCTAssertNil(builtIn.pageParameter)
+        XCTAssertEqual(builtIn.maxPages, 1)
+        XCTAssertEqual(builtIn.absentStatuses, [])
+        XCTAssertEqual(accounts.filter { $0.builtInList != nil }.map(\.provider), ["xai"])
+    }
+
     func testRealtimeVoicesMatchTheSharedRealtimeSpeech() throws {
         let realtime = try VoiceCatalogAndroidExport.realtime()
         XCTAssertEqual(realtime.voices.map(\.voice), OpenAIRealtimeSpeech.voices.map(\.id))

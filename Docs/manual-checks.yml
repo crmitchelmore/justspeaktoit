@@ -382,6 +382,19 @@ sessions:
           - "Force-stop and reopen the app."
         expected: "The prompt appears once with both switches off, dismissing it keeps both off, TalkBack reads each switch with its on or off state, search finds both, and the prompt does not return."
         final_gate: false
+      - id: "android-icloud-restore"
+        issues:
+          - 1837
+        title: "Android: iCloud sync resumes after a transfer"
+        minutes: 10
+        core: false
+        build: "Two Android phones, build with #1837"
+        steps:
+          - "Sign in to History sync on phone one."
+          - "Transfer to phone two during setup."
+          - "Open the app on phone two."
+        expected: "Signed in with no browser prompt, and sync works."
+        final_gate: true
       - id: "owner-android-play-tip-products"
         issues:
           - 1594

@@ -16,7 +16,7 @@ re-check them whenever the Android app gains a network call, SDK or permission.
 | Upload to the internal testing track | Same job, through `r0adkll/upload-google-play`, when the Play service account is configured |
 | Privacy policy inside the app | Settings › Privacy policy opens `https://justspeaktoit.com/privacy` |
 | Privacy policy covering Android | The Android section of `landing-page/privacy.html` |
-| No backup or device transfer of keys and history | `res/xml/data_extraction_rules.xml`, `allowBackup=false` |
+| No backup or device transfer of keys and history, except the iCloud sign-in token (see [Restoring sign-in](#restoring-sign-in-on-a-new-device-april-2027)) | `res/xml/data_extraction_rules.xml`, `res/xml/backup_rules.xml` |
 | HTTPS only | No cleartext traffic is permitted (target SDK ≥ 28 default, no network security override) |
 
 ### How the release job behaves
@@ -289,3 +289,32 @@ the same). Copy both into 1Password. Repeat them only to rotate the key.
     changes wait there.
 
 [mlkit-disclosure]: https://developers.google.com/ml-kit/android-data-disclosure
+
+## Restoring sign-in on a new device (April 2027)
+
+From April 2027 Play requires apps with sign-in to restore the signed-in state after a device transfer or
+cloud restore. The only sign-in is the optional iCloud History sync (#1630, #1815). Block Store does not
+qualify (it had to be in production by 30 September 2026).
+
+**Credential Manager Restore Credentials was not used.** Its `CreateRestoreCredentialRequest` takes a
+WebAuthn `PublicKeyCredentialCreationOptions` JSON from a relying-party server, and the resulting
+registration response must be verified and stored by that server, which later checks the assertion from
+`GetRestoreCredentialOption`. The key is a passkey, not a place to stash an arbitrary token. We run no
+account server (CloudKit authenticates through Apple), and standing one up only to carry a token would add
+infrastructure, a data store and a privacy surface for an optional feature.
+
+**What is done instead:** Android Auto Backup and device-to-device transfer of one file,
+`files/restore/cloudkit-web-auth-token`.
+
+- The Keystore-encrypted copy of the token cannot move (its key never leaves the device), so
+  `BackupMirroringTokenStore` also writes each rotated token to that file. Everything else stays excluded.
+- `data_extraction_rules.xml` includes the file in `cloud-backup` only with `requireFlags="clientSideEncryption"`
+  (end-to-end encrypted, which needs a screen lock) and in `device-transfer`. `backup_rules.xml` does the
+  same for Android 11 and older. `allowBackup` is therefore `true`, with every other path excluded.
+  Without end-to-end encryption the token is not backed up and the user signs in again.
+- On launch `HistorySyncService.prepare()` finds no live session but a backed-up token, saves it, validates it
+  with a CloudKit `users/caller` call and resumes sync. If CloudKit rejects it, the token is deleted and the
+  normal sign-in prompt applies. Offline, the token is kept and the first sync decides.
+- Sign-out, or CloudKit rejecting the token at any time, deletes the file.
+
+If Play later insists on the Restore Credentials API itself, this needs a WebAuthn relying party; revisit then.

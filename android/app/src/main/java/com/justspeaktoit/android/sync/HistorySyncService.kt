@@ -49,6 +49,7 @@ class HistorySyncService(
     unavailable: CloudKitUnavailable?,
     private val store: AndroidHistorySyncStore,
     private val io: CoroutineDispatcher,
+    private val backup: WebAuthTokenBackup? = null,
     private val now: () -> Long = System::currentTimeMillis,
     private val transportFor: (CloudKitWebClient, Long) -> HistorySyncTransport = ::CloudKitHistorySyncTransport,
     private val bindCallback: () -> ServerSocket = CloudKitSignIn::bind,
@@ -69,11 +70,14 @@ class HistorySyncService(
     private var syncing = false
     private var followUp = false
 
-    /** Reads whether a session is stored, so Settings shows it before the first sync. */
+    /**
+     * Reads whether a session is stored, so Settings shows it before the first sync. With none, a token
+     * restored from backup onto a new device is validated and resumed.
+     */
     suspend fun prepare() = withContext(io) {
         val client = client ?: return@withContext
         try {
-            val signedIn = client.hasWebAuthToken()
+            val signedIn = client.hasWebAuthToken() || restoreFromBackup(client)
             val last = store.state().lastSuccessfulSyncMs
             _status.update { it.copy(signedIn = signedIn, lastSuccessfulSyncMs = last) }
         } catch (e: CancellationException) {
@@ -81,6 +85,35 @@ class HistorySyncService(
         } catch (e: Exception) {
             _status.update { it.copy(problem = problem(e)) }
         }
+    }
+
+    /** True when the backed-up token is still accepted; an expired one is dropped so normal sign-in applies. */
+    private suspend fun restoreFromBackup(client: CloudKitWebClient): Boolean {
+        val token = try {
+            backup?.read()
+        } catch (e: IOException) {
+            null
+        } ?: return false
+        client.storeWebAuthToken(token)
+        try {
+            client.currentUserRecordName()
+        } catch (e: CloudKitException.AuthenticationRequired) {
+            return forgetRestored(client)
+        } catch (e: CloudKitException.AuthenticationFailed) {
+            return forgetRestored(client)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Offline on first launch: keep the token and let the first sync decide.
+            _status.update { it.copy(problem = problem(e)) }
+        }
+        store.updateState { it.copy(enabled = true) }
+        return true
+    }
+
+    private suspend fun forgetRestored(client: CloudKitWebClient): Boolean {
+        client.signOut()
+        return false
     }
 
     /**
@@ -252,9 +285,10 @@ class HistorySyncService(
             tokens: WebAuthTokenStore,
             store: AndroidHistorySyncStore,
             io: CoroutineDispatcher,
+            backup: WebAuthTokenBackup? = null,
         ): HistorySyncService = when (resolution) {
             is CloudKitResolution.Available ->
-                HistorySyncService(CloudKitWebClient(resolution.config, http, tokens, io), null, store, io)
+                HistorySyncService(CloudKitWebClient(resolution.config, http, tokens, io), null, store, io, backup)
             is CloudKitResolution.Unavailable -> HistorySyncService(null, resolution.reason, store, io)
         }
 

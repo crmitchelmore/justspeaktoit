@@ -124,7 +124,8 @@ enum RealtimeReadingCheck {
                 continue
             }
             for scalar in character.unicodeScalars {
-                if CharacterSet.alphanumerics.contains(scalar) { current.unicodeScalars.append(scalar) } else { flush() }
+                guard CharacterSet.alphanumerics.contains(scalar) else { flush(); continue }
+                current.unicodeScalars.append(scalar)
             }
         }
         flush()
@@ -247,15 +248,8 @@ enum NumberWords {
             } else if let number = small[word], !["oh", "o", "nought"].contains(word) {
                 current += number
             } else if let scale = scales[word] {
-                // Checked before multiplying, which would otherwise overflow.
-                let base = max(current, 1)
-                guard base <= (limit - 1 - total) / scale else { return nil }
-                if scale == 100 {
-                    current = base * 100
-                } else {
-                    total += base * scale
-                    current = 0
-                }
+                guard let scaled = scaling(total: total, current: current, by: scale) else { return nil }
+                (total, current) = scaled
             } else {
                 return nil
             }
@@ -263,5 +257,13 @@ enum NumberWords {
             guard total + current < limit else { return nil }
         }
         return sawValue ? total + current : nil
+    }
+
+    /// `current` times `scale`, checked against the limit before multiplying,
+    /// which would otherwise overflow.
+    private static func scaling(total: Int, current: Int, by scale: Int) -> (total: Int, current: Int)? {
+        let base = max(current, 1)
+        guard base <= (limit - 1 - total) / scale else { return nil }
+        return scale == 100 ? (total, base * 100) : (total + base * scale, 0)
     }
 }

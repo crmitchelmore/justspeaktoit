@@ -70,7 +70,9 @@ class OkHttpSpeechHttpTest {
         repeat(times) {
             server.accept().use { socket ->
                 val reader = socket.getInputStream().bufferedReader()
-                while (reader.readLine()?.isNotEmpty() == true) Unit
+                do {
+                    val line = reader.readLine()
+                } while (!line.isNullOrEmpty())
                 socket.getOutputStream().write(response.toByteArray())
                 socket.getOutputStream().flush()
             }

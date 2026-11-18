@@ -389,7 +389,9 @@ extension KeyboardInstantDictationCoordinator {
         // `activate()` may already be starting it; two starts would race for the microphone.
         await startTask?.value
         guard !isReady else { return }
-        let task = Task { [weak self] in await self?.startSession() }
+        let task = Task<Void, Never> { [weak self] in
+            await self?.startSession()
+        }
         startTask = task
         await task.value
         if startTask == task { startTask = nil }

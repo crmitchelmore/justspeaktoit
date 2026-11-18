@@ -1371,23 +1371,6 @@ sessions:
           - "Turn VoiceOver on and move through a model row while it downloads."
         expected: "The sentence is transcribed with Airplane Mode on and History names the model (for example WhisperKit Base), never a generic label or a cloud provider. The silent recording produces no text and no placeholder. The not-downloaded model fails with a message to download it rather than uploading. Removed models show Download again. The import appears in the list and downloads. VoiceOver reads each model's name, size, state and progress, and announces when a download finishes."
         final_gate: false
-      - id: "ios-downloaded-cleanup-models"
-        issues:
-          - 1650
-        title: "Downloaded cleanup models polish transcripts on the device"
-        minutes: 12
-        core: false
-        build: "TestFlight Just Speak to It Alpha, the first build that includes #1650 iOS downloaded local cleanup models, on an iPhone and an iPad"
-        steps:
-          - "Open Settings \u203a Post-Processing \u203a Model & Prompt \u203a On-Device Cleanup Models. Check each model shows its size; Qwen3 1.7B Q4 appears only on a device with 6 GB of memory or more."
-          - "Tap Download on SmolLM2 360M Q4, then tap Download on Qwen3 0.6B Q4 and Cancel part-way: it returns to Download."
-          - "When SmolLM2 finishes, tap Use, and confirm it is ticked in the Model list above."
-          - "Turn on Airplane Mode and Auto-Polish After Recording, record \"um so I think we should uh meet on Tuesday\" and stop, and time how long the polish takes."
-          - "Add a line to the cleanup prompt asking for every word in capitals, polish the same transcript again, then record five seconds of silence."
-          - "Remove SmolLM2 with its Remove button and polish the transcript again."
-          - "Turn VoiceOver on and move through a model row while it downloads."
-        expected: "With Airplane Mode on, the filler words are removed and the prompt's capitals rule is followed, so the prompt reached the model. The silent recording stays empty with no placeholder. After removal, polishing keeps the original transcript and says to download the model; nothing goes to a cloud model. The app does not quit during or after cleanup. VoiceOver reads each model's name, size, state and progress, and announces when a download finishes. Note the device and polish time in the result."
-        final_gate: false
       - id: "iphone-usage-insights-dashboard"
         issues:
           - 1623

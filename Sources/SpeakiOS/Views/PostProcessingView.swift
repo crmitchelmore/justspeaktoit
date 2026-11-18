@@ -29,8 +29,7 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
     ) async {
         guard !text.isEmpty else { return }
         let usesAppleModel = model == AppleLocalModels.foundationModelID
-        let usesDownloadedModel = IOSLocalCleanupModels.isCleanupModelID(model)
-        guard usesAppleModel || usesDownloadedModel || !apiKey.isEmpty else {
+        guard usesAppleModel || !apiKey.isEmpty else {
             error = PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model))
                 .errorDescription
             return
@@ -52,13 +51,6 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
                     streamingText = try await AppleFoundationModelPolisher.process(
                         text: text,
                         systemPrompt: effectivePrompt
-                    )
-                } else if usesDownloadedModel {
-                    streamingText = try await IOSLocalCleanup().respond(
-                        transcript: text,
-                        systemPrompt: effectivePrompt,
-                        userMessage: TranscriptCleanupPolicy.userMessage(transcript: text),
-                        modelID: model
                     )
                 } else {
                     // Use streaming for real-time updates
@@ -126,13 +118,6 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
             return try await AppleFoundationModelPolisher.respond(
                 systemPrompt: systemPrompt,
                 userMessage: userMessage
-            )
-        }
-        if IOSLocalCleanupModels.isCleanupModelID(model) {
-            // Downloaded models never fall back to the cloud: a failure keeps
-            // the original transcript and reports why.
-            return try await IOSLocalCleanup().respond(
-                transcript: text, systemPrompt: systemPrompt, userMessage: userMessage, modelID: model
             )
         }
         guard !apiKey.isEmpty else {

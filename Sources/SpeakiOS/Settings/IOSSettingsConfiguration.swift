@@ -161,8 +161,7 @@ final class IOSSettingsConfiguration {
         }
         if case .string(let model)? = changes["postProcessingModel"],
            !AppSettings.postProcessingModels.contains(where: { $0.id == model }),
-           CleanupModelSelection.modelID(from: model) == nil,
-           !IOSLocalCleanupModels.isCleanupModelID(model) {
+           CleanupModelSelection.modelID(from: model) == nil {
             issues.append(.init(
                 path: "settings.postProcessingModel", message: "\"\(model)\" cannot run on this device."))
         }

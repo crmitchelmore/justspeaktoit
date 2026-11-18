@@ -17,12 +17,6 @@ struct PostProcessingSettingsView: View {
                 Text("Native models use that provider's own key. OpenRouter offers many more models with one key.")
             }
 
-            if !IOSLocalCleanupModelManager.shared.models.isEmpty {
-                SearchableSettingsSection("On-Device Cleanup Models") {
-                    IOSDownloadedCleanupModelsList(settings: settings)
-                }
-            }
-
             Section("Effective Policy Preview") {
                 Text(TranscriptCleanupPolicy.systemPrompt())
                     .font(.caption)

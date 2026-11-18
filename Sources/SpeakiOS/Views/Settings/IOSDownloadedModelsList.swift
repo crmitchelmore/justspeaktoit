@@ -153,13 +153,6 @@ struct IOSDownloadedModelsList: View {
 
 /// One model: name, size, state and the actions that state allows.
 struct IOSDownloadedModelRow: View {
-    /// What the row shows of a downloaded transcription or cleanup model.
-    struct Model {
-        let id: String
-        let displayName: String
-        let approximateSizeMB: Int
-    }
-
     struct Actions {
         let download: () -> Void
         let cancel: () -> Void
@@ -167,7 +160,7 @@ struct IOSDownloadedModelRow: View {
         let remove: () -> Void
     }
 
-    let model: Model
+    let model: LocalTranscriptionModel
     let state: IOSLocalModelInstallState
     let sizeBytes: Int64?
     let isRecommended: Bool
@@ -175,32 +168,8 @@ struct IOSDownloadedModelRow: View {
     let isImported: Bool
     let actions: Actions
 
-    init(
-        model: Model, state: IOSLocalModelInstallState, sizeBytes: Int64?, isRecommended: Bool, isSelected: Bool,
-        isImported: Bool, actions: Actions
-    ) {
-        self.model = model
-        self.state = state
-        self.sizeBytes = sizeBytes
-        self.isRecommended = isRecommended
-        self.isSelected = isSelected
-        self.isImported = isImported
-        self.actions = actions
-    }
-
-    init(
-        model: LocalTranscriptionModel, state: IOSLocalModelInstallState, sizeBytes: Int64?, isRecommended: Bool,
-        isSelected: Bool, isImported: Bool, actions: Actions
-    ) {
-        self.init(
-            model: Model(id: model.id, displayName: model.displayName, approximateSizeMB: model.approximateSizeMB),
-            state: state, sizeBytes: sizeBytes, isRecommended: isRecommended, isSelected: isSelected,
-            isImported: isImported, actions: actions
-        )
-    }
-
     /// Stable automation suffix: `local/whisperkit/base` → `local-whisperkit-base`.
-    static func identifierSuffix(for model: Model) -> String {
+    static func identifierSuffix(for model: LocalTranscriptionModel) -> String {
         model.id.lowercased().map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined()
     }
 

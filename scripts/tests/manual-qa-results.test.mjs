@@ -148,10 +148,14 @@ test('a compact block lists passes and skips by id and parses to the same result
     { id: 'decision-x', choice: 'no' },
   ];
   const compact = encodeResultsBlock(catalogue.hash, results, true);
-  assert.match(compact, /"pass":\["iphone-a"\],"skip":\["iphone-c"\]/);
+  assert.match(compact, /"pass":"iphone-a","skip":"iphone-c"/);
   const simplify = parsed => parsed.results.map(entry => [entry.item.id, entry.result || entry.option.id, entry.note || '']);
-  assert.deepEqual(simplify(parseResults(compact, catalogue)).sort(),
-    simplify(parseResults(encodeResultsBlock(catalogue.hash, results), catalogue)).sort());
+  const full = simplify(parseResults(encodeResultsBlock(catalogue.hash, results), catalogue)).sort();
+  assert.deepEqual(simplify(parseResults(compact, catalogue)).sort(), full);
+  // Links opened before ids became space-separated strings carry arrays.
+  const legacy = compact.replace('"pass":"iphone-a","skip":"iphone-c"', '"pass":["iphone-a"],"skip":["iphone-c"]');
+  assert.deepEqual(simplify(parseResults(legacy, catalogue)).sort(), full);
+  assert.throws(() => parseResults(compact.replace('"pass":"iphone-a"', '"pass":"iphone-a "'), catalogue), /pass/);
 });
 
 test('results parsing is strict', () => {

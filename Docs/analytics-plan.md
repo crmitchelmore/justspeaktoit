@@ -185,9 +185,9 @@ fail on any non-enum string property, exactly as issue #591 specifies.
   that `scripts/desktop-analytics/configure-posthog-key.py` writes into
   `DesktopAnalyticsBuildConfiguration` in the build's checkout (never a
   commit) from `POSTHOG_PROJECT_KEY`. The Windows x64, Windows ARM64 and Linux
-  Flatpak release workflows do not run it yet (owner step #1744); once they
-  do, only `main` pushes and the Alpha/Stable manifest tags are stamped, and
-  pull request, merge-batch and other branch builds stay keyless. A debug
+  Flatpak workflows run it before building (#1744), but only for `main` pushes
+  and the Alpha/Stable manifest tags; pull request, merge-batch and other
+  branch builds stay keyless. `test_configure_posthog_key.py` guards that. A debug
   build ignores a stamped key. A set `JSTI_POSTHOG_PROJECT_KEY` overrides the
   stamped key for development; a key that is not `phc_` followed by 8 to 128
   letters, digits, `-` or `_` counts as no key, and a keyless build sends

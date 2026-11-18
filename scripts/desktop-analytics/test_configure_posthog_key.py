@@ -63,5 +63,24 @@ class ConfigurePostHogKeyTests(unittest.TestCase):
             CONFIGURE.configured_source("public enum DesktopAnalyticsBuildConfiguration {}\n", KEY)
 
 
+    def test_release_workflows_stamp_only_main_and_manifest_tags_before_building(self):
+        release_only = ("if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || "
+                        "startsWith(github.ref, 'refs/tags/alpha-build-') || "
+                        "startsWith(github.ref, 'refs/tags/stable-candidate-')) }}\n")
+        builds = {"windows-cross-proof.yml": "Cross-build the Windows app and test suite",
+                  "windows-arm64.yml": "Build native Windows ARM64 executable",
+                  "linux-flatpak.yml": "Build offline"}
+        for name, build in builds.items():
+            with self.subTest(workflow=name):
+                workflow = (CONFIGURE.ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+                self.assertEqual(workflow.count("secrets.POSTHOG_PROJECT_KEY"), 1)
+                start = workflow.index("      - name: Stamp the PostHog project key into release builds\n")
+                step = workflow[start:workflow.index("\n      - ", start + 1)]
+                self.assertIn(release_only, step)
+                self.assertIn("POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}", step)
+                self.assertIn("scripts/desktop-analytics/configure-posthog-key.py", step)
+                self.assertLess(start, workflow.index("      - name: %s\n" % build))
+                self.assertIn("      - scripts/desktop-analytics/**\n", workflow)
+
 if __name__ == "__main__":
     unittest.main()

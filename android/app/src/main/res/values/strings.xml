@@ -639,6 +639,15 @@
     <string name="keyboard_voice_edit_network">The cleanup provider could not be reached.</string>
     <string name="keyboard_voice_edit_failed">The cleanup model could not rewrite the selection.</string>
     <string name="settings_privacy_title">Privacy</string>
+    <string name="settings_cloud_sharing_title">Cloud sharing</string>
+    <string name="settings_cloud_sharing_note">Audio, transcript text and text to speak are sent only to providers you allow. Each provider is asked the first time something would be sent. Withdrawal takes effect immediately.</string>
+    <string name="settings_cloud_sharing_empty">No cloud providers are allowed yet. You\'ll be asked before anything is sent.</string>
+    <string name="cloud_sharing_allow">Allow</string>
+    <string name="cloud_sharing_not_now">Not now</string>
+    <string name="cloud_sharing_on_device">Use on-device instead</string>
+    <string name="cloud_sharing_withdraw">Withdraw</string>
+    <string name="cloud_sharing_policy">%1$s privacy policy</string>
+    <string name="failure_cloud_sharing_consent">Nothing was sent. Allow cloud sharing in the app, or use on-device recognition.</string>
     <string name="settings_analytics_title">Share anonymous analytics</string>
     <string name="settings_analytics_note">Helps improve the app with a few typed usage events, such as a daily active ping and your first successful transcription. Transcripts, audio, prompts, clipboard text, keystrokes, API keys, screen content and personal identity are never collected. Off unless you turn it on.</string>
     <string name="settings_diagnostics_title">Send crash reports and diagnostics</string>

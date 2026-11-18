@@ -115,8 +115,13 @@ extension TranscriptionRecordingService {
         // Shortcut) decides the mode rather than being started in a mode it has
         // no client for. `modelSelection` owns that rule for every surface.
         let runParameters = adoptRunParameters(configuration.parameters, keyboardProfile: keyboardProfile)
-        let usesBatchTranscription = configuration.usesBatch
+        var usesBatchTranscription = configuration.usesBatch
         currentModel = configuration.modelID
+        let consented = try await consentedCloudModel(
+            modelID: currentModel, usesBatch: usesBatchTranscription, run: runID
+        )
+        usesBatchTranscription = consented.usesBatch
+        currentModel = consented.modelID
         try validateCredentialAvailability(
             settings: settings,
             usesBatchTranscription: usesBatchTranscription,

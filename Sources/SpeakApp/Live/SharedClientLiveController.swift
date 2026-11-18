@@ -67,6 +67,9 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
 
   func start() async throws {
     guard !isRunning, !isStarting, !isStopping else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
+    if let model = currentModel {
+      try await CloudSharingStartConsent.requireLive(modelID: model, settings: appSettings)
+    }
     isStarting = true
     defer { isStarting = false }
     try Task.checkCancellation()

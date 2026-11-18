@@ -155,6 +155,12 @@ final class OpenRouterTTSRoutingTests: XCTestCase {
             keychainService: "com.justspeaktoit.tests.openrouter-tts.\(UUID().uuidString)"
         )
         let clients: [TTSProvider: TextToSpeechClient] = client.map { [.openrouter: $0] } ?? [:]
+        if let request = CloudSharingConsent.request(
+            providerID: TTSProvider.openrouter.rawValue, kind: .textToSpeak, purpose: .voiceOutput,
+            canUseOnDevice: true
+        ) {
+            CloudSharingConsentStore.shared.grant(request)
+        }
         let manager = TextToSpeechManager(
             appSettings: settings, secureStorage: storage, clients: clients, recordingSaver: recordingSaver
         )

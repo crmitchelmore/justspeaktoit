@@ -60,6 +60,22 @@ struct BatchTranscriptionRouter {
         )
       }
 
+      switch await CloudSharingPrompt.resolve(modelID: model, purpose: .batchTranscription) {
+      case .proceed:
+        break
+      case .useOnDevice:
+        CloudSharingStartConsent.applyOnDeviceTranscription(settings)
+        if let local = onDeviceFileModel(settings: settings), local != model {
+          return try await performBatchTranscription(
+            at: url, model: { local }, settings: settings, batchClient: batchClient,
+            providerForModel: providerForModel, apiKey: apiKey, onDiagnostic: onDiagnostic
+          )
+        }
+        throw CloudSharingKeptOnDevice(modelID: model)
+      case .refused(let request):
+        throw CloudSharingBlocked(request: request)
+      }
+
       // Check if this model uses a dedicated transcription provider
       if let provider = await providerForModel(model) {
         let metadata = provider.metadata
@@ -133,6 +149,26 @@ struct BatchTranscriptionRouter {
     }
     let saved = settings.batchTranscriptionModel
     return ModelRetirements.successor(for: saved, mode: .batch) ?? saved
+  }
+}
+
+/// The recording stays on this Mac. The next dictation uses the on-device choice.
+struct CloudSharingKeptOnDevice: Error, LocalizedError {
+  let modelID: String
+
+  var errorDescription: String? {
+    "This recording stays on this Mac. Transcription is now on-device; start again to use it."
+  }
+}
+
+extension BatchTranscriptionRouter {
+  /// A file transcription that cannot leave the device: SpeechAnalyzer when this OS has it,
+  /// otherwise a downloaded model.
+  fileprivate static func onDeviceFileModel(settings: AppSettings) -> String? {
+    let downloaded = settings.localTranscriptionModel
+    if ModelRouting.family(for: downloaded).isDownloadedLocal { return downloaded }
+    if #available(macOS 26.0, *) { return AppleLocalModels.speechTranscriberModelID }
+    return nil
   }
 }
 

@@ -42,6 +42,7 @@ final class GladiaControllerBoundaryFixture {
             ), appSettings: settings
         )
         controller.configure(language: nil, model: "gladia/solaria-1-streaming")
+        grantCloudSharingConsent(forModel: "gladia/solaria-1-streaming", purpose: .liveTranscription)
         let client = client
         controller.clientFactory = { client }
         controller.startCaptureAudio = {}

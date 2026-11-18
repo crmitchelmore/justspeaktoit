@@ -144,6 +144,7 @@ public struct ContentView: View {
                 }
             ))))
         }
+        .cloudSharingConsentPrompt()
         .environment(\.appVisualDensity, settings.visualDensity)
         .environment(\.defaultMinListRowHeight, settings.visualDensity.minimumListRowHeight)
         .controlSize(density.isCompact ? .small : .regular)

@@ -169,6 +169,11 @@ final class OpenRouterIOSProgressiveVoiceOutputTests: XCTestCase {
     func testCancelledQueuedRouterStartDoesNotStopPriorSynthesis() async throws {
         let session = StubURLProtocol.makeSession()
         let router = VoiceOutputRouter(session: session)
+        if let request = CloudSharingConsent.request(
+            providerID: "openrouter", kind: .textToSpeak, purpose: .voiceOutput, canUseOnDevice: false
+        ) {
+            CloudSharingConsentStore.shared.grant(request)
+        }
         try await assertCancelledQueuedStartPreservesPendingRequest(session: session, stop: { router.stop() }, speak: {
             try await router.speak(
                 text: "Hello", provider: .openrouter, model: self.selection.id, voice: "voice",

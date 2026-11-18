@@ -42,6 +42,7 @@ final class SharedClientParityFixture {
             ), appSettings: settings
         )
         controller.configure(language: language, model: model)
+        grantCloudSharingConsent(forModel: model, purpose: .liveTranscription)
         let socket = socket, clock = clock, updates = updates
         controller.configuredClientFactory = { [weak self] route, language, options in
             let client = makeClient(Context(

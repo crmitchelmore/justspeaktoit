@@ -243,6 +243,14 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     case downloadedLocal
     case openRouter
 
+    /// Local routes never upload. Everything else sends the recording to a provider.
+    var sendsAudioOffDevice: Bool {
+        switch self {
+        case .appleSpeechAnalyzer, .downloadedLocal: false
+        default: true
+        }
+    }
+
     // One mapping per native backend; capability policy is owned by SpeakCore.
     // swiftlint:disable:next cyclomatic_complexity
     static func route(for model: String) -> IOSBatchTranscriptionRoute {

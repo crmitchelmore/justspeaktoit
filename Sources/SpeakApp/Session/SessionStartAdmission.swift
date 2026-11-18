@@ -18,6 +18,11 @@ struct SessionStartAdmission {
   /// after undoing the profile and warm-capture hand-off, or nil when the
   /// start may proceed with `.dictation` capture reserved.
   func rejection(for trigger: SessionTriggerSource, host: SessionStartHost) async -> HandsFreeCaptureStartOutcome? {
+    if let message = await CloudSharingStartConsent.prepare(settings: settings, trigger: trigger) {
+      host.publishStartRejection(message)
+      return abandonStart(.rejected(.captureFailed))
+    }
+
     if trigger == .handsFree,
       !HandsFreeDictationPolicy.supportsCapture(
         modelID: settings.liveTranscriptionModel,

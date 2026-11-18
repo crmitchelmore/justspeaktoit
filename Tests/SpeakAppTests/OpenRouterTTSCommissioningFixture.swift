@@ -26,6 +26,11 @@ final class OpenRouterTTSCommissioningFixture {
         self.defaults = defaults
         let settings = AppSettings(defaults: defaults)
         self.settings = settings
+        if let request = CloudSharingConsent.request(
+            providerID: "openrouter", kind: .textToSpeak, purpose: .voiceOutput, canUseOnDevice: true
+        ) {
+            CloudSharingConsentStore.shared.grant(request)
+        }
         settings.ttsAutoPlay = true
         settings.ttsSpeed = 1
         settings.ttsSaveToDirectory = false

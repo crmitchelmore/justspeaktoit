@@ -171,6 +171,7 @@ data class IssueFailure(
             DictationFailure.ModelMissing -> IssueFailure("admission", "unavailable", "application")
             DictationFailure.ModelCorrupt -> IssueFailure("admission", "invalidInput", "application")
             DictationFailure.LocalModelFailed -> IssueFailure("request", "unavailable", "application")
+            DictationFailure.CloudSharingConsent -> IssueFailure("admission", "cancelled", "application")
             DictationFailure.InvalidKey -> IssueFailure("request", "authentication", "provider")
             DictationFailure.KeyUnavailable, DictationFailure.MissingKey ->
                 IssueFailure("admission", "authentication", "application")

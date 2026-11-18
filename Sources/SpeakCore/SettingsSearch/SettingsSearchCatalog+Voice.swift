@@ -176,6 +176,16 @@ extension SettingsSearchCatalog {
             platforms: .macOS
         ),
         SettingsSearchEntry(
+            id: "privacy.cloudSharing", title: "Cloud sharing", section: .about, systemImage: "hand.raised",
+            summary: "Providers allowed to receive audio, transcripts or text to speak, and how to withdraw that.",
+            keywords: [
+                "consent", "allow", "withdraw", "third party", "cloud provider", "privacy policy",
+                "upload", "send audio", "transcript", "text to speak"
+            ],
+            settingKeys: ["cloudSharingConsent"],
+            platforms: [.macOS, .iOS, .android]
+        ),
+        SettingsSearchEntry(
             id: "about.privacy", title: "Privacy", section: .about, systemImage: "hand.raised",
             summary: "Crash reports and diagnostics, anonymous analytics and the privacy policy.",
             keywords: [

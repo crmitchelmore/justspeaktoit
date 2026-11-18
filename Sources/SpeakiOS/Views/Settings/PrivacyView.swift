@@ -31,6 +31,7 @@ struct PrivacyView: View {
     var body: some View {
         Form {
             currentWorkflowSection
+            cloudSharingSection
             diagnosticsSection
             clipboardSection
             supportedProvidersSection
@@ -53,6 +54,13 @@ struct PrivacyView: View {
                 Label("Read the Privacy Policy", systemImage: "hand.raised.square")
             }
             .accessibilityIdentifier("privacyPolicyLink")
+        }
+    }
+
+    @ViewBuilder
+    private var cloudSharingSection: some View {
+        Section("Cloud sharing") {
+            CloudSharingConsentSettings()
         }
     }
 

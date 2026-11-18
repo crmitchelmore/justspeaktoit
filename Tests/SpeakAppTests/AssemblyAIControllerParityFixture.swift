@@ -39,6 +39,7 @@ final class AssemblyAIControllerFixture {
             ), appSettings: settings
         )
         controller.configure(language: nil, model: AssemblyAIModels.universal36ProStreamingID)
+        grantCloudSharingConsent(forModel: AssemblyAIModels.universal36ProStreamingID, purpose: .liveTranscription)
         let client = client
         controller.clientFactory = { client }
         controller.startCaptureAudio = {}

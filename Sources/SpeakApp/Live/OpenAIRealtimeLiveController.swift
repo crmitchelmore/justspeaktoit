@@ -69,6 +69,9 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
 
   // swiftlint:disable:next function_body_length
   func start() async throws {
+    if let model = currentModel {
+      try await CloudSharingStartConsent.requireLive(modelID: model, settings: appSettings)
+    }
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.microphonePermissionMissing
     }

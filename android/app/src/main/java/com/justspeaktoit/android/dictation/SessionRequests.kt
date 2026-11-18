@@ -5,6 +5,11 @@ import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.CloudService
+import com.justspeaktoit.android.cloud.CloudSharedDataKind
+import com.justspeaktoit.android.cloud.CloudSharingBlockedException
+import com.justspeaktoit.android.cloud.CloudSharingConsent
+import com.justspeaktoit.android.cloud.CloudSharingProvider
+import com.justspeaktoit.android.cloud.CloudSharingRequest
 import com.justspeaktoit.android.cloud.RequestReleasedException
 import com.justspeaktoit.android.cloud.SharedAudio
 import com.justspeaktoit.android.ondevice.GeminiNanoCleanup
@@ -31,6 +36,9 @@ internal sealed interface CleanupOutcome {
 
     /** Gemini Nano kept the original transcript; the reason is shown. No cloud model is tried instead. */
     data class OnDeviceFailed(val failure: GeminiNanoFailure) : CleanupOutcome
+
+    /** The transcript was not sent. The app asks, and the original text stays. */
+    data class NeedsConsent(val providerId: String) : CleanupOutcome
 }
 
 /**
@@ -48,6 +56,8 @@ internal class SessionRequests(
     private val timings: DictationTimings,
     private val onDevice: GeminiNanoCleanup? = null,
     private val onKeyFailure: (CloudProvider, DictationFailure) -> Unit,
+    /** Production passes the device store. The default allows, so tests of other behaviour still upload. */
+    private val allowsSharing: (String, CloudSharedDataKind) -> Boolean = { _, _ -> true },
 ) {
     /**
      * Transcribes [file] with [model]. [missingKey] is the failure when no key is saved; [prepare]
@@ -84,6 +94,8 @@ internal class SessionRequests(
     /** A live session ended with [failure]; a rejected key is reported like an upload's. */
     fun liveFailed(provider: CloudProvider, failure: DictationFailure) = noteKeyFailure(provider, failure)
 
+    fun allows(providerId: String, kind: CloudSharedDataKind): Boolean = allowsSharing(providerId, kind)
+
     private suspend fun upload(
         model: CloudModel,
         file: File,
@@ -92,6 +104,19 @@ internal class SessionRequests(
         vocabulary: List<String>,
         prepare: suspend () -> SharedAudio.Format?,
     ): DictationEvent = try {
+        if (!allowsSharing(model.provider.id, CloudSharedDataKind.Audio)) {
+            throw CloudSharingBlockedException(
+                model.provider.id,
+                CloudSharedDataKind.Audio,
+                CloudSharingConsent.blockedMessage(
+                    CloudSharingRequest(
+                        CloudSharingProvider(model.provider.id, model.provider.displayName, ""),
+                        listOf(CloudSharedDataKind.Audio),
+                        canUseOnDevice = true,
+                    ),
+                ),
+            )
+        }
         val key = withContext(io) { secrets.read(model.provider.credentialId) }
         if (key == null) {
             DictationEvent.Error(missingKey)
@@ -125,6 +150,9 @@ internal class SessionRequests(
     suspend fun cleanup(model: CleanupModel, transcript: String, systemPrompt: String): CleanupOutcome {
         if (model.isOnDevice) return cleanupOnDevice(transcript, systemPrompt)
         val provider = model.cloudProvider
+        if (!allowsSharing(provider.id, CloudSharedDataKind.Transcript)) {
+            return CleanupOutcome.NeedsConsent(provider.id)
+        }
         val cleaned = try {
             val key = withContext(io) { secrets.read(provider.credentialId) }
             key?.let {

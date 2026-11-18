@@ -66,6 +66,9 @@ enum class DictationFailure {
 
     /** The downloaded-model runtime is missing or could not transcribe this recording. */
     LocalModelFailed,
+
+    /** Audio or text was not sent because this provider has not been allowed. */
+    CloudSharingConsent,
     Unknown,
 }
 

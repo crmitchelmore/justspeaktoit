@@ -287,8 +287,25 @@ extension TextToSpeechManager {
   private func performSynthesis(
     text: String, voice: String?, useSSML: Bool?, requestID: UUID, purpose: SynthesisPurpose
   ) async throws -> TTSResult {
-    let effectiveVoice = migrateAndValidateVoiceID(voice ?? appSettings.defaultTTSVoice)
-    let provider = TTSProvider.from(voiceID: effectiveVoice)
+    var effectiveVoice = migrateAndValidateVoiceID(voice ?? appSettings.defaultTTSVoice)
+    var provider = TTSProvider.from(voiceID: effectiveVoice)
+    if provider != .system {
+      let request = CloudSharingConsent.request(forModel: effectiveVoice, purpose: .voiceOutput, availability: .apple)
+        ?? CloudSharingConsent.request(
+          providerID: provider.rawValue, kind: .textToSpeak, purpose: .voiceOutput,
+          canUseOnDevice: true, modelID: effectiveVoice
+        )
+      switch await CloudSharingPrompt.resolve(request) {
+      case .proceed:
+        break
+      case .useOnDevice:
+        appSettings.defaultTTSVoice = Self.onDeviceVoiceID
+        effectiveVoice = Self.onDeviceVoiceID
+        provider = .system
+      case .refused(let refused):
+        throw CloudSharingBlocked(request: refused)
+      }
+    }
     guard let client = clients[provider] else { throw TTSError.providerNotAvailable(provider) }
     let settings = synthesisSettings(useSSML: useSSML)
     let processedText = applyPronunciationProcessing(text: text, provider: provider, useSSML: settings.useSSML)

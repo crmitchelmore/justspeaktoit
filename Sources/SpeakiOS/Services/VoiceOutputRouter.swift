@@ -63,6 +63,18 @@ public final class VoiceOutputRouter: ObservableObject {
     ) async throws {
         try Task.checkCancellation()
         stop()
+        switch await CloudSharingPrompt.resolve(
+            CloudSharingConsent.request(
+                providerID: provider.rawValue, kind: .textToSpeak, purpose: .voiceOutput,
+                canUseOnDevice: false, modelID: model
+            ),
+            presentsUI: true
+        ) {
+        case .proceed:
+            break
+        case .useOnDevice(let request), .refused(let request):
+            throw CloudSharingBlocked(request: request)
+        }
         switch provider {
         case .deepgram:
             deepgram.model = model

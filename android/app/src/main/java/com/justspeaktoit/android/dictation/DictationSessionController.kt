@@ -119,6 +119,7 @@ internal class DictationSessionController(
     private val downloaded: DownloadedTranscription = DownloadedTranscription.Unavailable,
     private val downloadedCleanup: DownloadedCleanup = DownloadedCleanup.Unavailable,
     clockMs: () -> Long = { System.nanoTime() / 1_000_000 },
+    private val onCloudSharingBlocked: (String, com.justspeaktoit.android.cloud.CloudSharedDataKind) -> Unit = { _, _ -> },
 ) {
     var state = SessionState()
         private set
@@ -261,6 +262,9 @@ internal class DictationSessionController(
                 requests.transcribe(model, file, languageTag, DictationFailure.MissingKey, vocabulary()) {
                     copyIn(file)
                 }
+            } catch (e: com.justspeaktoit.android.cloud.CloudSharingBlockedException) {
+                onCloudSharingBlocked(e.providerId, e.kind)
+                DictationEvent.Error(DictationFailure.CloudSharingConsent)
             } catch (e: RequestReleasedException) {
                 DictationEvent.Cancelled
             } catch (e: IOException) {
@@ -341,6 +345,11 @@ internal class DictationSessionController(
     /** Reads the key off the main thread, then opens the stream; audio captured meanwhile is held. */
     private fun connectLive(run: LiveRun) {
         scope.launch {
+            if (!requests.allows(run.model.provider.id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio)) {
+                onCloudSharingBlocked(run.model.provider.id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio)
+                if (live === run) cancelLive()
+                return@launch
+            }
             val (key, failure) = requests.liveKey(run.model.provider, DictationFailure.MissingKey)
             if (live !== run) return@launch
             if (key != null) {
@@ -415,6 +424,11 @@ internal class DictationSessionController(
                         keepForHistory = settings.keepRecordings || it is DictationEvent.Error || heardNothing
                     }
                 }.also { settled = true }
+            } catch (e: com.justspeaktoit.android.cloud.CloudSharingBlockedException) {
+                kept = true
+                history.keepRecording(file, modelId, settings.retention, mode, captureTimer.seconds)
+                onCloudSharingBlocked(e.providerId, e.kind)
+                DictationEvent.Error(DictationFailure.CloudSharingConsent)
             } catch (e: RequestReleasedException) {
                 // Releasing the upload is a cancel, so honour "Keep audio when a recording is cancelled".
                 if (settings.keepAudioOnCancel) {
@@ -618,6 +632,13 @@ internal class DictationSessionController(
                         cleanup = CleanupStatus.Failed,
                         cleanupFailure = outcome.failure,
                     )
+                    is CleanupOutcome.NeedsConsent -> {
+                        onCloudSharingBlocked(
+                            outcome.providerId,
+                            com.justspeaktoit.android.cloud.CloudSharedDataKind.Transcript,
+                        )
+                        it.copy(cleanup = CleanupStatus.None)
+                    }
                     is CleanupOutcome.Applied -> it.copy(
                         dictation = done.copy(transcript = outcome.text),
                         cleanup = CleanupStatus.Applied,

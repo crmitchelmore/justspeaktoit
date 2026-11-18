@@ -28,6 +28,11 @@ final class MistralTTSModelSettingsTests: XCTestCase {
             permissionsManager: PermissionsManager(), appSettings: reloaded,
             keychainService: "com.justspeaktoit.tests.mistral-model.\(UUID().uuidString)"
         )
+        if let request = CloudSharingConsent.request(
+            providerID: "mistral", kind: .textToSpeak, purpose: .voiceOutput, canUseOnDevice: true
+        ) {
+            CloudSharingConsentStore.shared.grant(request)
+        }
         let manager = TextToSpeechManager(
             appSettings: reloaded, secureStorage: storage, clients: [.mistral: client], defaults: defaults
         )

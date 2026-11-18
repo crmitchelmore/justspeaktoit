@@ -82,6 +82,7 @@ final class SessionStartPipeline {
   }
 
   func start(_ request: Request) async -> HandsFreeCaptureStartOutcome {
+    defer { CloudSharingStartConsent.suppressAppleCloudFallback = false }
     // Taken first, so no exit can leave a hotkey press's input warm-up behind.
     var warmedInput = owners.keyPressPrimer.takeInputWarmUp()
     // Every exit closes a primed microphone this start did not take over.
@@ -222,6 +223,7 @@ final class SessionStartPipeline {
     guard host.isStreamingTranscriptionMode else { return nil }
     let preRollBuffers = request.preRollBuffers
     let analyzerFallbackAllowed = request.trigger != .handsFree
+      && !CloudSharingStartConsent.suppressAppleCloudFallback
     let primedInput = request.primedInput
     return { [weak host, transcription] in
       let primedCapture = await primedInput?.value

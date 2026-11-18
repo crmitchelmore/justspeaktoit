@@ -21,7 +21,25 @@ struct IOSBatchTranscriptionClient {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
         let model = ModelRetirements.successor(for: trimmed, mode: .batch) ?? trimmed
         try ModelRetirements.ensureAvailable(model)
-        switch IOSBatchTranscriptionRoute.route(for: model) {
+        let route = IOSBatchTranscriptionRoute.route(for: model)
+        if route.sendsAudioOffDevice {
+            let canUseOnDevice = Self.canTranscribeFileOnDevice
+            switch await CloudSharingPrompt.resolve(
+                modelID: model,
+                purpose: .batchTranscription,
+                availability: CloudSharingOnDeviceAvailability(
+                    transcription: canUseOnDevice, postProcessing: false, voice: false
+                )
+            ) {
+            case .proceed:
+                break
+            case .useOnDevice:
+                return try await Self.transcribeFileOnDevice(at: url, language: language, session: session)
+            case .refused(let request):
+                throw CloudSharingBlocked(request: request)
+            }
+        }
+        switch route {
         case .downloadedLocal:
             return try await IOSLocalTranscriptionModels.transcribe(at: url, modelID: model, language: language)
         case .fileSpeech(let provider):
@@ -325,6 +343,26 @@ struct IOSBatchTranscriptionClient {
             rawPayload: String(data: rawPayload, encoding: .utf8),
             debugInfo: nil
         )
+    }
+
+    /// A finished recording can stay on the device when this OS can transcribe a file locally.
+    static var canTranscribeFileOnDevice: Bool {
+        if #available(iOS 26.0, *) { return true }
+        return false
+    }
+
+    /// Transcribes with on-device SpeechAnalyzer. Callers only offer this when `canTranscribeFileOnDevice`.
+    static func transcribeFileOnDevice(
+        at url: URL, language: String?, session: URLSession
+    ) async throws -> TranscriptionResult {
+        if #available(iOS 26.0, *) {
+            let model = AppleLocalModels.speechTranscriberModelID
+            return try await AppleSpeechAnalyzerTranscriber.transcribeFile(
+                at: url, localeIdentifier: language, engine: AppleSpeechAnalyzerEngine(modelID: model)
+            )
+        }
+        _ = session
+        throw AppleLocalModelError.speechTranscriberUnavailable
     }
 }
 

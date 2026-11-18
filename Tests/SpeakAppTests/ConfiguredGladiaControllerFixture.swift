@@ -61,6 +61,7 @@ final class ConfiguredGladiaControllerFixture {
         )
         let client = client, updates = updates, tail = callbackTail
         controller.configure(language: "en_GB", model: "gladia/solaria-1-streaming")
+        grantCloudSharingConsent(forModel: "gladia/solaria-1-streaming", purpose: .liveTranscription)
         controller.clientFactory = { client }
         controller.startCaptureAudio = {}
         controller.enqueueClientUpdate = { update in updates.enqueue(update); tail.fire() }

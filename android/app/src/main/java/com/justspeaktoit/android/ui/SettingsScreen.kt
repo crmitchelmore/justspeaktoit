@@ -610,6 +610,7 @@ fun SettingsScreen(
                 anchor("android.diagnostics").testTag(AutomationIds.SETTINGS_DIAGNOSTICS),
             )
             Text(stringResource(R.string.settings_diagnostics_note), style = MaterialTheme.typography.bodyMedium)
+            CloudSharingSettings()
 
             HorizontalDivider()
             SectionTitle(R.string.settings_support_title, anchor("android.tipJar"))

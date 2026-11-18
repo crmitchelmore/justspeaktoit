@@ -45,5 +45,6 @@ internal fun DictationFailure.message(): Int = when (this) {
     DictationFailure.ModelMissing -> R.string.failure_model_missing
     DictationFailure.ModelCorrupt -> R.string.failure_model_corrupt
     DictationFailure.LocalModelFailed -> R.string.failure_local_model_failed
+    DictationFailure.CloudSharingConsent -> R.string.failure_cloud_sharing_consent
     DictationFailure.Unknown -> R.string.failure_unknown
 }

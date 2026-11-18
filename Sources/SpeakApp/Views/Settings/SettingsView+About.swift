@@ -134,6 +134,10 @@ extension SettingsView {
         }
       }
 
+      SettingsCard(title: "Cloud sharing", systemImage: "icloud", tint: Color.indigo) {
+        CloudSharingConsentSettings()
+      }
+
       SettingsCard(title: "Transfer to iOS", systemImage: "iphone.and.arrow.forward", tint: Color.cyan) {
         VStack(alignment: .leading, spacing: 12) {
           Text("Transfer your API keys and settings to the iOS app by scanning a QR code.")

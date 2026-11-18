@@ -56,6 +56,9 @@ final class SessionStartPipelineTests: XCTestCase {
             .appendingPathComponent("SessionStartPipelineTests-\(UUID().uuidString)", isDirectory: true)
         environment.settings.recordingsDirectory = recordingsDirectory
         environment.settings.transcriptionMode = .batchRemote
+        grantCloudSharingConsent(
+            forModel: environment.settings.batchTranscriptionModel, purpose: .batchTranscription
+        )
     }
 
     override func tearDown() async throws {

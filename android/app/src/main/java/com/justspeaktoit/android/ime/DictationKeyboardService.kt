@@ -440,7 +440,20 @@ class DictationKeyboardService : InputMethodService() {
         val key = run.apiKey ?: return endVoiceEdit(voiceEditFailureNotice(VoiceEditFailure.KeyUnavailable))
         run.rewriting = true
         voiceEditWork.execute {
-            val outcome = rewriter.rewrite(run.model, key, run.target.selectedText, instruction, run.call)
+            val sharing = com.justspeaktoit.android.cloud.CloudSharingConsentStore.preferences(this)
+            if (!sharing.allows(run.model.cloudProvider.id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Transcript)) {
+                mainExecutor.execute {
+                    openAppForConsent(run.model.cloudProvider.id)
+                    endVoiceEdit(getString(R.string.failure_cloud_sharing_consent))
+                }
+                return@execute
+            }
+            val outcome = rewriter.rewrite(
+                run.model, key, run.target.selectedText, instruction, run.call,
+                allowsTranscript = { id ->
+                    sharing.allows(id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Transcript)
+                },
+            )
             mainExecutor.execute { finishVoiceEdit(run, outcome) }
         }
     }
@@ -509,6 +522,8 @@ class DictationKeyboardService : InputMethodService() {
         VoiceEditFailure.EmptyRewrite -> getString(R.string.keyboard_voice_edit_empty_rewrite)
         VoiceEditFailure.TargetChanged -> getString(R.string.keyboard_voice_edit_target_changed)
         is VoiceEditFailure.Recognition -> unchanged(failure.failure.message())
+        is VoiceEditFailure.NeedsCloudSharingConsent ->
+            getString(R.string.failure_cloud_sharing_consent)
         is VoiceEditFailure.Request -> unchanged(
             when (failure.failure) {
                 DictationFailure.Network, DictationFailure.NetworkTimeout -> R.string.keyboard_voice_edit_network
@@ -582,6 +597,15 @@ class DictationKeyboardService : InputMethodService() {
             }
             downloadedRun = null
             if (mode == RecognitionMode.Cloud) {
+                val sharing = com.justspeaktoit.android.cloud.CloudSharingConsentStore.preferences(this)
+                if (!sharing.allows(
+                        cloudModel.provider.id,
+                        com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio,
+                    )
+                ) {
+                    openAppForConsent(cloudModel.provider.id)
+                    return@checkOnDeviceLanguage
+                }
                 cloudProvider = cloudModel.provider.displayName
                 recordingLimitSeconds = DEFAULT_RECORDING_SECONDS
                 live().start(cloudModel, tag)
@@ -637,7 +661,14 @@ class DictationKeyboardService : InputMethodService() {
         KeyboardLiveDictation(
             engine = engine,
             capture = capture,
-            requests = SessionRequests(cloud, secrets, capture, Dispatchers.IO, DictationTimings()) { _, _ -> },
+            requests = SessionRequests(
+                cloud, secrets, capture, Dispatchers.IO, DictationTimings(),
+                onKeyFailure = { _, _ -> },
+                allowsSharing = { id, kind ->
+                    com.justspeaktoit.android.cloud.CloudSharingConsentStore.preferences(this@DictationKeyboardService)
+                        .allows(id, kind)
+                },
+            ),
             resources = SystemResourceRegistry.shared,
             scope = scope,
             cacheDir = dir,
@@ -1048,6 +1079,15 @@ class DictationKeyboardService : InputMethodService() {
     /** A keyboard cannot ask for runtime permissions, so the app is opened to do it. */
     private fun openApp() {
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    /** Cloud audio is not sent from the keyboard until the app has recorded permission. */
+    private fun openAppForConsent(providerId: String) {
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(MainActivity.EXTRA_CLOUD_SHARING_PROVIDER, providerId),
+        )
     }
 
     private companion object {

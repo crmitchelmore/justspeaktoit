@@ -43,6 +43,9 @@ internal sealed interface VoiceEditFailure {
 
     /** The cleanup provider request failed. */
     data class Request(val failure: DictationFailure) : VoiceEditFailure
+
+    /** The selection was not sent. The app has to ask first. */
+    data class NeedsCloudSharingConsent(val provider: CloudProvider) : VoiceEditFailure
 }
 
 internal sealed interface VoiceEditOutcome {
@@ -127,7 +130,11 @@ internal class VoiceEditRewriter(
         selection: String,
         spokenInstruction: String,
         call: CallHandle,
+        allowsTranscript: (String) -> Boolean = { true },
     ): VoiceEditOutcome {
+        if (!model.isOnDevice && !allowsTranscript(model.cloudProvider.id)) {
+            return VoiceEditOutcome.Failed(VoiceEditFailure.NeedsCloudSharingConsent(model.cloudProvider))
+        }
         if (selection.isEmpty()) return VoiceEditOutcome.Failed(VoiceEditFailure.NoSelection)
         val instruction = VoiceEditPolicy.normalizedInstruction(spokenInstruction)
         if (instruction.isEmpty()) return VoiceEditOutcome.Failed(VoiceEditFailure.EmptyInstruction)

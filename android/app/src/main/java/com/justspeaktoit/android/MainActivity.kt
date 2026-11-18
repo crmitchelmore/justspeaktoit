@@ -144,6 +144,7 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             val state by viewModel.state.collectAsStateWithLifecycle()
+            val cloudSharing by viewModel.cloudSharingPrompt.collectAsStateWithLifecycle()
             val mic by permission
             var screen by screenState
             val privacyChoices by privacy
@@ -332,6 +333,14 @@ class MainActivity : ComponentActivity() {
                             refreshPrivacy()
                         })
                     }
+                    cloudSharing?.let { request ->
+                        com.justspeaktoit.android.ui.CloudSharingConsentDialog(
+                            request = request,
+                            onAllow = viewModel::allowCloudSharing,
+                            onUseOnDevice = viewModel::useOnDeviceInstead,
+                            onNotNow = viewModel::declineCloudSharing,
+                        )
+                    }
                 }
             }
         }
@@ -357,6 +366,15 @@ class MainActivity : ComponentActivity() {
             intent == null -> Unit
             // Only the private alias may auto-start; intents to the exported Activity cannot.
             intent.component?.className == DICTATE_ENTRY -> startWithPermission()
+            intent.getStringExtra(EXTRA_CLOUD_SHARING_PROVIDER) != null -> {
+                screenState.value = Screen.Dictation
+                val providerId = intent.getStringExtra(EXTRA_CLOUD_SHARING_PROVIDER) ?: return
+                viewModel.presentCloudSharing(
+                    providerId,
+                    com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio,
+                    resume = null,
+                )
+            }
             intent.action == Intent.ACTION_SEND -> {
                 val uri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java) ?: return
                 viewModel.offerSharedAudio(uri, intent.type)
@@ -475,6 +493,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val DICTATE_ENTRY = "com.justspeaktoit.android.DictateEntry"
+        const val EXTRA_CLOUD_SHARING_PROVIDER = "cloudSharingProvider"
         private const val KEY_SCREEN = "screen"
         private const val KEY_START_AFTER_GRANT = "startAfterGrant"
 

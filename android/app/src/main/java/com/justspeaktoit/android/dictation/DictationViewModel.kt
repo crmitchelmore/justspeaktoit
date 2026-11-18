@@ -142,6 +142,9 @@ class DictationViewModel internal constructor(
     private val geminiNano: GeminiNanoModel? = null,
     // Downloaded Whisper (#1658) and cleanup (#1660) models; null leaves both out of the app.
     localModelSetup: LocalModelSetup? = null,
+    private val cloudSharing: com.justspeaktoit.android.cloud.CloudSharingConsentStore =
+        com.justspeaktoit.android.cloud.CloudSharingConsentStore.allowing,
+    private val cloudSharingProviders: List<com.justspeaktoit.android.cloud.CloudSharingProvider> = emptyList(),
 ) : ViewModel(AutoCloseable { scope.cancel() }) {
     /** Hands-free dictation (#1632): its recordings take their audio from its microphone, pre-roll first. */
     private val handsFree = HandsFreeDictation(
@@ -336,6 +339,7 @@ class DictationViewModel internal constructor(
             io,
             timings,
             onDevice = geminiNano?.let { GeminiNanoCleanup(it, isTopApp = { appInFront }) },
+            allowsSharing = { id, kind -> cloudSharing.allows(id, kind) },
             onKeyFailure = { provider, failure ->
                 _state.update {
                     it.copy(
@@ -395,6 +399,7 @@ class DictationViewModel internal constructor(
                 )
             }
         },
+        onCloudSharingBlocked = { providerId, kind -> presentCloudSharing(providerId, kind, resume = null) },
     )
 
     /** Kept separate so microphone level updates only recompose the level indicator. */
@@ -924,6 +929,14 @@ class DictationViewModel internal constructor(
         _state.update { it.copy(localModels = it.localModels.copy(downloadOnMobileData = allowed)) }
     }
 
+    private val _cloudSharingPrompt = MutableStateFlow<com.justspeaktoit.android.cloud.CloudSharingRequest?>(null)
+
+    /** The consent sheet. Null when nothing is waiting to be sent. */
+    val cloudSharingPrompt: StateFlow<com.justspeaktoit.android.cloud.CloudSharingRequest?> =
+        _cloudSharingPrompt.asStateFlow()
+
+    private var resumeAfterConsent: (() -> Unit)? = null
+
     /** Records now or, with hands-free on in Cloud mode, starts listening for speech. */
     fun start() {
         val current = _state.value
@@ -932,8 +945,88 @@ class DictationViewModel internal constructor(
         if (current.armsHandsFree) {
             session.clearResult()
             handsFree.arm()
+        } else if (!ensureCloudSharing(mode) { start() }) {
+            return
         } else {
             session.start(selector.plan(mode))
+        }
+    }
+
+    /**
+     * Shows the consent sheet before a cloud transcription or cleanup send. Returns false when the
+     * caller must wait. [resume] runs after Allow.
+     */
+    private fun ensureCloudSharing(mode: RecognitionMode, resume: () -> Unit): Boolean {
+        if (mode == RecognitionMode.Cloud) {
+            val provider = _state.value.cloudModel.provider
+            if (!cloudSharing.allows(provider.id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio)) {
+                presentCloudSharing(provider.id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio, resume)
+                return false
+            }
+        }
+        val state = _state.value
+        val cleanup = state.sessionCleanupModel
+        if (state.cleanupReady && state.sessionDownloadedCleanupModelId == null && !cleanup.isOnDevice &&
+            !cloudSharing.allows(cleanup.cloudProvider.id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Transcript)
+        ) {
+            presentCloudSharing(
+                cleanup.cloudProvider.id,
+                com.justspeaktoit.android.cloud.CloudSharedDataKind.Transcript,
+                resume,
+            )
+            return false
+        }
+        return true
+    }
+
+    fun presentCloudSharing(
+        providerId: String,
+        kind: com.justspeaktoit.android.cloud.CloudSharedDataKind,
+        resume: (() -> Unit)?,
+    ) {
+        val known = com.justspeaktoit.android.cloud.CloudSharingProviders.provider(providerId, cloudSharingProviders)
+        val provider = known ?: com.justspeaktoit.android.cloud.CloudSharingProvider(
+            providerId,
+            com.justspeaktoit.android.cloud.CloudProvider.entries.firstOrNull { it.id == providerId }?.displayName
+                ?: providerId,
+            "",
+        )
+        resumeAfterConsent = resume
+        _cloudSharingPrompt.value = com.justspeaktoit.android.cloud.CloudSharingRequest(
+            provider,
+            listOf(kind),
+            canUseOnDevice = kind != com.justspeaktoit.android.cloud.CloudSharedDataKind.TextToSpeak,
+        )
+    }
+
+    fun allowCloudSharing() {
+        val request = _cloudSharingPrompt.value ?: return
+        cloudSharing.grant(request)
+        val resume = resumeAfterConsent
+        _cloudSharingPrompt.value = null
+        resumeAfterConsent = null
+        resume?.invoke()
+    }
+
+    fun declineCloudSharing() {
+        _cloudSharingPrompt.value = null
+        resumeAfterConsent = null
+        if (handsFree.armed) handsFree.disarm(failed = true)
+    }
+
+    /** Switches the blocked step to an on-device route and continues when that route can run. */
+    fun useOnDeviceInstead() {
+        val request = _cloudSharingPrompt.value ?: return
+        _cloudSharingPrompt.value = null
+        resumeAfterConsent = null
+        val audio = com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio
+        if (audio in request.kinds) {
+            chooseMode(RecognitionMode.OnDevice)
+            start()
+            return
+        }
+        com.justspeaktoit.android.cloud.CloudCatalog.cleanupModels.firstOrNull { it.isOnDevice }?.let {
+            chooseCleanupModel(it)
         }
     }
 
@@ -952,6 +1045,10 @@ class DictationViewModel internal constructor(
             handsFree.disarm(failed = true)
             return
         }
+        if (!ensureCloudSharing(RecognitionMode.Cloud) {
+            session.start(selector.plan(RecognitionMode.Cloud))
+            if (handsFree.recordingUtterance) handsFree.utteranceStarted() else handsFree.disarm(failed = true)
+        }) return
         session.start(selector.plan(RecognitionMode.Cloud))
         // A recording that could not start leaves the session failed, which turns hands-free off.
         if (handsFree.recordingUtterance) handsFree.utteranceStarted() else handsFree.disarm(failed = true)
@@ -1373,7 +1470,17 @@ class DictationViewModel internal constructor(
                     Dispatchers.IO,
                     cleanupTimeoutMs = DictationTimings().localCleanupMs,
                 ),
+                cloudSharing = com.justspeaktoit.android.cloud.CloudSharingConsentStore.preferences(application),
+                cloudSharingProviders = loadCloudSharingProviders(application),
             )
+        }
+
+        private fun loadCloudSharingProviders(application: Application) = try {
+            application.assets.open("cloud_sharing_providers.json").bufferedReader().use { reader ->
+                com.justspeaktoit.android.cloud.CloudSharingProviders.load(reader.readText())
+            }
+        } catch (e: java.io.IOException) {
+            emptyList()
         }
 
         /** A missing or unreadable asset leaves the dictionary empty rather than stopping the app. */

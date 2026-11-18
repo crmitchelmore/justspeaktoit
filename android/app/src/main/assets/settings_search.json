@@ -20,6 +20,28 @@
       "title" : "Edit raw configuration"
     },
     {
+      "id" : "privacy.cloudSharing",
+      "keywords" : [
+        "consent",
+        "allow",
+        "withdraw",
+        "third party",
+        "cloud provider",
+        "privacy policy",
+        "upload",
+        "send audio",
+        "transcript",
+        "text to speak"
+      ],
+      "section" : "about",
+      "sectionTitle" : "Privacy",
+      "settingKeys" : [
+        "cloudSharingConsent"
+      ],
+      "summary" : "Providers allowed to receive audio, transcripts or text to speak, and how to withdraw that.",
+      "title" : "Cloud sharing"
+    },
+    {
       "id" : "android.cloudModel",
       "keywords" : [
         "transcription model",

@@ -309,6 +309,7 @@ extension BatchRequestDiagnosticReceiptTests {
         settings.localStreamingModelSource = "local/streaming/diagnostic-fixture-uninstalled"
         settings.transcriptionMode = .batchRemote
         settings.batchTranscriptionModel = Self.model
+        grantCloudSharingConsent(forModel: Self.model, purpose: .batchTranscription)
         settings.preferredLocaleIdentifier = "en_GB"
         let entered = expectation(description: "production batch delegate admitted owned fake client")
         let client = HeldDiagnosticBatchClient(entered: entered)

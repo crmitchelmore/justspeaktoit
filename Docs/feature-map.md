@@ -136,6 +136,7 @@ The flags live in `Project.swift`; release selection is in
 | F48 | Learned auto-corrections | Yes | Yes | Yes | Yes | Limited | | iOS learns from edits to text its keyboard inserted. Android learns only from edits made while its keyboard is in the field. |
 | F49 | Appearance settings | Yes | Yes | Yes | Yes | Yes | | |
 | F50 | Keyboard / IME surface | N/A | Yes | N/A | N/A | Yes | | Android can stream live Cloud models as an explicit opt-in. |
+| F51 | Cloud sharing consent | Yes | Yes | No | No | Yes | #1814 | Asked once per provider and data type before the first send. Windows and Linux still upload without this ask (#1814). |
 
 ## Features
 
@@ -588,6 +589,15 @@ The flags live in `Project.swift`; release selection is in
 - **Refs:** `Sources/SpeakCore/Keyboard/Apple/KeyboardHandoff.swift`, `Docs/ios-keyboard-v2-design.md`, `android/app/src/main/java/com/justspeaktoit/android/ime/DictationKeyboardService.kt`, `Docs/android-input-surfaces.md`
 - **Sunset:** `TUIST_IOS_KEYBOARD_DIRECT_CAPTURE` is an experiment (#661); Apple gives custom keyboards no microphone. `KeyboardHandoff.legacyRecordKey` (v3) is still read for migration.
 - **Nuances:** The iOS app runs on iPad: name the device through `DeviceCopy`, never "iPhone" (`Sources/SpeakiOS/Views/DeviceCopy.swift`). Android's live Cloud keyboard never falls back: a batch Cloud model, a missing key, a stream failure or a finish past the keyboard's 10-second bound (`KeyboardPolicy.FINISH_TIMEOUT_MS`) fails visibly and types nothing, and no on-device or speech-service recogniser is tried instead. It watches calls, audio focus and headset changes with the app's own `SessionInterruptionWatch` and `InterruptionPolicy`: a brief focus loss pauses it (the status line says Paused) and a call, lasting focus loss or headset change ends it visibly. When an explicit on-device or speech-service choice is unusable the keyboard says so and never blames Cloud (`KeyboardPolicy.blamesBatchCloud`). Voice edit (F22) still hears its instruction on the phone. Keyboard sessions skip History and cleanup (`SessionHistory.None`).
+
+### F51 Cloud sharing consent
+- **Platforms:** macOS Yes · iOS Yes · Windows No · Linux No · Android Yes
+- **Excluded:** none
+- **Gaps:** Windows, Linux #1814 (the shared policy is in SpeakCore; those apps do not ask yet)
+- **How:** Before audio, transcript text or text to speak is sent to a cloud AI provider for the first time, the app names that provider, lists the data, links to the provider's privacy policy and offers Allow, Use on-device instead (when that step can stay on the device) and Not now. Allow is remembered on that device only, per provider and per data type, and is never exported, imported or synced. Not now sends nothing; a recording already on the device stays in History so it can be tried again. Withdrawal is in Settings, under Cloud sharing, and takes effect immediately. The iOS keyboard and share extension do not upload; they hand the audio to the app, which asks. App Intents ask in the app and do not upload if the person says not now. The Android keyboard opens the app instead of streaming when permission is missing.
+- **Refs:** `Sources/SpeakCore/App/CloudSharingConsent.swift`, `Sources/SpeakCore/App/CloudSharingProviderCatalogue.swift`, `Sources/SpeakCore/AppleUI/CloudSharingConsentPrompt.swift`, `Sources/SpeakiOS/Views/Settings/PrivacyView.swift`, `android/app/src/main/java/com/justspeaktoit/android/cloud/CloudSharingConsent.kt`, `android/app/src/main/assets/cloud_sharing_providers.json`
+- **Sunset:** none
+- **Nuances:** Consent is the JSON document `{"grants":{id:[kinds]},"version":1}` under the key `cloudSharingConsent`. Kinds are `audio`, `transcript` and `textToSpeak`. The Android keyboard's platform speech-service disclosure is separate: that recogniser is the OS, not a catalogue provider. macOS Apple Speech may still fall back to Apple's servers on a later recording; that asks for Apple separately. Windows and Linux keep today's behaviour until #1814.
 
 ## Companion surfaces
 

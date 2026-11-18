@@ -11,6 +11,7 @@ final class GladiaStartupOptionsTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
         settings.liveTranscriptionModel = "gladia/solaria-1-streaming"
+        grantCloudSharingConsent(forModel: "gladia/solaria-1-streaming", purpose: .liveTranscription)
         settings.liveStopGracePeriod = 0.4
         let permissions = PermissionsManager(statusProvider: { _ in .granted }, grantHistory: defaults)
         let controller = SharedClientLiveController(

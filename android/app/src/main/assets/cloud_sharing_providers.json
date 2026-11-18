@@ -1,0 +1,120 @@
+{
+  "providers" : [
+    {
+      "displayName" : "Alibaba Model Studio",
+      "id" : "alibaba",
+      "privacyPolicyURL" : "https://www.alibabacloud.com/help/en/legal/latest/alibaba-cloud-international-website-privacy-policy"
+    },
+    {
+      "displayName" : "Anthropic",
+      "id" : "anthropic",
+      "privacyPolicyURL" : "https://www.anthropic.com/legal/privacy"
+    },
+    {
+      "displayName" : "Apple",
+      "id" : "apple",
+      "privacyPolicyURL" : "https://www.apple.com/legal/privacy/"
+    },
+    {
+      "displayName" : "AssemblyAI",
+      "id" : "assemblyai",
+      "privacyPolicyURL" : "https://www.assemblyai.com/legal/privacy-policy"
+    },
+    {
+      "displayName" : "Azure Speech",
+      "id" : "azure",
+      "privacyPolicyURL" : "https://privacy.microsoft.com/privacystatement"
+    },
+    {
+      "displayName" : "Cartesia",
+      "id" : "cartesia",
+      "privacyPolicyURL" : "https://www.cartesia.ai/legal/privacy"
+    },
+    {
+      "displayName" : "Deepgram",
+      "id" : "deepgram",
+      "privacyPolicyURL" : "https://deepgram.com/privacy"
+    },
+    {
+      "displayName" : "ElevenLabs",
+      "id" : "elevenlabs",
+      "privacyPolicyURL" : "https://elevenlabs.io/privacy-policy"
+    },
+    {
+      "displayName" : "Gladia",
+      "id" : "gladia",
+      "privacyPolicyURL" : "https://www.gladia.io/privacy-notice"
+    },
+    {
+      "displayName" : "Google Gemini",
+      "id" : "google",
+      "privacyPolicyURL" : "https://policies.google.com/privacy"
+    },
+    {
+      "displayName" : "Groq",
+      "id" : "groq",
+      "privacyPolicyURL" : "https://groq.com/privacy-policy"
+    },
+    {
+      "displayName" : "Meta",
+      "id" : "meta",
+      "privacyPolicyURL" : "https://www.facebook.com/privacy/policy/"
+    },
+    {
+      "displayName" : "Mistral",
+      "id" : "mistral",
+      "privacyPolicyURL" : "https://legal.mistral.ai/terms/privacy-policy"
+    },
+    {
+      "displayName" : "Modulate",
+      "id" : "modulate",
+      "privacyPolicyURL" : "https://www.modulate.ai/privacy-policy"
+    },
+    {
+      "displayName" : "OpenAI",
+      "id" : "openai",
+      "privacyPolicyURL" : "https://openai.com/policies/privacy-policy"
+    },
+    {
+      "displayName" : "OpenRouter",
+      "id" : "openrouter",
+      "privacyPolicyURL" : "https://openrouter.ai/privacy"
+    },
+    {
+      "displayName" : "Reson8",
+      "id" : "reson8",
+      "privacyPolicyURL" : "https://www.reson8.dev/privacy-policy"
+    },
+    {
+      "displayName" : "Rev.ai",
+      "id" : "revai",
+      "privacyPolicyURL" : "https://www.rev.com/legal/privacy"
+    },
+    {
+      "displayName" : "Smallest AI",
+      "id" : "smallest",
+      "privacyPolicyURL" : "https://smallest.ai/privacy-policy"
+    },
+    {
+      "displayName" : "Soniox",
+      "id" : "soniox",
+      "privacyPolicyURL" : "https://soniox.com/policies/privacy-policy"
+    },
+    {
+      "displayName" : "Speechmatics",
+      "id" : "speechmatics",
+      "privacyPolicyURL" : "https://www.speechmatics.com/legal/privacy-policy"
+    },
+    {
+      "displayName" : "StepFun",
+      "id" : "stepfun",
+      "privacyPolicyURL" : "https://platform.stepfun.ai/docs/en/agreement/userprivacy"
+    },
+    {
+      "displayName" : "xAI",
+      "id" : "xai",
+      "privacyPolicyURL" : "https://x.ai/legal/privacy-policy"
+    }
+  ],
+  "version" : 1
+}

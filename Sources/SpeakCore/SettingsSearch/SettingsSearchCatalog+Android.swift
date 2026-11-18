@@ -302,7 +302,8 @@ extension SettingsSearchCatalog {
     static let androidSectionTitles: [String: String] = [
         "android.privacy": "Privacy",
         "android.analytics": "Privacy",
-        "android.diagnostics": "Privacy"
+        "android.diagnostics": "Privacy",
+        "privacy.cloudSharing": "Privacy"
     ]
 }
 

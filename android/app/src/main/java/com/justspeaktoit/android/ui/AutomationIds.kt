@@ -84,6 +84,14 @@ object AutomationIds {
     const val CONSENT_ANALYTICS = "consent.analytics"
     const val CONSENT_DIAGNOSTICS = "consent.diagnostics"
     const val CONSENT_DONE = "consent.done"
+    const val CLOUD_SHARING_SHEET = "cloudSharingConsentSheet"
+    const val CLOUD_SHARING_ALLOW = "cloudSharingConsentAllowButton"
+    const val CLOUD_SHARING_NOT_NOW = "cloudSharingConsentNotNowButton"
+    const val CLOUD_SHARING_ON_DEVICE = "cloudSharingConsentUseOnDeviceButton"
+    const val CLOUD_SHARING_POLICY = "cloudSharingConsentPrivacyPolicyLink"
+    const val CLOUD_SHARING_SETTINGS = "cloudSharingSettings"
+
+    fun cloudSharingWithdraw(providerId: String) = "cloudSharingWithdrawButton-$providerId"
 
     const val AZURE_REGION = "settings.apiKeys.azure.region"
     const val AZURE_ENDPOINT = "settings.apiKeys.azure.endpoint"

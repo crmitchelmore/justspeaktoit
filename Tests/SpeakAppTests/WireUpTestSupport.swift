@@ -16,6 +16,16 @@ import XCTest
 /// presence or touching login items. Teardown removes the root and the suite
 /// and refuses anything else.
 @MainActor
+/// These fixtures drive a cloud client on purpose. They record permission the way a
+/// person who already tapped Allow would, so the test still reaches the client.
+@MainActor
+func grantCloudSharingConsent(forModel model: String, purpose: ModelCredentialPurpose) {
+    guard let request = CloudSharingConsent.request(
+        forModel: model, purpose: purpose, availability: .apple
+    ) else { return }
+    CloudSharingConsentStore.shared.grant(request)
+}
+
 final class WireUpTestHost {
     /// Every host's root and preferences suite carry this prefix.
     nonisolated static let namePrefix = "com.justspeaktoit.tests.wireup-host."

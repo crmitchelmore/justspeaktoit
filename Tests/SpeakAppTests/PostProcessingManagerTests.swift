@@ -115,6 +115,7 @@ final class PostProcessingManagerTests: XCTestCase {
     let client = SpyChatClient(responseText: "Cleaned by cloud")
     let settings = makeSettings()
     settings.postProcessingModel = ModelCatalog.defaultPostProcessingModel
+    grantCloudSharingConsent(forModel: settings.postProcessingModel, purpose: .postProcessing)
     let manager = PostProcessingManager(
       client: client,
       settings: settings,
@@ -144,6 +145,7 @@ final class PostProcessingManagerTests: XCTestCase {
     let client = SpyChatClient(responseText: "Cleaned by cloud")
     let settings = makeSettings()
     settings.postProcessingModel = ModelCatalog.defaultPostProcessingModel
+    grantCloudSharingConsent(forModel: settings.postProcessingModel, purpose: .postProcessing)
     settings.postProcessingOutputLanguage = "ENGB"
     let manager = PostProcessingManager(
       client: client,

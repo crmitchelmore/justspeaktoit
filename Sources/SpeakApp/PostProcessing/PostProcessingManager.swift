@@ -70,6 +70,20 @@ final class PostProcessingManager: ObservableObject {
       return localResult
     }
 
+    switch await CloudSharingPrompt.resolve(modelID: model, purpose: .postProcessing) {
+    case .proceed:
+      break
+    case .useOnDevice:
+      let rules = LocalPostProcessingModel.builtInRulesModelID
+      settings.postProcessingModel = rules
+      if let localResult = await local.process(model: rules, rawText: rawText, systemPrompt: systemPrompt) {
+        return localResult
+      }
+      return .success(passthrough(rawText, processed: rawText))
+    case .refused:
+      return .success(passthrough(rawText, processed: rawText))
+    }
+
     let promptPayload = PostProcessingPromptPayload(
       modelIdentifier: model,
       customPrompt: nil,

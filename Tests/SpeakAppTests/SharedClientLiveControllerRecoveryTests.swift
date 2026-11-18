@@ -310,6 +310,7 @@ private extension SharedClientLiveControllerRecoveryTests {
                 secureStorage: storage, appSettings: settings
             )
             controller.configure(language: nil, model: XAISpeechToText.liveCatalogID)
+            grantCloudSharingConsent(forModel: XAISpeechToText.liveCatalogID, purpose: .liveTranscription)
             controller.clientFactory = { [client] in client }
             controller.startCaptureAudio = {}
             controller.enqueueClientUpdate = { [updates] in updates.enqueue($0) }

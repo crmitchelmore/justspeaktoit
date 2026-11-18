@@ -138,6 +138,23 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
         guard !apiKey.isEmpty else {
             throw PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model))
         }
+        let availability = CloudSharingOnDeviceAvailability(
+            transcription: true,
+            postProcessing: AppleFoundationModelPolisher.isAvailable,
+            voice: false
+        )
+        switch await CloudSharingPrompt.resolve(
+            modelID: model, purpose: .postProcessing, availability: availability
+        ) {
+        case .proceed:
+            break
+        case .useOnDevice:
+            return try await AppleFoundationModelPolisher.respond(
+                systemPrompt: systemPrompt, userMessage: userMessage
+            )
+        case .refused(let request):
+            throw CloudSharingBlocked(request: request)
+        }
 
         var result = ""
         for try await chunk in sendChatStreaming(

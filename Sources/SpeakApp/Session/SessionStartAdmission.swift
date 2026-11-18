@@ -2,8 +2,9 @@ import SpeakCore
 import Foundation
 
 /// The checks a dictation start must pass before a session exists: a
-/// hands-free route that supports capture, a stored live API key, a
-/// microphone, and the shared capture reservation (Voice Edit may hold it).
+/// hands-free route that supports capture, a stored live API key, consent
+/// for every cloud AI provider it sends to, a microphone, and the shared
+/// capture reservation (Voice Edit may hold it).
 /// A rejection undoes what the start already took and says why.
 @MainActor
 struct SessionStartAdmission {
@@ -28,6 +29,14 @@ struct SessionStartAdmission {
 
     if let alert = await missingLiveAPIKeyAlert() {
       host.publishMissingLiveAPIKey(alert)
+      return abandonStart(.rejected(.captureFailed))
+    }
+
+    // Checked before capture so a refused start loses no audio; the per-app
+    // profile is already applied, so this sees the providers it routes to.
+    let missingConsent = host.missingCloudSharingConsent()
+    if !missingConsent.isEmpty {
+      host.publishCloudSharingConsentRequired(missingConsent)
       return abandonStart(.rejected(.captureFailed))
     }
 

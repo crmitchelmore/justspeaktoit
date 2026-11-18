@@ -9,6 +9,7 @@ import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.CloudSharingRequest
 import com.justspeaktoit.android.cloud.OpenRouterDiscoveryState
 import com.justspeaktoit.android.corrections.AutoCorrectionCandidate
 import com.justspeaktoit.android.corrections.AutoCorrectionLearningPolicy
@@ -89,6 +90,10 @@ data class DictationUiState(
     val historyError: Boolean = false,
     /** Audio another app shared, waiting for the user to confirm the upload. */
     val sharedAudio: SharedAudioOffer? = null,
+    /** A send waiting for consent to its provider (#1805); shown on every screen until answered. */
+    val cloudSharingPrompt: CloudSharingPrompt? = null,
+    /** The providers the user allowed, for Settings > Privacy to list and withdraw. */
+    val cloudSharingAllowed: List<CloudSharingRequest> = emptyList(),
     /** Cancelled Cloud recordings are kept in History for a later transcription. */
     val keepAudioOnCancel: Boolean = AppPreferences.DEFAULT_KEEP_AUDIO_ON_CANCEL,
     /** Whether a Cloud recording stops by itself after a pause. */

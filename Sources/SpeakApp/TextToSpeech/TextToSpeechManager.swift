@@ -43,6 +43,9 @@ final class TextToSpeechManager: ObservableObject {
   private var audioPlayer: AVAudioPlayer? { playback.player }
   private let progressivePlayer = TTSProgressivePlayer()
   private var synthesisTask: Task<TTSSynthesisOutput, Error>?
+  /// Refuses, and asks for, read aloud through a provider the user has not
+  /// allowed (issue #1805). Set by WireUp.
+  var requireCloudSharingConsent: CloudSharingConsentCheck?
   private var playbackTask: Task<Void, Never>?
   private var synthesisID = UUID()
   private let openRouterOutput = OpenRouterSpeechOutput()
@@ -284,12 +287,23 @@ final class TextToSpeechManager: ObservableObject {
 }
 
 extension TextToSpeechManager {
+  private func requireReadAloudConsent(for provider: TTSProvider) throws {
+    guard provider != .system else { return }
+    try requireCloudSharingConsent?([
+      CloudSharingRequest(
+        provider: CloudSharingProviderCatalogue.resolve(id: provider.rawValue, fallbackName: provider.displayName),
+        kinds: [.textToSpeak]
+      )
+    ])
+  }
+
   private func performSynthesis(
     text: String, voice: String?, useSSML: Bool?, requestID: UUID, purpose: SynthesisPurpose
   ) async throws -> TTSResult {
     let effectiveVoice = migrateAndValidateVoiceID(voice ?? appSettings.defaultTTSVoice)
     let provider = TTSProvider.from(voiceID: effectiveVoice)
     guard let client = clients[provider] else { throw TTSError.providerNotAvailable(provider) }
+    try requireReadAloudConsent(for: provider)
     let settings = synthesisSettings(useSSML: useSSML)
     let processedText = applyPronunciationProcessing(text: text, provider: provider, useSSML: settings.useSSML)
     synthesisProgress = 0.5

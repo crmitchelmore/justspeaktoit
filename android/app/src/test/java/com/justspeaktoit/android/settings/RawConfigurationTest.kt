@@ -32,6 +32,7 @@ class RawConfigurationTest {
         // Consent is only ever given on its own screen, never by pasting a document.
         "analyticsConsent" to "Analytics opt-in is a consent choice.",
         "diagnosticsConsent" to "Crash-report consent is a consent choice.",
+        "cloudSharingConsent" to "Per-provider sharing consent is given only in its own dialog, per device.",
         "autoCorrectionCandidates" to "Learned suggestions are app state, reviewed in Settings.",
         "hasCompletedOnboarding" to "First-run state, reopened from Settings > Setup guide, not a preference.",
         "preferredAudioInputUID" to "A device ID only means something on the phone that saved it.",

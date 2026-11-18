@@ -1,6 +1,7 @@
 #if DEBUG
 import Carbon
 import Foundation
+import SpeakCore
 import SpeakHotKeys
 
 /// Explicit opt-in for isolated launched-app checks, never a release mode.
@@ -134,6 +135,9 @@ final class CoreJourneyLaunchProfile {
                 settings.appearance = appearance
             }
         }
+        // Journeys exercise dictation, not the first-use consent sheet (#1805):
+        // the isolated suite starts with the fixture providers already allowed.
+        CloudSharingConsentStore(defaults: defaults).grant(settings.dictationCloudSharingRequests)
     }
 
     private func configureBatchSettings() {

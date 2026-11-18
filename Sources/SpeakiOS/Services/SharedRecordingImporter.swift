@@ -81,11 +81,13 @@ public final class SharedRecordingImporter: ObservableObject {
         }
         do {
             try settings.requireAvailableCredentials(for: model, purpose: .batchTranscription)
+            try IOSCloudSharingConsentPrompt.shared.require(model: model, purpose: .batchTranscription)
         } catch {
-            // Keychain access has not recovered yet (issue #930). An empty key
-            // is not a terminal failure, so submitting it would spend one of
-            // each item's attempts and eventually delete the staged audio.
-            // Leave every item and its attempt count untouched instead.
+            // Keychain access has not recovered yet (issue #930), or the user
+            // has not allowed the provider yet (#1805). Neither is a terminal
+            // failure, so submitting would spend one of each item's attempts
+            // and eventually delete the staged audio. Leave every item and its
+            // attempt count untouched instead.
             lastOutcome = .failed(
                 filename: pending[0].originalFilename,
                 message: error.localizedDescription

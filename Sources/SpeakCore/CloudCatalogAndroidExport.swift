@@ -204,6 +204,7 @@ public enum CloudCatalogAndroidExport {
         let openRouterBrowser: OpenRouterBrowser
         let voiceEdit: VoiceEdit
         let geminiNano: OnDeviceCleanupModel
+        let cloudSharing: CloudSharingAndroidExport
     }
 
     public static func json() throws -> Data {
@@ -239,7 +240,8 @@ public enum CloudCatalogAndroidExport {
                 codeFenceTerms: VoiceEditFormattingIntent.codeFenceTerms,
                 whitespaceTerms: VoiceEditFormattingIntent.whitespaceTerms
             ),
-            geminiNano: .geminiNano
+            geminiNano: .geminiNano,
+            cloudSharing: .current
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -337,13 +339,13 @@ public enum CloudCatalogAndroidExport {
             )
         )
     }
-
-    private static func providerID(of catalogID: String) -> String {
-        String(catalogID.prefix { $0 != "/" })
-    }
 }
 
 extension CloudCatalogAndroidExport {
+    fileprivate static func providerID(of catalogID: String) -> String {
+        String(catalogID.prefix { $0 != "/" })
+    }
+
     /// Models whose Android client reads the recording as canonical 16 kHz PCM16 WAV: Meta, Azure
     /// (sent as Meta's WAV, as on the desktop hosts), Alibaba (whose duration and silence checks read
     /// the samples) and OpenRouter's WAV-only audio models.

@@ -101,6 +101,10 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
         public let detail: String
         /// True when this cloud destination is a permitted fallback, not an unconditional upload.
         public internal(set) var isConditionalCloud = false
+        /// Canonical provider ID (`CloudSharingProviderCatalogue`) of an
+        /// unconditional cloud destination; `nil` on device, off, or for the
+        /// Apple Speech fallback, which the system permission prompt covers.
+        public internal(set) var providerID: String?
 
         public init(
             id: String,
@@ -189,6 +193,7 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
             detail: detail
         )
         row.isConditionalCloud = route.conditional
+        row.providerID = route.conditional ? nil : route.providerID
         return row
     }
 
@@ -196,20 +201,31 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
         for modelID: String,
         inputs: PrivacyWorkflowInputs,
         purpose: ModelCredentialPurpose
-    ) -> (destination: PrivacyDataDestination, conditional: Bool) {
+    ) -> TranscriptionRoute {
         if inputs.usesBatchTranscription {
             // iOS only implements SpeechAnalyzer as a local batch route. An
             // older persisted SFSpeechRecognizer ID falls through to OpenRouter.
             if modelID == AppleLocalModels.legacySpeechModelID {
-                return (.cloud(providerName: "OpenRouter"), false)
+                return TranscriptionRoute(
+                    destination: .cloud(providerName: "OpenRouter"), providerID: OpenRouterService.providerID
+                )
             }
         } else if inputs.appleSpeechRequiresOnDeviceRecognition && AppleLocalModels.isAppleSpeechModel(modelID) {
-            return (.onDevice, false)
+            return TranscriptionRoute(destination: .onDevice)
         } else if modelID == AppleLocalModels.legacySpeechModelID
             || (AppleLocalModels.isSpeechAnalyzerModel(modelID) && inputs.appleSpeechAnalyzerFallbackAllowed) {
-            return (.cloud(providerName: "Apple"), true)
+            return TranscriptionRoute(destination: .cloud(providerName: "Apple"), conditional: true)
         }
-        return (resolveDestination(for: modelID, purpose: purpose), false)
+        return TranscriptionRoute(
+            destination: resolveDestination(for: modelID, purpose: purpose),
+            providerID: providerID(for: modelID, purpose: purpose)
+        )
+    }
+
+    private struct TranscriptionRoute {
+        var destination: PrivacyDataDestination
+        var conditional = false
+        var providerID: String?
     }
 
     private static func postProcessingRow(_ inputs: PrivacyWorkflowInputs) -> Row {
@@ -228,13 +244,17 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
             detail = "\(modelName) cleans up your transcript on this device; the text is not uploaded."
         }
 
-        return Row(
+        var row = Row(
             id: "postProcessing",
             title: "Transcript clean-up",
             systemImage: destination.leavesDevice ? "text.badge.checkmark" : "iphone.gen3",
             destination: destination,
             detail: detail
         )
+        if inputs.postProcessingEnabled {
+            row.providerID = providerID(for: inputs.postProcessingModelID, purpose: .postProcessing)
+        }
+        return row
     }
 
     private static func voiceOutputRow(_ inputs: PrivacyWorkflowInputs) -> Row {
@@ -251,13 +271,25 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
                 + "text to \(providerName)."
         }
 
-        return Row(
+        var row = Row(
             id: "voiceOutput",
             title: "Spoken replies",
             systemImage: destination.leavesDevice ? "speaker.wave.2" : "speaker.slash",
             destination: destination,
             detail: detail
         )
+        if inputs.voiceOutputEnabled {
+            row.providerID = CloudSharingProviderCatalogue.providerID(
+                forCredentialIdentifier: inputs.voiceOutputProvider.apiKeyIdentifier
+            )
+        }
+        return row
+    }
+
+    private static func providerID(for modelID: String, purpose: ModelCredentialPurpose) -> String? {
+        guard case .apiKey(let identifier, _) = ModelCredentialResolver.requirement(for: modelID, purpose: purpose)
+        else { return nil }
+        return CloudSharingProviderCatalogue.providerID(forCredentialIdentifier: identifier)
     }
 
     private static func resolveDestination(

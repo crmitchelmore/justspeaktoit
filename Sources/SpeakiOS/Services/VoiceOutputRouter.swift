@@ -62,6 +62,11 @@ public final class VoiceOutputRouter: ObservableObject {
         openRouterAPIKey: String
     ) async throws {
         try Task.checkCancellation()
+        try IOSCloudSharingConsentPrompt.shared.require([
+            CloudSharingConsent.request(
+                credentialIdentifier: provider.rawValue, providerName: provider.displayName, kind: .textToSpeak
+            )
+        ])
         stop()
         switch provider {
         case .deepgram:

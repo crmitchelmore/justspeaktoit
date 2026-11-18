@@ -130,6 +130,7 @@ final class CompareModelsController: ObservableObject {
 
     func startStreaming() async {
         guard canStart, mode == .streaming else { return }
+        guard cloudSharingAllowed(purpose: .liveTranscription) else { return }
         guard reserveCapture() else { return }
         let generation = UUID()
         runID = generation

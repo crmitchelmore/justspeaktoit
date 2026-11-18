@@ -270,6 +270,9 @@ final class OfflineTranscriptUpgrader {
             // Consent, network or the row changed while keys loaded: nothing was sent.
             if !self.isStillWanted(ticket), self.canProceed { self.store.remove(historyID: ticket.historyID) }
             return
+        } catch is CloudSharingConsentRequiredError {
+            // Nothing was sent and the on-device text stands; costs no retry (#1805).
+            return
         } catch {
             self.logger.error(
                 "Offline upgrade failed: \(RemoteFailureLabel.label(for: error, status: nil), privacy: .public)"

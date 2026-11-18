@@ -155,6 +155,149 @@
       "selectionId" : "anthropic/claude-sonnet-5.5"
     }
   ],
+  "cloudSharing" : {
+    "allowTitle" : "Allow",
+    "blockedMessageTemplate" : "Open Just Speak to It to allow sending your content to {providers}, or switch to on-device.",
+    "emptyWithdrawalText" : "You haven't allowed any AI provider to receive your content.",
+    "kinds" : [
+      {
+        "id" : "audio",
+        "purpose" : "to transcribe what you say",
+        "title" : "Your audio recordings"
+      },
+      {
+        "id" : "transcriptText",
+        "purpose" : "to clean up your transcripts",
+        "title" : "Your transcript text"
+      },
+      {
+        "id" : "textToSpeak",
+        "purpose" : "to turn it into speech",
+        "title" : "Text you ask to be read aloud"
+      }
+    ],
+    "notNowTitle" : "Not now",
+    "pluralServiceName" : "third-party AI services",
+    "providers" : [
+      {
+        "displayName" : "Alibaba Model Studio",
+        "id" : "alibaba",
+        "privacyPolicyURL" : "https://www.alibabacloud.com/help/en/legal/latest/alibaba-cloud-international-website-privacy-policy"
+      },
+      {
+        "displayName" : "Anthropic",
+        "id" : "anthropic",
+        "privacyPolicyURL" : "https://www.anthropic.com/legal/privacy"
+      },
+      {
+        "displayName" : "AssemblyAI",
+        "id" : "assemblyai",
+        "privacyPolicyURL" : "https://www.assemblyai.com/legal/privacy-policy"
+      },
+      {
+        "displayName" : "Azure Speech",
+        "id" : "azure",
+        "privacyPolicyURL" : "https://privacy.microsoft.com/privacystatement"
+      },
+      {
+        "displayName" : "Cartesia",
+        "id" : "cartesia",
+        "privacyPolicyURL" : "https://cartesia.ai/legal/privacy"
+      },
+      {
+        "displayName" : "Deepgram",
+        "id" : "deepgram",
+        "privacyPolicyURL" : "https://deepgram.com/privacy"
+      },
+      {
+        "displayName" : "ElevenLabs",
+        "id" : "elevenlabs",
+        "privacyPolicyURL" : "https://elevenlabs.io/privacy-policy"
+      },
+      {
+        "displayName" : "Gladia",
+        "id" : "gladia",
+        "privacyPolicyURL" : "https://www.gladia.io/privacy-policy"
+      },
+      {
+        "displayName" : "Google Gemini",
+        "id" : "google",
+        "privacyPolicyURL" : "https://policies.google.com/privacy"
+      },
+      {
+        "displayName" : "Groq",
+        "id" : "groq",
+        "privacyPolicyURL" : "https://groq.com/privacy-policy/"
+      },
+      {
+        "displayName" : "Meta",
+        "id" : "meta",
+        "privacyPolicyURL" : "https://www.facebook.com/privacy/policy/"
+      },
+      {
+        "displayName" : "Mistral",
+        "id" : "mistral",
+        "privacyPolicyURL" : "https://mistral.ai/terms#privacy-policy"
+      },
+      {
+        "displayName" : "Modulate",
+        "id" : "modulate",
+        "privacyPolicyURL" : "https://www.modulate.ai/privacy-policy"
+      },
+      {
+        "displayName" : "OpenAI",
+        "id" : "openai",
+        "privacyPolicyURL" : "https://openai.com/policies/privacy-policy/"
+      },
+      {
+        "displayName" : "OpenRouter",
+        "id" : "openrouter",
+        "privacyPolicyURL" : "https://openrouter.ai/privacy"
+      },
+      {
+        "displayName" : "Reson8",
+        "id" : "reson8",
+        "privacyPolicyURL" : "https://reson8.dev/privacy-policy"
+      },
+      {
+        "displayName" : "Rev.ai",
+        "id" : "revai",
+        "privacyPolicyURL" : "https://www.rev.com/about/privacy"
+      },
+      {
+        "displayName" : "Smallest AI",
+        "id" : "smallest",
+        "privacyPolicyURL" : "https://smallest.ai/privacy-policy"
+      },
+      {
+        "displayName" : "Soniox",
+        "id" : "soniox",
+        "privacyPolicyURL" : "https://soniox.com/policies/privacy-policy"
+      },
+      {
+        "displayName" : "Speechmatics",
+        "id" : "speechmatics",
+        "privacyPolicyURL" : "https://www.speechmatics.com/privacy-policy"
+      },
+      {
+        "displayName" : "StepFun",
+        "id" : "stepfun",
+        "privacyPolicyURL" : "https://stepfun.ai/privacy-policy"
+      },
+      {
+        "displayName" : "xAI",
+        "id" : "xai",
+        "privacyPolicyURL" : "https://x.ai/legal/privacy-policy"
+      }
+    ],
+    "sheetIntroTemplate" : "Your current settings send personal data to {providers}, {service}. Nothing is sent until you allow it. You can withdraw this in Privacy settings.",
+    "sheetTitle" : "Allow sharing with an AI provider?",
+    "singleServiceName" : "a third-party AI service",
+    "storageKey" : "cloudSharingConsent",
+    "useOnDeviceTitle" : "Use on-device instead",
+    "withdrawalFooter" : "Withdrawing stops the app sending that provider anything until you allow it again. It does not delete data the provider already received; its privacy policy explains how to ask.",
+    "withdrawalTitle" : "AI providers you allowed"
+  },
   "geminiNano" : {
     "description" : "Cleans up transcripts on the phone with Android's built-in Gemini Nano, on supported Pixel and Samsung devices. The transcript never leaves the device.",
     "displayName" : "Gemini Nano (On-device)",

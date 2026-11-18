@@ -1,18 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Credentials and transcripts never leave the device through backup or device transfer. -->
+<!--
+  Credentials and transcripts never leave the device through backup or device transfer, with one
+  exception: the iCloud sign-in token file, which is what lets History sync resume on a new phone
+  (Play Restore Credentials needs a WebAuthn server we do not run; see Docs/android-play-store-submission.md).
+  It is included only in an end-to-end encrypted cloud backup or a direct device-to-device transfer.
+-->
 <data-extraction-rules>
     <cloud-backup>
-        <exclude domain="root" />
-        <exclude domain="file" />
-        <exclude domain="database" />
-        <exclude domain="sharedpref" />
-        <exclude domain="external" />
+        <include domain="file" path="restore/cloudkit-web-auth-token" requireFlags="clientSideEncryption" />
     </cloud-backup>
     <device-transfer>
-        <exclude domain="root" />
-        <exclude domain="file" />
-        <exclude domain="database" />
-        <exclude domain="sharedpref" />
-        <exclude domain="external" />
+        <include domain="file" path="restore/cloudkit-web-auth-token" />
     </device-transfer>
 </data-extraction-rules>

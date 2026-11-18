@@ -351,7 +351,10 @@ Kotlin in `android/app/src/main/java/com/justspeaktoit/android/sync/`:
   (`GET`, `Host`, top-level navigation, Apple `Origin` and `Referer`), but
   Android cannot tell which app opened the connection, so there is no peer
   check. The web auth token, rotated from every response, is kept in the
-  Keystore-encrypted secret store with the API keys.
+  Keystore-encrypted secret store with the API keys. It is also mirrored to one
+  backup-only file that Auto Backup carries to a new phone (end-to-end encrypted
+  or device to device only); the next launch validates it and resumes sync, or
+  falls back to sign-in if expired (#1837, [Play submission](android-play-store-submission.md)).
 - **Sync.** `HistorySyncCoordinator`, the record codec, the comparison pass,
   fingerprints, deletion tickets and tombstones follow
   `SpeakSync` and `DesktopHistorySyncStore`; state is in `history-sync.json`

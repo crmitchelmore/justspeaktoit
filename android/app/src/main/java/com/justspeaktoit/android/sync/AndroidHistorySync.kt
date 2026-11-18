@@ -26,6 +26,7 @@ internal class KeystoreWebAuthTokenStore(private val secrets: SecretStore) : Web
 /** Builds History sync from this build's CloudKit configuration and the app's private files. */
 internal object AndroidHistorySync {
     private const val STATE_FILE = "history-sync.json"
+    private const val TOKEN_BACKUP_FILE = "restore/cloudkit-web-auth-token"
 
     fun resolution(): CloudKitResolution = CloudKitConfig.resolve(
         token = BuildConfig.CLOUDKIT_WEB_API_TOKEN,
@@ -40,10 +41,12 @@ internal object AndroidHistorySync {
         io: CoroutineDispatcher,
     ): HistorySyncService {
         val stateFile = HistorySyncStateFile(AtomicHistoryFile(File(context.filesDir, STATE_FILE)))
+        val backup = FileWebAuthTokenBackup(File(context.filesDir, TOKEN_BACKUP_FILE))
         return HistorySyncService.create(
             resolution = resolution(),
             http = UrlConnectionCloudKitHttp(),
-            tokens = KeystoreWebAuthTokenStore(secrets),
+            tokens = BackupMirroringTokenStore(KeystoreWebAuthTokenStore(secrets), backup),
+            backup = backup,
             store = AndroidHistorySyncStore(entries, stateFile),
             io = io,
         )

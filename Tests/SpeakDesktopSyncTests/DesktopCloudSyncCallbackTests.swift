@@ -77,6 +77,26 @@ final class DesktopCloudSyncCallbackTests: XCTestCase {
         }
     }
 
+    /// The registered callback is https://justspeaktoit.com/cloudkit-sign-in,
+    /// which answers Apple's redirect with a 302 to the loopback address,
+    /// re-encoding the token with encodeURIComponent and sending
+    /// `Referrer-Policy: no-referrer`. The browser follows it as the same
+    /// top-level navigation: cross-site, with no `Referer` or `Origin`.
+    func testTheSitesForwardedRedirectIsAcceptedButTheSiteIsNotATrustedInitiator() {
+        let forwarded = head(browserRedirect, target: "/cloudkit-sign-in?ckWebAuthToken=158__a%2Bb%2Fc%3D%3D")
+        XCTAssertEqual(
+            SignIn.evaluateCallback(forwarded, peer: .currentUser), .accept(webAuthToken: "158__a+b/c==")
+        )
+        XCTAssertEqual(SignIn.registeredCallbackURL, "https://justspeaktoit.com/cloudkit-sign-in")
+        XCTAssertEqual(
+            SignIn.evaluateCallback(
+                head(browserRedirect + [("Referer", "https://justspeaktoit.com/cloudkit-sign-in")]),
+                peer: .currentUser
+            ),
+            .refuse(.untrustedInitiator)
+        )
+    }
+
     // MARK: - Not the callback
 
     func testAnythingButTheCallbackWithATokenIsNotFound() {

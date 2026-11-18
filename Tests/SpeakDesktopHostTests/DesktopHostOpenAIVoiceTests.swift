@@ -17,7 +17,8 @@ final class DesktopHostOpenAIVoiceTests: XCTestCase {
         FakeLog.shared.reset()
         FakeSpeech.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-openai-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         session = StubURLProtocol.makeSession()
         await controller.markReadyForSelfTest()
     }

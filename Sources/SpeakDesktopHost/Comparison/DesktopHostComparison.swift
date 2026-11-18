@@ -165,6 +165,9 @@ extension DesktopHostController {
 
     private func startComparisonCapture(_ configuration: DesktopComparisonConfiguration) async throws {
         let generation = configuration.generation
+        try cloudSharing.require(configuration.selected.compactMap {
+            DesktopHostCloudSharing.transcription(model: $0.modelID)
+        })
         let lanes = try configuration.selected.map { candidate in
             guard let route = LiveTranscriptionRouting.route(for: candidate.modelID),
                   let client = effects.makeLiveClient(

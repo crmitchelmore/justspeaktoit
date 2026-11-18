@@ -28,7 +28,7 @@ final class DesktopHostVoiceSelectionStartupTests: XCTestCase {
             raw[VoiceSelectionPreference.key] = AnyCodable(.string(nested ? "future/root" : "openai/alloy"))
             raw["ttsQuality"] = AnyCodable(.string("high"))
             try JSONEncoder().encode(raw).write(to: directory.appendingPathComponent("settings.json"))
-            let controller = try DesktopHostController<FakePlatform>(
+            let controller = try DesktopHostController<FakePlatform>.consented(
                 directory: directory, effects: SettingsWriteEffects())
             let saved = await controller.voiceOutputSettings()
             XCTAssertEqual(saved.voiceID, "openai/alloy")

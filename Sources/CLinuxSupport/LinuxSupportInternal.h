@@ -37,6 +37,9 @@ struct _GtkEventControllerKey;
 struct _GtkWindow;
 void jsti_permissions_open(struct _GtkWindow *owner);
 void jsti_permissions_close(void);
+/* The window of allowed cloud AI providers, with a Withdraw button for each (LinuxCloudSharing.c). */
+void jsti_cloud_sharing_open(struct _GtkWindow *owner);
+void jsti_cloud_sharing_close(void);
 int32_t jsti_permissions_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 void jsti_api_keys_open(struct _GtkWindow *owner);
 void jsti_api_keys_close(void);

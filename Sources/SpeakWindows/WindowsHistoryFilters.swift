@@ -28,6 +28,20 @@ func windowsHistoryManagementEvent(
         holder.enqueueSettings { await controller.beginMigrationRestore(url, nativeFlags: index) }
     case .migrationRestoreResponse:
         holder.enqueueSettings { await controller.answerMigrationRestore(value, choice: index) }
+    default: return windowsCloudSharingEvent(event, value: value, index: index, holder: holder)
+    }
+    return true
+}
+
+private func windowsCloudSharingEvent(
+    _ event: DesktopNativeWindowEvent, value: String, index: Int, holder: WindowsEventContext
+) -> Bool {
+    let controller = holder.controller
+    switch event {
+    case .cloudConsentResponse:
+        holder.enqueueSettings { await controller.answerCloudSharing(value, allow: index == 1) }
+    case .cloudSharingWithdraw:
+        holder.enqueueSettings { await controller.withdrawCloudSharing(providerID: value) }
     default: return false
     }
     return true

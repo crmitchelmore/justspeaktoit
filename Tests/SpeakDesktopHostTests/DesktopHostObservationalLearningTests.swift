@@ -227,7 +227,8 @@ private struct ObservationalFixture: Sendable {
     init(disposition: DesktopTextOutputResult.Disposition = .observedInsertion) throws {
         FakeLog.shared.reset()
         FakeLog.shared.installCorrectionReadback(span)
-        host = try DesktopHostController(directory: root, effects: SyntheticEffects(outputDisposition: disposition))
+        host = try DesktopHostController.consented(
+            directory: root, effects: SyntheticEffects(outputDisposition: disposition))
     }
     func allow() async throws -> String {
         let token = span.offerLocalConsent()

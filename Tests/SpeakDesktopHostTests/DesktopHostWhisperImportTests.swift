@@ -21,7 +21,7 @@ final class DesktopHostWhisperImportTests: XCTestCase {
         DesktopHostModels.setLocalLabels([:])
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("hf-host-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController(directory: directory, effects: LocalEffects())
+        controller = try DesktopHostController.consented(directory: directory, effects: LocalEffects())
         await controller.markReadyForSelfTest()
         await controller.configureLocalModels()
     }
@@ -81,7 +81,7 @@ final class DesktopHostWhisperImportTests: XCTestCase {
         XCTAssertTrue(selected)
         await controller.close()
         DesktopHostModels.configure(streamingQualified: false, local: DesktopLocalTranscription.options(host: .linux))
-        controller = try DesktopHostController(directory: directory, effects: LocalEffects())
+        controller = try DesktopHostController.consented(directory: directory, effects: LocalEffects())
         await controller.markReadyForSelfTest()
         await controller.configureLocalModels()
         let current = await controller.settingsModelForTests

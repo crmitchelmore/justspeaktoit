@@ -15,7 +15,7 @@ final class DesktopHostHandsFreeTests: XCTestCase {
         DesktopHostModels.configure(streamingQualified: true)
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("hands-free-\(UUID().uuidString)")
         effects = TailEffects()
-        controller = try DesktopHostController(directory: directory, effects: effects)
+        controller = try DesktopHostController.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         index = try XCTUnwrap(DesktopHostModels.all.firstIndex { DesktopTranscription.provider(for: $0.id) != nil })
         let provider = try XCTUnwrap(DesktopHostModels.provider(for: DesktopHostModels.all[index].id))

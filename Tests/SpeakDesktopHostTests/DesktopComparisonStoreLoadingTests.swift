@@ -13,7 +13,7 @@ final class DesktopComparisonStoreLoadingTests: XCTestCase {
         try Data([1, 2]).write(to: orphan)
         let unrelated = samples.appendingPathComponent("unrecognized.wav")
         try Data([3, 4]).write(to: unrelated)
-        let controller = try DesktopHostController<FakePlatform>(
+        let controller = try DesktopHostController<FakePlatform>.consented(
             directory: root, effects: GatedEffects(gate: Gate(open: true))
         )
         async let first = controller.loadComparisonStore()
@@ -31,7 +31,7 @@ final class DesktopComparisonStoreLoadingTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(
+        let controller = try DesktopHostController<FakePlatform>.consented(
             directory: root, effects: GatedEffects(gate: Gate(open: true))
         )
         await controller.close()

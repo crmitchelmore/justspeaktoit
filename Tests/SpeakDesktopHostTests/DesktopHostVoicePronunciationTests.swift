@@ -20,7 +20,7 @@ final class DesktopHostVoicePronunciationTests: XCTestCase {
         FakeSpeech.shared.reset()
         VoicePronunciationProbe.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-pronunciation-\(UUID())")
-        controller = try DesktopHostController(
+        controller = try DesktopHostController.consented(
             directory: directory, effects: VoicePronunciationEffects(), shutdownGrace: .milliseconds(30))
         await controller.markReadyForSelfTest()
         await controller.selectVoiceOutput(voice)

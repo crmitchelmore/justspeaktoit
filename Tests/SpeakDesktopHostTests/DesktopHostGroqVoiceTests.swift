@@ -17,7 +17,8 @@ final class DesktopHostGroqVoiceTests: XCTestCase {
         FakeLog.shared.reset()
         FakeSpeech.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-groq-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         session = StubURLProtocol.makeSession()
         await controller.markReadyForSelfTest()
     }
@@ -62,7 +63,8 @@ final class DesktopHostGroqVoiceTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.recordedRequests.count, 2)
         let finalRecords = await controller.voiceUsage.records
         XCTAssertEqual(finalRecords, records)
-        let restored = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let restored = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await restored.showVoiceUsage(text: "Synthetic restored estimate.", requestID: "restored")
         let loaded = await restored.voiceUsage.records
         XCTAssertEqual(loaded, records)

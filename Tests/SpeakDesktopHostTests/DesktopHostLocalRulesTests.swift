@@ -15,7 +15,7 @@ final class DesktopHostLocalRulesTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("local-rules-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         effects = LocalRulesEffects()
-        controller = try DesktopHostController(directory: directory, effects: effects)
+        controller = try DesktopHostController.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
     }
 
@@ -55,12 +55,12 @@ final class DesktopHostLocalRulesTests: XCTestCase {
         XCTAssertEqual(enabled.modelIdentifier, rules)
         XCTAssertEqual(enabled.customPrompt, "Keep remote instructions.")
         await controller.close()
-        controller = try DesktopHostController(directory: directory, effects: effects)
+        controller = try DesktopHostController.consented(directory: directory, effects: effects)
         let restarted = await controller.postProcessingOptions()
         XCTAssertEqual(restarted, enabled)
         await controller.savePostProcessing(enabled: false, modelIdentifier: rules, prompt: "", key: "must-not-save")
         await controller.close()
-        controller = try DesktopHostController(directory: directory, effects: effects)
+        controller = try DesktopHostController.consented(directory: directory, effects: effects)
         let disabled = await controller.postProcessingOptions()
         XCTAssertEqual(disabled.mode, .disabled)
         XCTAssertEqual(disabled.modelIdentifier, rules)
@@ -176,7 +176,7 @@ extension DesktopHostLocalRulesTests {
             expected[DesktopPostProcessingConfiguration.streamingKey] = AnyCodable(.bool(false))
             XCTAssertEqual(exported.preferences.values, expected)
             await controller.close()
-            controller = try DesktopHostController(directory: directory, effects: effects)
+            controller = try DesktopHostController.consented(directory: directory, effects: effects)
             let restarted = await controller.postProcessingOptions()
             XCTAssertEqual(restarted, applied)
         }
@@ -232,7 +232,7 @@ extension DesktopHostLocalRulesTests {
             XCTAssertEqual(exported.preferences.values[key.rawValue], preferences.values[key.rawValue])
         }
         await controller.close()
-        controller = try DesktopHostController(directory: directory, effects: effects)
+        controller = try DesktopHostController.consented(directory: directory, effects: effects)
         let restarted = await controller.postProcessingOptions()
         XCTAssertEqual(restarted.mode, .disabled)
         XCTAssertEqual(restarted.modelIdentifier, options.modelIdentifier)

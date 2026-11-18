@@ -17,7 +17,8 @@ final class DesktopHostGeminiVoiceTests: XCTestCase {
         FakeLog.shared.reset()
         FakeSpeech.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-gemini-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         session = StubURLProtocol.makeSession()
         await controller.markReadyForSelfTest()
     }
@@ -76,7 +77,8 @@ final class DesktopHostGeminiVoiceTests: XCTestCase {
         XCTAssertTrue(summary.contains("Unpriced requests excluded: 1"))
         let data = try Data(contentsOf: directory.appendingPathComponent("VoiceUsage/requests.json"))
         XCTAssertFalse(try XCTUnwrap(String(data: data, encoding: .utf8)).contains("Synthetic Gemini native"))
-        let restored = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let restored = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await restored.showVoiceUsage(text: "Synthetic fresh estimate.", requestID: "restored")
         let loaded = await restored.voiceUsage.records
         XCTAssertEqual(loaded, usage.records)

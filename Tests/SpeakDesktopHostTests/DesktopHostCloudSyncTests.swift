@@ -152,7 +152,8 @@ final class DesktopHostCloudSyncTests: XCTestCase {
         server = FakeCloudKitWebServer(apiToken: apiToken, containerIdentifier: "iCloud.com.justspeaktoit")
         vault = MemoryVault()
         log = NativeLog()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
     }
 

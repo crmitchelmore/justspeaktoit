@@ -172,7 +172,7 @@ final class DesktopHostOwnedQuiescenceTests: XCTestCase {
         let cleanup = HostQuiescenceCleanup(directory: directory)
         self.cleanup = cleanup
         addTeardownBlock { try await cleanup.finish() }
-        host = try DesktopHostController(
+        host = try DesktopHostController.consented(
             directory: directory, effects: QuiescenceOnlyEffects(), shutdownGrace: .milliseconds(20)
         )
         await cleanup.retain(host)

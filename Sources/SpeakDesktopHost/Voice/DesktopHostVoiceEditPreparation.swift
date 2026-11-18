@@ -12,6 +12,10 @@ extension DesktopHostController {
             guard run.temperature.isFinite, (0...1).contains(run.temperature) else {
                 throw DesktopPostProcessingError.invalidTemperature
             }
+            try requireCloudSharing([
+                DesktopHostCloudSharing.transcription(model: run.profile.modelIdentifier),
+                DesktopHostCloudSharing.postProcessing(model: run.rewriteModel)
+            ])
             run.key = try effects.apiKey(name: postProcessingCredential(for: run.rewriteModel))
             guard !run.key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw DesktopHostError(message: "Voice editing needs an OpenRouter key. Open API Keys first.")

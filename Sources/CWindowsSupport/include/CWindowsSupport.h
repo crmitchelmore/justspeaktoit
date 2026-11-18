@@ -7,6 +7,7 @@
 #include "VoiceAudioCodec.h"
 #include "VoiceCredentials.h"
 #include "LocalCleanup.h"
+#include "CloudSharing.h"
 #include "OpenRouterBrowser.h"
 #include "Onboarding.h"
 

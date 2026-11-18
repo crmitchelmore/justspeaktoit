@@ -11,7 +11,7 @@ final class DesktopHostVoiceUsageSnapshotTests: XCTestCase {
     override func setUp() async throws {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-snapshot-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: SyntheticEffects(), shutdownGrace: .milliseconds(60))
         await controller.markReadyForSelfTest()
     }

@@ -174,6 +174,17 @@ extension SettingsSearchCatalog {
             summary: "Learn corrections you make to inserted text.",
             keywords: ["auto corrections", "learn corrections", "promotion threshold"],
             platforms: .linux
+        ),
+        SettingsSearchEntry(
+            id: "desktop.cloudSharing", title: "AI providers you allowed", section: .about,
+            systemImage: "arrow.up.circle",
+            summary: "The cloud AI providers you allowed to receive your audio or text. Withdraw any of them from "
+                + "About, Privacy settings.",
+            keywords: [
+                "privacy settings", "ai providers", "third-party ai", "consent", "withdraw consent", "data sharing",
+                "cloud", "privacy policy"
+            ],
+            settingKeys: ["cloudSharingConsent"], platforms: [.windows, .linux]
         )
     ] + windowsEntries
 

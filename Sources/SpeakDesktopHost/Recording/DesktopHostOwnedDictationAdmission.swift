@@ -66,6 +66,8 @@ extension DesktopHostController {
         if let limitation = profile.blockingLimitation { throw DesktopHostError(message: limitation.message) }
         let key = try requireCredentialOrLocalModel(profile.modelIdentifier)
         try requireAzureResource(forLive: profile.modelIdentifier)
+        let polish = captureLivePolish(profile)
+        try requireCloudSharing(cloudSharingRequests(for: profile, polish: polish))
         let configuration: DesktopConfiguration?
         if let event { configuration = event.configuration } else { configuration = settings.configuration }
         return .init(
@@ -74,8 +76,7 @@ extension DesktopHostController {
                 profile.transcriptionOptions ?? configuration?.liveOptions ?? .desktopDefaults
             ),
             textOutput: textOutput, trigger: trigger, key: key, endpoint: azureResourceEndpoint(),
-            // swiftlint:disable:next line_length
-            configuration: configuration, polish: captureLivePolish(profile), cleanup: captureCleanup(profile.postProcessing)
+            configuration: configuration, polish: polish, cleanup: captureCleanup(profile.postProcessing)
         )
     }
 

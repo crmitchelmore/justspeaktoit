@@ -140,6 +140,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             }
         }
         return 0;
+    case cloudSharingMessage:
+        jsti_present_cloud_sharing_request(window, state.callback, state.context);
+        return 0;
     case audioCleanupMessage: {
         std::string token;
         size_t count;
@@ -370,6 +373,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case setupGuideID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_guide(window); return 0;
         case permissionsID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_permissions(window); return 0;
         case troubleshootingID: if (HIWORD(wparam) == BN_CLICKED) jsti_show_troubleshooting(window); return 0;
+        case privacyID:
+            if (HIWORD(wparam) == BN_CLICKED) jsti_show_cloud_sharing(window, state.callback, state.context);
+            return 0;
         case backupRestoreID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, backupRestoreID)) restoreMigrationBackup(window);
             return 0;

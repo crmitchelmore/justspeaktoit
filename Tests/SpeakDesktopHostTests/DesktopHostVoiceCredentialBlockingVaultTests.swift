@@ -11,7 +11,7 @@ final class DesktopHostVoiceCredentialVaultTests: XCTestCase {
         FakeLog.shared.reset()
         FakeSpeech.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-vault-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: SyntheticEffects(), shutdownGrace: .milliseconds(40))
         await controller.markReadyForSelfTest()
         await controller.selectVoiceOutput(.cartesia(CartesiaTTSCatalog.voices[0]))

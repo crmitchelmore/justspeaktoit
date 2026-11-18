@@ -17,7 +17,8 @@ final class DesktopHostGeminiConfigurationTests: XCTestCase {
         FakeLog.shared.reset()
         FakeSpeech.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("gemini-configuration-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         session = StubURLProtocol.makeSession()
         await controller.markReadyForSelfTest()
     }
@@ -92,7 +93,8 @@ final class DesktopHostGeminiConfigurationTests: XCTestCase {
         XCTAssertEqual(selection.language, "pt_BR")
         XCTAssertEqual(selection.voice, voice)
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restored = await controller.voiceOutputSettings()
         XCTAssertEqual(restored, actual)
         let restoredSnapshot = try await controller.voiceConfigurationEditorSnapshot()

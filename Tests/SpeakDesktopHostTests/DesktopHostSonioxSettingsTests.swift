@@ -13,7 +13,7 @@ final class DesktopHostSonioxSettingsTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("soniox-settings-\(UUID())")
         effects = SettingsWriteEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
     }
 
@@ -46,7 +46,7 @@ final class DesktopHostSonioxSettingsTests: XCTestCase {
         XCTAssertEqual(document.preferences.values[SonioxVoicePreference.languageKey], AnyCodable(.string("fr_FR")))
         XCTAssertEqual(try VoiceFavoritePreference.value(in: document.preferences.values), saved.favoriteVoices)
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         let restored = await controller.voiceOutputSettings()
         XCTAssertEqual(restored, saved)
         let picker = DesktopVoicePicker(voices: DesktopSpeechVoice.voices, favoriteIDs: restored.favoriteVoices ?? [])

@@ -158,6 +158,20 @@ final class DesktopSettingsSearchTests: XCTestCase {
         }
     }
 
+    func testCloudSharingWithdrawalIsSearchableOnBothDesktops() throws {
+        for platform: SettingsSearchPlatforms in [.windows, .linux] {
+            for query in ["AI providers you allowed", "withdraw consent", "privacy settings"] {
+                let session = DesktopSettingsSearchSession(platform: platform)
+                let rows = session.results(for: query)
+                XCTAssertEqual(rows.first?.title, "AI providers you allowed", "\(platform): \(query)")
+                XCTAssertEqual(try XCTUnwrap(session.choose(0)).destination, .about, "\(platform): \(query)")
+            }
+            let entry = try XCTUnwrap(
+                SettingsSearchCatalog.entry(title: "AI providers you allowed", platform: platform))
+            XCTAssertEqual(entry.settingKeys, ["cloudSharingConsent"])
+        }
+    }
+
     func testBrowseOpenRouterModelsFindsBothPickers() {
         for platform: SettingsSearchPlatforms in [.windows, .linux] {
             let titles = Set(DesktopSettingsSearchSession(platform: platform)

@@ -11,7 +11,7 @@ final class DesktopHostLegacyPronunciationTests: XCTestCase {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         try await seed(controller, root: root, dictionary: ["Legacy": "Spoken\nform\t%"])
         _ = try await controller.vocabularyEvent(kind: 1, payload: DesktopVocabularyWire.encode([
             "save", "", "Modern", "Modern spoken", "", "Technical", "false", "false", ""
@@ -44,7 +44,7 @@ final class DesktopHostLegacyPronunciationTests: XCTestCase {
         XCTAssertEqual(configuration.legacyPronunciationDictionary, ["Additional": "Added"])
         FakeLog.shared.reset()
         await controller.close()
-        let restarted = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let restarted = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let restored = try await restarted.configuration()
         XCTAssertEqual(restored.legacyPronunciationDictionary, ["Additional": "Added"])
         XCTAssertEqual(restored.values["futureSetting"], before.values["futureSetting"])
@@ -58,7 +58,7 @@ final class DesktopHostLegacyPronunciationTests: XCTestCase {
     func testLegacyEditor_RejectsStaleRowsAndDuplicateRenamesWithoutLosingOtherEntries() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         try await seed(controller, root: root, dictionary: ["A": "First", "B": "Second"])
         let rows = try await legacyRows(controller)
         // swiftlint:disable:next identifier_name
@@ -79,7 +79,7 @@ final class DesktopHostLegacyPronunciationTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = SettingsWriteEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         try await seed(controller, root: root, dictionary: ["A": "Before"])
         let rows = try await legacyRows(controller)
         let row = try XCTUnwrap(rows.first)
@@ -106,7 +106,7 @@ final class DesktopHostLegacyPronunciationTests: XCTestCase {
     func testLegacyEditor_RejectsMalformedAndUnrepresentableChangesWithoutTruncatingStorage() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         try await seed(controller, root: root, dictionary: [:])
         for fields in [["save"], ["defaults", "", "", ""], ["save", "", " ", "spoken"],
                        ["save", "", "Word", ""], ["save", "not base64", "Word", "spoken"],

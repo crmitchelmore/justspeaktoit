@@ -13,7 +13,8 @@ final class DesktopHostHUDExpansionTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("hud-expansion-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SettingsWriteEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SettingsWriteEffects())
     }
 
     override func tearDown() async throws {

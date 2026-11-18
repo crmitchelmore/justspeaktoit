@@ -78,7 +78,7 @@ private final class NativeHostFixture {
     init() { self.worker = DesktopOwnedCaptureWorker(factory: NativeHostFactory(script: script)) }
 
     func prepare() async throws {
-        let host = try DesktopHostController(
+        let host = try DesktopHostController.consented(
             directory: directory, effects: SyntheticEffects(), shutdownGrace: .milliseconds(20)
         )
         self.host = host

@@ -28,7 +28,7 @@ final class DesktopHostShutdownTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("shutdown-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         effects = StubbornEffects()
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: effects, shutdownGrace: .milliseconds(200)
         )
         await controller.markReadyForSelfTest()

@@ -20,7 +20,7 @@ final class DesktopHostSonioxOwnershipTests: XCTestCase {
         FakeSpeech.shared.reset()
         StubURLProtocol.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("soniox-ownership-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: SyntheticEffects(), shutdownGrace: .milliseconds(40))
         await controller.markReadyForSelfTest()
         session = StubURLProtocol.makeSession()

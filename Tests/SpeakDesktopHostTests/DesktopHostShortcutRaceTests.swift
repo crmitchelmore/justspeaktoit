@@ -17,7 +17,8 @@ final class DesktopHostShortcutRaceTests: XCTestCase {
         DesktopHostModels.configure(streamingQualified: false)
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("host-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         batchIndex = try XCTUnwrap(
             DesktopHostModels.all.firstIndex { DesktopTranscription.provider(for: $0.id) != nil }

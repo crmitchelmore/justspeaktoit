@@ -30,7 +30,7 @@ final class DesktopHostHUDTests: XCTestCase {
     }
 
     private func start(_ effects: some DesktopHostEffects<FakePlatform>) async throws {
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
     }
 

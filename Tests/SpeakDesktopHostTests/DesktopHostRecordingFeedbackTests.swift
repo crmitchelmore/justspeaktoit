@@ -15,7 +15,7 @@ final class DesktopHostRecordingFeedbackTests: XCTestCase {
         DesktopHostModels.configure(streamingQualified: true)
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("feedback-\(UUID().uuidString)")
         effects = TailEffects()
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: effects, shutdownGrace: .milliseconds(500)
         )
         await controller.markReadyForSelfTest()

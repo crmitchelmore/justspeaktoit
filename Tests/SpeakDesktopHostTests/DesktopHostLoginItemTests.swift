@@ -61,7 +61,8 @@ final class DesktopHostLoginItemTests: XCTestCase {
         FakeLoginItem.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("login-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
     }
 
     override func tearDown() async throws {
@@ -129,7 +130,8 @@ final class DesktopHostLoginItemTests: XCTestCase {
         let reached = await controller.setLaunchAtLogin(true)
         XCTAssertEqual(reached, .enabled)
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restored = await controller.refreshLoginItem()
         XCTAssertEqual(restored, .enabled)
     }

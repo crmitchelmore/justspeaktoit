@@ -656,7 +656,7 @@ private final class IssueReportFixture: @unchecked Sendable {
             root = FileManager.default.temporaryDirectory.appendingPathComponent("issue-report-\(UUID().uuidString)")
         }
         self.root = root
-        controller = try DesktopHostController(directory: root, effects: SyntheticEffects())
+        controller = try DesktopHostController.consented(directory: root, effects: SyntheticEffects())
     }
     func seed(_ record: DesktopRecordingStore.Record) async {
         do { try await controller.store.save(record) } catch { XCTFail("Could not seed owned History") }

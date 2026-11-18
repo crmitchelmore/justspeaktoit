@@ -120,6 +120,11 @@ package protocol DesktopHostPlatform: Sendable {
     static func openFile(_ url: URL) throws
     static func revealDirectory(_ url: URL) throws
     static func confirmAudioCleanup(id: UUID, count: Int) throws
+    /// Asks, in a native dialog, whether to share with the providers in `prompt`;
+    /// the answer comes back through `answerCloudSharing(_:allow:)`.
+    static func requestCloudSharingConsent(id: UUID, prompt: DesktopCloudSharingPrompt) throws
+    /// Replaces the providers Privacy settings lists with their Withdraw buttons.
+    static func presentCloudSharing(_ presentation: DesktopCloudSharingPresentation)
     static var migrationArchive: DesktopMigrationBackup.Adapter? { get }
     static var migrationInspector: DesktopHostMigrationInspector? { get }
     static var migrationRestorer: DesktopHostMigrationRestorer? { get }
@@ -247,6 +252,10 @@ package extension DesktopHostPlatform {
     static func confirmAudioCleanup(id: UUID, count: Int) throws {
         throw DesktopHostError(message: "Recording audio cleanup is unavailable on this host.")
     }
+    static func requestCloudSharingConsent(id: UUID, prompt: DesktopCloudSharingPrompt) throws {
+        throw DesktopHostError(message: "Asking before sharing with an AI provider is unavailable on this host.")
+    }
+    static func presentCloudSharing(_ presentation: DesktopCloudSharingPresentation) {}
     static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? { nil }
     static var comparisonDigest: LocalModelDigestProvider? { LocalModelDigestProvider.platformDefault }
     static func comparisonPresentation(_ presentation: DesktopComparisonPresentation) {}

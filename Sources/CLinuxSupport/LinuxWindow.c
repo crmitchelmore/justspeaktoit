@@ -63,6 +63,7 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
     jsti_troubleshooting_close();
     jsti_api_keys_close();
     jsti_permissions_close();
+    jsti_cloud_sharing_close();
     jsti_openrouter_browser_close();
     jsti_voice_sources_close();
     jsti_voice_credentials_close();

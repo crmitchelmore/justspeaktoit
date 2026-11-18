@@ -16,7 +16,8 @@ final class DesktopHostAutomationConfigurationTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("automation-configuration-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
     }
 

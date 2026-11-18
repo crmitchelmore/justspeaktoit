@@ -299,7 +299,7 @@ sessions:
           - "Sign off the privacy and retention text in Docs/paid-access-privacy.md."
         expected: "Staging is configured so an agent can sign in on a Developer ID build through the web flow and run the staging purchase and refund drill. Paid Access stays switched off for users."
         final_gate: false
-      - id: "owner-microsoft-store-first-submission"
+      - id: "owner-ms-store-submission"
         issues:
           - 1157
         title: "Microsoft Store: make the first submission by hand"
@@ -397,7 +397,7 @@ sessions:
           - "Update the Data safety form and the purchase digital goods answer from the guide."
         expected: "The three products are active and the Data safety form matches the guide."
         final_gate: false
-      - id: "owner-desktop-posthog-key-workflows"
+      - id: "owner-desktop-posthog-key"
         issues:
           - 1624
           - 1744
@@ -698,7 +698,7 @@ sessions:
           - "Search Settings for tip jar and choose the result."
         expected: "Orca reads each button's name and that tips are optional and unlock nothing. Each button opens its page (github.com/sponsors/crmitchelmore, ko-fi.com/crmitchelmore) in the default browser, nothing in the app changes or unlocks, and the search result opens About."
         final_gate: false
-      - id: "owner-desktop-raw-configuration-editor"
+      - id: "owner-desktop-raw-config"
         issues:
           - 1670
         title: "Windows and Linux: Edit raw configuration validates, applies all or none, round-trips"
@@ -1202,7 +1202,7 @@ sessions:
           - "Switch to the Just Speak keyboard in Notes and swipe through its keys."
         expected: "Every control has a meaningful name and nothing is clipped. \"Recording\" and \"Transcribing\" are announced, the scrub closes the import sheet, and every keyboard key is named."
         final_gate: true
-      - id: "owner-iphone-store-device-readiness"
+      - id: "owner-iphone-store-devices"
         issues:
           - 1468
         title: "Store candidate: fresh-install microphone and iPad recording controls"
@@ -1237,7 +1237,7 @@ sessions:
           - "In iOS Settings turn the app's Microphone access off, return and tap Transcribe."
         expected: "A button labelled Transcribe with a microphone icon is visible at the bottom in portrait, landscape and every Split View width. With no API key the first recording uses on-device Apple Speech and produces text with no error (if Apple's speech assets are still downloading, the alert offers Prepare Apple Model, not a generic Error). No copy mentions this iPhone or the Dynamic Island. With access off, the alert is titled Can't Start Recording and offers Open Settings."
         final_gate: true
-      - id: "owner-iphone-store-privacy-and-review-metadata"
+      - id: "owner-iphone-store-privacy-review"
         issues:
           - 1468
         title: "Store candidate: privacy report, consent and private review information"
@@ -1246,7 +1246,7 @@ sessions:
         build: "The exact signed iOS candidate selected for resubmission, plus App Store Connect"
         prerequisites:
           - "Read Docs/ios-app-store-submission.md; static archive checks do not prove consent, retention, support-site deployment or App Store Connect answers."
-          - "Sentry diagnostics are opt-in (Send crash reports and diagnostics, off until agreed) and separate from product-analytics consent; run owner-diagnostics-consent-signed-candidate first."
+          - "Sentry diagnostics are opt-in (Send crash reports and diagnostics, off until agreed) and separate from product-analytics consent; run owner-diagnostics-consent-signed first."
         steps:
           - "Generate the exact archive's Privacy Report in Xcode Organizer and compare it with the app, all SDKs and enabled extension data flows."
           - "In App Store Connect declare Audio Data and Other User Content for App Functionality, and installation-linked Crash Data, Performance Data, Other Diagnostic Data and Device ID for App Functionality; reconcile any additional SDK types in the report rather than answering No automatically."
@@ -1298,7 +1298,7 @@ sessions:
           - "Open Settings \u203a Privacy & Diagnostics \u203a Privacy Information, then turn Send crash reports and diagnostics on and off again; check the Network Activity row each time."
         expected: "The prompt appears once and explains what is sent; it does not return. The switch reflects your choice, and the Crash and Performance Diagnostics row reads Off whenever the switch is off."
         final_gate: false
-      - id: "owner-diagnostics-consent-signed-candidate"
+      - id: "owner-diagnostics-consent-signed"
         issues:
           - 1468
         title: "Store candidate: no Sentry traffic before consent; withdrawal deletes unsent reports"
@@ -1314,7 +1314,7 @@ sessions:
           - "Answer the App Store Connect privacy label as in Docs/ios-app-store-submission.md (installation-linked Crash Data, Performance Data, Other Diagnostic Data and Device ID for App Functionality)."
         expected: "No request reaches Sentry and no Sentry files exist before consent; after withdrawal no further request is made and the on-device Sentry data is deleted. Sentry retention is 90 days or less and the published policy, in-app text and nutrition label agree."
         final_gate: false
-      - id: "iphone-openrouter-cleanup-discover-configure"
+      - id: "iphone-openrouter-cleanup-setup"
         issues:
           - 1575
         title: "Cleanup and transcription have a separate Browse OpenRouter models link, like voice"
@@ -1372,7 +1372,7 @@ sessions:
           - "With VoiceOver on, repeat one send and listen to the result."
         expected: "Pairing shows the Mac as paired. The first send shows Sent to <your Mac> and the text is pasted once at the Mac's cursor. After regenerating the code the send fails with a message asking you to pair again, and the phone never re-pairs on its own. After forgetting, History no longer offers Send to Mac. Search finds Send to Mac and opens Sync & Transfer. VoiceOver announces sent and failed results."
         final_gate: false
-      - id: "owner-ios-upload-required-reason-apis"
+      - id: "owner-ios-required-reason-apis"
         issues:
           - 1644
         title: "iOS upload processes without ITMS-91053"
@@ -1738,7 +1738,7 @@ sessions:
           - "Share an audio file into the app while the live model is still selected."
         expected: "Words appear while speaking and are replaced, never duplicated, as each phrase settles. Stop returns the full text within a few seconds, including the last words. Flight mode ends the session with a network failure and History keeps the words heard so far as unfinished; no upload happens instead. The shared file fails with a message to choose a batch model."
         final_gate: true
-      - id: "owner-android-live-deepgram-assemblyai"
+      - id: "owner-android-live-dg-aai"
         issues:
           - 1590
         title: "Deepgram and AssemblyAI live streaming with real keys"
@@ -1827,7 +1827,7 @@ sessions:
           - "With TalkBack on, focus the new setting."
         expected: "Off, the keyboard dictates on the phone as before. On, the note and status line name OpenAI, words appear underlined while speaking and Stop types the full text within 10 seconds. Stopping from System resources or Airplane mode removes the underlined words, shows why and types nothing. The batch model and the missing key each show a message and never dictate on the phone instead. Nothing from the keyboard appears in History. TalkBack reads the setting's name, state and switch role."
         final_gate: false
-      - id: "owner-android-keyboard-live-cloud-interruptions"
+      - id: "owner-android-kbd-cloud-interrupts"
         issues:
           - 1668
         title: "Dictation keyboard: live Cloud handles interruptions; local choices never blame Cloud"
@@ -1858,7 +1858,7 @@ sessions:
           - "Search Settings for \"raw\" or \"json\": Edit raw configuration is a result and scrolls to the editor."
         expected: "Errors name each bad key and nothing changes until every value is valid; applied values show on their settings at once; export, reset and import round-trip; Apply is refused while dictating; results are announced to TalkBack."
         final_gate: false
-      - id: "android-language-corrections-read-aloud"
+      - id: "android-language-read-aloud"
         issues:
           - 1328
         title: "Dictation language, personal corrections and Read aloud"
@@ -2019,7 +2019,7 @@ sessions:
           - "With TalkBack on, repeat the search and open a model's details, then use Back to return to the browser and to the picker."
         expected: "The browser lists only OpenRouter models, the result count changes as you search and filter, and no matches shows a clear message. The details page shows pricing (or says it is not listed) before choosing. After choosing, the Browse row shows OpenRouter \u203a the model name and cleanup uses it. TalkBack reads every control's name and state, announces the result count, and Back goes details, browser, picker."
         final_gate: false
-      - id: "android-openrouter-transcription-browser"
+      - id: "android-openrouter-browser"
         issues:
           - 1618
         title: "Browse live OpenRouter models for transcription and cleanup, then dictate with one"
@@ -2067,7 +2067,7 @@ sessions:
           - "Turn on cleanup with a provider whose key is not saved and tap Turn off cleanup; then repeat with TalkBack on."
         expected: "Problems are listed first with a matching summary line, and every row turns OK after its fix without reopening the page. The microphone fix opens the permission prompt or app settings, the keyboard fix opens the phone's keyboard list, the missing key row names the provider and jumps to API keys, and Turn off cleanup removes the cleanup key row. TalkBack reads each row with its severity, each fix button with its row, and announces the summary when it changes."
         final_gate: false
-      - id: "android-raw-configuration-newer-settings"
+      - id: "android-raw-config-newer"
         issues:
           - 1700
         title: "Android raw configuration carries the newer Settings choices"
@@ -2268,7 +2268,7 @@ sessions:
           - "With TalkBack on, move through the section and download Whisper Tiny."
         expected: "Tiny, Base and Small are listed with their sizes. On mobile data the model waits for Wi-Fi and nothing downloads. Resume carries on from the bytes already received rather than starting again, and the model shows Downloaded and verified only at the end. Remove returns it to Not downloaded and it can no longer be chosen. TalkBack names each model, its size and state, its Download, Cancel and Remove buttons and the mobile data switch, and announces progress changes."
         final_gate: true
-      - id: "android-downloaded-whisper-transcribe"
+      - id: "android-whisper-transcribe"
         issues:
           - 1658
         title: "Downloaded mode transcribes offline and fails visibly without a model"
@@ -2283,7 +2283,7 @@ sessions:
           - "Open the dictation keyboard in a messaging app."
         expected: "The text appears a little after Stop with no network, and History shows Downloaded with Whisper Base. Without a downloaded model the screen asks you to choose one and links to Settings; a recording made without one fails with a clear message, never a Cloud or speech-service transcript, and History keeps the audio so Transcribe works once the model is back. The keyboard never offers Downloaded and keeps using the phone's recogniser."
         final_gate: true
-      - id: "owner-android-downloaded-whisper-measure"
+      - id: "owner-android-whisper-measure"
         issues:
           - 1658
         title: "Measure downloaded Whisper models on a mid-range and a flagship phone"
@@ -2330,7 +2330,7 @@ sessions:
           - "Turn off flight mode and wait for a network connection. Open the dictation keyboard in a messaging app and use a voice edit."
         expected: "Offline, the note says Cleaning up on this phone, then Cleaned up on this phone, and the custom prompt is followed (a full stop after each word). Show original restores the raw text; History keeps the cleaned text. Silence stays empty with no cleanup. With the model removed the original transcript is kept and nothing goes to a cloud model. The keyboard still uses the cloud cleanup model for voice edits."
         final_gate: true
-      - id: "owner-android-downloaded-cleanup-measure"
+      - id: "owner-android-cleanup-measure"
         issues:
           - 1660
         title: "Measure downloaded cleanup models on a mid-range and a flagship phone"
@@ -2392,7 +2392,7 @@ sessions:
           - "Remove the chosen model and open the keyboard again."
         expected: "With Tiny the status names Tiny and its 120-second limit, the text arrives within 10 seconds of Stop and nothing goes online; recording stops itself at the limit and the text is typed. Base shows a 60-second limit. Small, and a removed model, leave the platform recogniser in use with a status saying why. Record Tiny and Base times on #1658."
         final_gate: true
-      - id: "android-cloud-silence-no-invented-text"
+      - id: "android-cloud-silence-no-text"
         issues:
           - 1788
         title: "A silent Cloud recording never comes back as invented text"
@@ -2561,6 +2561,22 @@ sessions:
           - "Turn receiving off and send once more. Then search Settings for \"send from phone\" and, with Narrator on, move through the receiver controls."
         expected: "The phone shows the computer as paired and it appears under Paired phones. Each send shows Sent to <this computer> and types the text once at the cursor. A new pairing code empties Paired phones and the next send asks you to pair again; re-pairing works. After Forget the send asks you to pair again and never re-pairs on its own. With receiving off the send fails within ten seconds. Search finds Send from phone. Narrator reads each control's name and state and the code."
         final_gate: false
+      - id: "windows-cloud-consent"
+        issues:
+          - 1814
+        title: "Windows: AI provider consent"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Windows, the first Alpha build that includes the #1814 cloud sharing consent"
+        steps:
+          - "With Narrator running, select a cloud transcription model whose key is saved, then press the record shortcut."
+          - "Read the question, open one privacy policy, then choose Not now."
+          - "Press the shortcut again and choose Allow, then press it a third time and dictate a made-up sentence."
+          - "Open About, choose Privacy settings, select the provider and choose its Withdraw button."
+          - "Press the shortcut again, then close the question with Escape."
+          - "Search Settings for withdraw consent and choose the result."
+        expected: "Before anything is recorded the question names each provider, what it gets and its privacy policy, and Narrator reads each by name. Not now and Escape record and send nothing. After Allow, dictation works and the question never shows again for that provider. Withdraw removes it from the list, announces the change and the next start asks again. The search result opens About."
+        final_gate: false
   - id: "linux"
     device: "Linux"
     title: "Linux"
@@ -2703,6 +2719,22 @@ sessions:
           - "In Paired phones choose Forget next to the phone, then send again from the phone."
           - "Turn receiving off and send once more. Then search Settings for \"send from phone\" and, with Orca on, move through the receiver controls."
         expected: "The phone shows the computer as paired and it appears under Paired phones. Each send shows Sent to <this computer> and types the text once at the cursor. A new pairing code empties Paired phones and the next send asks you to pair again; re-pairing works. After Forget the send asks you to pair again and never re-pairs on its own. With receiving off the send fails within ten seconds. Search finds Send from phone. Orca reads each control's name and state and the code. The Flatpak works like the native package; with avahi-daemon stopped, Status says why phones cannot find it."
+        final_gate: false
+      - id: "linux-cloud-consent"
+        issues:
+          - 1814
+        title: "Linux: AI provider consent"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Linux, the first Alpha build that includes the #1814 cloud sharing consent"
+        steps:
+          - "With Orca running, select a cloud transcription model whose key is saved, then press the record shortcut."
+          - "Read the question, open one privacy policy, then choose Not now."
+          - "Press the shortcut again and choose Allow, then press it a third time and dictate a made-up sentence."
+          - "Open About, choose Privacy settings, select the provider and choose its Withdraw button."
+          - "Press the shortcut again, then close the question with Escape."
+          - "Search Settings for withdraw consent and choose the result."
+        expected: "Before anything is recorded the question names each provider, what it gets and its privacy policy, and Orca reads each by name. Not now and Escape record and send nothing. After Allow, dictation works and the question never shows again for that provider. Withdraw removes it from the list, announces the change and the next start asks again. The search result opens About."
         final_gate: false
   - id: "decisions"
     device: "Decision"

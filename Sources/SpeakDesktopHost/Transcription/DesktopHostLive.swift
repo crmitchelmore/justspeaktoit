@@ -17,6 +17,7 @@ extension DesktopHostController {
             )
         }
         guard DesktopHostModels.isLive(model) else { return nil }
+        try cloudSharing.require(DesktopHostCloudSharing.transcription(model: model))
         let baseOptions = options ?? settings.configuration?.liveOptions ?? .desktopDefaults
         let hints: (keywords: [String], pronunciationWords: [String])
         if let input { hints = (input.vocabulary, input.pronunciationWords) } else {

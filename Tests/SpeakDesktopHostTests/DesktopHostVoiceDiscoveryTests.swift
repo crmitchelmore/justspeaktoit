@@ -17,8 +17,8 @@ final class DesktopHostVoiceDiscoveryTests: XCTestCase {
         FakeLog.shared.reset(); FakeSpeech.shared.reset(); StubURLProtocol.reset()
         DesktopHostModels.configure(streamingQualified: false)
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-discovery-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects(),
-                                                             shutdownGrace: .milliseconds(60))
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects(), shutdownGrace: .milliseconds(60))
         session = StubURLProtocol.makeSession()
         await controller.markReadyForSelfTest()
         FakeLog.shared.setKey("synthetic-key", name: XAITTSCatalog.credentialIdentifier)

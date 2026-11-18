@@ -21,7 +21,8 @@ final class DesktopHostLocalModelTransferTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("local-transfer-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
     }
 
@@ -76,7 +77,8 @@ final class DesktopHostLocalModelTransferTests: XCTestCase {
         let withoutMirrors = await controller.settings
         XCTAssertNil(withoutMirrors.configuration?.values[liveKey])
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restored = await controller.preferredModelIDs()
         XCTAssertEqual(restored.batch, remoteBatch)
         XCTAssertEqual(restored.live, remoteLive)
@@ -149,7 +151,7 @@ final class DesktopHostLocalModelTransferTests: XCTestCase {
     func testFailedSettingsWrite_DoesNotChangeSlotsOrPublish() async throws {
         await controller.close()
         let effects = SettingsWriteEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         let configuration = try await controller.configuration()
         try await controller.saveConfiguration(configuration.entries)
         let file = directory.appendingPathComponent("settings.json")
@@ -178,7 +180,8 @@ final class DesktopHostLocalModelTransferTests: XCTestCase {
         }
         await controller.close()
         FakeLog.shared.refuseLocalChoices(false)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restored = await controller.settings
         XCTAssertEqual(restored.localLiveModel, live)
         XCTAssertFalse(DesktopHostModels.isLocal(restored.model))

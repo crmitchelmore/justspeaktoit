@@ -19,7 +19,7 @@ final class DesktopHostModelSelectionTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("host-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         effects = SettingsWriteEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         let batch = DesktopHostModels.all.indices.filter {
             DesktopTranscription.provider(for: DesktopHostModels.all[$0].id) != nil

@@ -14,7 +14,8 @@ final class DesktopHostTelemetryConsentTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("consent-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SettingsWriteEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SettingsWriteEffects())
     }
 
     override func tearDown() async throws {

@@ -12,7 +12,8 @@ final class DesktopHostVoiceUsageTests: XCTestCase {
         FakeLog.shared.reset()
         FakeSpeech.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-usage-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
     }
 
@@ -45,7 +46,8 @@ final class DesktopHostVoiceUsageTests: XCTestCase {
         await controller.exportGeneratedVoice(result.id.uuidString, path: destination.path)
         await controller.readAloudState.exportTask?.value
         XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("VoiceUsage/requests.json")), encoded)
-        let restored = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let restored = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await restored.showVoiceUsage(text: "Synthetic new estimate", requestID: "fixture")
         let loaded = await restored.voiceUsage
         XCTAssertEqual(loaded.records, state.records)

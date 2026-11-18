@@ -74,7 +74,8 @@ unsigned pagesOf(int identifier) {
     case comparisonID: return page(transcriptionPage);
     case shortcutValueID: case shortcutID: case actionShortcutsID: return page(keyboardPage);
     case cloudSyncID: case phoneReceiverID: return page(cloudSyncPage);
-    case aboutDetailsID: case setupGuideID: case permissionsID: case troubleshootingID: return page(aboutPage);
+    case aboutDetailsID: case setupGuideID: case permissionsID: case troubleshootingID: case privacyID:
+        return page(aboutPage);
     default: return page(transcriptionPage);
     }
 }
@@ -611,6 +612,7 @@ void layoutAbout(HWND window, const RECT &content) {
     place(window, setupGuideID, box(content.left + inset, y, scale(window, 192), row));
     place(window, permissionsID, box(content.left + inset + scale(window, 200), y, scale(window, 208), row));
     place(window, troubleshootingID, box(content.left + inset, y + row + gap, scale(window, 240), row));
+    place(window, privacyID, box(content.left + inset + scale(window, 248), y + row + gap, scale(window, 200), row));
 }
 
 // Each results row: a semibold title over a caption detail.

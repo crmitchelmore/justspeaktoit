@@ -101,6 +101,28 @@ From Apple's
 
 ## Sign-in callback
 
+The API token's registered sign-in callback is
+`https://justspeaktoit.com/cloudkit-sign-in`
+(`DesktopCloudSyncSignIn.registeredCallbackURL`; Android
+`CloudKitSignIn.REGISTERED_CALLBACK_URL`). CloudKit Console refuses `http://`
+URL Redirects, accepting only `https://…` or `cloudkit-icloud.<bundle id>://…`,
+so the loopback address cannot be registered directly. Instead the site's
+Worker (`landing-page/_worker.js`) answers `GET` or `HEAD` on exactly that path
+with a `302` to `http://127.0.0.1:47823/cloudkit-sign-in?ckWebAuthToken=…`,
+carrying only the single `ckWebAuthToken`, re-encoded, and dropping every
+other query parameter. It sends `Cache-Control: no-store`,
+`Referrer-Policy: no-referrer` and `X-Robots-Tag: noindex`, runs no analytics,
+and answers a missing, empty, repeated or malformed token with a `400` page
+asking the user to start sign-in again from the app. Other methods get a
+`405`. The site has no request logging configured; if Cloudflare ever records
+the URL, the logged token is useless, because each token is single-use (every
+CloudKit response rotates it) and the app redeems it within seconds.
+
+The browser follows that `302` as the same top-level navigation, so the
+listener sees `Sec-Fetch-Site: cross-site` and, because of the forwarding
+page's referrer policy, no `Referer`. justspeaktoit.com is deliberately not a
+trusted initiator.
+
 Apple appends only `ckWebAuthToken` to the API token's registered callback.
 The reference documents no state or nonce parameter that the redirect would
 echo, and the callback URL is fixed in CloudKit Console, so the request that
@@ -122,14 +144,15 @@ when all of these hold:
   `127.0.0.1` with any port, so a DNS-rebinding page is refused.
 - **It is a top-level navigation.** When the browser sends fetch metadata,
   which pages cannot set, `Sec-Fetch-Mode` must be `navigate`,
-  `Sec-Fetch-Dest` `document` and `Sec-Fetch-Site` `cross-site` (Apple's page)
-  or `none` (the address opened directly). `fetch` and XHR, images and
+  `Sec-Fetch-Dest` `document` and `Sec-Fetch-Site` `cross-site` (Apple's
+  redirect, forwarded by justspeaktoit.com) or `none` (the address opened
+  directly). `fetch` and XHR, images and
   scripts, frames, and navigations from another page on `127.0.0.1` are
   refused.
 - **Its `Origin` and `Referer`, when present, are HTTPS pages on `apple.com`
-  or `icloud.com`.** Absent headers are allowed: Apple's referrer policy is
-  not documented, and an HTTPS page's default policy sends no `Referer` to an
-  `http` address.
+  or `icloud.com`.** Absent headers are allowed: the forwarding page sends
+  `Referrer-Policy: no-referrer`, and an HTTPS page's default policy sends no
+  `Referer` to an `http` address anyway.
 
 A refused request gets a 403 page and waiting goes on, so it can neither
 complete nor cut short the sign-in; other paths still get a 404. On both
@@ -321,8 +344,10 @@ Kotlin in `android/app/src/main/java/com/justspeaktoit/android/sync/`:
   that secret, every Android build is one of those.
 - **Sign-in.** Opt-in from Settings › History sync. The app opens Apple's
   sign-in page in the browser and listens on the same loopback callback,
-  `http://127.0.0.1:47823/cloudkit-sign-in`, for ten minutes, so the API
-  token needs no extra redirect. The request checks match the desktop's
+  `http://127.0.0.1:47823/cloudkit-sign-in`, for ten minutes. Apple redirects
+  to the token's registered `https://justspeaktoit.com/cloudkit-sign-in`,
+  which forwards to that address (see [Sign-in callback](#sign-in-callback)),
+  so the API token needs no extra redirect. The request checks match the desktop's
   (`GET`, `Host`, top-level navigation, Apple `Origin` and `Referer`), but
   Android cannot tell which app opened the connection, so there is no peer
   check. The web auth token, rotated from every response, is kept in the
@@ -341,7 +366,7 @@ Kotlin in `android/app/src/main/java/com/justspeaktoit/android/sync/`:
 |---|---|
 | Change notifications | Not available to web clients for these subscriptions; Windows polls every five minutes and after each saved transcript. |
 | Expired cursor | No documented error code identifies an expired `syncToken`; it surfaces as a sync error. |
-| Loopback callback | Unverified until the API token is created. If CloudKit Console refuses `http://127.0.0.1:47823/cloudkit-sign-in`, a custom URI scheme is needed instead: through the MSIX manifest on Windows, an `x-scheme-handler` in the desktop file on Linux. |
+| Loopback callback | Resolved (#1815): CloudKit Console refuses `http://` callbacks, so the token's callback is `https://justspeaktoit.com/cloudkit-sign-in`, which forwards the token to `http://127.0.0.1:47823/cloudkit-sign-in`. Sign-in therefore needs justspeaktoit.com to be up. See [Sign-in callback](#sign-in-callback). |
 | Callback binding | Apple echoes no per-attempt value, so the callback is taken only from this user's processes as a top-level navigation; a web page that races Apple's redirect with a suppressed referrer is not refused. See [Sign-in callback](#sign-in-callback). |
 | Token size | Credential Manager holds up to 2,560 bytes per credential, and Linux reads up to 8 KiB from the keyring. A longer web auth token would fail to save or read and ask for sign-in again. |
 | Keys typed by hand | The "saved by hand" mark is saved before the key. If the sync state cannot be saved, the key is not saved and the error is shown. If Credential Manager then refuses the key, or the app stops between the two, the key saved before stays and counts as typed: a deletion on the Mac no longer removes it, though a newer key from the Mac still replaces it. |

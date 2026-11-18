@@ -422,7 +422,7 @@ sessions:
         prerequisites:
           - "Steps: Docs/windows-cloudkit-sync.md (Android)"
         steps:
-          - "Check the CloudKit Console API token for iCloud.com.justspeaktoit that the desktop builds use still lists http://127.0.0.1:47823/cloudkit-sign-in as its sign-in callback."
+          - "Check the CloudKit Console API token for iCloud.com.justspeaktoit that the desktop builds use lists https://justspeaktoit.com/cloudkit-sign-in as its URL Redirect sign-in callback."
           - "Save the token as the CLOUDKIT_WEB_API_TOKEN repository secret (android.yml and alpha-release.yml already pass it to the Android build) and make sure the Production schema has the TranscriptionHistory record type."
           - "Run the Android workflow on main, install the Alpha APK and open Settings \u203a History sync."
         expected: "The next Android Alpha shows Sign in to iCloud under Settings \u203a History sync instead of saying sync is not set up for this build."
@@ -1871,6 +1871,22 @@ sessions:
           - "Tap Sign out, dictate again and check nothing more reaches the Mac. Search Settings for iCloud and check it opens History sync."
         expected: "Sign-in completes and the status shows a sync time. Mac entries appear on the phone without audio and phone entries appear on the Mac without audio. Deletions on either side stay deleted and never come back. After signing out nothing more is sent, and TalkBack reads the status as it changes."
         final_gate: false
+      - id: "android-icloud-sign-in-callback"
+        issues:
+          - 1815
+          - 1741
+        title: "Android: iCloud sign-in returns to the app through justspeaktoit.com"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Android, the signed APK from an Alpha built with the CloudKit web API token (#1741) that includes #1815"
+        steps:
+          - "Open Settings \u203a History sync and tap Sign in to iCloud."
+          - "Finish signing in to Apple in the browser and watch the address bar: it passes through https://justspeaktoit.com/cloudkit-sign-in and lands on http://127.0.0.1:47823/cloudkit-sign-in."
+          - "Check the browser tab says you are signed in to iCloud and can return to Just Speak to It, then return to the app and wait for its status to show a sync time."
+          - "Open https://justspeaktoit.com/cloudkit-sign-in in a new tab with no query and check it says to start iCloud sign-in again from the app."
+          - "Turn on TalkBack, sign out and sign in again, and check the status change is read out."
+        expected: "Apple's redirect goes to justspeaktoit.com, which forwards straight to the app's loopback page without showing its own page, and the app signs in and syncs. Opening the site address directly shows only the start-again message and signs nothing in."
+        final_gate: false
       - id: "android-battery-latency"
         issues:
           - 1328
@@ -2340,6 +2356,22 @@ sessions:
           - "Press Ctrl+K, type silence, choose the setting and check its page opens with that preference highlighted. Press Ctrl+K, type zzqx and check No results is shown and announced, then press Escape."
         expected: "Ctrl+K always focuses the search box. Results list actions first, then History, then settings, each read as its title then its kind (Action, History or the settings page). Choosing an action runs it, a History result selects that recording, and a setting opens and highlights its field. Escape restores the sidebar pages."
         final_gate: true
+      - id: "windows-icloud-sign-in-callback"
+        issues:
+          - 1815
+          - 1741
+        title: "Windows: iCloud sign-in returns to the app through justspeaktoit.com"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Windows, an Alpha built with the CloudKit web API token (#1741) that includes #1815"
+        steps:
+          - "Open Settings \u203a iCloud Sync and choose Sign in, with Edge or Chrome as the default browser."
+          - "Finish signing in to Apple in the browser and watch the address bar: it passes through https://justspeaktoit.com/cloudkit-sign-in and lands on http://127.0.0.1:47823/cloudkit-sign-in."
+          - "Check the browser tab says you are signed in to iCloud and can return to Just Speak to It, then return to the app and wait for its status to show a sync time."
+          - "Open https://justspeaktoit.com/cloudkit-sign-in in a new tab with no query and check it says to start iCloud sign-in again from the app."
+          - "Sign out, switch the default browser to Firefox, sign in again and check it completes the same way."
+        expected: "Apple's redirect goes to justspeaktoit.com, which forwards straight to the app's loopback page without showing its own page, and the app signs in and syncs. Opening the site address directly shows only the start-again message and signs nothing in."
+        final_gate: false
       - id: "windows-telemetry-consent"
         issues:
           - 1624
@@ -2437,6 +2469,22 @@ sessions:
           - "Press Ctrl+K, type silence, choose the setting and check its page opens with that preference highlighted. Press Ctrl+K, type zzqx and check No results is shown and announced, then press Escape."
         expected: "Ctrl+K always focuses the search box. Results list actions first, then History, then settings, each read as its title then its kind (Action, History or the settings page). Choosing an action runs it, a History result selects that recording, and a setting opens and highlights its field. Escape restores the sidebar pages."
         final_gate: true
+      - id: "linux-icloud-sign-in-callback"
+        issues:
+          - 1815
+          - 1741
+        title: "Linux: iCloud sign-in returns to the app through justspeaktoit.com"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Linux, an Alpha built with the CloudKit web API token (#1741) that includes #1815, native package or Flatpak"
+        steps:
+          - "Open Settings \u203a iCloud Sync and choose Sign in\u2026 with Firefox or Chrome as the default browser."
+          - "Finish signing in to Apple in the browser and watch the address bar: it passes through https://justspeaktoit.com/cloudkit-sign-in and lands on http://127.0.0.1:47823/cloudkit-sign-in."
+          - "Check the browser tab says you are signed in to iCloud and can return to Just Speak to It, then return to the app and wait for its status to show a sync time."
+          - "Open https://justspeaktoit.com/cloudkit-sign-in in a new tab with no query and check it says to start iCloud sign-in again from the app."
+          - "Sign out, repeat with the other install type (Flatpak or native package) or the other browser, and check it completes the same way."
+        expected: "Apple's redirect goes to justspeaktoit.com, which forwards straight to the app's loopback page without showing its own page, and the app signs in and syncs. Opening the site address directly shows only the start-again message and signs nothing in."
+        final_gate: false
       - id: "linux-telemetry-consent"
         issues:
           - 1624

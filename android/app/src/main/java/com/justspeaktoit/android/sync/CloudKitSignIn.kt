@@ -58,13 +58,18 @@ class CloudKitSignInTimeoutException : Exception("iCloud sign-in did not finish 
 
 /**
  * The loopback half of iCloud web sign-in, ported from `DesktopCloudSyncSignIn`. Apple redirects the
- * browser to [CALLBACK_URL], the address registered on the API token for every non-Apple platform,
- * and this keeps the `ckWebAuthToken` from that request alone.
+ * browser to [REGISTERED_CALLBACK_URL], the https callback registered on the API token for every
+ * non-Apple platform (CloudKit Console refuses http), and that page forwards the token with a 302 to
+ * [CALLBACK_URL]. This keeps the `ckWebAuthToken` from that request alone. The page sends
+ * `Referrer-Policy: no-referrer`, so the forwarded request normally has no `Referer`, and
+ * justspeaktoit.com is deliberately not a trusted initiator.
  *
  * Unlike Windows, Android cannot tell which app opened a loopback connection, so the browser
  * checks below are the only defence against another app on the device delivering its own token.
  */
 object CloudKitSignIn {
+    /** The sign-in callback set on the API token in CloudKit Console; it forwards to [CALLBACK_URL]. */
+    const val REGISTERED_CALLBACK_URL = "https://justspeaktoit.com/cloudkit-sign-in"
     const val CALLBACK_HOST = "127.0.0.1"
     const val CALLBACK_PORT = 47_823
     const val CALLBACK_PATH = "/cloudkit-sign-in"

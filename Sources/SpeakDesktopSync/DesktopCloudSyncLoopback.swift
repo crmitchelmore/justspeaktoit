@@ -122,12 +122,14 @@ extension DesktopCloudSyncSignIn {
     /// callback and echoes no per-attempt value, so the request itself cannot
     /// be tied to this sign-in. Instead a callback must come from a process of
     /// this user (`peer`), and must look like the top-level browser navigation
-    /// Apple's redirect is: a GET to 127.0.0.1 that, where the browser sends
-    /// fetch metadata, is a `navigate` to a `document` from another site or
-    /// from no page, and whose `Origin` and `Referer`, when present, are HTTPS
-    /// pages on apple.com or icloud.com. Absent headers are allowed, since
-    /// Apple's referrer policy is not documented and older browsers send no
-    /// fetch metadata.
+    /// Apple's redirect is, after justspeaktoit.com forwards it here: a GET to
+    /// 127.0.0.1 that, where the browser sends fetch metadata, is a `navigate`
+    /// to a `document` from another site or from no page, and whose `Origin`
+    /// and `Referer`, when present, are HTTPS pages on apple.com or
+    /// icloud.com. The forwarding page sends `Referrer-Policy: no-referrer`,
+    /// so the forwarded request normally has no `Referer`; justspeaktoit.com is
+    /// deliberately not a trusted initiator. Absent headers are allowed, since
+    /// older browsers send no fetch metadata.
     public static func evaluateCallback(
         _ head: DesktopLoopbackRequestHead?,
         peer: DesktopLoopbackPeer
@@ -149,7 +151,7 @@ extension DesktopCloudSyncSignIn {
         return .accept(webAuthToken: token)
     }
 
-    /// `127.0.0.1`, with or without a port, as the registered callback names it.
+    /// `127.0.0.1`, with or without a port, as the forwarded callback names it.
     private static func isCallbackHost(_ value: String) -> Bool {
         let parts = value.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
         guard parts.first == Substring(callbackHost) else { return false }

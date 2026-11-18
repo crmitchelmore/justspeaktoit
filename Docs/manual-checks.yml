@@ -1229,7 +1229,7 @@ sessions:
       - id: "owner-store-console-nov-2026"
         issues:
           - 1806
-        title: "Store consoles: answer the Nov 2026 age rating and social media questions"
+        title: "App Store Connect: age rating and social media answers"
         minutes: 10
         core: true
         build: "App Store Connect"
@@ -2651,34 +2651,34 @@ sessions:
       - id: "decision-play-refunds"
         issues:
           - 1806
-        title: "How should Android handle refunded tips?"
+        title: "Android tip refunds"
         minutes: 2
         core: true
         question: "Play can ask the app to review a refund on a one-off tip. Tips unlock nothing, so there is nothing to revoke. What should the app do?"
         context: "Play Billing tips are consumables in PlayBillingTipStore.kt. Play Console Help 17068375 describes the Review Refund API."
         options:
           - id: "accept-and-document"
-            label: "Accept refunds and say so in the Play submission doc"
+            label: "Accept and document them"
             consequence: "No code change; refunds simply go through."
             recommended: true
           - id: "review-refund-api"
-            label: "Answer PendingRefundReviewNotification with the Review Refund API"
+            label: "Use the Review Refund API"
             consequence: "Adds a server-side handler and Play API credentials for little benefit."
       - id: "decision-universal-links"
         issues:
           - 1806
-        title: "Should capture links move to Universal Links?"
+        title: "Universal Links for capture links"
         minutes: 2
         core: true
         question: "Capture deep links use a custom URL scheme that another app could also register. They only start or stop recording or open History and carry no credentials."
         context: "Hardening means serving apple-app-site-association on justspeaktoit.com and adding an applinks entitlement, while keeping the scheme for Shortcuts."
         options:
           - id: "keep-scheme"
-            label: "Keep the custom scheme only"
+            label: "Keep the custom scheme"
             consequence: "No change; another app claiming the scheme could at worst swallow a start or stop link."
             recommended: true
           - id: "add-universal-links"
-            label: "Add Universal Links alongside the scheme"
+            label: "Add Universal Links too"
             consequence: "An agent adds the site file and entitlement; needs a new provisioning profile and an iPhone check."
       - id: "decision-non-apple-screen-readers"
         issues:

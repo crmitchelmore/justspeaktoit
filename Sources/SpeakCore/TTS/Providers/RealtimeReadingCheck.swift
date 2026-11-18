@@ -12,10 +12,14 @@ import Foundation
 ///   up to `maximumNumeralWords` words, never a negation;
 /// - a token mixing letters and digits ("5kg", "1st") is that same bounded slot;
 /// - a minus sign starting a numeral ("-5") must be read as one word carrying
-///   no number ("minus", "negative"), so "-5" read as "five" fails;
+///   no number ("minus", "negative"), so "-5" read as "five" fails. A point
+///   word ("point", "dot") is not a minus, so "-5" read as "point five" fails;
 /// - a decimal point between digits ("3.5") may be read as one such word
 ///   ("point") or left out, and is never read inside an integer, so "35" read
-///   as "three point five" fails;
+///   as "three point five" fails. A sign or operator word ("minus", "plus",
+///   "times") is not a point, so "3.5" read as "three minus five" fails;
+/// - both slots stay language-neutral: any other word with no number in it
+///   fills them, so another language's "point" or "minus" still passes;
 /// - spoken words that match nothing are allowed only for symbols read aloud
 ///   ("&" as "and", "$5" as "five dollars"), `wordsPerSymbol` each. Anything
 ///   more, such as an inserted "not", an answer or commentary, fails.
@@ -64,9 +68,9 @@ enum RealtimeReadingCheck {
         case .word(let word):
             return next == word ? [start + 1] : []
         case .minus:
-            return next.map(carriesNoNumber) == true ? [start + 1] : []
+            return next.map { carriesNoNumber($0) && !pointWords.contains($0) } == true ? [start + 1] : []
         case .point:
-            return next.map(carriesNoNumber) == true ? [start, start + 1] : [start]
+            return next.map { carriesNoNumber($0) && !signWords.contains($0) } == true ? [start, start + 1] : [start]
         case .number, .mixed:
             break
         }
@@ -89,6 +93,13 @@ enum RealtimeReadingCheck {
     private static func carriesNoNumber(_ word: String) -> Bool {
         !isDigits(word) && NumberWords.value(of: word) == nil && !negations.contains(word)
     }
+
+    /// Words that change the arithmetic when read in the other slot, so the
+    /// language-neutral slots refuse them.
+    private static let signWords: Set<String> = [
+        "minus", "plus", "negative", "positive", "times", "over", "divided"
+    ]
+    private static let pointWords: Set<String> = ["point", "dot"]
 
     private static let negations: Set<String> = [
         "not", "no", "never", "none", "nothing", "nobody", "neither", "nor", "without"

@@ -127,6 +127,11 @@ final class OpenAIRealtimeSpeechTests: XCTestCase {
         XCTAssertTrue(faithful("Add 3.5 cups", "Add 3.5 cups"))
         XCTAssertTrue(faithful("Add 3.5 cups", "Add three dot five cups"))
         XCTAssertFalse(faithful("Add 35 cups", "Add three point five cups"), "35 is not three point five")
+        XCTAssertTrue(faithful("Add 3.5 cups", "Add three point five cups"))
+        XCTAssertTrue(faithful("Add 3.5 cups", "Add three five cups"))
+        XCTAssertFalse(faithful("Add 3.5 cups", "Add three minus five cups"), "A sign word is not a decimal point")
+        XCTAssertFalse(faithful("Add 3.5 cups", "Add three plus five cups"), "An operator word is not a decimal point")
+        XCTAssertFalse(faithful("The balance is -5", "The balance is point five"), "A point word is not a minus")
         XCTAssertFalse(faithful("Pay 290448384 now", "Pay 18446744074 billion now"),
                        "A scale past the limit is refused before it can overflow")
         XCTAssertTrue(faithful("Caf\u{65}\u{301} au lait", "caf\u{e9} au lait"))

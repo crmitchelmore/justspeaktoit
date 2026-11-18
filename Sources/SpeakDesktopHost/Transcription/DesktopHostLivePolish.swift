@@ -18,7 +18,7 @@ extension DesktopHostController {
 
     // exhaustive owned live-polish admission gating; no behavior change.
     // swiftlint:disable:next cyclomatic_complexity
-    func captureLivePolish(_ profile: DesktopProfileSession) -> DesktopHostLivePolishInput? {
+    package func captureLivePolish(_ profile: DesktopProfileSession) -> DesktopHostLivePolishInput? {
         guard DesktopHostModels.isLive(profile.modelIdentifier) else { return nil }
         let selection = profile.livePolish ?? livePolishSelection()
         guard let configuration = selection.configuration else { return nil }

@@ -157,6 +157,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     }
     /// The recording the user cancelled while `keepAudioOnCancel` was off.
     var discardCancelledRecordingID: UUID?
+    /// Set while a consent withdrawal cancels a session, so its audio is kept whatever `keepAudioOnCancel` says.
+    var keepAudioOnWithdrawal = false
     var historyDeletionInProgress = false
     var historyDeletionTask: Task<Void, Never>?
     var folderRevealTask: Task<Void, Error>?

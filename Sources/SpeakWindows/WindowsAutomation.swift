@@ -91,10 +91,8 @@ extension WindowsAppController {
     /// once capture is live.
     func automationStartDictation() async throws -> AutomationResult {
         guard dictationSessionID == nil, !busy else { throw AutomationError.dictationAlreadyRunning }
-        try requireAutomationCloudSharing([
-            DesktopHostCloudSharing.transcription(model: settings.model),
-            DesktopHostCloudSharing.postProcessing(settings.postProcessing ?? .init())
-        ])
+        let profile = captureProfile(modelIndex: selectedIndex(), executablePath: nil)
+        try requireAutomationCloudSharing(cloudSharingRequests(for: profile, polish: captureLivePolish(profile)))
         await toggle(
             target: nil, modelIndex: selectedIndex(), deviceID: selectedMicrophone(), targetExecutablePath: nil,
             textOutput: textOutputOptions()

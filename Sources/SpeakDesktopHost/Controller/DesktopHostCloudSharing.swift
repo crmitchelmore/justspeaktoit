@@ -213,6 +213,8 @@ extension DesktopHostController {
             $0.request.live != nil && transcribes($0.request.profile.modelIdentifier)
         } ?? false
         if editing || dictating || ownedDictating {
+            keepAudioOnWithdrawal = true
+            defer { keepAudioOnWithdrawal = false }
             await cancelTranscription()
             stopped = true
         }

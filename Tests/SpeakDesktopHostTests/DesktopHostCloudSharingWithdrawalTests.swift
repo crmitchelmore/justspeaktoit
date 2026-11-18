@@ -28,6 +28,22 @@ final class DesktopHostCloudSharingWithdrawalTests: XCTestCase {
         }
     }
 
+    func testWithdrawingWithKeepAudioOff_StillKeepsTheCapturedRecording() async throws {
+        let fixture = AutoCleanHostFixture()
+        try await fixture.prepare()
+        let configuration = try DesktopConfiguration(values: [
+            "postRecordingTailDuration": AnyCodable(.int(0)),
+            "keepAudioOnCancel": AnyCodable(.bool(false))
+        ])
+        try await fixture.host.saveConfiguration(configuration.entries)
+        await fixture.toggle()
+        let provider = try XCTUnwrap(DesktopHostCloudSharing.transcription(model: fixture.model)?.provider.id)
+        await fixture.host.withdrawCloudSharing(providerID: provider)
+        let saved = try await fixture.host.store.records()
+        XCTAssertEqual(saved.count, 1)
+        try await fixture.cleanup()
+    }
+
     func testWithdrawingAnotherProvider_LeavesALiveDictationRunning() async throws {
         let fixture = AutoCleanHostFixture()
         try await fixture.prepare()

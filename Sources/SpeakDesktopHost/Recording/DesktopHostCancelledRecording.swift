@@ -7,7 +7,8 @@ extension DesktopHostController {
 
     /// Captures `keepAudioOnCancel` when the user cancels a recording.
     func noteUserCancelledRecording(_ id: UUID?) {
-        let keep = settings.configuration?.keepAudioOnCancel ?? SpeechDefaults.keepAudioOnCancel
+        let keep = keepAudioOnWithdrawal
+            || (settings.configuration?.keepAudioOnCancel ?? SpeechDefaults.keepAudioOnCancel)
         discardCancelledRecordingID = keep ? nil : id
     }
 

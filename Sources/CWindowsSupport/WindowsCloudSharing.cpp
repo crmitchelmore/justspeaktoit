@@ -214,6 +214,7 @@ bool run(HWND owner, Dialog &dialog, const wchar_t *className, HWND *activeSlot)
     if (!window) return false;
     if (activeSlot) { std::lock_guard<std::mutex> lock(mutex); *activeSlot = window; }
     EnableWindow(owner, FALSE); ShowWindow(window, SW_SHOW);
+    SetFocus(GetDlgItem(window, dialog.consent || dialog.content.rows.empty() ? IDCANCEL : listID));
     MSG message{}; BOOL result = 1;
     while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
         if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }

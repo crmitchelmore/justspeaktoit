@@ -765,7 +765,7 @@ API token serves both apps: they share the callback URL.
 
 The CloudKit API token is a build setting:
 `scripts/windows-cloudkit/configure-cloudkit-web.py` writes the
-`CLOUDKIT_WEB_API_TOKEN` secret into both `Sources/SpeakWindows` and
+`CLOUDKIT_WEB_API_TOKEN` secret (held in the `cloudkit` environment) into both `Sources/SpeakWindows` and
 `Sources/SpeakLinux/CloudKitWebBuildConfiguration.swift`, which are committed
 without one. No Linux workflow injects it yet, so every Linux build says
 "iCloud sync is not available in this build" and otherwise works. For local

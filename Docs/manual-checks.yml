@@ -423,7 +423,7 @@ sessions:
           - "Steps: Docs/windows-cloudkit-sync.md (Android)"
         steps:
           - "Check the CloudKit Console API token for iCloud.com.justspeaktoit that the desktop builds use lists https://justspeaktoit.com/cloudkit-sign-in as its URL Redirect sign-in callback."
-          - "Save the token as the CLOUDKIT_WEB_API_TOKEN repository secret (android.yml and alpha-release.yml already pass it to the Android build) and make sure the Production schema has the TranscriptionHistory record type."
+          - "Save the token as the CLOUDKIT_WEB_API_TOKEN secret in the android-release environment (android.yml and alpha-release.yml already pass it to the Android build; #1827) and make sure the Production schema has the TranscriptionHistory record type."
           - "Install the APK from the first Alpha build that includes #1741 (the secret is already saved), then open Settings \u203a History sync."
         expected: "The next Android Alpha shows Sign in to iCloud under Settings \u203a History sync instead of saying sync is not set up for this build."
         final_gate: false

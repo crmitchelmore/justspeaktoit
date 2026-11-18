@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 
 WORKFLOW = '.github/workflows/linux-flatpak.yml'
+ANALYTICS_CONFIGURATION = (Path(__file__).resolve().parents[2]
+                           / 'Sources/SpeakDesktop/Telemetry/DesktopAnalyticsBuildConfiguration.swift')
 VERIFY = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'packaging/linux/verify_build_revision.py'))
 
 
@@ -45,7 +47,13 @@ def checkout_parents(git, revision='HEAD'):
             if line.startswith('parent ')]
 
 
-def build_record(environment, event, built_sha, parents, bundle_sha256):
+def key_stamped(configuration=ANALYTICS_CONFIGURATION):
+    # Read from the checkout that was compiled, so the record reflects the bundle and not the workflow's intent.
+    source = configuration.read_text(encoding='utf-8')
+    return re.search(r'postHogProjectKey: String\? = "phc_', source) is not None
+
+
+def build_record(environment, event, built_sha, parents, bundle_sha256, stamped=False):
     repository = environment['GITHUB_REPOSITORY']
     workflow_prefix = repository + '/' + WORKFLOW + '@'
     if (not environment['GITHUB_WORKFLOW_REF'].startswith(workflow_prefix)
@@ -69,7 +77,7 @@ def build_record(environment, event, built_sha, parents, bundle_sha256):
                 'repository': repository, 'repositoryID': repository_id, 'workflow': WORKFLOW,
                 'event': environment['GITHUB_EVENT_NAME'], 'sourceSHA': source_sha}
     record = dict(metadata, version=1, builtRevision=built_sha, parents=parents,
-                  bundleSHA256=bundle_sha256, pullRequest=request)
+                  bundleSHA256=bundle_sha256, pullRequest=request, postHogKeyStamped=stamped)
     # PR packaging explicitly checks out its immutable head. GITHUB_SHA still
     # names GitHub's synthetic merge, so accept the authenticated event head too.
     exact_pr_head = environment['GITHUB_EVENT_NAME'] == 'pull_request' and built_sha == source_sha
@@ -115,7 +123,8 @@ def write_build_record(bundle, output):
     git = ['git', '-c', 'safe.directory=' + os.getcwd()]
     built_sha = subprocess.check_output([*git, 'rev-parse', 'HEAD'], text=True).strip()
     event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
-    record = build_record(os.environ, event, built_sha, checkout_parents(git), file_digest(bundle))
+    record = build_record(os.environ, event, built_sha, checkout_parents(git), file_digest(bundle),
+                          key_stamped())
     with output.open('x') as target:
         target.write(json.dumps(record, indent=2) + '\n')
 

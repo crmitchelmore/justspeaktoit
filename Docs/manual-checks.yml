@@ -406,10 +406,12 @@ sessions:
         core: false
         build: "GitHub repository settings"
         steps:
-          - "Check the POSTHOG_PROJECT_KEY repository secret holds the public PostHog Production project key (phc_\u2026), not a personal or staging key."
-          - "Open the first windows-cross-proof, windows-arm64 and linux-flatpak runs on main after #1744 merges."
-          - "In each, check the Stamp the PostHog project key into release builds step ran and printed no key."
-        expected: "The secret is the Production project key, and each run stamped it without printing it. windows-cross-proof.yml, windows-arm64.yml and linux-flatpak.yml stamp it into main and Alpha/Stable manifest builds (#1744)."
+          - "GitHub never shows a secret's value, so if you cannot say where POSTHOG_PROJECT_KEY came from, copy the public project key (phc_\u2026) from PostHog EU, Production project, Settings \u203a Project, and set it with gh secret set POSTHOG_PROJECT_KEY. Never paste the key into a result, issue or log."
+          - "Open the first windows-cross-proof, windows-arm64 and linux-flatpak runs from a push to main after #1744 merges."
+          - "In each run's log, open the Stamp the PostHog project key into release builds step and check it printed Stamped the PostHog project key for opt-in product analytics. and no key."
+          - "Treat the step printing No POSTHOG_PROJECT_KEY, or a warning that the value is not a PostHog project key, as a failure: that build is keyless and sends nothing."
+          - "Check a manual (workflow_dispatch) run on main skips the step, so it stays keyless."
+        expected: "The secret is the Production project key. Each push run on main logs Stamped the PostHog project key for opt-in product analytics. without printing the key; a missing or malformed key is a failure. windows-cross-proof.yml, windows-arm64.yml and linux-flatpak.yml stamp it only on pushes to main and Alpha/Stable manifest tags, never on manual main runs, pull requests or other branches (#1744, #1828)."
         final_gate: false
       - id: "owner-android-cloudkit-token"
         issues:
@@ -2416,7 +2418,8 @@ sessions:
         core: false
         build: "Just Speak to It for Windows, an Alpha built after #1744 (release workflows stamp the PostHog key)"
         steps:
-          - "Turn on Share anonymous usage analytics in Settings \u203a General and apply."
+          - "Start with Share anonymous usage analytics off: use a fresh profile, or turn it off in Settings \u203a General and apply."
+          - "Turn on Share anonymous usage analytics and apply."
           - "Make one short recording, then quit the app."
           - "Tell the owner the time you opted in, so an agent can look for the event in PostHog Production."
         expected: "One analytics_opt_in event from Windows arrives in PostHog Production with the app version and platform=windows, and no transcript text, file path or user name."
@@ -2513,7 +2516,8 @@ sessions:
         core: false
         build: "Just Speak to It for Linux, an Alpha built after #1744 (release workflows stamp the PostHog key)"
         steps:
-          - "Turn on Share anonymous usage analytics in Settings \u203a General and apply."
+          - "Start with Share anonymous usage analytics off: use a fresh profile, or turn it off in Settings \u203a General and apply."
+          - "Turn on Share anonymous usage analytics and apply."
           - "Make one short recording, then quit the app."
           - "Tell the owner the time you opted in, so an agent can look for the event in PostHog Production."
         expected: "One analytics_opt_in event from Linux arrives in PostHog Production with the app version and platform=linux, and no transcript text, file path or user name."

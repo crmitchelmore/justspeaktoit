@@ -133,6 +133,31 @@ final class DesktopSettingsSearchTests: XCTestCase {
         XCTAssertNil(session.choose(99))
     }
 
+    func testTelemetryConsentSettingsAreSearchableOnBothDesktops() throws {
+        struct Consent {
+            let query: String
+            let key: String
+            let title: String
+        }
+        let consents = [
+            Consent(query: "Share anonymous usage analytics", key: DesktopTelemetryConsent.analyticsKey,
+                    title: DesktopTelemetryConsent.analyticsTitle),
+            Consent(query: "Send crash reports and diagnostics", key: DesktopTelemetryConsent.diagnosticsKey,
+                    title: DesktopTelemetryConsent.diagnosticsTitle)
+        ]
+        for platform: SettingsSearchPlatforms in [.windows, .linux] {
+            for consent in consents {
+                let session = DesktopSettingsSearchSession(platform: platform)
+                let rows = session.results(for: consent.query)
+                XCTAssertEqual(rows.first?.title, consent.title, "\(platform): \(consent.query)")
+                let target = try XCTUnwrap(session.choose(0), "\(platform): \(consent.query)")
+                XCTAssertEqual(target.destination, .general)
+                let index = try XCTUnwrap(target.fieldIndex)
+                XCTAssertEqual(DesktopConfiguration.fields[index].key, consent.key)
+            }
+        }
+    }
+
     func testBrowseOpenRouterModelsFindsBothPickers() {
         for platform: SettingsSearchPlatforms in [.windows, .linux] {
             let titles = Set(DesktopSettingsSearchSession(platform: platform)

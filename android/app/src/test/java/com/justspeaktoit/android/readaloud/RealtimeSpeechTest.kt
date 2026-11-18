@@ -171,6 +171,10 @@ class RealtimeSpeechTest {
         assertTrue(faithful("Add 3.5 cups", "Add 3.5 cups"))
         assertTrue(faithful("Add 3.5 cups", "Add three dot five cups"))
         assertFalse("35 is not three point five", faithful("Add 35 cups", "Add three point five cups"))
+        assertTrue(faithful("Add 3.5 cups", "Add three five cups"))
+        assertFalse("A sign word is not a decimal point", faithful("Add 3.5 cups", "Add three minus five cups"))
+        assertFalse("An operator word is not a decimal point", faithful("Add 3.5 cups", "Add three plus five cups"))
+        assertFalse("A point word is not a minus", faithful("The balance is -5", "The balance is point five"))
         assertFalse(
             "A scale past the limit is refused before it can overflow",
             faithful("Pay 290448384 now", "Pay 18446744074 billion now"),

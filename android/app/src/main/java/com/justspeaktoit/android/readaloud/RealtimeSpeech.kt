@@ -228,8 +228,8 @@ object RealtimeReading {
         val next = heard.getOrNull(start)
         when (token) {
             is Token.Word -> return if (next == token.text) listOf(start + 1) else emptyList()
-            Token.Minus -> return if (next != null && carriesNoNumber(next)) listOf(start + 1) else emptyList()
-            Token.Point -> return if (next != null && carriesNoNumber(next)) listOf(start, start + 1) else listOf(start)
+            Token.Minus -> return if (next != null && isSign(next)) listOf(start + 1) else emptyList()
+            Token.Point -> return if (next != null && isPoint(next)) listOf(start, start + 1) else listOf(start)
             is Token.Number, Token.Mixed -> Unit
         }
         val longest = minOf(heard.size, start + perNumeral)
@@ -245,6 +245,14 @@ object RealtimeReading {
 
     /** A spoken sign or decimal point: a word with no digits, number or negation in it. */
     private fun carriesNoNumber(word: String) = !isDigits(word) && NumberWords.value(word) == null && word !in NEGATIONS
+
+    /** Words that change the arithmetic when read in the other slot, so the language-neutral slots refuse them. */
+    private fun isSign(word: String) = carriesNoNumber(word) && word !in POINT_WORDS
+
+    private fun isPoint(word: String) = carriesNoNumber(word) && word !in SIGN_WORDS
+
+    private val SIGN_WORDS = setOf("minus", "plus", "negative", "positive", "times", "over", "divided")
+    private val POINT_WORDS = setOf("point", "dot")
 
     private val NEGATIONS = setOf("not", "no", "never", "none", "nothing", "nobody", "neither", "nor", "without")
 

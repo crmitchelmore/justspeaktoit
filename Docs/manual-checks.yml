@@ -155,7 +155,7 @@ sessions:
           - "Choose Apple Dictation and read the same paragraph three more times."
           - "Mark this Pass. An agent then compares first-words latency for the two models using only the numeric latency fields in History."
         expected: "Six recordings exist, three per model. The agent posts both first-words p50 values on #614 and closes it if SpeechTranscriber\u2019s is the same or lower and iphone-hands-free has passed."
-        final_gate: false
+        final_gate: true
       - id: "mac-hands-free"
         issues:
           - 1553
@@ -170,7 +170,7 @@ sessions:
           - "Stay silent for 30 seconds, tap the desk once, then say \"Hands free works on this Mac\" and stay silent until it finishes."
           - "Disarm and open History."
         expected: "Arming shows armed (never \u201ccouldn\u2019t access the microphone\u201d). Silence and the tap start nothing; speech starts recording within about a second, the sentence lands in TextEdit, and it returns to armed after silence. History has exactly one new item."
-        final_gate: false
+        final_gate: true
       - id: "mac-start-latency-sample"
         issues:
           - 611
@@ -183,7 +183,7 @@ sessions:
           - "Once the Alpha has about 50 hotkey recordings made on such a build, mark this Pass."
           - "An agent then reads only the numeric latency fields in History and posts the result on #611."
         expected: "About 50 or more recent hotkey recordings exist. The agent reports hotkey-to-capture p50 and p95; #611 closes if p50 is under 100 ms and the #664 streaming checks have passed."
-        final_gate: false
+        final_gate: true
       - id: "mac-double-tap-start-latency"
         issues:
           - 611
@@ -198,7 +198,7 @@ sessions:
           - "Tap the hotkey once (no second tap) three times, and check the menu-bar microphone indicator does not stay on."
           - "Mark this Pass. An agent then reads only the numeric latency fields and the Start timeline in History and posts p50 and p95 on #611."
         expected: "No recording, sound or History entry comes from a single tap. The agent reports double-tap hotkey-to-capture p50 and p95, back to back and after a pause, and whether each start shows \"live input prepared from key-down\". #611 closes if back-to-back p50 is under 100 ms."
-        final_gate: false
+        final_gate: true
       - id: "mac-paid-new-providers"
         issues:
           - 1210
@@ -428,7 +428,7 @@ sessions:
           - "Save the token as the CLOUDKIT_WEB_API_TOKEN secret in the android-release environment (android.yml and alpha-release.yml already pass it to the Android build; #1827) and make sure the Production schema has the TranscriptionHistory record type."
           - "Install the APK from the first Alpha build that includes #1741 (the secret is already saved), then open Settings \u203a History sync."
         expected: "The next Android Alpha shows Sign in to iCloud under Settings \u203a History sync instead of saying sync is not set up for this build."
-        final_gate: false
+        final_gate: true
       - id: "android-play-tip-jar"
         issues:
           - 1594
@@ -956,7 +956,7 @@ sessions:
           - "Press the Action Button briefly and read the hint; press and hold to start, press briefly and read the hint, press and hold to stop."
           - "Add Transcribe Voice to a Lock Screen bottom slot, then start and stop from the Lock Screen."
         expected: "Written steps match the real pickers. Hints read \"Start dictation\" when idle and \"Stop dictation\" while recording. Each route records once and pastes; note any unlock prompt. Needs iOS 18 and 26 evidence to close #954."
-        final_gate: false
+        final_gate: true
       - id: "iphone-transcript-alerts"
         issues:
           - 1017
@@ -1047,7 +1047,7 @@ sessions:
           - "Say \"Go quick start\", then stay silent until it finishes."
           - "Stay silent for 60 more seconds, then disarm and open History."
         expected: "Armed \u2192 Recording as you start speaking, then back to Armed after silence without tapping Stop. History has one item starting \"Go\"; nothing is recorded during the silent minute."
-        final_gate: false
+        final_gate: true
       - id: "iphone-history-upgrade"
         issues:
           - 1118
@@ -1226,6 +1226,22 @@ sessions:
           - "Re-read Resolution Center, resolve every remaining review finding and approve the frozen candidate through the normal Stable process."
         expected: "The exact candidate's device evidence, SDK privacy report, nutrition labels, published policy, consent/withdrawal behavior, support URLs and private review information agree. No credentials enter public issues or screenshots, and no submission is approved solely because the archive builds."
         final_gate: false
+      - id: "owner-store-console-nov-2026"
+        issues:
+          - 1806
+        title: "App Store Connect: age rating and social media answers"
+        minutes: 10
+        core: true
+        build: "App Store Connect"
+        prerequisites:
+          - "Apple's new age rating questions are due by 12 January 2027."
+        steps:
+          - "In App Store Connect open App Information \u203a Age Rating for the iOS app, both Mac apps and the Alpha records."
+          - "Answer the new content descriptors Shared Location and Dating and Relationships with No, then complete the 13+, 16+ and 18+ questionnaire."
+          - "Answer the 2.3.6 social media question with No: the app has no user-to-user social features."
+          - "Save each record."
+        expected: "Every record shows a 4+ rating with the new questions answered and no pending age rating warning."
+        final_gate: true
       - id: "iphone-app-shortcuts-phrases"
         issues:
           - 1595
@@ -1372,7 +1388,7 @@ sessions:
           - "Expand Import from Hugging Face, enter argmaxinc/whisperkit-coreml and openai_whisper-base.en, tap Add Model, then download it."
           - "Turn VoiceOver on and move through a model row while it downloads."
         expected: "The sentence is transcribed with Airplane Mode on and History names the model (for example WhisperKit Base), never a generic label or a cloud provider. The silent recording produces no text and no placeholder. The not-downloaded model fails with a message to download it rather than uploading. Removed models show Download again. The import appears in the list and downloads. VoiceOver reads each model's name, size, state and progress, and announces when a download finishes."
-        final_gate: false
+        final_gate: true
       - id: "ios-downloaded-cleanup-models"
         issues:
           - 1650
@@ -1389,7 +1405,7 @@ sessions:
           - "Remove SmolLM2 with its Remove button and polish the transcript again."
           - "Turn VoiceOver on and move through a model row while it downloads."
         expected: "With Airplane Mode on, the filler words are removed and the prompt's capitals rule is followed, so the prompt reached the model. The silent recording stays empty with no placeholder. After removal, polishing keeps the original transcript and says to download the model; nothing goes to a cloud model. The app does not quit during or after cleanup. VoiceOver reads each model's name, size, state and progress, and announces when a download finishes. Note the device and polish time in the result."
-        final_gate: false
+        final_gate: true
       - id: "iphone-usage-insights-dashboard"
         issues:
           - 1623
@@ -1888,7 +1904,7 @@ sessions:
           - "Open https://justspeaktoit.com/cloudkit-sign-in in a new tab with no query and check it says to start iCloud sign-in again from the app."
           - "Turn on TalkBack, sign out and sign in again, and check the status change is read out."
         expected: "Apple's redirect goes to justspeaktoit.com, which forwards straight to the app's loopback page without showing its own page, and the app signs in and syncs. Opening the site address directly shows only the start-again message and signs nothing in."
-        final_gate: false
+        final_gate: true
       - id: "android-battery-latency"
         issues:
           - 1328
@@ -2206,7 +2222,7 @@ sessions:
           - "When Base shows Downloaded and verified, choose it, then tap Remove on it."
           - "With TalkBack on, move through the section and download Whisper Tiny."
         expected: "Tiny, Base and Small are listed with their sizes. On mobile data the model waits for Wi-Fi and nothing downloads. Resume carries on from the bytes already received rather than starting again, and the model shows Downloaded and verified only at the end. Remove returns it to Not downloaded and it can no longer be chosen. TalkBack names each model, its size and state, its Download, Cancel and Remove buttons and the mobile data switch, and announces progress changes."
-        final_gate: false
+        final_gate: true
       - id: "android-downloaded-whisper-transcribe"
         issues:
           - 1658
@@ -2221,7 +2237,7 @@ sessions:
           - "Choose Downloaded with no model downloaded (or remove the chosen one mid-way), dictate and stop; open History and tap Transcribe on the failed entry after downloading the model again."
           - "Open the dictation keyboard in a messaging app."
         expected: "The text appears a little after Stop with no network, and History shows Downloaded with Whisper Base. Without a downloaded model the screen asks you to choose one and links to Settings; a recording made without one fails with a clear message, never a Cloud or speech-service transcript, and History keeps the audio so Transcribe works once the model is back. The keyboard never offers Downloaded and keeps using the phone's recogniser."
-        final_gate: false
+        final_gate: true
       - id: "owner-android-downloaded-whisper-measure"
         issues:
           - 1658
@@ -2235,7 +2251,7 @@ sessions:
           - "On a phone with 4 GB of RAM or less, check whether Large v3 Turbo is offered; on the largest phone, check that it transcribes without the app being closed."
           - "On an x86_64 emulator, download Tiny and dictate one sentence."
         expected: "Every listed model transcribes without the app closing or the phone stalling. Record time-to-text, real-time factor and battery per model and phone on #1658, choose the default model, confirm or change the 5 GiB Large v3 Turbo memory floor, and check the keyboard's estimates (KeyboardLocalModels: Tiny up to 120 seconds, Base up to 60, Small and Turbo app-only) against the measured times within its 10-second finish bound. The emulator returns text for Tiny."
-        final_gate: false
+        final_gate: true
       - id: "android-downloaded-cleanup-download"
         issues:
           - 1660
@@ -2251,7 +2267,7 @@ sessions:
           - "Choose Qwen3 0.6B without downloading it and read the note, then tap Clean up with (the picked model) instead. Choose SmolLM2 360M again from On this phone in the Cleanup model picker, then pick a cloud model there. Finally tap Remove on SmolLM2 360M."
           - "With TalkBack on, move through the section and choose a model."
         expected: "SmolLM2 360M and Qwen3 0.6B are listed with sizes (Qwen3 1.7B too with 5 GB of RAM or more). On mobile data the download waits for Wi-Fi; Resume carries on from the bytes received. Once chosen, the Cleanup model row names it, the picker shows it chosen under On this phone and the prompt editor stays. A chosen model not downloaded says recordings are not cleaned up until it is; Clean up with (the picked model) instead, or picking another model, switches back. Remove returns it to Not downloaded. TalkBack names each model, size, state and button, and announces the note."
-        final_gate: false
+        final_gate: true
       - id: "android-downloaded-cleanup-run"
         issues:
           - 1660
@@ -2268,7 +2284,7 @@ sessions:
           - "Still offline, remove the model while it stays chosen, dictate one sentence and stop."
           - "Turn off flight mode and wait for a network connection. Open the dictation keyboard in a messaging app and use a voice edit."
         expected: "Offline, the note says Cleaning up on this phone, then Cleaned up on this phone, and the custom prompt is followed (a full stop after each word). Show original restores the raw text; History keeps the cleaned text. Silence stays empty with no cleanup. With the model removed the original transcript is kept and nothing goes to a cloud model. The keyboard still uses the cloud cleanup model for voice edits."
-        final_gate: false
+        final_gate: true
       - id: "owner-android-downloaded-cleanup-measure"
         issues:
           - 1660
@@ -2282,7 +2298,7 @@ sessions:
           - "On a phone with 4 GB of RAM or less, check whether Qwen3 1.7B is offered; on the largest phone, check that it cleans up without the app being closed. Note any cleanup that hits the two-minute limit."
           - "On an x86_64 emulator, download SmolLM2 360M and clean one sentence."
         expected: "Every listed model cleans up without the app closing or the phone stalling, within two minutes for a 2-minute dictation. Record cleanup time, peak memory and battery per model and phone on #1660, confirm or change the 5 GiB Qwen3 1.7B memory floor and the two-minute limit, and check the keyboard's cleanup estimates (KeyboardLocalModels) against the measured times. The emulator returns cleaned text for SmolLM2 360M."
-        final_gate: false
+        final_gate: true
       - id: "android-profile-downloaded-cleanup"
         issues:
           - 1650
@@ -2298,7 +2314,7 @@ sessions:
           - "Remove SmolLM2 360M under Downloaded cleanup models, dictate again and stop."
           - "Make another profile active and dictate once more with flight mode off."
         expected: "The profile's row names SmolLM2 360M (downloaded, on this phone). Offline, the profile's dictation is cleaned up on this phone. With the model removed, the original transcript is kept with a visible cleanup error and nothing goes to the cloud model. The other profile uses your own cloud cleanup model."
-        final_gate: false
+        final_gate: true
       - id: "android-keyboard-downloaded-cleanup"
         issues:
           - 1650
@@ -2314,7 +2330,7 @@ sessions:
           - "Choose Qwen3 1.7B where it is offered (or Qwen3 0.6B), dictate one sentence and stop."
           - "Start a cleanup and tap into another text field before it finishes."
         expected: "Short dictations show the words at once, the status says Cleaning up with SmolLM2 360M, and the cleaned text replaces them within 10 seconds with a Cleaned up notice. The long dictation, Qwen3 1.7B and any cleanup that runs past 10 seconds type the words as said, with a notice that the model was too slow, and nothing goes to the cloud. Leaving the field keeps the words typed as said. Record the times on #1660."
-        final_gate: false
+        final_gate: true
       - id: "android-keyboard-downloaded-whisper"
         issues:
           - 1650
@@ -2330,7 +2346,7 @@ sessions:
           - "Choose Base and repeat once; then choose Small (download it if needed) and open the keyboard again."
           - "Remove the chosen model and open the keyboard again."
         expected: "With Tiny the status names Tiny and its 120-second limit, the text arrives within 10 seconds of Stop and nothing goes online; recording stops itself at the limit and the text is typed. Base shows a 60-second limit. Small, and a removed model, leave the platform recogniser in use with a status saying why. Record Tiny and Base times on #1658."
-        final_gate: false
+        final_gate: true
       - id: "android-cloud-silence-no-invented-text"
         issues:
           - 1788
@@ -2394,7 +2410,7 @@ sessions:
           - "Open https://justspeaktoit.com/cloudkit-sign-in in a new tab with no query and check it says to start iCloud sign-in again from the app."
           - "Sign out, switch the default browser to Firefox, sign in again and check it completes the same way."
         expected: "Apple's redirect goes to justspeaktoit.com, which forwards straight to the app's loopback page without showing its own page, and the app signs in and syncs. Opening the site address directly shows only the start-again message and signs nothing in."
-        final_gate: false
+        final_gate: true
       - id: "windows-telemetry-consent"
         issues:
           - 1624
@@ -2537,7 +2553,7 @@ sessions:
           - "Open https://justspeaktoit.com/cloudkit-sign-in in a new tab with no query and check it says to start iCloud sign-in again from the app."
           - "Sign out, repeat with the other install type (Flatpak or native package) or the other browser, and check it completes the same way."
         expected: "Apple's redirect goes to justspeaktoit.com, which forwards straight to the app's loopback page without showing its own page, and the app signs in and syncs. Opening the site address directly shows only the start-again message and signs nothing in."
-        final_gate: false
+        final_gate: true
       - id: "linux-telemetry-consent"
         issues:
           - 1624
@@ -2632,6 +2648,38 @@ sessions:
     device: "Decision"
     title: "Decisions"
     items:
+      - id: "decision-play-refunds"
+        issues:
+          - 1806
+        title: "Android tip refunds"
+        minutes: 2
+        core: true
+        question: "Play can ask the app to review a refund on a one-off tip. Tips unlock nothing, so there is nothing to revoke. What should the app do?"
+        context: "Play Billing tips are consumables in PlayBillingTipStore.kt. Play Console Help 17068375 describes the Review Refund API."
+        options:
+          - id: "accept-and-document"
+            label: "Accept and document them"
+            consequence: "No code change; refunds simply go through."
+            recommended: true
+          - id: "review-refund-api"
+            label: "Use the Review Refund API"
+            consequence: "Adds a server-side handler and Play API credentials for little benefit."
+      - id: "decision-universal-links"
+        issues:
+          - 1806
+        title: "Universal Links for capture links"
+        minutes: 2
+        core: true
+        question: "Capture deep links use a custom URL scheme that another app could also register. They only start or stop recording or open History and carry no credentials."
+        context: "Hardening means serving apple-app-site-association on justspeaktoit.com and adding an applinks entitlement, while keeping the scheme for Shortcuts."
+        options:
+          - id: "keep-scheme"
+            label: "Keep the custom scheme"
+            consequence: "No change; another app claiming the scheme could at worst swallow a start or stop link."
+            recommended: true
+          - id: "add-universal-links"
+            label: "Add Universal Links too"
+            consequence: "An agent adds the site file and entitlement; needs a new provisioning profile and an iPhone check."
       - id: "decision-non-apple-screen-readers"
         issues:
           - 1400

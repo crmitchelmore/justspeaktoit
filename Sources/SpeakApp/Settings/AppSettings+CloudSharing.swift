@@ -38,6 +38,19 @@ extension AppSettings {
     return CloudSharingConsent.merged(requests)
   }
 
+  /// Every provider a Voice Edit started now would send content to: the
+  /// spoken instruction's audio and, with the selection, the rewrite.
+  var voiceEditCloudSharingRequests: [CloudSharingRequest] {
+    var requests = CloudSharingConsent.requests(for: privacyWorkflowSummary).filter { $0.kinds.contains(.audio) }
+    requests = requests.map { CloudSharingRequest(provider: $0.provider, kinds: [.audio]) }
+    if let request = CloudSharingConsent.request(
+      forModel: VoiceEditPolicy.modelIdentifier(configured: postProcessingModel), purpose: .postProcessing
+    ) {
+      requests.append(request)
+    }
+    return CloudSharingConsent.merged(requests)
+  }
+
   /// "Use on-device instead": moves every cloud step asked about on device.
   /// Transcription switches to Apple Speech, cloud cleanup and live polish
   /// turn off and read aloud uses the system voice. Steps that already run

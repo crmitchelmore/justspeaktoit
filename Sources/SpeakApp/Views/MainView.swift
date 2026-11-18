@@ -71,6 +71,7 @@ struct MainView: View {
     } message: { alert in
       Text(alert.message)
     }
+    .modifier(CloudSharingConsentPresenter(main: environment.main))
   }
 
   @ViewBuilder
@@ -179,3 +180,26 @@ struct MainView: View {
 
 // @Implement This is the main app container and handles top-level system events.
 // It owns the sidebar selection and displays the selected content in the main window.
+
+/// Presents the cloud AI consent sheet whenever a start is waiting for it.
+/// Observes `MainManager` directly so the sheet appears even while nothing
+/// else in the window changes.
+private struct CloudSharingConsentPresenter: ViewModifier {
+  @ObservedObject var main: MainManager
+
+  func body(content: Content) -> some View {
+    content.sheet(
+      isPresented: Binding(
+        get: { !main.pendingCloudSharingRequests.isEmpty },
+        set: { if !$0 { main.dismissCloudSharingConsent() } }
+      )
+    ) {
+      CloudSharingConsentSheet(
+        requests: main.pendingCloudSharingRequests,
+        onAllow: { main.allowCloudSharing() },
+        onUseOnDevice: { main.useOnDeviceInsteadOfCloudSharing() },
+        onNotNow: { main.dismissCloudSharingConsent() }
+      )
+    }
+  }
+}

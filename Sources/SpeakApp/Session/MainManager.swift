@@ -58,6 +58,15 @@ final class MainManager: ObservableObject {
   /// transcription provider has no API key stored. Observed by `MainView`
   /// to present an alert with an "Add API Key" deep-link CTA.
   @Published var missingLiveAPIKeyAlert: MissingLiveAPIKeyAlert?
+  /// Cloud AI providers waiting for the user's permission before a start can
+  /// send them anything (issue #1805). `MainView` presents the consent sheet.
+  @Published var pendingCloudSharingRequests: [CloudSharingRequest] = []
+  /// Where this device records which providers the user allowed. WireUp points
+  /// it at the bootstrap defaults so tests and journeys stay isolated.
+  var cloudSharingConsent: CloudSharingConsentStore = .shared
+  /// Brings the main window forward so the consent sheet is seen when a
+  /// hotkey start was refused in menu-bar-only mode.
+  var presentCloudSharingConsent: (() -> Void)?
 
   /// Whether live text insertion is enabled based on current settings
   private var liveInsertionEnabled: Bool {

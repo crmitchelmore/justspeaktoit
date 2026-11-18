@@ -33,7 +33,7 @@ final class TranscriberCoordinator: ObservableObject {
     private let finalisation: ForegroundCaptureFinalisation
     private let launcher: ForegroundRunLauncher
     private let owner: ForegroundRunOwner
-    private let observation: ForegroundRunObservation
+    let observation: ForegroundRunObservation
     private let liveActivity: ForegroundLiveActivity
     private let headlessState: @MainActor () -> RecordingServiceState
 
@@ -48,6 +48,7 @@ final class TranscriberCoordinator: ObservableObject {
     }
     /// The cloud model this run would have used had the network been up.
     private var offlineIntendedModel: String?
+    let cloudSharingConsent: IOSCloudSharingConsentPrompt? // nil only in test harnesses (#1805)
 
     init(
         sharedState: SharedTranscriptionState = .shared,
@@ -61,8 +62,10 @@ final class TranscriberCoordinator: ObservableObject {
         },
         networkSnapshot: @escaping CaptureNetworkPathMonitor.SnapshotProvider = { .unknown },
         localRecognitionCapability: @escaping @MainActor (String) -> AppleLocalRecognitionCapability =
-            { _ in .available }
+            { _ in .available },
+        cloudSharingConsent: IOSCloudSharingConsentPrompt? = nil
     ) {
+        self.cloudSharingConsent = cloudSharingConsent
         let observation = ForegroundRunObservation()
         self.mirror = ForegroundTranscriptMirror(sharedState: sharedState)
         self.finalisation = ForegroundCaptureFinalisation(sharedState: sharedState, historyManager: historyManager)
@@ -336,6 +339,7 @@ private extension TranscriberCoordinator {
         mirror.begin()
 
         let route = try launcher.route(for: request)
+        try requireCloudSharingConsent(modelID: route.modelID, usesBatch: request.usesBatch, runID: runID)
         offlineIntendedModel = route.offlineIntendedModelID
         currentModel = route.modelID
         recordingWarning = route.notice
@@ -388,7 +392,7 @@ extension TranscriberCoordinator {
         onCapturePresentationChanged?()
     }
 
-    private func finishPresentation() {
+    func finishPresentation() {
         guard observation.finishPresentation() else { return }
         onCapturePresentationChanged?()
     }

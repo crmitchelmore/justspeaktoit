@@ -15,6 +15,9 @@ import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudClient
 import com.justspeaktoit.android.cloud.CloudModel
+import com.justspeaktoit.android.cloud.CloudSharedDataKind
+import com.justspeaktoit.android.cloud.CloudSharingConsent
+import com.justspeaktoit.android.cloud.CloudSharingRequest
 import com.justspeaktoit.android.cloud.CloudProvider
 import com.justspeaktoit.android.cloud.CloudService
 import com.justspeaktoit.android.cloud.NoAudioInputs
@@ -242,6 +245,7 @@ class DictationViewModel internal constructor(
                 selectedId = prefs.localCleanupModelId,
                 names = localModelSetup?.cleanup?.names.orEmpty(),
             ),
+            cloudSharingAllowed = prefs.cloudSharingConsent.allowed,
         ).withSelection(selector.selection),
     )
     val state: StateFlow<DictationUiState> = _state.asStateFlow()
@@ -533,6 +537,8 @@ class DictationViewModel internal constructor(
     fun confirmSharedAudio() {
         val offer = _state.value.sharedAudio ?: return
         _state.update { it.copy(sharedAudio = null) }
+        val requests = _state.value.cloudSharingRequests(audioToCloud = true)
+        if (asksCloudSharing(requests, PendingCloudSend.SharedAudio(offer))) return
         // Confirming takes priority over an optional cleanup; the transcript is already in History.
         session.cancelCleanup()
         val current = _state.value
@@ -929,6 +935,9 @@ class DictationViewModel internal constructor(
         val current = _state.value
         val mode = current.activeMode ?: return
         if (!current.canStart || handsFree.armed) return
+        // Asked before the microphone opens, so no recording waits on the answer.
+        val requests = current.cloudSharingRequests(audioToCloud = mode == RecognitionMode.Cloud)
+        if (asksCloudSharing(requests, PendingCloudSend.Recording)) return
         if (current.armsHandsFree) {
             session.clearResult()
             handsFree.arm()
@@ -949,6 +958,11 @@ class DictationViewModel internal constructor(
         if (!handsFree.startingUtterance) return
         val current = _state.value
         if (!current.canStart || current.activeMode != RecognitionMode.Cloud) {
+            handsFree.disarm(failed = true)
+            return
+        }
+        // Consent withdrawn while listening: stop rather than send.
+        if (asksCloudSharing(current.cloudSharingRequests(audioToCloud = true), PendingCloudSend.Recording)) {
             handsFree.disarm(failed = true)
             return
         }
@@ -982,6 +996,73 @@ class DictationViewModel internal constructor(
             DictationState.Idle -> handsFree.disarm()
             else -> Unit
         }
+    }
+
+    /**
+     * Shows the consent prompt when [requests] include a provider or kind the user has not allowed (#1805),
+     * holding [pending] to run once allowed. True when it asked, so the caller sends nothing.
+     */
+    private fun asksCloudSharing(requests: List<CloudSharingRequest>, pending: PendingCloudSend): Boolean {
+        val missing = prefs.cloudSharingConsent.missing(requests)
+        if (missing.isEmpty()) return false
+        _state.update { it.copy(cloudSharingPrompt = CloudSharingPrompt(missing, pending)) }
+        return true
+    }
+
+    /** Allows the prompt's providers and runs the send that waited for them. */
+    fun allowCloudSharing() {
+        val prompt = _state.value.cloudSharingPrompt ?: return
+        val consent = prefs.cloudSharingConsent.granting(prompt.requests)
+        prefs.cloudSharingConsent = consent
+        _state.update { it.copy(cloudSharingPrompt = null, cloudSharingAllowed = consent.allowed) }
+        when (val pending = prompt.pending) {
+            PendingCloudSend.Recording -> start()
+            is PendingCloudSend.SharedAudio -> {
+                _state.update { it.copy(sharedAudio = pending.offer) }
+                confirmSharedAudio()
+            }
+            is PendingCloudSend.HistoryEntry -> transcribeHistoryEntry(pending.id)
+        }
+    }
+
+    /**
+     * Keeps the content on the phone instead: an on-device recogniser for audio, and no cloud cleanup.
+     * Nothing starts; the next tap records with the new choice.
+     */
+    fun useOnDeviceInsteadOfCloud() {
+        val prompt = _state.value.cloudSharingPrompt ?: return
+        _state.update { it.copy(cloudSharingPrompt = null) }
+        val kinds = prompt.requests.flatMap { it.kinds }.toSet()
+        if (CloudSharedDataKind.TranscriptText in kinds) setCleanupEnabled(false)
+        if (CloudSharedDataKind.Audio in kinds) {
+            val options = _state.value.options
+            val onDevice = listOf(RecognitionMode.OnDevice, RecognitionMode.Downloaded)
+                .firstOrNull { mode -> options.any { it.mode == mode && it.usable } } ?: RecognitionMode.OnDevice
+            chooseMode(onDevice)
+        }
+    }
+
+    /** Not now: nothing is sent; shared audio is offered again and History keeps its recording for a retry. */
+    fun dismissCloudSharing() {
+        val pending = _state.value.cloudSharingPrompt?.pending
+        _state.update {
+            it.copy(
+                cloudSharingPrompt = null,
+                sharedAudio = (pending as? PendingCloudSend.SharedAudio)?.offer ?: it.sharedAudio,
+            )
+        }
+    }
+
+    /** Rereads the providers allowed, which read aloud may have changed outside this model. */
+    fun refreshCloudSharing() {
+        _state.update { it.copy(cloudSharingAllowed = prefs.cloudSharingConsent.allowed) }
+    }
+
+    /** Stops sending [providerId] anything until the user allows it again. */
+    fun withdrawCloudSharing(providerId: String) {
+        val consent = prefs.cloudSharingConsent.withdrawing(providerId)
+        prefs.cloudSharingConsent = consent
+        _state.update { it.copy(cloudSharingAllowed = consent.allowed) }
     }
 
     fun stop() = session.stop()
@@ -1117,6 +1198,8 @@ class DictationViewModel internal constructor(
         val model = current.sessionCloudModel
         val language = current.languageTag
         val local = HistoryRetry.usesDownloadedModel(entry, current.activeMode)
+        val upload = if (local) emptyList() else listOf(CloudSharingConsent.request(model.provider, CloudSharedDataKind.Audio))
+        if (asksCloudSharing(upload, PendingCloudSend.HistoryEntry(id))) return
         _state.update { it.copy(transcribingEntryId = id) }
         scope.launch {
             val updated = if (local) {

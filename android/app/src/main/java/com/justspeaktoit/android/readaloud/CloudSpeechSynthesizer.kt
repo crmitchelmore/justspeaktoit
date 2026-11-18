@@ -1,6 +1,7 @@
 package com.justspeaktoit.android.readaloud
 
 import com.justspeaktoit.android.cloud.AzureSpeechCredential
+import com.justspeaktoit.android.cloud.CloudSharingRequest
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -45,6 +46,8 @@ sealed interface ReadAloudFailure {
     data class Unreachable(val provider: String) : ReadAloudFailure
     data class InvalidAudio(val provider: String) : ReadAloudFailure
     data class TooLong(val provider: String) : ReadAloudFailure
+    /** The voice's provider has not been allowed to receive text to speak (#1805); the app asks first. */
+    data class NeedsConsent(val requests: List<CloudSharingRequest>) : ReadAloudFailure
     /** The account's voice list could not be read, so no account voice is offered. */
     data class InvalidVoiceList(val provider: String) : ReadAloudFailure
     /** The model answered or summarised rather than reading the text verbatim. */

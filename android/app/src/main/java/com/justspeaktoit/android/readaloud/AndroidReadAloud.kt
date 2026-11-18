@@ -13,8 +13,12 @@ import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.view.textclassifier.TextClassificationManager
 import android.view.textclassifier.TextLanguage
+import com.justspeaktoit.android.cloud.CloudSharedDataKind
+import com.justspeaktoit.android.cloud.CloudSharingConsent
+import com.justspeaktoit.android.cloud.CloudSharingRequest
 import com.justspeaktoit.android.security.KeystoreSecretStore
 import com.justspeaktoit.android.security.SecretStore
+import com.justspeaktoit.android.settings.AppPreferences
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +62,7 @@ internal class AndroidReadAloudEngines(
     private val secrets: SecretStore,
     private val system: SystemSpeech,
     private val http: SpeechHttp = OkHttpSpeechHttp(),
+    private val consent: () -> CloudSharingConsent = { AppPreferences(context).cloudSharingConsent },
     private val realtimeConnector: RealtimeConnector = OkHttpRealtimeConnector(),
 ) : (VoiceSelection) -> ReadAloudEngine {
     private val catalog by lazy { readVoiceCatalog(context) }
@@ -73,6 +78,7 @@ internal class AndroidReadAloudEngines(
         catalog.voice(key)?.let { return cloudEngine(it) }
         val realtime = catalog.realtime
         realtime?.voice(key)?.let { voice ->
+            requireConsent(realtime.provider, realtime.providerName)
             val credential = savedKey(realtime.credentialId, realtime.providerName)
             return RealtimeReadAloudEngine(
                 realtime, voice, credential, RealtimeSpeechSynthesizer(realtime, realtimeConnector), AudioTrackOutput(),
@@ -84,10 +90,21 @@ internal class AndroidReadAloudEngines(
     }
 
     private fun cloudEngine(voice: CloudVoice): ReadAloudEngine {
+        requireConsent(voice.provider, voice.providerName)
         val key = savedKey(voice.credentialId, voice.providerName)
         return CloudReadAloudEngine(voice, key, CloudSpeechSynthesizer(http), AudioTrackOutput()) { text ->
             ReadAloudLanguage.resolve(null, detector(text), Locale.getDefault().language)
         }
+    }
+
+    /** Nothing goes to the voice's provider until the user has allowed it in the app (#1805). */
+    private fun requireConsent(providerId: String, providerName: String) {
+        val request = CloudSharingRequest(
+            CloudSharingConsent.provider(providerId, providerName),
+            listOf(CloudSharedDataKind.TextToSpeak),
+        )
+        val missing = consent().missing(listOf(request))
+        if (missing.isNotEmpty()) throw ReadAloudException(ReadAloudFailure.NeedsConsent(missing))
     }
 
     private fun savedKey(credentialId: String, provider: String): String =

@@ -359,6 +359,7 @@
     "batchTranscriptionModel",
     "cancelRecordingOnEscape",
     "clipboardInsertionTriggers",
+    "cloudSharingConsent",
     "compactStatusBarIcon",
     "connectionPreWarmingEnabled",
     "defaultTTSVoice",

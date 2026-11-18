@@ -21,6 +21,19 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
 
     private init() {}
 
+    /// A missing key, or a cloud provider the user has not allowed yet (#1805).
+    private func admissionError(model: String, apiKey: String, local: Bool) -> String? {
+        guard local || !apiKey.isEmpty else {
+            return PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model)).errorDescription
+        }
+        do {
+            try IOSCloudSharingConsentPrompt.shared.require(model: model, purpose: .postProcessing)
+        } catch {
+            return error.localizedDescription
+        }
+        return nil
+    }
+
     /// Process text using the configured model and prompt.
     public func process(
         text: String,
@@ -30,9 +43,8 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
         guard !text.isEmpty else { return }
         let usesAppleModel = model == AppleLocalModels.foundationModelID
         let usesDownloadedModel = IOSLocalCleanupModels.isCleanupModelID(model)
-        guard usesAppleModel || usesDownloadedModel || !apiKey.isEmpty else {
-            error = PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model))
-                .errorDescription
+        if let refusal = admissionError(model: model, apiKey: apiKey, local: usesAppleModel || usesDownloadedModel) {
+            error = refusal
             return
         }
 
@@ -138,6 +150,7 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
         guard !apiKey.isEmpty else {
             throw PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model))
         }
+        try IOSCloudSharingConsentPrompt.shared.require(model: model, purpose: .postProcessing)
 
         var result = ""
         for try await chunk in sendChatStreaming(
@@ -398,6 +411,7 @@ public struct PostProcessingView: View {
             .sheet(isPresented: $showingModelPicker) {
                 modelPickerSheet
             }
+            .cloudSharingConsentSheet()
         }
     }
 }

@@ -596,6 +596,25 @@
       "title" : "Privacy"
     },
     {
+      "id" : "android.cloudSharing",
+      "keywords" : [
+        "ai providers",
+        "third-party ai",
+        "consent",
+        "withdraw consent",
+        "data sharing",
+        "cloud",
+        "privacy policy"
+      ],
+      "section" : "about",
+      "sectionTitle" : "About",
+      "settingKeys" : [
+        "cloudSharingConsent"
+      ],
+      "summary" : "The cloud AI providers you allowed to receive your audio or text. Withdraw any of them.",
+      "title" : "AI providers you allowed"
+    },
+    {
       "id" : "android.analytics",
       "keywords" : [
         "analytics",

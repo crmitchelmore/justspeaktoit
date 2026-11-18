@@ -28,6 +28,10 @@ final class SessionStartPipelineTests: XCTestCase {
         func captureDidStart(for session: ActiveSession) { captureStarts.append(session) }
         func publishStartRejection(_ message: String) { rejections.append(message) }
         func publishMissingLiveAPIKey(_ alert: MissingLiveAPIKeyAlert) {}
+        var missingConsent: [CloudSharingRequest] = []
+        var consentPrompts: [[CloudSharingRequest]] = []
+        func missingCloudSharingConsent() -> [CloudSharingRequest] { missingConsent }
+        func publishCloudSharingConsentRequired(_ requests: [CloudSharingRequest]) { consentPrompts.append(requests) }
         func makeAdmissionDiagnosticContext() -> HistoryDiagnosticContext { diagnostics() }
         func sessionProcessingShouldContinue(_ session: ActiveSession) -> Bool { activeSession === session }
 
@@ -165,6 +169,24 @@ final class SessionStartPipelineTests: XCTestCase {
         XCTAssertEqual(harness.host.rejections, ["Voice edit is in progress. Finish or cancel it first."])
         XCTAssertTrue(harness.host.activated.isEmpty)
         XCTAssertEqual(harness.ownership.owner, .voiceEdit, "Voice Edit keeps its reservation")
+    }
+
+    func testStart_withoutCloudConsentAsksBeforeCaptureAndTakesNothing() async {
+        let harness = makeHarness(source: CoreJourneyRecordingSource())
+        let request = CloudSharingRequest(
+            provider: CloudSharingProviderCatalogue.resolve(id: "deepgram", fallbackName: "Deepgram"),
+            kinds: [.audio]
+        )
+        harness.host.missingConsent = [request]
+
+        let outcome = await harness.pipeline.start(.init(trigger: .uiButton))
+
+        XCTAssertEqual(outcome, .rejected(.captureFailed))
+        XCTAssertEqual(harness.host.consentPrompts, [[request]])
+        XCTAssertTrue(harness.host.activated.isEmpty, "No session, so no recording can be lost")
+        XCTAssertEqual(harness.abandonedStarts(), 1)
+        XCTAssertNil(harness.ownership.owner)
+        XCTAssertEqual(harness.cues(), 0)
     }
 
     func testStart_bringsCaptureUpAndArmsTheRuntime() async {

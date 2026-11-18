@@ -174,6 +174,14 @@ extension TranscriptionRecordingService {
             )
         }
 
+        // Before the microphone opens, so a refusal loses no audio (#1805).
+        try requireCloudSharingConsent(
+            usesBatch: usesBatchTranscription,
+            polishModel: keyboardProfile.map { $0.polishes ? $0.postProcessingModelIdentifier : nil }
+                ?? (settings.postProcessingEnabled ? settings.postProcessingModel : nil),
+            run: runID
+        )
+
         // A Live Activity is required to record in the *background* via an
         // AudioRecordingIntent — without one the AppIntents system-policy check
         // asserts (EXC_BREAKPOINT). In the foreground a Live Activity is optional,

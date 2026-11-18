@@ -11,6 +11,9 @@ import com.justspeaktoit.android.cloud.AudioRecorder
 import com.justspeaktoit.android.cloud.CallHandle
 import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudModel
+import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.CloudSharedDataKind
+import com.justspeaktoit.android.cloud.CloudSharingConsent
 import com.justspeaktoit.android.cloud.CloudService
 import com.justspeaktoit.android.cloud.InputRoute
 import com.justspeaktoit.android.cloud.CaptureLevel
@@ -425,7 +428,13 @@ internal class MemoryPrefs(
     override var downloadedTranscriptionModel: String? = null,
     override var downloadedModelsOnMobileData: Boolean = false,
     override var localCleanupModelId: String? = null,
+    // Tests written before consent (#1805) start with every provider allowed; consent tests pass none.
+    override var cloudSharingConsent: CloudSharingConsent = everyProviderAllowed,
 ) : DictationPreferences
+
+internal val everyProviderAllowed = CloudSharingConsent(
+    CloudProvider.entries.associate { it.id to CloudSharedDataKind.entries.toSet() },
+)
 
 internal class MemoryHistoryFile : HistoryFile {
     @Volatile var text: String? = null

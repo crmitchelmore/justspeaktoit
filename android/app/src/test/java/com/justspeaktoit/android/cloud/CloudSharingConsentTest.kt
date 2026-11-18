@@ -34,6 +34,13 @@ class CloudSharingConsentTest {
     }
 
     @Test
+    fun kindWireValuesRoundTrip() {
+        assertEquals(CloudSharedDataKind.Audio, CloudSharedDataKind.fromWire("audio"))
+        assertEquals(CloudSharedDataKind.Transcript, CloudSharedDataKind.fromWire("transcript"))
+        assertEquals(null, CloudSharedDataKind.fromWire("nope"))
+    }
+
+    @Test
     fun blockedMessageMatchesSpeakCore() {
         val message = CloudSharingConsent.blockedMessage(request("deepgram", CloudSharedDataKind.Audio))
         assertEquals(

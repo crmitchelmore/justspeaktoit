@@ -61,15 +61,23 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
                         modelID: model
                     )
                 } else {
-                    // Use streaming for real-time updates
-                    for try await chunk in sendChatStreaming(
-                        systemPrompt: effectivePrompt,
-                        userMessage: TranscriptCleanupPolicy.userMessage(transcript: text),
-                        model: model,
-                        apiKey: apiKey
-                    ) {
-                        if Task.isCancelled { break }
-                        streamingText += chunk
+                    switch await authorizeCloudCleanup(model: model) {
+                    case .proceed:
+                        for try await chunk in sendChatStreaming(
+                            systemPrompt: effectivePrompt,
+                            userMessage: TranscriptCleanupPolicy.userMessage(transcript: text),
+                            model: model,
+                            apiKey: apiKey
+                        ) {
+                            if Task.isCancelled { break }
+                            streamingText += chunk
+                        }
+                    case .useOnDevice:
+                        streamingText = try await AppleFoundationModelPolisher.process(
+                            text: text, systemPrompt: effectivePrompt
+                        )
+                    case .refused(let request):
+                        throw CloudSharingBlocked(request: request)
                     }
                 }
 
@@ -138,14 +146,7 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
         guard !apiKey.isEmpty else {
             throw PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model))
         }
-        let availability = CloudSharingOnDeviceAvailability(
-            transcription: true,
-            postProcessing: AppleFoundationModelPolisher.isAvailable,
-            voice: false
-        )
-        switch await CloudSharingPrompt.resolve(
-            modelID: model, purpose: .postProcessing, availability: availability
-        ) {
+        switch await authorizeCloudCleanup(model: model) {
         case .proceed:
             break
         case .useOnDevice:
@@ -167,6 +168,19 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
             result += chunk
         }
         return result
+    }
+
+    /// The interactive editor and `polish` share this, so withdrawing consent stops both.
+    private func authorizeCloudCleanup(model: String) async -> CloudSharingAuthorization {
+        await CloudSharingPrompt.resolve(
+            modelID: model,
+            purpose: .postProcessing,
+            availability: CloudSharingOnDeviceAvailability(
+                transcription: true,
+                postProcessing: AppleFoundationModelPolisher.isAvailable,
+                voice: false
+            )
+        )
     }
 
     nonisolated static func effectiveSystemPrompt() -> String {

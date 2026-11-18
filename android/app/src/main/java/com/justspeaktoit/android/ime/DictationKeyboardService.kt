@@ -443,7 +443,10 @@ class DictationKeyboardService : InputMethodService() {
             val sharing = com.justspeaktoit.android.cloud.CloudSharingConsentStore.preferences(this)
             if (!sharing.allows(run.model.cloudProvider.id, com.justspeaktoit.android.cloud.CloudSharedDataKind.Transcript)) {
                 mainExecutor.execute {
-                    openAppForConsent(run.model.cloudProvider.id)
+                    openAppForConsent(
+                        run.model.cloudProvider.id,
+                        com.justspeaktoit.android.cloud.CloudSharedDataKind.Transcript,
+                    )
                     endVoiceEdit(getString(R.string.failure_cloud_sharing_consent))
                 }
                 return@execute
@@ -603,7 +606,10 @@ class DictationKeyboardService : InputMethodService() {
                         com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio,
                     )
                 ) {
-                    openAppForConsent(cloudModel.provider.id)
+                    openAppForConsent(
+                        cloudModel.provider.id,
+                        com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio,
+                    )
                     return@checkOnDeviceLanguage
                 }
                 cloudProvider = cloudModel.provider.displayName
@@ -1081,12 +1087,13 @@ class DictationKeyboardService : InputMethodService() {
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
-    /** Cloud audio is not sent from the keyboard until the app has recorded permission. */
-    private fun openAppForConsent(providerId: String) {
+    /** Cloud audio or transcript text is not sent from the keyboard until the app has recorded that permission. */
+    private fun openAppForConsent(providerId: String, kind: com.justspeaktoit.android.cloud.CloudSharedDataKind) {
         startActivity(
             Intent(this, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                .putExtra(MainActivity.EXTRA_CLOUD_SHARING_PROVIDER, providerId),
+                .putExtra(MainActivity.EXTRA_CLOUD_SHARING_PROVIDER, providerId)
+                .putExtra(MainActivity.EXTRA_CLOUD_SHARING_KIND, kind.wire),
         )
     }
 

@@ -369,11 +369,10 @@ class MainActivity : ComponentActivity() {
             intent.getStringExtra(EXTRA_CLOUD_SHARING_PROVIDER) != null -> {
                 screenState.value = Screen.Dictation
                 val providerId = intent.getStringExtra(EXTRA_CLOUD_SHARING_PROVIDER) ?: return
-                viewModel.presentCloudSharing(
-                    providerId,
-                    com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio,
-                    resume = null,
-                )
+                val kind = com.justspeaktoit.android.cloud.CloudSharedDataKind.fromWire(
+                    intent.getStringExtra(EXTRA_CLOUD_SHARING_KIND).orEmpty(),
+                ) ?: com.justspeaktoit.android.cloud.CloudSharedDataKind.Audio
+                viewModel.presentCloudSharing(providerId, kind, resume = null)
             }
             intent.action == Intent.ACTION_SEND -> {
                 val uri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java) ?: return
@@ -494,6 +493,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val DICTATE_ENTRY = "com.justspeaktoit.android.DictateEntry"
         const val EXTRA_CLOUD_SHARING_PROVIDER = "cloudSharingProvider"
+        const val EXTRA_CLOUD_SHARING_KIND = "cloudSharingKind"
         private const val KEY_SCREEN = "screen"
         private const val KEY_START_AFTER_GRANT = "startAfterGrant"
 

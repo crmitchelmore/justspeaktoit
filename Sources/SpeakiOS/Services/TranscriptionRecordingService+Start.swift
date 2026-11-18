@@ -117,9 +117,16 @@ extension TranscriptionRecordingService {
         let runParameters = adoptRunParameters(configuration.parameters, keyboardProfile: keyboardProfile)
         var usesBatchTranscription = configuration.usesBatch
         currentModel = configuration.modelID
+        // The start watchdog measures a hung backend, not time spent reading the consent sheet.
+        // It is parked only when a sheet will actually appear, then restarted from now.
+        let waitingForConsent = cloudSharingNeedsPrompt(
+            modelID: currentModel, usesBatch: usesBatchTranscription
+        )
+        if waitingForConsent { disarmWatchdogs() }
         let consented = try await consentedCloudModel(
             modelID: currentModel, usesBatch: usesBatchTranscription, run: runID
         )
+        if waitingForConsent { armWatchdogs(run: runID, entry: nil) }
         usesBatchTranscription = consented.usesBatch
         currentModel = consented.modelID
         try validateCredentialAvailability(

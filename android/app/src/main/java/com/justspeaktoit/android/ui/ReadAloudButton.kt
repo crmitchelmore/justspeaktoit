@@ -12,8 +12,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -24,6 +26,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justspeaktoit.android.R
+import com.justspeaktoit.android.cloud.CloudSharingConsent
+import com.justspeaktoit.android.cloud.CloudSharingRequest
 import com.justspeaktoit.android.readaloud.AndroidReadAloudEngines
 import com.justspeaktoit.android.readaloud.AndroidReadAloudFocus
 import com.justspeaktoit.android.readaloud.PronunciationEntry
@@ -34,6 +38,7 @@ import com.justspeaktoit.android.readaloud.ReadAloudState
 import com.justspeaktoit.android.readaloud.SystemSpeech
 import com.justspeaktoit.android.readaloud.VoiceSelection
 import com.justspeaktoit.android.security.KeystoreSecretStore
+import com.justspeaktoit.android.settings.AppPreferences
 import kotlinx.coroutines.launch
 
 /** The ids one set of read-aloud controls carries, derived from [read] so each set stays unique. */
@@ -66,9 +71,28 @@ internal fun rememberReadAloudController(snackbar: SnackbarHostState): ReadAloud
         }
     }
     val state by controller.state.collectAsStateWithLifecycle()
-    val message = state.failure?.let { failureMessage(it) }
-    LaunchedEffect(state.failure) {
-        if (message != null) {
+    // A voice whose provider is not yet allowed asks first, as dictation does (#1805); Allow lets the next tap read.
+    var consentAsk by remember { mutableStateOf<List<CloudSharingRequest>?>(null) }
+    consentAsk?.let { requests ->
+        CloudSharingConsentDialog(
+            requests = requests,
+            offersOnDevice = false,
+            onAllow = {
+                val prefs = AppPreferences(context)
+                prefs.cloudSharingConsent = prefs.cloudSharingConsent.granting(requests)
+                consentAsk = null
+            },
+            onUseOnDevice = { consentAsk = null },
+            onNotNow = { consentAsk = null },
+        )
+    }
+    val failure = state.failure
+    val message = failure?.takeUnless { it is ReadAloudFailure.NeedsConsent }?.let { failureMessage(it) }
+    LaunchedEffect(failure) {
+        if (failure is ReadAloudFailure.NeedsConsent) {
+            consentAsk = failure.requests
+            controller.dismissFailure()
+        } else if (message != null) {
             // Shown outside this effect, which clearing the failure restarts.
             scope.launch { snackbar.showSnackbar(message) }
             controller.dismissFailure()
@@ -154,6 +178,7 @@ private fun failureMessage(failure: ReadAloudFailure): String = when (failure) {
     is ReadAloudFailure.Unreachable -> stringResource(R.string.read_aloud_unreachable, failure.provider)
     is ReadAloudFailure.InvalidAudio -> stringResource(R.string.read_aloud_invalid_audio, failure.provider)
     is ReadAloudFailure.TooLong -> stringResource(R.string.read_aloud_too_long, failure.provider)
+    is ReadAloudFailure.NeedsConsent -> CloudSharingConsent.blockedMessage(failure.requests)
     ReadAloudFailure.VoiceUnavailable -> stringResource(R.string.read_aloud_voice_unavailable)
     ReadAloudFailure.SystemUnavailable -> stringResource(R.string.read_aloud_unavailable)
     ReadAloudFailure.AudioBusy -> stringResource(R.string.read_aloud_audio_busy)

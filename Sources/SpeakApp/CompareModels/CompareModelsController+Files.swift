@@ -30,6 +30,10 @@ extension CompareModelsController {
             errorMessage = ComparisonRunError.noUsableModels.localizedDescription
             return
         }
+        guard cloudSharingAllowed(purpose: .batchTranscription) else {
+            queuedFiles = []
+            return
+        }
         let generation = UUID()
         runID = generation
         phase = .transcribing
@@ -102,5 +106,24 @@ extension CompareModelsController {
             timeToFinalMs: entry.timeToFinalMs,
             estimatedCostUSD: entry.estimatedCostUSD
         )
+    }
+}
+
+// MARK: - Cloud sharing consent
+
+extension CompareModelsController {
+    /// Every selected cloud model's provider must be allowed before a round
+    /// sends it audio (issue #1805). Asks and returns false otherwise.
+    func cloudSharingAllowed(purpose: ModelCredentialPurpose) -> Bool {
+        let requests = CloudSharingConsent.merged(selectedUsableCandidates.compactMap {
+            CloudSharingConsent.request(forModel: $0.modelID, purpose: purpose)
+        })
+        do {
+            try environment.main.requireCloudSharingConsent(requests)
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
     }
 }

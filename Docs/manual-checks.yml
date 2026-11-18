@@ -713,6 +713,21 @@ sessions:
           - "Search Preferences for \"raw\" or \"json\": Edit raw configuration is a result and opens General."
         expected: "Errors name each bad key and nothing changes until every value is valid; read-only keys are kept with a warning; applied values show in Preferences at once; export, reset and import round-trip; Apply waits for dictation; results are announced to the screen reader."
         final_gate: false
+      - id: "mac-cloud-sharing-consent"
+        issues:
+          - 1805
+        title: "Cloud providers: asked once before the first upload, withdrawable in Privacy"
+        minutes: 4
+        core: true
+        build: "Just Speak to It for Mac, the first Alpha build that includes the #1805 cloud sharing consent"
+        steps:
+          - "Upgrade from an earlier build with a cloud Streaming model and remote cleanup selected, then press the record hotkey."
+          - "Read the sheet, open one privacy policy link, then choose Not now."
+          - "Press the record hotkey again and choose Allow, then press it again and dictate a made-up sentence."
+          - "Open Settings \u203a About \u203a Privacy, choose Withdraw for the transcription provider, then press the record hotkey and choose Use on-device instead."
+          - "With VoiceOver on, move through the sheet."
+        expected: "Before anything is recorded the sheet names each provider, lists what it gets (audio, transcript text) and links its privacy policy. Not now records and sends nothing. After Allow, dictation works and the sheet never shows again for that provider. Withdraw removes it from the Privacy list and the next start asks again; Use on-device instead switches to Apple Speech without recording consent. VoiceOver reads the title, each provider and every button by name."
+        final_gate: true
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"
@@ -1403,6 +1418,21 @@ sessions:
           - "Delete one History entry, go back to Usage insights, then turn VoiceOver on and move through the sections."
         expected: "Sessions, Errors, Recording time (Total Time), Average length and Words equal the History header, before and after the deletion. Filler words lists um and you know, Speaking pace counts the three sessions and Speech records shows the words all-time. VoiceOver reads each row's name and value together, and the chart button is named Usage insights."
         final_gate: false
+      - id: "iphone-cloud-sharing-consent"
+        issues:
+          - 1805
+        title: "Cloud providers: asked once before the first upload, also from the keyboard and Shortcuts"
+        minutes: 5
+        core: true
+        build: "TestFlight Just Speak to It Alpha, the first build that includes the #1805 cloud sharing consent, on an iPhone and an iPad"
+        steps:
+          - "Upgrade from an earlier build with a cloud transcription model and cleanup selected. Before opening the app, run a Shortcut that starts dictation."
+          - "Open the app and tap Record: read the sheet, open one privacy policy link and choose Not now."
+          - "Tap Record again, choose Allow, tap Record and dictate a made-up sentence."
+          - "Open Settings \u203a Privacy, withdraw the transcription provider, then start from the Just Speak to It keyboard in another app."
+          - "Back in the app choose Use on-device instead, then share an audio file to the app and choose Allow when asked."
+        expected: "The Shortcut uploads nothing and says to open the app. The sheet names each provider, lists the data it gets and links its privacy policy; Not now records nothing. After Allow dictation works without asking again. After Withdraw the keyboard hand-off asks in the app before recording; Use on-device instead switches to on-device recognition. The shared file is not lost while waiting and transcribes after Allow."
+        final_gate: true
   - id: "watch"
     device: "Watch"
     title: "Apple Watch + iPhone"
@@ -2317,6 +2347,21 @@ sessions:
           - "Choose GPT Transcribe (OpenAI) as the Cloud transcription model."
           - "Pick Cloud, tap the microphone, say a short made-up sentence and tap Stop."
         expected: "The error says the provider account has no credit left and to add credit or billing, not that the service is limiting requests."
+        final_gate: true
+      - id: "android-cloud-sharing-consent"
+        issues:
+          - 1805
+        title: "Cloud providers: asked once before the first upload, the keyboard opens the app instead"
+        minutes: 5
+        core: true
+        build: "Just Speak to It for Android, the signed APK from the first Alpha that includes the #1805 cloud sharing consent"
+        steps:
+          - "Upgrade from an earlier APK with Cloud and an OpenAI model selected, then tap the microphone."
+          - "Read the dialog, open one privacy policy link, then choose Not now. Tap the microphone again and choose Allow, then dictate a made-up sentence."
+          - "Open Settings \u203a Privacy and choose Withdraw for OpenAI. With Live Cloud on in the dictation keyboard, start the keyboard in another app."
+          - "In the app, tap the microphone and choose Use on-device instead."
+          - "Pick a cloud voice in Voice output and tap Read on a History entry; choose Allow, then tap Read again. Turn TalkBack on and move through the dialog."
+        expected: "The dialog names each provider, lists what it gets and links its privacy policy; Not now records nothing, and after Allow recording starts without asking again. After Withdraw the keyboard sends nothing, says why and opens the app. Use on-device instead switches the mode without recording consent. Read aloud asks once for the voice provider before speaking. TalkBack reads the title and every button by name."
         final_gate: true
   - id: "windows"
     device: "Windows"

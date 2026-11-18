@@ -85,6 +85,20 @@ object AutomationIds {
     const val CONSENT_DIAGNOSTICS = "consent.diagnostics"
     const val CONSENT_DONE = "consent.done"
 
+    /** The consent dialog before content first goes to a cloud AI provider (#1805); same names as Apple's. */
+    const val CLOUD_SHARING_DIALOG = "cloudSharingConsentSheet"
+    const val CLOUD_SHARING_ALLOW = "cloudSharingConsentAllowButton"
+    const val CLOUD_SHARING_ON_DEVICE = "cloudSharingConsentOnDeviceButton"
+    const val CLOUD_SHARING_NOT_NOW = "cloudSharingConsentNotNowButton"
+    const val SETTINGS_CLOUD_SHARING = "settings.cloudSharing"
+    const val SETTINGS_CLOUD_SHARING_EMPTY = "cloudSharingConsentEmpty"
+
+    fun cloudSharingProvider(providerId: String) = "cloudSharingProvider-$providerId"
+
+    fun cloudSharingPolicy(providerId: String) = "cloudSharingPrivacyPolicyLink-$providerId"
+
+    fun cloudSharingWithdraw(providerId: String) = "cloudSharingWithdrawButton-$providerId"
+
     const val AZURE_REGION = "settings.apiKeys.azure.region"
     const val AZURE_ENDPOINT = "settings.apiKeys.azure.endpoint"
     const val AZURE_ENDPOINT_SAVE = "settings.apiKeys.azure.endpoint.save"

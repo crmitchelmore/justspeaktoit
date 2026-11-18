@@ -30,6 +30,9 @@ final class TranscriptionManager: ObservableObject {
   private let stopWait: LiveStopWait
 
   private var pendingError: Error?
+  /// Refuses, and asks for, a file upload to a provider the user has not
+  /// allowed (issue #1805). Set by WireUp; nil sends nothing extra.
+  var requireCloudSharingConsent: CloudSharingConsentCheck?
   private var startupGeneration: UUID?
   private var startupTask: Task<Void, Error>?
   private var cancelledStartupGeneration: UUID?
@@ -221,7 +224,12 @@ extension TranscriptionManager {
   func transcribeFile(
     at url: URL, onDiagnostic: ((TranscriptionDiagnosticReceipt) -> Void)?
   ) async throws -> TranscriptionResult {
-    try await batchRouter.transcribeFile(at: url, onDiagnostic: onDiagnostic)
+    if let request = CloudSharingConsent.request(
+      forModel: batchRouter.offlineTranscriptionModel, purpose: .batchTranscription
+    ) {
+      try requireCloudSharingConsent?([request])
+    }
+    return try await batchRouter.transcribeFile(at: url, onDiagnostic: onDiagnostic)
   }
 
   func batchTranscriptionUsesRemoteService() async -> Bool {

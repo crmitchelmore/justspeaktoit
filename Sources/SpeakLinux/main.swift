@@ -268,6 +268,7 @@ do {
     let effects: any DesktopHostEffects<LinuxHostPlatform>
     if let probeEffects { effects = probeEffects } else { effects = LinuxNativeEffects() }
     let controller = try LinuxAppController(directory: directory, effects: effects)
+    if profileSessionProbe { try blocking { await controller.allowCloudSharingForSelfTest() } }
     if !smokeTest {
         let telemetry = controller.telemetry
         let http = DesktopHostTelemetryHTTP(

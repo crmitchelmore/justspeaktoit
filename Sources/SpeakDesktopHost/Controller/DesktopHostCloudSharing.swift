@@ -223,6 +223,15 @@ extension DesktopHostController {
         return stopped
     }
 
+    /// Self-test and probe hosts drive recording with synthetic effects that send nothing; they
+    /// allow every catalogued provider so the gate does not stop the flow they exercise.
+    package func allowCloudSharingForSelfTest() {
+        let requests = CloudSharingProviderCatalogue.all.map {
+            CloudSharingRequest(provider: $0, kinds: Set(CloudSharedDataKind.allCases))
+        }
+        try? cloudSharing.grant(requests)
+    }
+
     /// Gives the native Privacy settings the providers currently allowed.
     package func publishCloudSharing() {
         guard !closed else { return }

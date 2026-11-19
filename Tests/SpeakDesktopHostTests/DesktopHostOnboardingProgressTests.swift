@@ -20,7 +20,8 @@ final class DesktopHostOnboardingProgressTests: XCTestCase {
     }
 
     private func start() throws -> DesktopHostController<FakePlatform> {
-        let created = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let created = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         controller = created
         return created
     }

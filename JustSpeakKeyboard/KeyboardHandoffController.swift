@@ -16,6 +16,8 @@ final class KeyboardHandoffController: ObservableObject {
         case idle
         case starting
         case waitingForApp
+        /// The keyboard could not open Just Speak itself, so the user has to.
+        case openAppManually
         case recording
         case transcribing
         case inserted
@@ -235,6 +237,12 @@ final class KeyboardHandoffController: ObservableObject {
         }
     }
 
+    /// The mic tried to open the app to connect and nothing answered.
+    func noteAppCouldNotBeOpened() {
+        guard requestID == nil, !isInstantReady else { return }
+        presentation = .openAppManually
+    }
+
     func cancel() {
         applyMarkedText(markedText.abandon())
         guard let requestID else {
@@ -337,8 +345,12 @@ final class KeyboardHandoffController: ObservableObject {
     func refresh() {
         refreshInstantSession()
         guard let requestID else {
-            if autoStartWhenReady, isInstantReady, presentation == .waitingForApp {
+            let isDisconnected = presentation == .waitingForApp || presentation == .openAppManually
+            if autoStartWhenReady, isInstantReady, isDisconnected {
                 start()
+                return
+            }
+            if presentation == .openAppManually, !isInstantReady {
                 return
             }
             if presentation != .inserted

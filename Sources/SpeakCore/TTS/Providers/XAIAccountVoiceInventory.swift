@@ -31,21 +31,50 @@ public struct XAIAccountVoiceInventory: Equatable, Sendable, CustomStringConvert
         let key = try await credential().trimmingCharacters(in: .whitespacesAndNewlines)
         try Task.checkCancellation()
         guard !key.isEmpty else { throw DesktopXAISpeechError.missingCredential }
-        let response = try await receive(session: session, key: key)
+        let builtIn = try await receive(XAITTSAPI.voiceListRequest(apiKey: key), session: session) ?? Data()
+        var listed = try listing { try XAITTSAPI.decodedVoices(from: builtIn) }
+        var token: String?
+        for page in 0..<XAITTSAPI.maximumCustomVoicePages {
+            try Task.checkCancellation()
+            // Custom voices are region- and plan-gated: no library means none. A
+            // refusal after the first page is a failure, never a partial list.
+            guard let body = try await receive(
+                XAITTSAPI.customVoiceListRequest(apiKey: key, paginationToken: token), session: session,
+                absentStatuses: page == 0 ? XAITTSAPI.customVoicesUnavailableStatuses : []
+            ) else { break }
+            let custom = try listing { try XAITTSAPI.decodedCustomVoicePage(from: body) }
+            listed += custom.voices
+            guard listed.count <= maximumVoices else { throw XAIAccountVoiceDiscoveryError.oversized }
+            guard let next = custom.nextToken else { break }
+            guard page + 1 < XAITTSAPI.maximumCustomVoicePages else { throw XAIAccountVoiceDiscoveryError.oversized }
+            token = next
+        }
         try Task.checkCancellation()
-        return try decoded(response, key: key)
+        return try inventory(listed, key: key)
     }
 
-    private static func receive(session: URLSession, key: String) async throws -> Data {
+    private static func listing<Value>(_ decode: () throws -> Value) throws -> Value {
+        do { return try decode() } catch { throw XAIAccountVoiceDiscoveryError.invalidInventory }
+    }
+
+    private struct AbsentListing: Error {}
+
+    /// The body of a successful response, or nil for a status in `absentStatuses`.
+    private static func receive(
+        _ request: URLRequest, session: URLSession, absentStatuses: Set<Int> = []
+    ) async throws -> Data? {
         do {
-            return try await OpenRouterBoundedResponseTransport.perform(
-                XAITTSAPI.voiceListRequest(apiKey: key), session: session,
-                limit: maximumResponseBytes, deadline: .seconds(20)
+            let body = try await OpenRouterBoundedResponseTransport.perform(
+                request, session: session, limit: maximumResponseBytes, deadline: .seconds(20)
             ) { value in
+                if absentStatuses.contains(value.statusCode) { throw AbsentListing() }
                 guard (200..<300).contains(value.statusCode) else {
                     throw XAIAccountVoiceDiscoveryError.service(value.statusCode)
                 }
             }.body
+            return body
+        } catch is AbsentListing {
+            return nil
         } catch {
             if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
                 throw CancellationError()
@@ -60,11 +89,7 @@ public struct XAIAccountVoiceInventory: Equatable, Sendable, CustomStringConvert
         }
     }
 
-    private static func decoded(_ response: Data, key: String) throws -> Self {
-        let listed: [XAITTSVoice]
-        do { listed = try XAITTSAPI.decodedVoices(from: response) } catch {
-            throw XAIAccountVoiceDiscoveryError.invalidInventory
-        }
+    private static func inventory(_ listed: [XAITTSVoice], key: String) throws -> Self {
         guard listed.count <= maximumVoices else { throw XAIAccountVoiceDiscoveryError.oversized }
         var identifiers = Set<String>()
         var additional: [XAITTSVoice] = []

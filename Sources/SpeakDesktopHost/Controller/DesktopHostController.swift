@@ -157,12 +157,18 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     }
     /// The recording the user cancelled while `keepAudioOnCancel` was off.
     var discardCancelledRecordingID: UUID?
+    /// Set while a consent withdrawal cancels a session, so its audio is kept whatever `keepAudioOnCancel` says.
+    var keepAudioOnWithdrawal = false
     var historyDeletionInProgress = false
     var historyDeletionTask: Task<Void, Never>?
     var folderRevealTask: Task<Void, Error>?
     var recordingLocation = DesktopHostRecordingLocationState()
     var audioCleanupTask: Task<Void, Never>?
     var audioCleanupConfirmation: (id: UUID, snapshot: DesktopRecordingAudioSnapshot)?
+    /// The AI providers this computer allowed, kept apart from settings so no export or sync carries them.
+    package nonisolated let cloudSharing: DesktopCloudSharingConsentStore
+    /// The sharing question on screen; an answer for any other id is stale.
+    var cloudSharingPrompt: (id: UUID, requests: [CloudSharingRequest])?
     var migrationWork = DesktopHostMigrationWork()
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
@@ -222,6 +228,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         self.shutdownGrace = shutdownGrace
         self.store = try DesktopRecordingStore(directory: directory.appendingPathComponent("History"))
         self.telemetry = DesktopTelemetry(directory: directory)
+        self.cloudSharing = DesktopCloudSharingConsentStore(directory: directory, write: effects.writeSettings)
         self.uploadStaging = Platform.uploadStaging(directory: directory.appendingPathComponent("Uploads"))
         let profileStore = DesktopDictationProfileStore(directory: directory)
         self.profileStore = profileStore

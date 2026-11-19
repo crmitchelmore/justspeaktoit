@@ -211,7 +211,7 @@ private struct LearningFixture {
     init() throws {
         FakeLog.shared.reset()
         FakeLog.shared.installCorrectionReadback(readback)
-        host = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        host = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
     }
 }
 

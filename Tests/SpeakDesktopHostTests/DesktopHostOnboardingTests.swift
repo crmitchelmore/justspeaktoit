@@ -23,7 +23,8 @@ final class DesktopHostOnboardingTests: XCTestCase {
 
     private func start() throws -> DesktopHostController<FakePlatform> {
         DesktopHostOnboarding.adoptExistingInstall(directory: directory)
-        let created = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let created = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         controller = created
         return created
     }

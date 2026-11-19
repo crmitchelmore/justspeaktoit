@@ -56,6 +56,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let conversionID: UUID?
         do {
             selection = retained == nil ? try currentVoiceSelection() : nil
+            if let selection { try requireCloudSharing([DesktopHostCloudSharing.voice(selection.voice)]) }
             conversionID = retained == nil ? try admitVoiceAudioConversion(format) : nil
         } catch {
             update(error.localizedDescription); return
@@ -64,6 +65,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         playback.stop(announcing: false)
         let ticket = playbackRequests.begin()
         let effects = effects
+        let consent = cloudSharing
         update(selection.map { "Synthesizing \(format.displayName) with \($0.voice.name). Stop cancels export…" } ??
             "Exporting retained voice audio. No synthesis request is sent. Stop cancels export…")
         voiceOutputRecordID = snapshot.recordID
@@ -87,7 +89,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                             snapshot, selection: selection, ticket: ticket)
                         return try await synthesize(prepared, selection) {
                             try await Self.readVoiceSynthesisKey(
-                                effects: effects, name: selection.voice.apiKeyIdentifier)
+                                effects: effects, name: selection.voice.apiKeyIdentifier, consent: consent)
                         }
                     }
                     try Task.checkCancellation()

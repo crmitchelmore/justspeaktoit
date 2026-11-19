@@ -322,6 +322,11 @@ enum WireUp {
       comparisonRounds: ComparisonRoundStore(fileManager: fileManager)
     )
 
+    main.cloudSharingConsent = CloudSharingConsentStore(defaults: defaults)
+    main.presentCloudSharingConsent = { [weak environment] in environment?.presentMainWindow() }
+    transcription.requireCloudSharingConsent = { [weak main] in try main?.requireCloudSharingConsent($0) }
+    tts.requireCloudSharingConsent = { [weak main] in try main?.requireCloudSharingConsent($0) }
+    postProcessing.requireCloudSharingConsent = { [weak main] in try main?.requireCloudSharingConsent($0) }
     configureServices(environment: environment, settings: settings, secureStorage: secureStorage, options: options)
     AppEnvironment.shared = environment
     return environment

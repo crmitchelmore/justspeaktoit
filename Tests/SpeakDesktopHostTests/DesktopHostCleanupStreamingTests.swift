@@ -20,7 +20,8 @@ final class DesktopHostCleanupStreamingTests: XCTestCase {
             ), apiKey: ""
         )
         effects = CleanupHostEffects(outcome: outcome)
-        host = try DesktopHostController(directory: directory, effects: effects, shutdownGrace: .milliseconds(5))
+        host = try DesktopHostController.consented(
+            directory: directory, effects: effects, shutdownGrace: .milliseconds(5))
         await host.markReadyForSelfTest()
     }
 
@@ -81,7 +82,7 @@ final class DesktopHostCleanupStreamingTests: XCTestCase {
         )
         for owned in [false, true] {
             let path = directory.appendingPathComponent(owned ? "owned" : "legacy")
-            let host = try DesktopHostController(
+            let host = try DesktopHostController.consented(
                 directory: path, effects: effects, ownedDictationCapability: owned ? capability : nil
             )
             self.host = host
@@ -275,7 +276,7 @@ final class DesktopHostCleanupStreamingTests: XCTestCase {
         let enabled = await host.postProcessingOptions()
         XCTAssertTrue(enabled.streamingEnabled)
         await host.close()
-        host = try DesktopHostController(directory: directory, effects: effects)
+        host = try DesktopHostController.consented(directory: directory, effects: effects)
         await host.markReadyForSelfTest()
         let restored = await host.postProcessingOptions()
         XCTAssertTrue(restored.streamingEnabled)

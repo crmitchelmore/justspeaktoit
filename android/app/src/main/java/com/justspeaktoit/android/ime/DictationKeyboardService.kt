@@ -29,6 +29,9 @@ import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudClient
 import com.justspeaktoit.android.cloud.CloudModel
+import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.CloudSharedDataKind
+import com.justspeaktoit.android.cloud.CloudSharingConsent
 import com.justspeaktoit.android.cloud.WavRecorder
 import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.dictation.AndroidAudioInterruptions
@@ -40,9 +43,15 @@ import com.justspeaktoit.android.dictation.DictationLanguages
 import com.justspeaktoit.android.dictation.DictationReducer
 import com.justspeaktoit.android.dictation.DictationState
 import com.justspeaktoit.android.dictation.DictationTimings
+import com.justspeaktoit.android.dictation.DownloadedCleanup
+import com.justspeaktoit.android.dictation.DownloadedTranscription
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.dictation.RecognizerAvailability
 import com.justspeaktoit.android.dictation.SessionRequests
+import com.justspeaktoit.android.local.AndroidLocalModels
+import com.justspeaktoit.android.local.LocalCleanupPrompt
+import com.justspeaktoit.android.local.PinnedModel
+import com.justspeaktoit.android.local.PinnedModels
 import com.justspeaktoit.android.resources.SystemResourceKind
 import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.resources.SystemResourceToken
@@ -54,8 +63,10 @@ import com.justspeaktoit.android.ui.label
 import com.justspeaktoit.android.ui.message
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -78,6 +89,13 @@ import java.util.concurrent.Executors
  * dictation, then the selected text and the instruction (never audio) go to the user's cleanup model,
  * after the keyboard has named that provider once. The rewrite replaces the selection only if the same
  * field still holds the same selection; otherwise, and on any failure, the text is left as it was.
+ *
+ * Downloaded models (#1650, #1660) run here only when [KeyboardLocalModels] estimates they finish within
+ * [KeyboardPolicy.FINISH_TIMEOUT_MS]. A chosen downloaded Whisper model records for at most its estimated
+ * limit and transcribes on the phone; a slower or missing one leaves the platform recogniser in use, and the
+ * status line says why. A downloaded cleanup model (the profile's, else the user's) cleans up the final
+ * text while the words already show as composing text; a run that would not fit, runs past the bound or
+ * fails types the words as said and says so. Cloud and Gemini Nano cleanup never run in the keyboard.
  */
 class DictationKeyboardService : InputMethodService() {
     private lateinit var engine: AndroidSpeechEngine
@@ -117,7 +135,7 @@ class DictationKeyboardService : InputMethodService() {
     /** The voice edit from its first tap until it is applied or abandoned; null when none runs. */
     private var voiceEdit: VoiceEditRun? = null
 
-    /** The last voice edit's result or disclosure, shown until the next tap or field. */
+    /** The last voice edit's or keyboard cleanup's result or disclosure, shown until the next tap or field. */
     private var voiceEditNotice: String? = null
 
     /** Set after the cleanup provider has been named; the next Edit tap sends. */
@@ -135,7 +153,44 @@ class DictationKeyboardService : InputMethodService() {
     private var microphoneHold: SystemResourceToken? = null
     private var mic: ImageButton? = null
     private var profileKey: Button? = null
+    private var editingKeys: List<Button> = emptyList()
     private var voiceEditKey: Button? = null
+
+    /** The downloaded model cleaning up the last transcript, shown as composing text meanwhile. */
+    private var cleanupRun: CleanupRun? = null
+
+    /** The downloaded Whisper model the running session uses, named in its status. */
+    private var downloadedRun: WhisperChoice? = null
+
+    /** A chosen downloaded Whisper model the keyboard could not use for this session, and why. */
+    private var downloadedSkipped: WhisperChoice? = null
+
+    /** The longest recording the next live or downloaded session may make, read by its recorder. */
+    private var recordingLimitSeconds = DEFAULT_RECORDING_SECONDS
+
+    /** Hashes the chosen cleanup model's weights ahead of the first dictation, so cleanup can start sooner. */
+    private var prewarm: Job? = null
+
+    /** The app's downloaded-model catalogues and stores; built on first use. */
+    private val localSetup by lazy {
+        AndroidLocalModels.setup(this, Dispatchers.IO, KeyboardPolicy.FINISH_TIMEOUT_MS + NATIVE_GRACE_MS)
+    }
+
+    private val keyboardCleanup by lazy {
+        localSetup.cleanup?.let { setup ->
+            KeyboardCleanup(
+                cleanup = DownloadedCleanup(
+                    installed = ::installedCleanupModel,
+                    verify = setup.verifier::verify,
+                    cleaner = setup.cleaner,
+                    io = Dispatchers.IO,
+                    timeoutMs = KeyboardPolicy.FINISH_TIMEOUT_MS + NATIVE_GRACE_MS,
+                ),
+                installed = ::installedCleanupModel,
+                verified = setup.verifier::isVerified,
+            )
+        }
+    }
 
     /** Read when the keyboard is shown or the profile changes, not on every partial result. */
     private var profiles: List<DictationProfile> = emptyList()
@@ -146,7 +201,7 @@ class DictationKeyboardService : InputMethodService() {
         prefs = { AppPreferences(this) },
         connection = { currentInputConnection },
         editor = { currentInputEditorInfo },
-        busy = { state.isActive || ownsComposing || voiceEdit != null },
+        busy = { state.isActive || ownsComposing || voiceEdit != null || cleanupRun != null },
         hasSelection = { selectionStart != selectionEnd },
     )
 
@@ -216,8 +271,12 @@ class DictationKeyboardService : InputMethodService() {
             setPadding(dp(8), dp(4), dp(8), dp(12))
             addView(key(R.id.keyboard_switch, R.string.keyboard_switch) { switchKeyboard() })
             addView(micButton)
-            addView(key(R.id.keyboard_delete, R.string.keyboard_delete) { sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL) })
-            addView(key(R.id.keyboard_enter, R.string.keyboard_enter) { sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER) })
+            // While cleanup holds the words as composing text, editing keys would change what it replaces.
+            editingKeys = listOf(
+                key(R.id.keyboard_delete, R.string.keyboard_delete) { sendKeyUnlessCleaning(KeyEvent.KEYCODE_DEL) },
+                key(R.id.keyboard_enter, R.string.keyboard_enter) { sendKeyUnlessCleaning(KeyEvent.KEYCODE_ENTER) },
+            )
+            editingKeys.forEach { addView(it) }
         }
         status = statusView
         mic = micButton
@@ -269,6 +328,7 @@ class DictationKeyboardService : InputMethodService() {
         inputVisible = true
         // The profile may have changed in the app since the keyboard was last shown.
         loadProfiles()
+        prewarmCleanup()
         render()
     }
 
@@ -288,13 +348,28 @@ class DictationKeyboardService : InputMethodService() {
         // Cleared before the session is cancelled, so its Cancelled event is not reported as the user's.
         voiceEdit?.call?.cancel()
         voiceEdit = null
+        abandonCleanup()
         if (state.isActive) cancelSession()
+    }
+
+    private fun sendKeyUnlessCleaning(keyCode: Int) {
+        if (cleanupRun == null) sendDownUpKeyEvents(keyCode)
+    }
+
+    /** Stops a cleanup still running; the words it was given stay in the field as typed text. */
+    private fun abandonCleanup() {
+        val run = cleanupRun ?: return
+        cleanupRun = null
+        run.job?.cancel()
+        if (ownsComposing) currentInputConnection?.finishComposingText()
+        ownsComposing = false
+        editorShowedComposing = false
     }
 
     private fun onMicTapped() {
         when {
             // Finishing is bounded by the engine's deadline; further taps must not extend it.
-            state is DictationState.Finishing -> Unit
+            state is DictationState.Finishing || cleanupRun != null -> Unit
             state.isActive -> stopSession()
             voiceEdit != null || !editorAllowsDictation -> Unit
             !hasMicPermission() -> openApp()
@@ -314,7 +389,7 @@ class DictationKeyboardService : InputMethodService() {
                 state.isActive -> stopSession()
                 else -> cancelVoiceEdit(running)
             }
-            state.isActive || checking || !editorAllowsDictation -> Unit
+            state.isActive || checking || !editorAllowsDictation || cleanupRun != null -> Unit
             !hasMicPermission() -> openApp()
             else -> beginVoiceEdit()
         }
@@ -337,6 +412,7 @@ class DictationKeyboardService : InputMethodService() {
         }
         val prefs = AppPreferences(this)
         val model = VoiceEditRules.model(DictationProfiles.active(prefs)?.cleanupModel, prefs.cleanupModelId)
+        if (blockedWithoutConsent(prefs, model.cloudProvider, CloudSharedDataKind.TranscriptText)) return
         if (!cloudEditDisclosed) {
             // Say where the selected text goes before sending anything; the next tap confirms.
             cloudEditDisclosed = true
@@ -423,6 +499,22 @@ class DictationKeyboardService : InputMethodService() {
         showVoiceEditNotice(notice)
     }
 
+    /**
+     * The keyboard never asks for cloud consent itself (#1805): without it nothing is sent, the notice says
+     * why, and the app opens so the user can allow the provider or switch to on-device.
+     */
+    private fun blockedWithoutConsent(
+        prefs: AppPreferences,
+        provider: CloudProvider,
+        kind: CloudSharedDataKind,
+    ): Boolean {
+        val missing = prefs.cloudSharingConsent.missing(listOf(CloudSharingConsent.request(provider, kind)))
+        if (missing.isEmpty()) return false
+        showVoiceEditNotice(CloudSharingConsent.blockedMessage(missing))
+        openApp()
+        return true
+    }
+
     private fun showVoiceEditNotice(notice: String) {
         voiceEditNotice = notice
         render()
@@ -479,7 +571,10 @@ class DictationKeyboardService : InputMethodService() {
             } else {
                 KeyboardPolicy.cloud(current.keyboardLiveCloudEnabled, cloudModel.live != null)
             }
-            val mode = KeyboardPolicy.mode(chosen, options, cloud)
+            // A voice edit's instruction is never given to a downloaded model.
+            val whisper = if (edit == null && chosen == RecognitionMode.Downloaded) whisperChoice(current) else null
+            val mode = KeyboardPolicy.mode(chosen, options, cloud, downloaded = whisper?.usable == true)
+            downloadedSkipped = whisper?.takeIf { mode != RecognitionMode.Downloaded }
             if (mode == null) {
                 unavailable = true
                 batchCloudModel = cloudModel.takeIf { KeyboardPolicy.blamesBatchCloud(chosen, cloud) }
@@ -489,6 +584,13 @@ class DictationKeyboardService : InputMethodService() {
             }
             unavailable = false
             batchCloudModel = null
+            val audioBlocked = mode == RecognitionMode.Cloud &&
+                blockedWithoutConsent(current, cloudModel.provider, CloudSharedDataKind.Audio)
+            if (audioBlocked) {
+                voiceEdit = null
+                render()
+                return@checkOnDeviceLanguage
+            }
             if (KeyboardPolicy.needsDisclosure(mode, chosen) && !speechServiceDisclosed) {
                 // Say where audio goes before any capture; the next tap confirms.
                 speechServiceDisclosed = true
@@ -505,12 +607,20 @@ class DictationKeyboardService : InputMethodService() {
             if (edit == null && selectionStart != selectionEnd && selectionEnd >= 0) {
                 currentInputConnection?.setSelection(selectionEnd, selectionEnd)
             }
+            downloadedRun = null
             if (mode == RecognitionMode.Cloud) {
                 cloudProvider = cloudModel.provider.displayName
+                recordingLimitSeconds = DEFAULT_RECORDING_SECONDS
                 live().start(cloudModel, tag)
                 return@checkOnDeviceLanguage
             }
             cloudProvider = null
+            if (mode == RecognitionMode.Downloaded && whisper != null) {
+                downloadedRun = whisper
+                recordingLimitSeconds = whisper.limitSeconds
+                live().startLocal(whisper.id, tag)
+                return@checkOnDeviceLanguage
+            }
             dispatch(DictationEvent.Start(mode))
             val language = if (mode == RecognitionMode.OnDevice) resolution.languageTag else tag
             engine.start(mode, language, onEvent = ::dispatch, onLevel = {})
@@ -544,7 +654,7 @@ class DictationKeyboardService : InputMethodService() {
             recorders = { file, onLevel, onLimitReached, onCaptureFailed ->
                 // A saved microphone that is not connected records from the system default, as in the app.
                 val input = AppPreferences(this).audioInputId?.let(inputs::route)
-                WavRecorder(file, onLevel, onLimitReached, onCaptureFailed, input = input)
+                WavRecorder(file, onLevel, onLimitReached, onCaptureFailed, recordingLimitSeconds, input)
             },
             cacheDir = dir,
             io = Dispatchers.IO,
@@ -562,6 +672,7 @@ class DictationKeyboardService : InputMethodService() {
             silence = { AppPreferences(this).silence },
             onState = ::onLiveState,
             interruptions = AndroidAudioInterruptions(this),
+            downloaded = DownloadedTranscription({ id -> installedWhisperModel(id)?.second }, localSetup.transcriber),
         ).also { liveDictation = it }
     }
 
@@ -631,21 +742,19 @@ class DictationKeyboardService : InputMethodService() {
             is DictationState.Listening -> showPartial(s.partial)
             is DictationState.Finishing -> showPartial(s.partial)
             is DictationState.Done -> {
-                if (ic != null) {
-                    // Remove the provisional text first, so the spacing check sees the real preceding character.
-                    if (ownsComposing) ic.setComposingText("", 1)
-                    editorShowedComposing = false
-                    val transcript = if (corrected) {
-                        s.transcript
-                    } else {
-                        PersonalCorrections.apply(s.transcript, AppPreferences(this).corrections)
-                    }
-                    val text = KeyboardPolicy.textToCommit(transcript, ic.getTextBeforeCursor(1, 0))
-                    ic.commitText(text, 1)
-                    corrections.inserted(text, currentInputEditorInfo)
-                }
-                ownsComposing = false
                 state = DictationState.Idle
+                val transcript = if (corrected) {
+                    s.transcript
+                } else {
+                    PersonalCorrections.apply(s.transcript, AppPreferences(this).corrections)
+                }
+                val cleanupModel = keyboardCleanupModel()
+                when {
+                    ic == null -> ownsComposing = false
+                    cleanupModel != null && !LocalCleanupPrompt.isEmpty(transcript) ->
+                        beginCleanup(ic, cleanupModel, transcript)
+                    else -> commitTranscript(ic, transcript)
+                }
             }
             // Idle also arrives when Settings > System resources stops a live Cloud session.
             is DictationState.Failed, DictationState.Idle -> removeOwnComposingText()
@@ -653,6 +762,125 @@ class DictationKeyboardService : InputMethodService() {
         }
         reconcileMicrophoneHold()
         render()
+    }
+
+    /** Commits [transcript] in place of the session's provisional text, and watches it for corrections. */
+    private fun commitTranscript(ic: android.view.inputmethod.InputConnection, transcript: String) {
+        // Remove the provisional text first, so the spacing check sees the real preceding character.
+        if (ownsComposing) ic.setComposingText("", 1)
+        editorShowedComposing = false
+        ownsComposing = false
+        val text = KeyboardPolicy.textToCommit(transcript, ic.getTextBeforeCursor(1, 0))
+        ic.commitText(text, 1)
+        corrections.inserted(text, currentInputEditorInfo)
+    }
+
+    /** The downloaded cleanup model for keyboard dictation, by the app's rule; null runs no cleanup. */
+    private fun keyboardCleanupModel(): String? {
+        val setup = localSetup.cleanup ?: return null
+        val prefs = AppPreferences(this)
+        return KeyboardLocalModels.cleanupModelId(
+            profile = DictationProfiles.active(prefs),
+            cleanupEnabled = prefs.cleanupEnabled,
+            userModelId = prefs.localCleanupModelId,
+            catalog = setup.names.keys,
+            installed = { installedCleanupModel(it) != null },
+        )
+    }
+
+    /**
+     * Shows [transcript] as composing text while [modelId] cleans it up, then commits the result; anything
+     * but a cleaned-up result commits the words as said, with a notice saying why.
+     */
+    private fun beginCleanup(ic: android.view.inputmethod.InputConnection, modelId: String, transcript: String) {
+        val cleaner = keyboardCleanup ?: return commitTranscript(ic, transcript)
+        val prefs = AppPreferences(this)
+        val prompt = DictationProfiles.active(prefs)?.prompt ?: prefs.cleanupPrompt?.takeIf { it.isNotBlank() }
+        val name = localSetup.cleanup?.names?.get(modelId) ?: modelId
+        if (!cleaner.fits(modelId, transcript, prompt)) {
+            commitTranscript(ic, transcript)
+            voiceEditNotice = getString(R.string.keyboard_cleanup_too_long, name)
+            return
+        }
+        // The words show at once and stay provisional until the cleaned-up text replaces them. The partial
+        // goes first, so the spacing check sees the real preceding character.
+        if (ownsComposing) ic.setComposingText("", 1)
+        // The editor's report of that empty region must not count as the composing text being ended.
+        editorShowedComposing = false
+        val shown = KeyboardPolicy.textToCommit(transcript, ic.getTextBeforeCursor(1, 0))
+        ic.setComposingText(shown, 1)
+        ownsComposing = true
+        val run = CleanupRun(inputGeneration, name, shown)
+        cleanupRun = run
+        run.job = scope.launch {
+            val result = cleaner.clean(modelId, transcript, prompt)
+            finishCleanup(run, transcript, result)
+        }
+    }
+
+    private fun finishCleanup(run: CleanupRun, transcript: String, result: KeyboardCleanupResult) {
+        if (cleanupRun !== run) return
+        cleanupRun = null
+        val ic = currentInputConnection
+        if (ic == null || run.generation != inputGeneration || !inputVisible) {
+            ownsComposing = false
+            render()
+            return
+        }
+        if (!ownsComposing || ic.getTextBeforeCursor(run.shown.length, 0)?.toString() != run.shown) {
+            // The app or the user ended or edited the composing text, so those words are theirs now.
+            if (ownsComposing) ic.finishComposingText()
+            ownsComposing = false
+            editorShowedComposing = false
+            voiceEditNotice = getString(R.string.keyboard_cleanup_text_changed, run.modelName)
+            render()
+            return
+        }
+        when (result) {
+            is KeyboardCleanupResult.Applied -> {
+                // Cleanup can restore a misheard word, so corrections run again on its output.
+                commitTranscript(ic, PersonalCorrections.apply(result.text, AppPreferences(this).corrections))
+                voiceEditNotice = getString(R.string.keyboard_cleanup_done, run.modelName)
+            }
+            else -> {
+                commitTranscript(ic, transcript)
+                voiceEditNotice = when (result) {
+                    KeyboardCleanupResult.Empty -> null
+                    KeyboardCleanupResult.TooLong -> getString(R.string.keyboard_cleanup_too_long, run.modelName)
+                    KeyboardCleanupResult.TimedOut -> getString(R.string.keyboard_cleanup_timed_out, run.modelName)
+                    else -> getString(R.string.keyboard_cleanup_failed, run.modelName)
+                }
+            }
+        }
+        render()
+    }
+
+    /** Hashes the chosen cleanup model's weights in the background, once per file version and process. */
+    private fun prewarmCleanup() {
+        if (prewarm?.isActive == true) return
+        val setup = localSetup.cleanup ?: return
+        val (model, file) = keyboardCleanupModel()?.let(::installedCleanupModel) ?: return
+        if (setup.verifier.isVerified(model, file)) return
+        prewarm = scope.launch(Dispatchers.IO) { setup.verifier.verify(model, file) }
+    }
+
+    private fun installedCleanupModel(id: String): Pair<PinnedModel, File>? {
+        val setup = localSetup.cleanup ?: return null
+        return PinnedModels.find(setup.catalog, id)?.takeIf(setup.store::isInstalled)?.let { it to setup.store.file(it) }
+    }
+
+    private fun installedWhisperModel(id: String): Pair<PinnedModel, File>? =
+        PinnedModels.find(localSetup.catalog, id)?.takeIf(localSetup.store::isInstalled)
+            ?.let { it to localSetup.store.file(it) }
+
+    /** The chosen downloaded Whisper model and whether, by its estimate, the keyboard can use it. */
+    private fun whisperChoice(prefs: AppPreferences): WhisperChoice? {
+        val id = prefs.downloadedTranscriptionModel ?: return null
+        val name = localSetup.names[id] ?: id
+        val installed = installedWhisperModel(id)
+        val limit = installed?.first?.bytes?.let(KeyboardLocalModels::whisperLimitSeconds) ?: 0
+        val ready = installed != null && localSetup.transcriber.available
+        return WhisperChoice(id, name, limit, ready)
     }
 
     /**
@@ -696,9 +924,11 @@ class DictationKeyboardService : InputMethodService() {
         val statusView = status ?: return
         val run = voiceEdit
         val notice = voiceEditNotice
+        val cleaning = cleanupRun
         val text = when {
             !editorAllowsDictation -> getString(R.string.keyboard_password_field)
             !hasMicPermission() -> getString(R.string.keyboard_needs_permission)
+            cleaning != null -> getString(R.string.keyboard_cleaning_up, cleaning.modelName)
             checking -> getString(R.string.state_starting)
             disclosing && disclosingForEdit -> getString(R.string.keyboard_voice_edit_speech_service_disclosure)
             disclosing -> getString(R.string.keyboard_speech_service_disclosure)
@@ -719,7 +949,7 @@ class DictationKeyboardService : InputMethodService() {
         statusView.text = text
         mic?.apply {
             // During a voice edit the microphone only stops the instruction.
-            isEnabled = editorAllowsDictation && !checking && (run == null || state.isActive)
+            isEnabled = editorAllowsDictation && !checking && cleaning == null && (run == null || state.isActive)
             alpha = if (isEnabled) 1f else 0.4f
             setImageResource(if (state.isActive) R.drawable.ic_stop else R.drawable.ic_mic)
             contentDescription = getString(if (state.isActive) R.string.action_stop else R.string.action_start)
@@ -729,8 +959,12 @@ class DictationKeyboardService : InputMethodService() {
             visibility = if (profiles.isEmpty()) View.GONE else View.VISIBLE
             this.text = getString(R.string.keyboard_profile, name)
             contentDescription = getString(R.string.keyboard_profile_description, name)
-            isEnabled = !state.isActive && !checking && run == null
+            isEnabled = !state.isActive && !checking && run == null && cleaning == null
             alpha = if (isEnabled) 1f else 0.4f
+        }
+        editingKeys.forEach {
+            it.isEnabled = cleaning == null
+            it.alpha = if (it.isEnabled) 1f else 0.4f
         }
         // Read here: inside the button's apply, selectionStart would be the button's own TextView selection.
         val hasSelection = selectionStart != selectionEnd
@@ -739,7 +973,7 @@ class DictationKeyboardService : InputMethodService() {
             isEnabled = if (run != null) {
                 !checking && state !is DictationState.Finishing
             } else {
-                editorAllowsDictation && !checking && !state.isActive && hasSelection
+                editorAllowsDictation && !checking && !state.isActive && hasSelection && cleaning == null
             }
             alpha = if (isEnabled) 1f else 0.4f
             this.text = getString(
@@ -762,14 +996,33 @@ class DictationKeyboardService : InputMethodService() {
     /** A live Cloud session names where the audio is going while it streams. */
     private fun listeningStatus(mode: RecognitionMode): String {
         val provider = cloudProvider
-        return if (mode == RecognitionMode.Cloud && provider != null) {
-            getString(R.string.keyboard_listening_cloud, provider)
-        } else {
-            getString(R.string.keyboard_listening, getString(mode.label()))
+        val downloaded = downloadedRun
+        val skipped = downloadedSkipped
+        return when {
+            mode == RecognitionMode.Cloud && provider != null -> getString(R.string.keyboard_listening_cloud, provider)
+            mode == RecognitionMode.Downloaded && downloaded != null ->
+                resources.getQuantityString(
+                    R.plurals.keyboard_listening_downloaded,
+                    downloaded.limitSeconds,
+                    downloaded.name,
+                    downloaded.limitSeconds,
+                )
+            skipped != null -> getString(
+                if (skipped.ready) R.string.keyboard_downloaded_too_slow else R.string.keyboard_downloaded_not_ready,
+                getString(mode.label()),
+                skipped.name,
+            )
+            else -> getString(R.string.keyboard_listening, getString(mode.label()))
         }
     }
 
     private fun failureStatus(failed: DictationState.Failed): String {
+        val downloaded = downloadedRun
+        if (failed.mode == RecognitionMode.Downloaded && downloaded != null &&
+            failed.failure == DictationFailure.NetworkTimeout
+        ) {
+            return getString(R.string.keyboard_downloaded_timeout, downloaded.name)
+        }
         val provider = cloudProvider
         if (failed.mode != RecognitionMode.Cloud || provider == null) return getString(failed.failure.message())
         return when (failed.failure) {
@@ -827,6 +1080,25 @@ class DictationKeyboardService : InputMethodService() {
     private companion object {
         /** Where a live Cloud session keeps its local copy of the audio until the session ends. */
         const val LIVE_DIR = "keyboard-live"
+
+        /** The app's own Cloud recording limit, which live Cloud sessions keep. */
+        const val DEFAULT_RECORDING_SECONDS = 600
+
+        /** The runtime's own deadline is later than the keyboard's, so the keyboard's bound ends a slow run. */
+        const val NATIVE_GRACE_MS = 1_000L
+    }
+
+    /** One keyboard cleanup; [generation] is the field it started in and [shown] the composing text it set. */
+    private class CleanupRun(val generation: Long, val modelName: String, val shown: String) {
+        var job: Job? = null
+    }
+
+    /**
+     * A chosen downloaded Whisper model: [limitSeconds] is the longest recording its estimate allows (0 when
+     * too slow), and [ready] says whether it is on the phone with its runtime.
+     */
+    private class WhisperChoice(val id: String, val name: String, val limitSeconds: Int, val ready: Boolean) {
+        val usable: Boolean get() = ready && limitSeconds > 0
     }
 
     /** One voice edit: what it may replace, where it started and the request that rewrites it. */

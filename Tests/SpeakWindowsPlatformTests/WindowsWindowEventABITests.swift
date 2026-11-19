@@ -34,7 +34,9 @@ final class WindowsWindowEventABITests: XCTestCase {
             (.settingsSearch, JSTI_EVENT_SETTINGS_SEARCH), (.settingsSearchOpen, JSTI_EVENT_SETTINGS_SEARCH_OPEN),
             (.systemResourceRelease, JSTI_EVENT_SYSTEM_RESOURCE_RELEASE),
             (.systemResourcesReleaseAll, JSTI_EVENT_SYSTEM_RESOURCES_RELEASE_ALL),
-            (.rawConfiguration, JSTI_EVENT_RAW_CONFIGURATION)
+            (.rawConfiguration, JSTI_EVENT_RAW_CONFIGURATION),
+            (.cloudConsentResponse, JSTI_EVENT_CLOUD_CONSENT_RESPONSE),
+            (.cloudSharingWithdraw, JSTI_EVENT_CLOUD_SHARING_WITHDRAW)
         ]
         for (event, native) in pairs {
             XCTAssertEqual(Int64(event.rawValue), Int64(native.rawValue), "\(event)")

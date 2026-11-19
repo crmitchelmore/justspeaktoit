@@ -131,7 +131,7 @@ final class DesktopHostConfigurationCaptureTests: XCTestCase {
     func testActualControllerCapture_HasNoWritesFilesOrRuntimeEffects() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let effects = SettingsWriteEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         let before = await controller.settings
         let result = try await controller.configurationCapture(
             categories: categories, selectedNativeFields: [Field.customPrompt.rawValue]

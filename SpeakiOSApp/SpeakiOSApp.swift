@@ -1,6 +1,7 @@
 import SwiftUI
 import SpeakCore
 import SpeakiOSLib
+import SpeakiOSLlama
 import SpeakSync
 import UIKit
 import UserNotifications
@@ -38,6 +39,12 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
     /// than a routine incremental sync needs.
     static let historyPushCompletionBudget: TimeInterval = 20
 
+    private var memoryWarningObserver: NSObjectProtocol?
+
+    deinit {
+        if let memoryWarningObserver { NotificationCenter.default.removeObserver(memoryWarningObserver) }
+    }
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
@@ -54,6 +61,16 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
         // Downloaded transcription models run in process; registering does no
         // file or model work until a model is downloaded or used.
         IOSLocalTranscriptionEngines.register(WhisperKitLocalTranscriptionEngine())
+        // Downloaded cleanup models run on llama.cpp compiled into the app. The
+        // model is loaded per cleanup and freed after it; a memory warning
+        // stops a running cleanup, which keeps the original transcript.
+        let cleanupEngine = LlamaRuntimeCleanupEngine()
+        IOSLocalCleanupEngines.register(cleanupEngine)
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil
+        ) { _ in
+            cleanupEngine.releaseMemory()
+        }
         iOSHistoryManager.resetSyncStateIfContainerChanged()
         UNUserNotificationCenter.current().delegate = self
         TranscriptReadyNotificationRoute.reconcileDisabledPreference()
@@ -186,6 +203,9 @@ struct SpeakiOSApp: App {
         ContentView()
             .tint(.brandAccent)
             .environmentObject(deepLinkRouter)
+            .sheet(isPresented: $deepLinkRouter.showsKeyboardConnect) {
+                KeyboardConnectSheet()
+            }
             .environment(\.iOSKeyboardEnabled, FeatureFlags.iOSKeyboardEnabled)
             .environment(
                 \.iOSKeyboardDirectCaptureEnabled,
@@ -194,6 +214,7 @@ struct SpeakiOSApp: App {
             .onOpenURL { url in
                 deepLinkRouter.handle(url)
                 runPendingCaptureAction()
+                runPendingKeyboardConnect()
             }
             .task {
                 // A link that cold-launched the app is queued before the
@@ -205,12 +226,14 @@ struct SpeakiOSApp: App {
                     return
                 }
                 keyboardInstantDictation.activate()
+                runPendingKeyboardConnect()
             }
             .onChange(of: scenePhase) { _, newPhase in
                 guard newPhase == .active else { return }
                 runPendingCaptureAction()
                 if FeatureFlags.iOSKeyboardEnabled {
                     keyboardInstantDictation.activate()
+                    runPendingKeyboardConnect()
                 }
                 // Foreground entry reconciles Watch imports interrupted by
                 // suspension and replays unconfirmed acks (issue #674).
@@ -218,6 +241,20 @@ struct SpeakiOSApp: App {
                     WatchCaptureReceiver.shared.reconcilePendingWork()
                 }
             }
+    }
+
+    /// Starts Instant Dictation for a keyboard that opened the app to connect
+    /// (`KeyboardConnectLink`), once the scene is active enough to take the
+    /// microphone.
+    private func runPendingKeyboardConnect() {
+        guard FeatureFlags.iOSKeyboardEnabled else {
+            deepLinkRouter.showsKeyboardConnect = false
+            return
+        }
+        guard scenePhase == .active, deepLinkRouter.consumePendingKeyboardConnect() else { return }
+        Task { @MainActor in
+            await keyboardInstantDictation.connectFromKeyboard()
+        }
     }
 
     /// Performs a capture deep link once the scene is actually active.

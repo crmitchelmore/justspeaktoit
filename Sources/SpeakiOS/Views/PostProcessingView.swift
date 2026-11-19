@@ -21,6 +21,19 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
 
     private init() {}
 
+    /// A missing key, or a cloud provider the user has not allowed yet (#1805).
+    private func admissionError(model: String, apiKey: String, local: Bool) -> String? {
+        guard local || !apiKey.isEmpty else {
+            return PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model)).errorDescription
+        }
+        do {
+            try IOSCloudSharingConsentPrompt.shared.require(model: model, purpose: .postProcessing)
+        } catch {
+            return error.localizedDescription
+        }
+        return nil
+    }
+
     /// Process text using the configured model and prompt.
     public func process(
         text: String,
@@ -29,9 +42,9 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
     ) async {
         guard !text.isEmpty else { return }
         let usesAppleModel = model == AppleLocalModels.foundationModelID
-        guard usesAppleModel || !apiKey.isEmpty else {
-            error = PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model))
-                .errorDescription
+        let usesDownloadedModel = IOSLocalCleanupModels.isCleanupModelID(model)
+        if let refusal = admissionError(model: model, apiKey: apiKey, local: usesAppleModel || usesDownloadedModel) {
+            error = refusal
             return
         }
 
@@ -51,6 +64,13 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
                     streamingText = try await AppleFoundationModelPolisher.process(
                         text: text,
                         systemPrompt: effectivePrompt
+                    )
+                } else if usesDownloadedModel {
+                    streamingText = try await IOSLocalCleanup().respond(
+                        transcript: text,
+                        systemPrompt: effectivePrompt,
+                        userMessage: TranscriptCleanupPolicy.userMessage(transcript: text),
+                        modelID: model
                     )
                 } else {
                     // Use streaming for real-time updates
@@ -120,9 +140,17 @@ public final class iOSPostProcessingManager: ObservableObject { // swiftlint:dis
                 userMessage: userMessage
             )
         }
+        if IOSLocalCleanupModels.isCleanupModelID(model) {
+            // Downloaded models never fall back to the cloud: a failure keeps
+            // the original transcript and reports why.
+            return try await IOSLocalCleanup().respond(
+                transcript: text, systemPrompt: systemPrompt, userMessage: userMessage, modelID: model
+            )
+        }
         guard !apiKey.isEmpty else {
             throw PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model))
         }
+        try IOSCloudSharingConsentPrompt.shared.require(model: model, purpose: .postProcessing)
 
         var result = ""
         for try await chunk in sendChatStreaming(
@@ -383,6 +411,7 @@ public struct PostProcessingView: View {
             .sheet(isPresented: $showingModelPicker) {
                 modelPickerSheet
             }
+            .cloudSharingConsentSheet()
         }
     }
 }

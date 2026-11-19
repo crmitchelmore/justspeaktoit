@@ -27,6 +27,7 @@ extension DesktopHostController {
         let modulateFeatures = session.modulateBatchFeatures
         do {
             guard !closed else { throw CancellationError() }
+            try requireCloudSharing([DesktopHostCloudSharing.transcription(model: record.modelIdentifier)])
             let key: String
             if let input { key = input.key } else { key = try transcriptionKey(for: record.modelIdentifier) }
             let audio = try await store.audioURL(for: record)

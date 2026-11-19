@@ -10,7 +10,7 @@ final class DesktopHostVoiceFormatTests: XCTestCase {
     override func setUp() async throws {
         FakeLog.shared.reset(); FakeSpeech.shared.reset(); VoiceFormatProbe.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-format-\(UUID())")
-        controller = try DesktopHostController(directory: directory, effects: VoiceFormatEffects(),
+        controller = try DesktopHostController.consented(directory: directory, effects: VoiceFormatEffects(),
                                                shutdownGrace: .milliseconds(60))
         await controller.markReadyForSelfTest()
     }
@@ -147,7 +147,7 @@ final class DesktopHostVoiceFormatTests: XCTestCase {
         let saved = await controller.voiceOutputSettings()
         XCTAssertEqual(saved.format, "m4a")
         await controller.close()
-        controller = try DesktopHostController(directory: directory, effects: VoiceFormatEffects())
+        controller = try DesktopHostController.consented(directory: directory, effects: VoiceFormatEffects())
         let restarted = await controller.voiceOutputSettings()
         XCTAssertEqual(restarted.format, "m4a")
     }

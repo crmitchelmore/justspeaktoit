@@ -2,6 +2,7 @@ package com.justspeaktoit.android.settings
 
 import android.content.Context
 import androidx.core.content.edit
+import com.justspeaktoit.android.cloud.CloudSharingConsent
 import com.justspeaktoit.android.corrections.AutoCorrectionCandidate
 import com.justspeaktoit.android.corrections.AutoCorrectionLearningPolicy
 import com.justspeaktoit.android.corrections.CorrectionRule
@@ -81,6 +82,9 @@ interface DictationPreferences {
 
     /** The `local/post-processing/...` model cleanup uses instead of a cloud one; null uses the cloud model. */
     var localCleanupModelId: String?
+
+    /** Which cloud AI providers may receive which content (#1805); nothing is sent to one until allowed. */
+    var cloudSharingConsent: CloudSharingConsent
 }
 
 /** The float's shortest decimal as a double, so a stored 0.05f reads back as 0.05, not 0.0500000007. */
@@ -146,6 +150,10 @@ class AppPreferences(context: Context) : DictationPreferences {
         set(value) = prefs.edit {
             if (value == null) remove(KEY_LOCAL_CLEANUP_MODEL) else putString(KEY_LOCAL_CLEANUP_MODEL, value)
         }
+
+    override var cloudSharingConsent: CloudSharingConsent
+        get() = CloudSharingConsent.decode(prefs.getString(KEY_CLOUD_SHARING_CONSENT, null))
+        set(value) = prefs.edit { putString(KEY_CLOUD_SHARING_CONSENT, value.encode()) }
 
     override var audioInputId: String?
         get() = prefs.getString(KEY_AUDIO_INPUT, null)
@@ -261,6 +269,9 @@ class AppPreferences(context: Context) : DictationPreferences {
 
         /** Product analytics consent (`telemetry.AnalyticsConsent`); absent means not asked, so off. */
         const val KEY_ANALYTICS_CONSENT = "analyticsConsent"
+
+        /** Consent per cloud AI provider, the JSON and key SpeakCore's `CloudSharingConsentStore` uses. */
+        const val KEY_CLOUD_SHARING_CONSENT = "cloudSharingConsent"
 
         /** Crash-report consent (`telemetry.DiagnosticsConsent`), the key the Mac and iOS apps use. */
         const val KEY_DIAGNOSTICS_CONSENT = "diagnosticsConsent"

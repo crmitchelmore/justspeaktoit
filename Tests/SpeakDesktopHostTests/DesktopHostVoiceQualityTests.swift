@@ -17,7 +17,8 @@ final class DesktopHostVoiceQualityTests: XCTestCase {
         FakeLog.shared.reset()
         FakeSpeech.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-quality-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         session = StubURLProtocol.makeSession()
         await controller.markReadyForSelfTest()
     }
@@ -138,7 +139,8 @@ final class DesktopHostVoiceQualityTests: XCTestCase {
         let result = await controller.generatedVoice
         XCTAssertNil(result)
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restored = await controller.voiceOutputSettings()
         XCTAssertEqual(restored, saved)
         XCTAssertTrue(StubURLProtocol.recordedRequests.isEmpty)

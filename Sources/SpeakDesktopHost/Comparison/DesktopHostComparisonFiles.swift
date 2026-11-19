@@ -75,6 +75,8 @@ extension DesktopHostController {
             guard let key = configuration.keys[candidate.modelID] else {
                 throw DesktopHostError(message: "The comparison credential snapshot is missing.")
             }
+            // Consent can be withdrawn while a batch of files is queued.
+            try self.cloudSharing.require(DesktopHostCloudSharing.transcription(model: candidate.modelID))
             var request = DesktopHostTranscriptionRequest(
                 audio: audio, model: candidate.modelID, key: key,
                 duration: snapshot.round.sample.durationSeconds, language: language

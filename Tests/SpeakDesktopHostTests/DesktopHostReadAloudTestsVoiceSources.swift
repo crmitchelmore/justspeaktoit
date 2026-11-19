@@ -86,7 +86,8 @@ extension DesktopHostReadAloudTests {
         let voice = try XCTUnwrap(DesktopVoiceOutputSettings.voices.last)
         await controller.saveVoiceOutput(DesktopVoiceOutputSettings(voice: voice))
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let saved = await controller.voiceOutputSettings()
         XCTAssertEqual(saved.voice, voice)
         let retired = DesktopVoiceOutputSettings(modelID: "aura-0", voiceID: "deepgram/retired-voice")

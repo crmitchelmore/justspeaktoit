@@ -738,7 +738,8 @@ API token serves both apps: they share the callback URL.
   page, opens it in the default browser (only `https` pages on `apple.com` or
   `icloud.com`; through the OpenURI portal inside Flatpak) and listens on
   `http://127.0.0.1:47823/cloudkit-sign-in` for the redirect carrying
-  `ckWebAuthToken`, only during sign-in and for at most ten minutes. A
+  `ckWebAuthToken` (Apple redirects to the token's registered
+  `https://justspeaktoit.com/cloudkit-sign-in`, which forwards it there), only during sign-in and for at most ten minutes. A
   connection that sends no complete request within five seconds is dropped,
   so an idle browser preconnection cannot hold the callback. The redirect is
   taken only from a process of this user (read from `/proc/net/tcp`) and only
@@ -764,7 +765,7 @@ API token serves both apps: they share the callback URL.
 
 The CloudKit API token is a build setting:
 `scripts/windows-cloudkit/configure-cloudkit-web.py` writes the
-`CLOUDKIT_WEB_API_TOKEN` secret into both `Sources/SpeakWindows` and
+`CLOUDKIT_WEB_API_TOKEN` secret (held in the `cloudkit` environment) into both `Sources/SpeakWindows` and
 `Sources/SpeakLinux/CloudKitWebBuildConfiguration.swift`, which are committed
 without one. No Linux workflow injects it yet, so every Linux build says
 "iCloud sync is not available in this build" and otherwise works. For local

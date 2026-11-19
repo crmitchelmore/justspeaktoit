@@ -151,6 +151,10 @@ private func linuxHistoryManagementEvent(
         holder.enqueueSettings { await holder.controller.beginAudioCleanupConfirmation() }
     case .audioCleanupResponse:
         holder.enqueueSettings { await holder.controller.answerAudioCleanup(value, delete: slot == 1) }
+    case .cloudConsentResponse:
+        holder.enqueueSettings { await holder.controller.answerCloudSharing(value, allow: slot == 1) }
+    case .cloudSharingWithdraw:
+        holder.enqueueSettings { await holder.controller.withdrawCloudSharing(providerID: value) }
     default: return false
     }
     return true

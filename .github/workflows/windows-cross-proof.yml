@@ -37,6 +37,7 @@ on:
       - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
       - scripts/windows-cloudkit/**
+      - scripts/desktop-analytics/**
       - scripts/windows-bundle/**
       - scripts/windows-package/**
       - scripts/windows-local-runtime/**
@@ -63,6 +64,10 @@ jobs:
     needs: local-runtime
     runs-on: macos-15
     timeout-minutes: 30
+    # The CloudKit API token lives only in the main-only `cloudkit` environment
+    # (#1827). Other runs, such as merge-batch branches, get no environment and
+    # build without it.
+    environment: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/alpha-build-') || startsWith(github.ref, 'refs/tags/stable-candidate-')) && 'cloudkit' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -83,14 +88,26 @@ jobs:
       - name: Check the CloudKit Web Services build-setting writer
         shell: bash
         run: python3 -B -m unittest discover -s scripts/windows-cloudkit -p 'test_*.py'
-      # The container's API token (CloudKit Console) is a build setting. Pull
-      # request builds never receive it and report iCloud sync as unavailable.
+      # The container's API token (CloudKit Console) is a build setting. Only
+      # main and release manifest tags receive it; other builds report iCloud
+      # sync as unavailable.
       - name: Configure CloudKit Web Services for this build
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/alpha-build-') || startsWith(github.ref, 'refs/tags/stable-candidate-')) }}
         shell: bash
         env:
           CLOUDKIT_WEB_API_TOKEN: ${{ secrets.CLOUDKIT_WEB_API_TOKEN }}
         run: python3 -B scripts/windows-cloudkit/configure-cloudkit-web.py
+      # The public PostHog project key for opt-in analytics (#1624), compiled in
+      # from the existing secret. Only a push to main and the release manifest
+      # tags (which the Alpha/Stable desktop qualification dispatches) get it;
+      # pull request, merge-batch, branch and manual main builds stay keyless
+      # and send nothing.
+      - name: Stamp the PostHog project key into release builds
+        if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/alpha-build-') || startsWith(github.ref, 'refs/tags/stable-candidate-') }}
+        shell: bash
+        env:
+          POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
+        run: python3 -B scripts/desktop-analytics/configure-posthog-key.py
       - name: Cross-build the Windows app and test suite
         shell: bash
         run: |

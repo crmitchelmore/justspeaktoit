@@ -32,9 +32,6 @@ public enum OpenAIRealtimeSpeech {
     /// Short responses keep the reading instruction dominant and bound each
     /// response well inside the model's 32,000 output tokens.
     public static let chunkCharacters = 1_000
-    /// Spoken words allowed beyond the input for each numeral it contains, so
-    /// "2026" may be read as "two thousand and twenty six".
-    static let spokenWordsPerNumeral = 8
 
     /// Documented realtime voices, in the guide's order.
     public static let voices: [(id: String, name: String)] = [
@@ -95,42 +92,11 @@ public enum OpenAIRealtimeSpeech {
         ])
     }
 
-    /// Ordered share of `expected` words found in `spoken` (longest common
-    /// subsequence over case- and punctuation-folded words).
-    /// Whether the spoken transcript is a verbatim reading of `expected`.
-    ///
-    /// Every input word must be spoken, in order, so dropping one word ("not")
-    /// fails. Numerals cannot be checked language-independently, so they are not
-    /// required. Instead each one allows a few extra spoken words, plus a small
-    /// allowance for symbols read aloud ("&" as "and"). Anything more is an
-    /// answer or commentary.
+    /// Whether the spoken transcript is a verbatim reading of `expected`: every
+    /// word in order, numerals read as the same number, and extra words only
+    /// for symbols read aloud (see `RealtimeReadingCheck`).
     public static func isFaithfulReading(expected: String, spoken: String) -> Bool {
-        let input = words(expected), rhs = words(spoken)
-        let isNumeral: (String) -> Bool = { $0.unicodeScalars.contains(where: CharacterSet.decimalDigits.contains) }
-        let lhs = input.filter { !isNumeral($0) }
-        let numerals = input.count - lhs.count
-        let matched = commonSubsequenceLength(lhs, rhs)
-        let allowedExtra = numerals * spokenWordsPerNumeral + max(2, lhs.count / 10)
-        return matched == lhs.count && rhs.count - matched <= allowedExtra
-    }
-
-    private static func commonSubsequenceLength(_ lhs: [String], _ rhs: [String]) -> Int {
-        var previous = [Int](repeating: 0, count: rhs.count + 1)
-        for word in lhs {
-            var current = [Int](repeating: 0, count: rhs.count + 1)
-            for (index, other) in rhs.enumerated() {
-                current[index + 1] = word == other
-                    ? previous[index] + 1 : max(previous[index + 1], current[index])
-            }
-            previous = current
-        }
-        return previous[rhs.count]
-    }
-
-    private static func words(_ text: String) -> [String] {
-        text.lowercased()
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
+        RealtimeReadingCheck.isFaithful(expected: expected, spoken: spoken)
     }
 
     private static func json(_ object: [String: Any]) -> String? {
@@ -169,7 +135,8 @@ public enum OpenAIRealtimeSpeechEvent: Equatable, Sendable {
             usage.add(response?["usage"] as? [String: Any])
             let error = (details?["error"] as? [String: Any])?["message"] as? String
             self = .done(
-                status: response?["status"] as? String ?? "completed",
+                // Only an explicit "completed" is a finished reading.
+                status: response?["status"] as? String ?? "no status",
                 reason: error ?? details?["reason"] as? String,
                 usage: usage
             )

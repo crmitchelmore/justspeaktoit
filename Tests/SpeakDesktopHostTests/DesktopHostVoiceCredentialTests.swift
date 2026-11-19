@@ -12,7 +12,8 @@ final class DesktopHostVoiceCredentialTests: XCTestCase {
         FakeLog.shared.reset()
         FakeSpeech.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-credential-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
     }
 
@@ -293,7 +294,7 @@ extension DesktopHostVoiceCredentialTests {
     func testReadFailure_ReportsUnavailableWithoutDisclosingVaultDetails() async throws {
         await selectOpenAI()
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: VoiceCredentialReadFailureEffects())
         let presentation = await controller.voiceCredentialPresentation()
         if case .failure(let error) = presentation {

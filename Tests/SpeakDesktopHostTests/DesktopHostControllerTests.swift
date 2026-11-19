@@ -16,7 +16,7 @@ final class DesktopHostControllerTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("host-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         effects = SyntheticEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         batchIndex = try XCTUnwrap(
             DesktopHostModels.all.firstIndex { DesktopTranscription.provider(for: $0.id) != nil }
@@ -92,7 +92,7 @@ final class DesktopHostControllerTests: XCTestCase {
 
     func testCancellingTranscriptionRetainsTheAudio() async throws {
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: GatedEffects(gate: Gate(open: false))
         )
         await controller.markReadyForSelfTest()

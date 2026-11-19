@@ -27,7 +27,7 @@ extension DesktopHostReadAloudTests {
         await controller.close()
         let effects = VoiceCommandEffects()
         effects.clipboard = "Explicit clipboard speech."
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         await controller.readClipboardAloud()
         let task = await controller.readAloudState.task
@@ -64,7 +64,7 @@ extension DesktopHostReadAloudTests {
     func testClipboardShortcut_EmptyAndNontextSourcesNeverSpeakHistory() async throws {
         await controller.close()
         let effects = VoiceCommandEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         let empty: [String?] = [nil, "", " \n\t "]
         for text in empty {

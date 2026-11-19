@@ -75,12 +75,12 @@ class BuildRevisionTests(unittest.TestCase):
         return {'runID': '7', 'runAttempt': 2, 'repository': 'owner/repo', 'repositoryID': 123,
                 'workflow': '.github/workflows/linux-flatpak.yml', 'sourceSHA': self.source, 'event': event}
 
-    def record(self, event='pull_request', built=None, parents=None):
+    def record(self, event='pull_request', built=None, parents=None, stamped=False):
         request = {'number': 9, 'headSHA': self.source, 'baseSHA': self.base,
                    'headRepositoryID': 123, 'baseRepositoryID': 123} if event == 'pull_request' else None
         return dict(self.metadata(event), version=1, builtRevision=built or self.built,
                     parents=parents if parents is not None else [self.base, self.source],
-                    bundleSHA256=self.digest, pullRequest=request)
+                    bundleSHA256=self.digest, pullRequest=request, postHogKeyStamped=stamped)
 
     def test_exact_requested_source_still_requires_consistent_record_and_parents(self):
         for event in ('push', 'workflow_dispatch', 'pull_request'):
@@ -131,6 +131,35 @@ class BuildRevisionTests(unittest.TestCase):
         for record in (dict(self.record(), pullRequest=None), dict(self.record(), extra='untrusted')):
             with self.assertRaises(ValueError):
                 self.verify(self.built, [self.base, self.source], self.metadata(), record, self.digest)
+
+    def test_retest_of_a_release_ref_rejects_a_keyless_bundle(self):
+        requires = runpy.run_path(str(ROOT / 'packaging/linux/verify_build_revision.py'))['requires_stamped_key']
+        for event, ref, required in (
+                ('workflow_dispatch', 'refs/tags/alpha-build-7', True),
+                ('workflow_dispatch', 'refs/tags/stable-candidate-3', True),
+                ('push', 'refs/heads/main', True),
+                ('workflow_dispatch', 'refs/heads/main', False),
+                ('pull_request', 'refs/pull/9/merge', False),
+                ('workflow_dispatch', 'refs/heads/feature', False)):
+            self.assertEqual(requires(event, ref), required, (event, ref))
+        keyless = self.record('push', self.source, [])
+        stamped = self.record('push', self.source, [], stamped=True)
+        metadata = self.metadata('push')
+        self.verify(self.source, [], metadata, keyless, self.digest)
+        self.verify(self.source, [], metadata, keyless, self.digest, require_stamped=False)
+        self.verify(self.source, [], metadata, stamped, self.digest, require_stamped=True)
+        with self.assertRaisesRegex(ValueError, 'keyless'):
+            self.verify(self.source, [], metadata, keyless, self.digest, require_stamped=True)
+
+    def test_record_must_state_whether_the_bundle_was_stamped(self):
+        record = self.record('push', self.source, [])
+        del record['postHogKeyStamped']
+        with self.assertRaises(ValueError):
+            self.verify(self.source, [], self.metadata('push'), record, self.digest)
+        for value in (None, 'true', 1):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.verify(self.source, [], self.metadata('push'),
+                            dict(self.record('push', self.source, []), postHogKeyStamped=value), self.digest)
 
     def test_non_pr_event_cannot_claim_a_merge_or_pr_record(self):
         for record in (self.record('push'), dict(self.record('push', self.source, []), pullRequest={})):
@@ -217,6 +246,19 @@ class BuildRecordLifecycleTests(unittest.TestCase):
                                                 [self.base, self.source], self.digest)
         self.assertEqual(record, self.record())
         self.assertNotEqual(record['sourceSHA'], record['builtRevision'])
+
+    def test_producer_records_whether_the_checked_out_source_carries_the_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configuration = Path(directory) / 'DesktopAnalyticsBuildConfiguration.swift'
+            for source, expected in (
+                    ('    public static let postHogProjectKey: String? = nil\n', False),
+                    ('    public static let postHogProjectKey: String? = "phc_Synthetic0123456789"\n', True)):
+                configuration.write_text(source)
+                self.assertIs(QUALIFICATION['key_stamped'](configuration), expected)
+        self.assertIs(QUALIFICATION['key_stamped'](), False)
+        stamped = QUALIFICATION['build_record'](self.environment(), self.event(), self.built,
+                                                [self.base, self.source], self.digest, stamped=True)
+        self.assertIs(stamped['postHogKeyStamped'], True)
 
     def test_producer_accepts_exact_pr_head_without_relying_on_synthetic_merge_base(self):
         event = self.event()
@@ -376,7 +418,9 @@ class BuildRecordLifecycleTests(unittest.TestCase):
         self.assertIn("github-token: ${{ github.token }}", workflow)
         self.assertIn("metadata = verify(run, sha, repo, run_id", workflow)
         self.assertIn("parents = helper['checkout_parents'](git, built_sha)", workflow)
-        self.assertIn("metadata, record, helper['file_digest'](bundle)", workflow)
+        self.assertIn("metadata, record, helper['file_digest'](bundle),\n                                              require_stamped)", workflow)
+        self.assertIn("helper['VERIFY']['requires_stamped_key'](os.environ['GITHUB_EVENT_NAME'], os.environ['GITHUB_REF'])",
+                      workflow)
 
 
 FLATPAK = runpy.run_path(str(ROOT / 'packaging/linux/verify-flatpak-manifest.py'))
@@ -522,6 +566,7 @@ class RuntimeCleanupTests(unittest.TestCase):
         manifest = {'finish-args': [
             '--share=network', '--share=ipc', '--socket=wayland', '--socket=fallback-x11',
             '--socket=pulseaudio', '--device=dri', '--talk-name=org.kde.StatusNotifierWatcher',
+        '--system-talk-name=org.freedesktop.Avahi',
             '--env=JSTI_WHISPER_RUNTIME_DIRECTORY=/app/lib/justspeaktoit', '--env=GGML_NO_BACKTRACE=1'],
             'modules': [{'name': 'whisper-cpp', 'sources': [dict(type='git', **pin),
                 {'type': 'file', 'path': 'verify-flatpak-manifest.py', 'dest-filename': 'jsti-flatpak-runtime.py'},

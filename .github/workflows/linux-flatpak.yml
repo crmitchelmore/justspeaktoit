@@ -24,6 +24,7 @@ on:
       - scripts/linux/linux-flatpak-qualification.py
       - scripts/tests/test_linux_flatpak_sources.py
       - scripts/linux/stage-linux-desktop.py
+      - scripts/desktop-analytics/**
       - scripts/assets/generate-desktop-icons.py
       - scripts/local-llm-runtime/**
       - scripts/migration/verify-miniz.py
@@ -92,6 +93,17 @@ jobs:
         run: >-
           flatpak-builder --download-only --force-clean
           --state-dir "$RUNNER_TEMP/flatpak-state" "$RUNNER_TEMP/flatpak-build" "$MANIFEST"
+
+      # The public PostHog project key for opt-in analytics (#1624), compiled in
+      # from the existing secret. Only a push to main and the release manifest
+      # tags (which the Alpha/Stable desktop qualification dispatches) get it;
+      # pull request, merge-batch, branch and manual main builds stay keyless
+      # and send nothing.
+      - name: Stamp the PostHog project key into release builds
+        if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/alpha-build-') || startsWith(github.ref, 'refs/tags/stable-candidate-') }}
+        env:
+          POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
+        run: python3 -B scripts/desktop-analytics/configure-posthog-key.py
 
       - name: Build offline
         run: >-
@@ -198,9 +210,12 @@ jobs:
           evidence = pathlib.Path('flatpak-evidence/source-run.json')
           metadata = json.loads(evidence.read_text())
           parents = helper['checkout_parents'](git, built_sha)
-          helper['VERIFY']['verify_revision'](built_sha, parents, metadata, record, helper['file_digest'](bundle))
+          # A retest on a release tag must not reuse a bundle built without the PostHog key.
+          require_stamped = helper['VERIFY']['requires_stamped_key'](os.environ['GITHUB_EVENT_NAME'], os.environ['GITHUB_REF'])
+          helper['VERIFY']['verify_revision'](built_sha, parents, metadata, record, helper['file_digest'](bundle),
+                                              require_stamped)
           inputs = ['Package.swift', 'LICENSE', '.gitattributes', 'packaging/linux', 'Sources', 'Resources',
-                    'scripts/linux/stage-linux-desktop.py', 'scripts/local-llm-runtime',
+                    'scripts/linux/stage-linux-desktop.py', 'scripts/local-llm-runtime', 'scripts/desktop-analytics',
                     'scripts/assets/generate-desktop-icons.py', 'scripts/migration/verify-miniz.py',
                     'scripts/migration/migration_dependency.py',
                     'scripts/windows-local-runtime/dependencies.json']

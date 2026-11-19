@@ -97,9 +97,13 @@ def verify_submission_metadata(bundle, info, *, surface, main=False, watch=False
     # UITextInputMode.activeInputModes is UIKit-only: the iOS app and keyboard read it.
     ios_only = {"NSPrivacyAccessedAPICategoryActiveKeyboards"}
     categories = set()
-    apis = privacy.get("NSPrivacyAccessedAPITypes")
-    if not isinstance(apis, list):
-        raise SystemExit(f"Missing required-reason API array: {path}")
+    # A bundle that calls no required-reason API omits the key; an empty array is flagged by
+    # compliance scanners as a manifest that disagrees with itself.
+    apis = privacy.get("NSPrivacyAccessedAPITypes", None)
+    if apis is None:
+        apis = []
+    elif not isinstance(apis, list) or not apis:
+        raise SystemExit(f"Required-reason API array must list APIs or be omitted: {path}")
     for api in apis:
         if not isinstance(api, dict):
             raise SystemExit(f"Invalid required-reason API entry: {path}")

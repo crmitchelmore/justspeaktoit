@@ -22,7 +22,7 @@ final class DesktopNativeWindowPlatformTests: XCTestCase {
     }
 
     private func makeController() throws -> DesktopHostController<NativeTestPlatform> {
-        try DesktopHostController<NativeTestPlatform>(directory: root, effects: NativeTestEffects())
+        try DesktopHostController<NativeTestPlatform>.consented(directory: root, effects: NativeTestEffects())
     }
 
     func testVoicePresentation_sendsTheNativeCallsAndReportsRefusals() {

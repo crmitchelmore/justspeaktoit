@@ -106,6 +106,16 @@ extension SettingsSearchCatalog {
             platforms: .iOS
         ),
         SettingsSearchEntry(
+            id: "ios.onDeviceCleanupModels", title: "On-Device Cleanup Models", section: .postProcessing,
+            systemImage: "arrow.down.circle",
+            summary: "Download a small model to polish transcripts on the device, with no API key.",
+            keywords: [
+                "downloaded cleanup models", "local llm", "local cleanup", "llama", "llama.cpp", "qwen", "smollm",
+                "gguf", "offline", "private", "on device", "download", "remove model", "storage"
+            ],
+            platforms: .iOS
+        ),
+        SettingsSearchEntry(
             id: "ios.apiKeys", title: "API Keys", section: .apiKeys, systemImage: "key.fill",
             summary: "Add and manage provider API keys.",
             keywords: ["manage keys", "credentials", "tokens", "openrouter key", "openai key", "deepgram key"],
@@ -155,12 +165,18 @@ extension SettingsSearchCatalog {
         ),
         SettingsSearchEntry(
             id: "ios.privacy", title: "Privacy & Debugging", section: .about, systemImage: "hand.raised",
-            summary: "Crash reports and diagnostics, privacy information, clipboard expiry and debug logging.",
+            summary: "AI providers you allowed, crash reports and diagnostics, privacy information, clipboard expiry "
+                + "and debug logging.",
             keywords: [
                 "privacy information", "debug logging", "clipboard", "transcript expiry", "universal clipboard",
-                "network activity", "send crash reports and diagnostics", "crash reports", "diagnostics", "sentry"
+                "network activity", "send crash reports and diagnostics", "crash reports", "diagnostics", "sentry",
+                "ai providers you allowed", "ai providers", "third-party ai", "consent", "withdraw consent",
+                "data sharing"
             ],
-            settingKeys: ["diagnosticsConsent", "transcriptClipboardLifetime", "transcriptAllowsUniversalClipboard"],
+            settingKeys: [
+                "diagnosticsConsent", "transcriptClipboardLifetime", "transcriptAllowsUniversalClipboard",
+                "cloudSharingConsent"
+            ],
             platforms: .iOS
         ),
         SettingsSearchEntry(

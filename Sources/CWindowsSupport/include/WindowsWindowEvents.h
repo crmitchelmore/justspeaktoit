@@ -93,7 +93,11 @@ enum JSTIWindowEvent {
     /* General > Edit raw configuration (WindowsRawConfiguration.h): model_index is
      * the action and text the editor's JSON, an import path, or an export path, a
      * newline and the JSON. Reply with jsti_window_set_raw_configuration. */
-    JSTI_EVENT_RAW_CONFIGURATION = 180
+    JSTI_EVENT_RAW_CONFIGURATION = 180,
+    /* Cloud sharing consent (CloudSharing.h): RESPONSE's text is the question's token and
+     * model_index 1 allows, 0 is not now; WITHDRAW's text is the provider identifier. */
+    JSTI_EVENT_CLOUD_CONSENT_RESPONSE = 190,
+    JSTI_EVENT_CLOUD_SHARING_WITHDRAW = 191
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index

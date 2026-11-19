@@ -11,7 +11,7 @@ final class DesktopHostVoiceTextImportTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-import-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: SyntheticEffects(), shutdownGrace: .milliseconds(100)
         )
     }

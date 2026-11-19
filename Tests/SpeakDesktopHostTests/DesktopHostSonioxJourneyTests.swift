@@ -19,7 +19,8 @@ final class DesktopHostSonioxJourneyTests: XCTestCase {
         FakeSpeech.shared.reset()
         StubURLProtocol.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("soniox-journey-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         session = StubURLProtocol.makeSession()
         context = .init(provider: .soniox, sessionID: UUID(), epoch: UUID())
@@ -150,7 +151,8 @@ final class DesktopHostSonioxJourneyTests: XCTestCase {
     func testRestart_CloneAndFavoritesRemainStoredButRequireFreshRegionalEvidence() async throws {
         let saved = await controller.voiceOutputSettings()
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restored = await controller.voiceOutputSettings()
         XCTAssertEqual(restored, saved)
         XCTAssertEqual(restored.favoriteVoices, ["soniox/synthetic-clone", "soniox/deleted-clone"])

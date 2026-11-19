@@ -262,7 +262,7 @@ struct BackupHostFixture {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
             try profileData.write(to: directory.appendingPathComponent(DesktopDictationProfileStore.filename))
         }
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: root.appendingPathComponent("Application"), effects: SyntheticEffects(), shutdownGrace: grace
         )
     }

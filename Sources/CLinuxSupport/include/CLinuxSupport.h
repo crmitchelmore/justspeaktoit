@@ -9,6 +9,7 @@
 #include "../../CWindowsSupport/include/VoiceAudioCodec.h"
 #include "../../CWindowsSupport/include/VoiceCredentials.h"
 #include "../../CWindowsSupport/include/LocalCleanup.h"
+#include "../../CWindowsSupport/include/CloudSharing.h"
 #include "../../CWindowsSupport/include/OpenRouterBrowser.h"
 
 /* Domain headers, in declaration order. */

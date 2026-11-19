@@ -45,6 +45,7 @@ extension DesktopHostController {
         let key = try requireCredentialOrLocalModel(capturedProfile.modelIdentifier)
         try requireAzureResource(forLive: capturedProfile.modelIdentifier)
         let polish = captureLivePolish(capturedProfile)
+        try requireCloudSharing(cloudSharingRequests(for: capturedProfile, polish: polish))
         var profile = capturedProfile
         if DesktopHostModels.provider(for: profile.modelIdentifier)?.id == "assemblyai" {
             let recognition = profile.transcriptionOptions ?? frozenConfiguration?.liveOptions ?? .desktopDefaults

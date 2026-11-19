@@ -9,6 +9,7 @@ import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudModel
 import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.CloudSharingRequest
 import com.justspeaktoit.android.cloud.OpenRouterDiscoveryState
 import com.justspeaktoit.android.corrections.AutoCorrectionCandidate
 import com.justspeaktoit.android.corrections.AutoCorrectionLearningPolicy
@@ -89,6 +90,10 @@ data class DictationUiState(
     val historyError: Boolean = false,
     /** Audio another app shared, waiting for the user to confirm the upload. */
     val sharedAudio: SharedAudioOffer? = null,
+    /** A send waiting for consent to its provider (#1805); shown on every screen until answered. */
+    val cloudSharingPrompt: CloudSharingPrompt? = null,
+    /** The providers the user allowed, for Settings > Privacy to list and withdraw. */
+    val cloudSharingAllowed: List<CloudSharingRequest> = emptyList(),
     /** Cancelled Cloud recordings are kept in History for a later transcription. */
     val keepAudioOnCancel: Boolean = AppPreferences.DEFAULT_KEEP_AUDIO_ON_CANCEL,
     /** Whether a Cloud recording stops by itself after a pause. */
@@ -146,21 +151,28 @@ data class DictationUiState(
 
     val sessionCleanupModel: CleanupModel get() = profile?.cleanupModel ?: cleanupModel
 
-    /**
-     * The downloaded model a session's cleanup uses: the user's, unless the active profile names a cloud
-     * cleanup model. Null means cleanup uses [sessionCleanupModel].
-     */
-    val sessionLocalCleanupModelId: String?
-        get() = if (profile?.cleanupModel != null) null else localCleanup.selectedId
+    /** The active profile's downloaded cleanup model, which wins over every cleanup choice of the user's. */
+    val profileLocalCleanupModelId: String?
+        get() = profile?.takeIf { it.cleanupModel == null }?.downloadedCleanupModelId(localCleanup.names.keys)
 
     /**
-     * The downloaded model a session hands to cleanup: the chosen one when cleanup is on and it is on the
-     * phone. A runtime that did not load still gets it, so cleanup fails visibly and keeps the original;
-     * a model that is not downloaded turns cleanup off for the session instead, as Settings says.
+     * The downloaded model a session's cleanup uses: the profile's, else the user's unless the profile names
+     * a cloud cleanup model. Null means cleanup uses [sessionCleanupModel].
+     */
+    val sessionLocalCleanupModelId: String?
+        get() = if (profile?.cleanupModel != null) null else profileLocalCleanupModelId ?: localCleanup.selectedId
+
+    /**
+     * The downloaded model a session hands to cleanup. A profile's model is always handed over while cleanup
+     * is on, so a missing or unverified one fails visibly and keeps the original. The user's own is handed
+     * over only when it is on the phone: one that is not downloaded turns cleanup off, as Settings says. A
+     * runtime that did not load still gets it, so cleanup fails visibly.
      */
     val sessionDownloadedCleanupModelId: String?
-        get() = sessionLocalCleanupModelId?.takeIf {
-            sessionCleanupEnabled && localCleanup.selected?.state == ModelInstallState.Installed
+        get() = when {
+            !sessionCleanupEnabled -> null
+            profileLocalCleanupModelId != null -> profileLocalCleanupModelId
+            else -> sessionLocalCleanupModelId?.takeIf { localCleanup.selected?.state == ModelInstallState.Installed }
         }
 
     /** The base cleanup prompt a session uses: the profile's, else the user's, else null for the built-in one. */
@@ -199,10 +211,13 @@ data class DictationUiState(
     /**
      * Cleanup runs only when switched on (by the profile or the user) and its model can run: a downloaded
      * model must be on the phone with its runtime, a cloud model's provider must have a key. Gemini Nano
-     * needs no key; when the phone cannot run it, the session says why and keeps the transcript.
+     * needs no key; when the phone cannot run it, the session says why and keeps the transcript. A
+     * profile's downloaded model always runs, so a missing one says so and keeps the transcript.
      */
     val cleanupReady: Boolean
-        get() = sessionCleanupEnabled && if (sessionLocalCleanupModelId != null) {
+        get() = sessionCleanupEnabled && if (profileLocalCleanupModelId != null) {
+            true
+        } else if (sessionLocalCleanupModelId != null) {
             localCleanup.ready
         } else {
             sessionCleanupModel.let { it.isOnDevice || it.cloudProvider in savedKeys }

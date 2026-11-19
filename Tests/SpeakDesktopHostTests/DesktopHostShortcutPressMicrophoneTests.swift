@@ -50,7 +50,7 @@ final class DesktopHostShortcutPressMicrophoneTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("press-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         effects = PressEffects()
-        controller = try DesktopHostController(
+        controller = try DesktopHostController.consented(
             directory: directory, effects: effects, shutdownGrace: .milliseconds(10)
         )
         await controller.markReadyForSelfTest()

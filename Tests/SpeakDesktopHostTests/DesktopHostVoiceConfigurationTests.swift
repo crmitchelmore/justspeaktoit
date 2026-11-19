@@ -27,7 +27,7 @@ final class DesktopHostVoiceConfigurationTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-config-\(UUID().uuidString)")
         effects = SettingsWriteEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
     }
 
     override func tearDown() async throws {
@@ -74,7 +74,7 @@ final class DesktopHostVoiceConfigurationTests: XCTestCase {
         XCTAssertEqual(voice["ttsAutoPlay"], .bool(false))
         XCTAssertEqual(voice["ttsSaveToDirectory"], .bool(true))
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         let restored = await controller.voiceOutputSettings()
         XCTAssertEqual(restored, saved)
     }
@@ -187,7 +187,7 @@ final class DesktopHostVoiceConfigurationTests: XCTestCase {
         XCTAssertEqual(document.preferences.values["ttsPitch"], AnyCodable(.int(-3)))
         XCTAssertEqual(document.preferences.values["ttsQuality"], AnyCodable(.string("future-quality")))
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         let restored = await controller.voiceOutputSettings()
         XCTAssertEqual(restored, saved)
     }

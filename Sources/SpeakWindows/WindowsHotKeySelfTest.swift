@@ -15,6 +15,7 @@ enum WindowsHotKeySelfTest {
         try WindowsNative.createSyntheticDirectory(root)
         defer { try? FileManager.default.removeItem(at: root) }
         let controller = try WindowsAppController(directory: root, effects: SyntheticEffects())
+        await controller.allowCloudSharingForSelfTest()
         await controller.markReadyForSelfTest()
         do {
             try await checkSessions(controller)

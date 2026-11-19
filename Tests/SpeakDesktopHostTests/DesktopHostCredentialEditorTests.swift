@@ -10,7 +10,7 @@ final class DesktopHostCredentialEditorTests: XCTestCase {
     override func setUp() async throws {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("credential-editor-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: SyntheticEffects(), shutdownGrace: .milliseconds(40)
         )
         await controller.markReadyForSelfTest()

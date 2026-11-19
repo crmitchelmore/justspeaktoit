@@ -17,6 +17,10 @@ extension DesktopHostController {
             try await playback.stopAndWait()
             guard !closed else { return }
             _ = try requireCredentialOrLocalModel(settings.model)
+            try requireCloudSharing([
+                DesktopHostCloudSharing.transcription(model: settings.model),
+                DesktopHostCloudSharing.postProcessing(settings.postProcessing ?? .init())
+            ])
             let localModel = beginLocalUse(settings.model) // Held across the save until transcription ends.
             defer { endLocalUse(localModel) }
             let source = URL(fileURLWithPath: path)

@@ -7,7 +7,7 @@ import os.log
 /// The session the start pipeline brings up, and the façade state it reads
 /// and publishes. `MainManager` is the only host.
 @MainActor
-protocol SessionStartHost: AnyObject {
+protocol SessionStartHost: SessionStartConsentHost {
   var activeSession: ActiveSession? { get }
   /// False while a migration runs or another session is active.
   var mayStartSession: Bool { get }

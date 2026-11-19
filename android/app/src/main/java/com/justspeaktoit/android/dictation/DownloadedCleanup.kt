@@ -6,7 +6,7 @@ import com.justspeaktoit.android.local.LocalCleanupPrompt
 import com.justspeaktoit.android.local.PinnedModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
@@ -39,7 +39,8 @@ internal class DownloadedCleanup(
         if (LocalCleanupPrompt.isEmpty(transcript)) return CleanupOutcome.Released
         if (!cleaner.available) return CleanupOutcome.Failed
         val (model, file) = installed(modelId) ?: return CleanupOutcome.Failed
-        if (!withContext(io) { verify(model, file) }) return CleanupOutcome.Failed
+        // Interruptible, so a caller's own deadline (the keyboard's) also stops hashing the weights.
+        if (!runInterruptible(io) { verify(model, file) }) return CleanupOutcome.Failed
         val reply = try {
             withTimeoutOrNull(timeoutMs) {
                 cleaner.complete(file, LocalCleanupPrompt.system(customPrompt), LocalCleanupPrompt.user(transcript))

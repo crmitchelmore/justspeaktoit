@@ -6,7 +6,8 @@ final class DesktopHostAPIKeyCancellationTests: XCTestCase {
     func testCancelledRequests_NeverReadValidateOrReplaceTheSavedKey() async throws {
         FakeLog.shared.reset()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("api-keys-\(UUID())")
-        let controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         let identifier = "openrouter.apiKey"
         FakeLog.shared.setKey("synthetic-preserved", name: identifier)

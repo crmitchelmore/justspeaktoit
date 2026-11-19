@@ -17,7 +17,7 @@ final class DesktopComparisonHistoryHostTests: XCTestCase {
         try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data(repeating: 4, count: 3200), sampleRate: 16_000))
             .write(to: source)
         let effects = ComparisonHostEffects(sourceToMutate: root.appendingPathComponent("unused"))
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         let models = ["openai/whisper-1", "openai/gpt-4o-transcribe"]
         let payload = "\n" + models.joined(separator: "\t") + "\n" + source.path

@@ -54,6 +54,8 @@ package enum DesktopNativeWindowEvent: Int32, CaseIterable, Sendable {
     case systemResourceRelease = 170     // text: the row's id
     case systemResourcesReleaseAll = 171
     case rawConfiguration = 180          // index: DesktopRawConfigurationAction; text: JSON or path
+    case cloudConsentResponse = 190      // text: prompt UUID; index: 1 allows
+    case cloudSharingWithdraw = 191      // text: provider ID
 
     /// Issue report preview actions that carry a preview ticket.
     package var isIssueReportAction: Bool { (151...155).contains(rawValue) }

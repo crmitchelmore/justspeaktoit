@@ -56,6 +56,7 @@
     <string name="failure_server">The speech service reported an error.</string>
     <string name="failure_client">The speech service stopped unexpectedly.</string>
     <string name="failure_too_many_requests">The speech service is limiting requests. Try again later.</string>
+    <string name="failure_out_of_credit">This provider account has no credit left. Add credit or billing with the provider, then try again.</string>
     <string name="failure_language_not_supported">This language is not supported by the selected recognition.</string>
     <string name="failure_language_unavailable">This language is not installed for on-device recognition.</string>
     <string name="failure_left_app">Dictation stopped because the app left the screen.</string>
@@ -260,6 +261,7 @@
     <string name="profile_cleanup_off">Off</string>
     <string name="profile_cleanup_model">Cleanup model</string>
     <string name="profile_cleanup_model_use_settings">Use the cleanup model in Settings</string>
+    <string name="profile_cleanup_model_downloaded">%1$s (downloaded, on this phone)</string>
     <string name="profile_cleanup_prompt">Cleanup prompt</string>
     <string name="profile_cleanup_prompt_note">Leave empty to use the cleanup prompt in Settings.</string>
     <string name="profile_use_settings">Use Settings</string>
@@ -468,6 +470,15 @@
     <string name="read_aloud_voice_needs_key">needs a %1$s key</string>
     <string name="read_aloud_voice_picker_title">Choose a voice</string>
     <string name="read_aloud_voice_loading">Loading the phone\'s voices…</string>
+    <string name="read_aloud_invalid_voice_list">%1$s returned a voice list this phone cannot use, so no account voices are shown.</string>
+    <string name="read_aloud_not_a_reading">%1$s answered instead of reading the text word for word, so reading stopped.</string>
+    <string name="read_aloud_service_message">%1$s stopped reading aloud: %2$s</string>
+    <string name="read_aloud_timed_out">%1$s took too long to respond, so reading stopped.</string>
+    <string name="read_aloud_voice_realtime_group">%1$s Realtime</string>
+    <string name="read_aloud_voice_account_group">Your %1$s voices</string>
+    <string name="read_aloud_voice_account_loading">Loading your %1$s voices…</string>
+    <string name="read_aloud_voice_account_empty">Your %1$s account has no voices to offer.</string>
+    <string name="read_aloud_voice_account_needs_key">Add a %1$s key in Settings to list your account\'s voices.</string>
     <string name="settings_pronunciation_title">Pronunciation dictionary</string>
     <string name="settings_pronunciation_note">Words read aloud differently from how they are written. Each entry applies, in order, to the text before any voice reads it. Exports carry the dictionary to your other devices.</string>
     <string name="pronunciation_empty">No pronunciations yet.</string>
@@ -596,6 +607,19 @@
     <string name="keyboard_cloud_missing_key">Add a %1$s API key in Just Speak to It to dictate with it. Nothing was typed.</string>
     <string name="keyboard_cloud_timeout">%1$s took too long to finish. Nothing was typed.</string>
     <string name="keyboard_cloud_failed">%1$s Nothing was typed.</string>
+    <plurals name="keyboard_listening_downloaded">
+        <item quantity="one">Listening with %1$s on this phone, up to %2$d second</item>
+        <item quantity="other">Listening with %1$s on this phone, up to %2$d seconds</item>
+    </plurals>
+    <string name="keyboard_downloaded_too_slow">Listening (%1$s). %2$s would take too long to finish in the keyboard, so it is used only in the app.</string>
+    <string name="keyboard_downloaded_not_ready">Listening (%1$s). %2$s is not downloaded or not ready on this phone, so the keyboard uses this instead.</string>
+    <string name="keyboard_downloaded_timeout">%1$s took longer than the keyboard can wait. Nothing was typed.</string>
+    <string name="keyboard_cleaning_up">Cleaning up with %1$s on this phone…</string>
+    <string name="keyboard_cleanup_done">Cleaned up with %1$s.</string>
+    <string name="keyboard_cleanup_too_long">Typed what you said: %1$s would take longer than the keyboard can wait to clean it up.</string>
+    <string name="keyboard_cleanup_timed_out">Typed what you said: %1$s did not finish cleaning up in time.</string>
+    <string name="keyboard_cleanup_failed">Typed what you said: cleanup with %1$s failed. Check the model in Just Speak to It.</string>
+    <string name="keyboard_cleanup_text_changed">Kept your text: it changed while %1$s was cleaning it up.</string>
     <string name="keyboard_switch">Switch</string>
     <string name="keyboard_delete">Delete</string>
     <string name="keyboard_enter">Enter</string>
@@ -624,6 +648,9 @@
     <string name="keyboard_voice_edit_network">The cleanup provider could not be reached.</string>
     <string name="keyboard_voice_edit_failed">The cleanup model could not rewrite the selection.</string>
     <string name="settings_privacy_title">Privacy</string>
+    <string name="cloud_sharing_policy_link">%1$s privacy policy</string>
+    <string name="cloud_sharing_withdraw">Withdraw</string>
+    <string name="cloud_sharing_withdraw_description">Withdraw consent for %1$s</string>
     <string name="settings_analytics_title">Share anonymous analytics</string>
     <string name="settings_analytics_note">Helps improve the app with a few typed usage events, such as a daily active ping and your first successful transcription. Transcripts, audio, prompts, clipboard text, keystrokes, API keys, screen content and personal identity are never collected. Off unless you turn it on.</string>
     <string name="settings_diagnostics_title">Send crash reports and diagnostics</string>

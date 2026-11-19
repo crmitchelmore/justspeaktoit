@@ -1690,7 +1690,8 @@ What the Windows app does:
   Apple's sign-in page, opens it in the default browser (only `https` pages on
   `apple.com` or `icloud.com`), and listens on
   `http://127.0.0.1:47823/cloudkit-sign-in` for the redirect carrying
-  `ckWebAuthToken`. The listener runs only during sign-in, for at most ten
+  `ckWebAuthToken`, which Apple sends to the token's registered
+  `https://justspeaktoit.com/cloudkit-sign-in` and the site forwards there. The listener runs only during sign-in, for at most ten
   minutes, and takes the redirect only from a process of the signed-in
   Windows user and only as a top-level browser navigation (see
   [Sign-in callback](windows-cloudkit-sync.md#sign-in-callback)). The token rotates on every response and is kept in Credential
@@ -1746,16 +1747,23 @@ to use the Development environment) before starting the app.
    new **API Token**:
    - Name: `Just Speak to It for Windows`.
    - **Sign in Callback**: choose **URL Redirect** and enter exactly
-     `http://127.0.0.1:47823/cloudkit-sign-in`.
+     `https://justspeaktoit.com/cloudkit-sign-in`. The Console refuses
+     `http://` callbacks, so this site page forwards the token to the app's
+     loopback listener, `http://127.0.0.1:47823/cloudkit-sign-in` (see
+     [Sign-in callback](windows-cloudkit-sync.md#sign-in-callback)).
    - Allowed origins: leave the default. The Windows client is not a browser
      and sends no `Origin` header.
    - Save it and copy the token value.
 3. **Add the CI secret.** In GitHub, open **crmitchelmore/justspeaktoit >
-   Settings > Secrets and variables > Actions > New repository secret**, name
-   it `CLOUDKIT_WEB_API_TOKEN`, and paste the token. The macOS to Windows Swift
-   Proof workflow writes it into the build with
-   `scripts/windows-cloudkit/configure-cloudkit-web.py` on pushes to `main` and
-   manual runs. Pull request builds never receive it.
+   Settings > Environments**, and in both the `cloudkit` and `android-release`
+   environments add an environment secret named `CLOUDKIT_WEB_API_TOKEN` with
+   the token (it is not a repository secret, #1827). The `cloudkit`
+   environment admits `main` and the `alpha-build-*` and `stable-candidate-*`
+   tags. The macOS to Windows Swift Proof workflow writes the token into the
+   build with `scripts/windows-cloudkit/configure-cloudkit-web.py` on pushes to
+   `main` and runs on those tags. Pull request and merge-batch builds never
+   receive it. The 1Password item "CloudKit Web Services API token —
+   iCloud.com.justspeaktoit (Production)" holds the value.
 4. **Check the callback once.** Install a build made with the secret, sign in
    from Settings > iCloud sync, and confirm the browser lands on "Signed in".
    If Console refuses a plain `http://127.0.0.1` callback, record that in issue

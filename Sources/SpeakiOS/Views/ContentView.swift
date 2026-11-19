@@ -61,7 +61,8 @@ public struct ContentView: View {
     public init() {
         let coordinator = TranscriberCoordinator(
             networkSnapshot: CaptureNetworkPathMonitor.liveSnapshotProvider(),
-            localRecognitionCapability: AppleLegacyRecognitionCapabilityProbe.capability(for:)
+            localRecognitionCapability: AppleLegacyRecognitionCapabilityProbe.capability(for:),
+            cloudSharingConsent: .shared
         )
         _coordinator = StateObject(wrappedValue: coordinator)
         // Binds hands-free stop/cancel to the run its start acquired (#943): a

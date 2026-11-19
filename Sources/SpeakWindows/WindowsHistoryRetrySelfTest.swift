@@ -18,6 +18,7 @@ enum WindowsHistoryRetrySelfTest {
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = SyntheticEffects()
         let controller = try WindowsAppController(directory: root, effects: effects)
+        await controller.allowCloudSharingForSelfTest()
         await controller.markReadyForSelfTest()
         let checks = RetryChecks(
             controller: controller, effects: effects, history: root.appendingPathComponent("History", isDirectory: true)

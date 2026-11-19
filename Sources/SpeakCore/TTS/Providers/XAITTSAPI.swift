@@ -96,7 +96,14 @@ public struct XAITTSRequest: Equatable, Sendable {
 /// (read 2026-09-10).
 public struct XAITTSAPI: Sendable {
     public static let speechEndpoint = URL(string: "https://api.x.ai/v1/tts")!
+    /// Built-in voices only; team custom voices never appear here.
     public static let voicesEndpoint = URL(string: "https://api.x.ai/v1/tts/voices")!
+    /// The team's custom (cloned) voices, paginated. Contract:
+    /// https://docs.x.ai/developers/model-capabilities/audio/custom-voices (read 2026-11-17).
+    public static let customVoicesEndpoint = URL(string: "https://api.x.ai/v1/custom-voices")!
+    public static let customVoicePageSize = 100
+    /// Pages read before a listing is treated as unbounded.
+    public static let maximumCustomVoicePages = 10
 
     /// One request accepts at most 15,000 characters of text.
     public static let maximumTextCharacters = 15_000
@@ -169,10 +176,34 @@ public struct XAITTSAPI: Sendable {
         return urlRequest
     }
 
-    /// `GET /v1/tts/voices` — the account's own voice list, which is where the
-    /// voices beyond the two documented presets come from.
+    /// The built-in voices from `GET /v1/tts/voices`, then the team's custom
+    /// voices from `GET /v1/custom-voices`. Custom voices are region-gated, so
+    /// a 403 or 404 on the first page means the team has none rather than a
+    /// failure; on a later page it fails the listing rather than cutting it short.
     public func listVoices(apiKey: String) async throws -> [XAITTSVoice] {
-        let request = Self.voiceListRequest(apiKey: apiKey)
+        var voices = try Self.decodedVoices(from: try await data(for: Self.voiceListRequest(apiKey: apiKey)))
+        var token: String?
+        for _ in 0..<Self.maximumCustomVoicePages {
+            let request = Self.customVoiceListRequest(apiKey: apiKey, paginationToken: token)
+            let (data, response) = try await session.data(for: request)
+            guard let status = (response as? HTTPURLResponse)?.statusCode else {
+                throw XAITTSAPIError.invalidResponse
+            }
+            if token == nil, Self.customVoicesUnavailableStatuses.contains(status) { break }
+            guard (200..<300).contains(status) else { throw Self.error(from: data, statusCode: status) }
+            let page = try Self.decodedCustomVoicePage(from: data)
+            voices += page.voices
+            guard let next = page.nextToken else { break }
+            token = next
+        }
+        return voices
+    }
+
+    /// Statuses meaning the team has no custom voice library (not offered in
+    /// its region or plan), which leaves the built-in list unchanged.
+    public static let customVoicesUnavailableStatuses: Set<Int> = [403, 404]
+
+    private func data(for request: URLRequest) async throws -> Data {
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw XAITTSAPIError.invalidResponse
@@ -180,7 +211,26 @@ public struct XAITTSAPI: Sendable {
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw Self.error(from: data, statusCode: httpResponse.statusCode)
         }
-        return try Self.decodedVoices(from: data)
+        return data
+    }
+
+    public static func customVoiceListRequest(apiKey: String, paginationToken: String?) -> URLRequest {
+        var components = URLComponents(url: customVoicesEndpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "limit", value: String(customVoicePageSize))]
+            + (paginationToken.map { [URLQueryItem(name: "pagination_token", value: $0)] } ?? [])
+        var request = URLRequest(url: components?.url ?? customVoicesEndpoint)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    /// One page of `GET /v1/custom-voices` and the token for the next, if any.
+    public static func decodedCustomVoicePage(from data: Data) throws -> XAICustomVoicePage {
+        guard let payload = try? JSONDecoder().decode(XAIVoiceListPayload.self, from: data) else {
+            throw XAITTSAPIError.invalidResponse
+        }
+        let token = payload.paginationToken.flatMap { $0.isEmpty ? nil : $0 }
+        return XAICustomVoicePage(voices: voices(from: payload), nextToken: token)
     }
 
     public static func voiceListRequest(apiKey: String) -> URLRequest {
@@ -198,7 +248,11 @@ public struct XAITTSAPI: Sendable {
         guard let payload = try? JSONDecoder().decode(XAIVoiceListPayload.self, from: data) else {
             throw XAITTSAPIError.invalidResponse
         }
-        return payload.voices.map {
+        return voices(from: payload)
+    }
+
+    private static func voices(from payload: XAIVoiceListPayload) -> [XAITTSVoice] {
+        payload.voices.map {
             XAITTSVoice(
                 id: $0.voiceID,
                 name: $0.name ?? $0.voiceID.capitalized,
@@ -240,8 +294,19 @@ public struct XAITTSAPI: Sendable {
     }
 }
 
+public struct XAICustomVoicePage: Equatable, Sendable {
+    public let voices: [XAITTSVoice]
+    public let nextToken: String?
+}
+
 private struct XAIVoiceListPayload: Decodable {
     let voices: [XAIVoiceListEntry]
+    let paginationToken: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case voices
+        case paginationToken = "pagination_token"
+    }
 }
 
 private struct XAIVoiceListEntry: Decodable {

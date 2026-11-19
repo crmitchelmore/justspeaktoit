@@ -135,6 +135,21 @@ Post-processing drains, keyless ordering, ordered live completion, later Apply,
 bounded overflow and permanent shutdown refusal. These native wiring and test changes remain
 NOT_RUN locally; this is not yet automatic qualification of the drain contract.
 
+## Cloud sharing consent (Windows and Linux, #1814)
+
+Before the first upload to each cloud AI provider the host asks once, per provider
+and kind of content, with a modal window (Windows: Win32 dialog; Linux: GTK tool
+window). It names every provider, what it receives and links its https privacy
+policy; the buttons are Allow and Not now, and closing it answers Not now. About's
+**Privacy settings** button opens a second window listing the providers allowed,
+each with a Withdraw button; withdrawing is saved before the list refreshes. The
+host (`DesktopHostCloudSharing`) gates recording, History retry, imported audio,
+remote cleanup, live Auto-Clean, read-aloud, voice export, Compare and Voice Edit,
+and automation sends nothing and says why. The answer is kept in
+`cloud-sharing-consent.json` beside the settings, which is never exported or
+synced. The native ABI is `CloudSharing.h` (events 190 and 191); both windows are
+NOT_RUN locally until the Windows and Linux workflows build them.
+
 ## Linux Permissions destination (native CI qualified; physical acceptance open)
 
 About's **Permissions** button, Open Permissions action (run 10/event 118)

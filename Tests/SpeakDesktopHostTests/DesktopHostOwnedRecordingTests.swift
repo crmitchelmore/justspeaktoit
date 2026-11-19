@@ -65,7 +65,8 @@ final class DesktopHostOwnedRecordingTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("owned-recording-\(UUID())")
         effects = SyntheticEffects()
-        host = try DesktopHostController(directory: directory, effects: effects, shutdownGrace: .milliseconds(30))
+        host = try DesktopHostController.consented(
+            directory: directory, effects: effects, shutdownGrace: .milliseconds(30))
         await host.markReadyForSelfTest()
     }
     override func tearDown() async throws {

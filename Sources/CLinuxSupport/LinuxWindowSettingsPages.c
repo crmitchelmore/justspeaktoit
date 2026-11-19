@@ -272,6 +272,11 @@ static void on_troubleshooting(GtkButton *button, gpointer data) {
     jsti_troubleshooting_open(ui.window);
 }
 
+static void on_privacy(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    jsti_cloud_sharing_open(ui.window);
+}
+
 static void on_permissions(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     jsti_permissions_open(ui.window);
@@ -443,8 +448,14 @@ GtkWidget *build_about(void) {
     gtk_widget_set_size_request(setup, -1, 44);
     gtk_widget_set_halign(setup, GTK_ALIGN_START);
     g_signal_connect(setup, "clicked", G_CALLBACK(on_setup), NULL);
+    GtkWidget *privacy = gtk_button_new_with_mnemonic("P_rivacy settings…");
+    gtk_widget_set_size_request(privacy, -1, 44);
+    gtk_widget_set_halign(privacy, GTK_ALIGN_START);
+    gtk_widget_set_name(privacy, "cloudSharingPrivacySettingsButton");
+    g_signal_connect(privacy, "clicked", G_CALLBACK(on_privacy), NULL);
     gtk_box_append(GTK_BOX(body), setup);
     gtk_box_append(GTK_BOX(body), permissions);
+    gtk_box_append(GTK_BOX(body), privacy);
     gtk_box_append(GTK_BOX(column), card);
     GtkWidget *tip_body;
     about_page()->tip_jar = jsti_card_new("emblem-favorite-symbolic", "Support development", &tip_body);

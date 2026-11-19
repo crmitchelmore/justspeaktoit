@@ -105,7 +105,7 @@ final class DesktopComparisonBatchTests: XCTestCase {
             XCTAssertNil(batch)
             await fixture.controller.close()
             let effects = ComparisonHostEffects(sourceToMutate: fixture.root.appendingPathComponent("unused"))
-            let reopened = try DesktopHostController<FakePlatform>(directory: fixture.root, effects: effects)
+            let reopened = try DesktopHostController<FakePlatform>.consented(directory: fixture.root, effects: effects)
             await reopened.openComparison()
             let persisted = await reopened.comparisons
             let store = try XCTUnwrap(persisted)
@@ -236,7 +236,7 @@ private struct BatchFixture {
         }
         models = DesktopHostModels.visible.filter { !DesktopHostModels.isLive($0.id) }.prefix(2).map(\.id)
         effects = ComparisonHostEffects(sourceToMutate: root.appendingPathComponent("unused"))
-        controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
     }
 
     func start() async {

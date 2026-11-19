@@ -198,6 +198,7 @@ enum WindowsTroubleshootingSelfTest {
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = SyntheticEffects()
         let controller = try WindowsAppController(directory: root, effects: effects)
+        await controller.allowCloudSharingForSelfTest()
         do {
             await controller.markReadyForSelfTest()
             try await checkClipboard(controller, effects: effects)
@@ -206,6 +207,7 @@ enum WindowsTroubleshootingSelfTest {
             await controller.close()
             try await reject { try await controller.applyTroubleshootingFix(keepClipboard, snapshot: snapshot) }
             let reopened = try WindowsAppController(directory: root, effects: effects)
+            await reopened.allowCloudSharingForSelfTest()
             let output = await reopened.textOutputOptions()
             let processing = await reopened.postProcessingOptions()
             await reopened.close()

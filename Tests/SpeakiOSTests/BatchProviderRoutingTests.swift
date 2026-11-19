@@ -8,6 +8,16 @@ import XCTest
 
 @MainActor
 final class BatchProviderRoutingTests: XCTestCase {
+    override func setUp() async throws {
+        try await super.setUp()
+        CloudSharingConsentTestSupport.grantAll()
+    }
+
+    override func tearDown() async throws {
+        CloudSharingConsentTestSupport.withdrawAll()
+        try await super.tearDown()
+    }
+
     func testExistingBatchRoutePrecedenceAndFallback() {
         let cases: [(String, IOSBatchTranscriptionRoute)] = [
             (AppleLocalModels.speechTranscriberModelID, .appleSpeechAnalyzer),

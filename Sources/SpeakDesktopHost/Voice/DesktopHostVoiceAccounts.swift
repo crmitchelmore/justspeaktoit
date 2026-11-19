@@ -248,6 +248,15 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         presentModernVoiceDiscovery(voiceDiscovery.message, loading: voiceAccountWorkIsPending)
     }
 
+    /// The key for a request that is about to send text to the voice's provider;
+    /// it stops first if the user has not allowed that provider.
+    package nonisolated static func readVoiceSynthesisKey(
+        effects: any DesktopHostEffects<Platform>, name: String, consent: DesktopCloudSharingConsentStore
+    ) async throws -> String {
+        try consent.require(DesktopHostCloudSharing.voice(credentialIdentifier: name))
+        return try await readVoiceSynthesisKey(effects: effects, name: name)
+    }
+
     package nonisolated static func readVoiceSynthesisKey(
         effects: any DesktopHostEffects<Platform>, name: String
     ) async throws -> String {

@@ -117,7 +117,8 @@ final class DesktopHostLinuxShortcutEditTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("shortcut-cas-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         cleanupDirectory = directory
-        let controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         cleanupController = controller
         let base = await controller.shortcutBindings
         let changed = base.applying(.off)
@@ -141,7 +142,7 @@ final class DesktopHostLinuxShortcutEditTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         cleanupDirectory = directory
         let effects = SettingsWriteEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         cleanupController = controller
         let base = await controller.shortcutBindings
         try await controller.saveShortcutBindings(base)

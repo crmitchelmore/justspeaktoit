@@ -3,13 +3,14 @@ import SwiftUI
 
 extension SettingsView {
   /// The card for a native cleanup provider whose key no speech card already manages.
-  func nativeTextAPIKeyCard(for provider: NativeTextProvider) -> some View {
+  func nativeTextAPIKeyCard(for provider: NativeTextProvider, cardID: String) -> some View {
     let stateID = APIKeyFormModel.nativeTextStateID(provider)
     let identifier = provider.credentialIdentifier
     let isStored = isAPIKeyStored(identifier)
     let validationState = apiKeyForm.providerStates[stateID] ?? .idle
     let inFlight = validationState.isInFlight
     return apiKeyCard(APIKeyCardConfiguration(
+      cardID: cardID,
       title: "\(provider.displayName) (Post-processing)",
       systemImage: "text.badge.checkmark",
       tint: .orange,

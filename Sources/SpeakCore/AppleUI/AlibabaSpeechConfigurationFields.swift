@@ -19,6 +19,7 @@ public struct AlibabaSpeechConfigurationFields: View {
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
                 #endif
+                .accessibilityLabel("Alibaba workspace ID")
                 .accessibilityIdentifier("alibaba-workspace-id")
             Text("For the new or replacement Alibaba key you save below. Use a key from this same region and "
                 + "workspace. The key, region and workspace are saved and transferred together; changing these "

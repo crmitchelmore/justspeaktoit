@@ -222,11 +222,15 @@ private extension LocalTranscriptionModelsCard {
             Button("Use") {
               settings.localTranscriptionModel = model.id
             }
+            .accessibilityLabel("Use \(model.displayName)")
+            .accessibilityIdentifier("localModelUse.\(model.id)")
           }
           Button(localModels.usesLegacyStorage(model) ? "Remove" : "Delete") {
             inventory.deleteDownloadedWhisperKitModel(model)
           }
           .disabled(!localModels.canDelete(model))
+          .accessibilityLabel("\(localModels.usesLegacyStorage(model) ? "Remove" : "Delete") \(model.displayName)")
+          .accessibilityIdentifier("localModelDelete.\(model.id)")
         }
       case .installing:
         VStack(alignment: .trailing, spacing: 6) {
@@ -241,10 +245,14 @@ private extension LocalTranscriptionModelsCard {
           Button("Download") {
             Task { await localModels.install(model) }
           }
+          .accessibilityLabel("Download \(model.displayName)")
+          .accessibilityIdentifier("localModelDownload.\(model.id)")
           if localModels.canDelete(model) {
             Button(state == .notInstalled ? "Delete" : "Retry Delete") {
               inventory.deleteDownloadedWhisperKitModel(model)
             }
+            .accessibilityLabel("\(state == .notInstalled ? "Delete" : "Retry Delete") \(model.displayName)")
+            .accessibilityIdentifier("localModelDelete.\(model.id)")
           }
         }
       }

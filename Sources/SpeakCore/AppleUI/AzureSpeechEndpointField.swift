@@ -14,6 +14,7 @@ public struct AzureSpeechEndpointField: View {
                 .textInputAutocapitalization(.never)
                 .keyboardType(.URL)
                 #endif
+                .accessibilityLabel("Azure resource endpoint")
                 .accessibilityIdentifier("azure-speech-resource-endpoint")
             Text("For live transcription, paste the HTTPS endpoint from your Speech resource’s Keys and Endpoint page. "
                 + "Recorded audio and live transcription also accept http://127.0.0.1:PORT for a local proxy. "

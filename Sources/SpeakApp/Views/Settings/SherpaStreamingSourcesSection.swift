@@ -180,6 +180,8 @@ private extension SherpaStreamingSourcesSection {
             Button("Use") {
               settings.localStreamingModelSource = source.id
             }
+            .accessibilityLabel("Use \(source.displayName)")
+            .accessibilityIdentifier("localStreamingModelUse.\(source.id)")
           }
         case .installing:
           VStack(alignment: .trailing, spacing: 6) {
@@ -194,6 +196,8 @@ private extension SherpaStreamingSourcesSection {
             Task { await sherpaRuntime.installModel(source) }
           }
           .disabled(!sherpaRuntime.runtimeState.isInstalled)
+          .accessibilityLabel("Download \(source.displayName)")
+          .accessibilityIdentifier("localStreamingModelDownload.\(source.id)")
           .speakTooltip(
             sherpaRuntime.runtimeState.isInstalled
               ? "Download this sherpa-onnx model for local-only streaming."
@@ -215,6 +219,8 @@ private extension SherpaStreamingSourcesSection {
             }
           }
         }
+        .accessibilityLabel("Remove \(source.displayName)")
+        .accessibilityIdentifier("localStreamingModelRemove.\(source.id)")
       }
       }
     }

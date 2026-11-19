@@ -44,6 +44,8 @@ struct VoiceOutputInputSourceCard: View {
         Label(source.displayName, systemImage: source.icon).tag(source)
       }
     }
+    // Without an explicit identifier SwiftUI exposes the selected item's SF Symbol name.
+    .accessibilityIdentifier("voiceOutputSourcePicker")
   }
 }
 

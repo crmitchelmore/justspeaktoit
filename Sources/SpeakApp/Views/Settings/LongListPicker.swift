@@ -163,6 +163,10 @@ struct LongListChooserSheet<Item, ID: Hashable, Row: View, Footer: View>: View {
                     .keyboardShortcut(.cancelAction)
             }
             controls()
+            TextField("Search", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Search \(title)")
+                .accessibilityIdentifier("longListSearchField")
             List {
                 if let current {
                     Section("Current selection") { choice(current) }
@@ -195,7 +199,6 @@ struct LongListChooserSheet<Item, ID: Hashable, Row: View, Footer: View>: View {
                 }
                 footer(select)
             }
-            .searchable(text: $query)
         }
         .padding(16)
         .frame(minWidth: 780, minHeight: 520)
@@ -218,6 +221,9 @@ struct LongListChooserSheet<Item, ID: Hashable, Row: View, Footer: View>: View {
                 .accessibilityElement(children: .combine)
             }
             .buttonStyle(.plain)
+            // A row-unique identifier; otherwise SwiftUI surfaces a child's
+            // shared one (for example `modelCredentialStatus.ready`).
+            .accessibilityIdentifier("longListChoice.\(id(item))")
             accessory(item)
         }
     }

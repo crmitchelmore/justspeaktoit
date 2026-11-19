@@ -27,7 +27,7 @@ jobs:
     # batches and main run the whole suite and the macOS-only tooling tests.
     # Route only the explicitly reviewed revision to the native pool.
     # Every selected native runner must also admit this revision locally.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 45
     # Compiles the native-CI Keychain redirect into these test builds only;
     # distribution builds never set it (#1360).
@@ -273,7 +273,7 @@ jobs:
   core-journey-e2e:
     name: Core Dictation Journey (≤8m tests)
     # This non-UI contract gate may use an explicitly approved native runner.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 40
     # Compiles the native-CI Keychain redirect into these test builds only;
     # distribution builds never set it (#1360).

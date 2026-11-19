@@ -362,7 +362,7 @@ jobs:
 
   portable-macos:
     name: Portable Swift on macOS
-    runs-on: macos-15
+    runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-15"]') }}
     timeout-minutes: 15
     env:
       SPEAK_PORTABLE_CORE: '1'

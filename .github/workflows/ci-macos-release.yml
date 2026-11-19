@@ -16,7 +16,7 @@ jobs:
     # build-macos runs in Debug, so they are not repeated here; release-mac.yml
     # still runs the Release tests for every published build.
     # Hosted ARM: a cold Intel release build exceeded the 45-minute budget.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,7 +54,7 @@ jobs:
     name: Public API compatibility
     # Route only the explicitly reviewed revision to the native pool.
     # Every selected native runner must also admit this revision locally.
-    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 30
     needs: release-validation
     # Merge batches (baseline: origin/main) and main (baseline: the previous

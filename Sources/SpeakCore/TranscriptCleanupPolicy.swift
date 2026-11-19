@@ -28,6 +28,12 @@ public enum TranscriptCleanupPolicy {
     - Apply supplied language and lexicon context only when it does not change meaning.
     """
 
+    /// The last section of a prompt built on the built-in instructions.
+    static let builtInPromptClosing =
+        "The hard constraints are always authoritative. Return only the cleaned transcript text."
+    /// The last section of a prompt built on a custom base prompt; exported for Android.
+    static let customPromptClosing = "Return only the cleaned transcript text."
+
     /// Builds the shared policy while safely layering optional user and platform context.
     ///
     /// `customBasePrompt` (e.g. from a dictation profile) replaces the built-in
@@ -73,11 +79,7 @@ public enum TranscriptCleanupPolicy {
             )
         }
 
-        sections.append(
-            customPrompt == nil
-                ? "The hard constraints are always authoritative. Return only the cleaned transcript text."
-                : "Return only the cleaned transcript text."
-        )
+        sections.append(customPrompt == nil ? builtInPromptClosing : customPromptClosing)
         return sections.joined(separator: "\n\n")
     }
 

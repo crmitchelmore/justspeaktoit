@@ -349,7 +349,7 @@ void jsti_action_shortcut_editor_open(GtkWindow *owner) {
     for (guint i = 0; i < editor->rows->len; ++i)
         gtk_string_list_append(titles, ((ActionRow *)g_ptr_array_index(editor->rows, i))->title);
     editor->action = GTK_DROP_DOWN(gtk_drop_down_new(G_LIST_MODEL(titles), NULL));
-    gtk_accessible_update_property(GTK_ACCESSIBLE(editor->action), GTK_ACCESSIBLE_PROPERTY_LABEL, "Action", -1);
+    jsti_accessible_set_name(GTK_WIDGET(editor->action), "Action");
     gtk_widget_set_size_request(GTK_WIDGET(editor->action), -1, 44);
     gtk_box_append(GTK_BOX(editor->controls), GTK_WIDGET(editor->action));
     editor->key = GTK_LABEL(wrapped(""));
@@ -371,7 +371,7 @@ void jsti_action_shortcut_editor_open(GtkWindow *owner) {
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(switches), GTK_WIDGET(editor->global));
     gtk_box_append(GTK_BOX(editor->controls), switches);
     editor->preset = GTK_DROP_DOWN(gtk_drop_down_new_from_strings((const char *const *)configuration.names));
-    gtk_accessible_update_property(GTK_ACCESSIBLE(editor->preset), GTK_ACCESSIBLE_PROPERTY_LABEL, "Preset", -1);
+    jsti_accessible_set_name(GTK_WIDGET(editor->preset), "Preset");
     gtk_widget_set_size_request(GTK_WIDGET(editor->preset), -1, 44);
     gtk_box_append(GTK_BOX(editor->controls), GTK_WIDGET(editor->preset));
     gtk_box_append(GTK_BOX(editor->controls), button("Apply preset to draft", G_CALLBACK(use_preset), editor));

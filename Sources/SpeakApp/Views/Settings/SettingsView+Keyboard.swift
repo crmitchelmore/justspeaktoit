@@ -64,6 +64,16 @@ extension SettingsView {
             "When on, Escape discards the active dictation recording, even in another app. "
               + "When off, Escape leaves recording running; stop it with your recording hotkey or the Stop button."
           )
+
+          settingsToggle(
+            "Keep audio when a recording is cancelled",
+            isOn: settingsBinding(\AppSettings.keepAudioOnCancel),
+            tint: .yellow
+          )
+          .speakTooltip(
+            "When on, a cancelled recording stays in History so you can play it or transcribe it later. "
+              + "When off, cancelling deletes the audio and adds nothing to History."
+          )
         }
       }
       .speakTooltip("Choose how the hotkey behaves when you start and stop recordings.")
@@ -81,6 +91,8 @@ extension SettingsView {
               .foregroundStyle(.secondary)
             }
             Slider(value: settingsBinding(\AppSettings.holdThreshold), in: 0.2...1.5, step: 0.05)
+            .accessibilityLabel("Hold Threshold")
+            .accessibilityValue(String(format: "%.2f seconds", settings.holdThreshold))
             .speakTooltip("Decide how long you must hold the shortcut before Speak starts recording.")
           }
 
@@ -95,6 +107,8 @@ extension SettingsView {
               .foregroundStyle(.secondary)
             }
             Slider(value: settingsBinding(\AppSettings.doubleTapWindow), in: 0.2...1.0, step: 0.05)
+            .accessibilityLabel("Double Tap Window")
+            .accessibilityValue(String(format: "%.2f seconds", settings.doubleTapWindow))
             .speakTooltip("Set the gap allowed between taps when you double-press to trigger Speak.")
           }
 

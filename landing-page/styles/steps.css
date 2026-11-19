@@ -1,0 +1,30 @@
+/* ---------- Steps ---------- */
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1.1rem;
+}
+
+.step { position: relative; display: flex; flex-direction: column; gap: .5rem; }
+
+.step-index {
+  font-family: var(--display);
+  font-size: .82rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  color: var(--accent);
+}
+
+.step h3 { font-size: 1.32rem; margin-bottom: .15rem; }
+
+kbd {
+  font-family: var(--mono);
+  font-size: .8rem;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 7px;
+  padding: .12rem .48rem;
+}

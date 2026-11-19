@@ -36,7 +36,7 @@ type Route = `${'GET' | 'POST'} ${string}`;
 
 export default {
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
-    await new Repository(env.DB).pruneExpiredRequestClaims(Math.floor(controller.scheduledTime / 1000));
+    await new Repository(env.DB).usage.pruneExpiredRequestClaims(Math.floor(controller.scheduledTime / 1000));
   },
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);

@@ -11,6 +11,27 @@ final class IncrementalMP3DecoderTests: XCTestCase {
         let chunks: [Data]
     }
 
+    func testNativeState_releasesItsRetainedCallbackContextOnClose() throws {
+        let state = try IncrementalMP3NativeState()
+        XCTAssertTrue(state.isCallbackContextRetained)
+        try state.append(try fixture())
+        state.close()
+        state.close()
+        XCTAssertFalse(state.isCallbackContextRetained, "Closing releases the context native code held")
+        XCTAssertNil(try state.nextPCM(), "A closed state never calls back into native code")
+    }
+
+    func testCallbackContext_neverResolvesAFreedState() throws {
+        let context = MP3CallbackContext()
+        do {
+            let state = try IncrementalMP3NativeState()
+            context.state = state
+            XCTAssertNotNil(MP3CallbackContext.state(Unmanaged.passUnretained(context).toOpaque()))
+        }
+        XCTAssertNil(MP3CallbackContext.state(Unmanaged.passUnretained(context).toOpaque()))
+        XCTAssertNil(MP3CallbackContext.state(nil))
+    }
+
     func testRealMP3FragmentsPreservePCMAndProduceBeforeEOF() async throws {
         let mp3 = try fixture()
         let reference = try await decode(mp3, chunkSize: 1024)

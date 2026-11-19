@@ -39,6 +39,8 @@ public struct CLIPlan: Equatable {
     public var pitch: Double?
     public var quality: String?
     public var language: String?
+    /// `speak config get|set`: see `CommandLineParser+Configuration`.
+    public var keys: [String]?, prefix: String?, changes: [String: AnyCodable]?, dryRun: Bool?
 
     public init(
         command: AutomationCommand,
@@ -64,25 +66,7 @@ public struct CLIPlan: Equatable {
     /// Builds the wire request. The id is injected so a retry can reuse one and
     /// tests can assert on a fixed value.
     public func request(id: String = UUID().uuidString) -> AutomationRequest {
-        var request = AutomationRequest(
-            id: id,
-            command: self.command,
-            path: self.path,
-            limit: self.limit,
-            timeout: self.timeout,
-            captureID: self.captureID,
-            sinceID: self.sinceID
-        )
-        request.text = self.text
-        request.voice = self.voice
-        request.play = self.play
-        request.provider = self.provider
-        request.model = self.model
-        request.speed = self.speed
-        request.pitch = self.pitch
-        request.quality = self.quality
-        request.language = self.language
-        return request
+        self.arguments.request(id: id, command: self.command)
     }
 }
 
@@ -113,6 +97,8 @@ public enum CommandLineParser {
                 [--speed <n>] [--pitch <semitones>] [--quality <q>] [--language <id>]
       speak voices [--provider <id>] [--json]
       speak status [--json]
+      speak config get [<key>...] [--prefix <p>] [--json]
+      speak config set <key>=<value>... [--dry-run] [--json]
       speak mcp
       speak --help | --version
 
@@ -133,6 +119,10 @@ public enum CommandLineParser {
                    -o writes without playing unless --play is given.
       voices       List the providers, voices and models say can use (* = app's voice).
       status       Report whether the app is reachable and dictating.
+      config       Read settings (get) or change several at once (set). Values are
+                   JSON (true, 1.2, "text") or plain text. set validates every
+                   change and applies all or none; --dry-run only validates.
+                   Writes need "Allow automation to change settings" in the app.
       mcp          Run a stdio MCP server exposing the same commands as tools.
 
     NOTES
@@ -153,21 +143,22 @@ public enum CommandLineParser {
         #endif
     }
 
-    /// Verbs that map straight onto a command plus the options they accept.
-    /// Table-driven so adding a verb is data, not another branch.
-    private static let verbs: [String: (command: AutomationCommand, options: Set<Option>)] = [
-        "await": (.awaitTranscript, [.json, .timeout, .captureID, .sinceID]),
-        "listen": (.startDictation, [.json]),
-        "stop": (.stopDictation, [.json]),
-        "history": (.history, [.json, .last]),
-        "status": (.status, [.json]),
-        "voices": (.listVoices, [.json, .provider])
+    /// Verbs that map straight onto a command. Table-driven so adding a verb
+    /// is data, not another branch.
+    private static let verbs: [String: AutomationCommand] = [
+        "await": .awaitTranscript,
+        "listen": .startDictation,
+        "stop": .stopDictation,
+        "history": .history,
+        "status": .status,
+        "voices": .listVoices
     ]
 
     /// Verbs with their own argument grammar.
     private static let customVerbs: [String: ([String]) throws -> CLIPlan] = [
         "transcribe": parseTranscribe,
-        "say": parseSay
+        "say": parseSay,
+        "config": parseConfig
     ]
 
     public static func parse(_ arguments: [String]) throws -> CLIInvocation {
@@ -189,11 +180,11 @@ public enum CommandLineParser {
             return .mcpServer
         default:
             if let custom = self.customVerbs[verb] { return .run(try custom(remaining)) }
-            guard let entry = self.verbs[verb] else {
+            guard let command = self.verbs[verb] else {
                 throw CLIUsageError(message: "Unknown command \"\(verb)\". Run `speak --help`.")
             }
-            var plan = CLIPlan(command: entry.command)
-            try self.rejectPositional(&plan, arguments: remaining, allowed: entry.options, verb: verb)
+            var plan = CLIPlan(command: command)
+            try self.rejectPositional(&plan, arguments: remaining, allowed: self.options[command] ?? [], verb: verb)
             if plan.command == .awaitTranscript {
                 do { _ = try plan.request().validated() } catch {
                     throw CLIUsageError(
@@ -209,7 +200,7 @@ public enum CommandLineParser {
         let positional = try self.applyOptions(
             &plan,
             arguments: arguments,
-            allowed: [.json, .timeout]
+            allowed: self.options[.transcribeFile] ?? []
         )
         guard let file = positional.first else {
             throw CLIUsageError(message: "`speak transcribe` requires an audio file path.")
@@ -241,6 +232,8 @@ public enum CommandLineParser {
         case pitch = "--pitch"
         case quality = "--quality"
         case language = "--language"
+        case prefix = "--prefix"
+        case dryRun = "--dry-run"
 
         init?(token: String) {
             switch token {
@@ -251,7 +244,7 @@ public enum CommandLineParser {
         }
 
         var takesValue: Bool {
-            self != .json && self != .play
+            self != .json && self != .play && self != .dryRun
         }
     }
 
@@ -269,68 +262,15 @@ public enum CommandLineParser {
         }
     }
 
-    /// Applies recognised options to `plan` and returns the positional leftovers.
-    static func applyOptions(
-        _ plan: inout CLIPlan,
-        arguments: [String],
-        allowed: Set<Option>
-    ) throws -> [String] {
-        var positional: [String] = []
-        var index = 0
-
-        while index < arguments.count {
-            let token = arguments[index]
-            index += 1
-
-            // `-` names standard input and `--` ends the options, so text that
-            // starts with a dash can still be spoken.
-            if token == "--" {
-                positional.append(contentsOf: arguments[index...])
-                break
-            }
-            guard token.hasPrefix("-"), token != "-" else {
-                positional.append(token)
-                continue
-            }
-            // Support --flag=value as well as --flag value. Empty subsequences are
-            // kept so `--timeout=` fails as a missing value instead of silently
-            // swallowing the next argument.
-            let parts = token
-                .split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-                .map(String.init)
-            guard let option = Option(token: parts[0]) else {
-                throw CLIUsageError(message: "Unknown option \"\(parts[0])\".")
-            }
-            guard allowed.contains(option) else {
-                throw CLIUsageError(message: "\(option.rawValue) is not valid for this command.")
-            }
-            guard option.takesValue else {
-                guard parts.count == 1 else {
-                    throw CLIUsageError(message: "\(option.rawValue) does not take a value.")
-                }
-                if option == .play { plan.play = true } else { plan.json = true }
-                continue
-            }
-
-            let value: String
-            if parts.count == 2 {
-                value = parts[1]
-            } else {
-                guard index < arguments.count else {
-                    throw CLIUsageError(message: "\(option.rawValue) requires a value.")
-                }
-                value = arguments[index]
-                index += 1
-            }
-            try self.apply(option: option, value: value, to: &plan)
-        }
-        return positional
-    }
-
-    private static func apply(option: Option, value: String, to plan: inout CLIPlan) throws {
+    static func apply(option: Option, value: String, to plan: inout CLIPlan) throws {
         switch option {
-        case .json, .play:
+        case .json, .play, .dryRun:
             break
+        case .prefix:
+            guard !value.isEmpty, value.count <= AutomationLimits.maxIdentifierLength else {
+                throw CLIUsageError(message: "--prefix must be 1-\(AutomationLimits.maxIdentifierLength) characters.")
+            }
+            plan.prefix = value
         case .voice, .output, .file, .provider, .model, .speed, .pitch, .quality, .language:
             try self.applySpeech(option: option, value: value, to: &plan)
         case .timeout:

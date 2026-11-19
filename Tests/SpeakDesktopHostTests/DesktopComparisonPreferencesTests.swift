@@ -56,7 +56,7 @@ final class DesktopComparisonPreferencesTests: XCTestCase {
     func testNativeReferenceEventValidatesRoundMembershipAndDoesNotJudge() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.openComparison()
         let store = try await controller.loadComparisonStore()
         let entries = [

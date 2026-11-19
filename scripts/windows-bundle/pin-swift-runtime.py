@@ -13,20 +13,56 @@ import argparse
 import hashlib
 import json
 import mmap
-from pathlib import Path
+import platform
 import subprocess
 import sys
+import tarfile
 import tempfile
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
+import http.client
+import time
+import urllib.error
+
 import redistributables  # noqa: E402
 import windows_targets  # noqa: E402
+
+# GitHub release assets and other pinned sources intermittently return 5xx or
+# time out; an outage on 9 Nov lasted well over the old single attempt. The
+# bytes are pinned by size and SHA-256, so retrying is safe.
+NETWORK_RETRY_DELAYS = (10, 30, 60, 120)
+
+
+def download_with_retry(source, timeout, path, limit, oversize):
+    """Stream source into path, retrying transient network failures."""
+    for delay in (*NETWORK_RETRY_DELAYS, None):
+        try:
+            with urllib.request.urlopen(source, timeout=timeout) as response, path.open("wb") as output:
+                count = 0
+                while chunk := response.read(1 << 20):
+                    count += len(chunk)
+                    if count > limit:
+                        raise oversize()
+                    output.write(chunk)
+            return
+        except urllib.error.HTTPError as error:
+            if delay is None or (error.code < 500 and error.code != 429):
+                raise
+            reason = "HTTP %d" % error.code
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as error:
+            if delay is None:
+                raise
+            reason = str(error)
+        print("Download failed (%s); retrying in %ds" % (reason, delay), flush=True)
+        time.sleep(delay)
+
 
 DOWNLOAD_HOSTS = {"download.swift.org", "github.com"}
 RUNTIME_PACKAGE = {"rtl.msi", "rtl.cab"}
@@ -68,13 +104,8 @@ def download(pin, directory):
     limit = pin["bytes"]
     partial = destination.with_name(pin["name"] + ".partial")
     print("Downloading pinned file: " + pin["name"], flush=True)
-    with urllib.request.urlopen(pin["url"], timeout=300) as response, partial.open("wb") as output:
-        count = 0
-        while chunk := response.read(1024 * 1024):
-            count += len(chunk)
-            if count > limit:
-                raise PinError("download exceeded its pinned size: " + pin["name"])
-            output.write(chunk)
+    download_with_retry(pin["url"], 300, partial, limit,
+                        lambda: PinError("download exceeded its pinned size: " + pin["name"]))
     if not check_size(pin, partial.stat().st_size) or digest(partial) != pin["sha256"]:
         partial.unlink()
         raise PinError("download differs from its pin: " + pin["name"])
@@ -82,15 +113,33 @@ def download(pin, directory):
     return destination
 
 
-def pinned_seven(downloads, cross=windows_targets.CROSS_PINS):
-    """The macOS 7-Zip console pinned for the cross build, extracted beside its download."""
-    lock = json.loads(Path(cross).read_text(encoding="utf-8"))
-    pin = next(item for item in lock["downloads"] if item["name"].endswith("-mac.tar.xz"))
+def seven_pin(host=None, machine=None, cross=windows_targets.CROSS_PINS, bundle=windows_targets.BUNDLE_PINS):
+    """The pinned 7-Zip console archive for this host: macOS from the cross lock, Linux from the bundle lock."""
+    host = host or sys.platform
+    machine = (machine or platform.machine()).lower()
+    if host == "darwin":
+        lock = json.loads(Path(cross).read_text(encoding="utf-8"))
+        return next(item for item in lock["downloads"] if item["name"].endswith("-mac.tar.xz"))
+    if host.startswith("linux"):
+        machine = {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
+        lock = json.loads(Path(bundle).read_text(encoding="utf-8"))
+        for item in lock.get("sevenZipLinux", []):
+            if item["machine"] == machine:
+                return item
+    raise PinError("no pinned 7-Zip console for %s/%s; pass --seven" % (host, machine))
+
+
+def pinned_seven(downloads, pin=None):
+    """The pinned 7-Zip console for this host, extracted beside its verified download."""
+    pin = pin or seven_pin()
     archive = download(pin, downloads)
-    target = downloads / "sevenzip"
+    target = downloads / ("sevenzip-" + pin["name"].removesuffix(".tar.xz"))
     if not (target / "7zz").exists():
         target.mkdir(exist_ok=True)
-        subprocess.run(["tar", "-xf", str(archive), "-C", str(target)], check=True)
+        with tarfile.open(archive) as bundle:
+            member = bundle.getmember("7zz")
+            bundle.extract(member, target, filter="data")
+        (target / "7zz").chmod(0o755)
     return target / "7zz"
 
 
@@ -160,7 +209,7 @@ def main(argv=None):
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--installer", type=Path, help="an already downloaded installer")
     source.add_argument("--downloads", type=Path, help="download the pinned installer (and 7-Zip) here")
-    parser.add_argument("--seven", type=Path, help="7-Zip console (default with --downloads: the pinned macOS 7-Zip)")
+    parser.add_argument("--seven", type=Path, help="7-Zip console (default with --downloads: the pinned 7-Zip for this macOS or Linux host)")
     parser.add_argument("--temporary-parent", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path, help="lock file to write")
     parser.add_argument("--runtime-output", type=Path, help="new directory that keeps the extracted runtime")
@@ -191,4 +240,4 @@ if __name__ == "__main__":
     try:
         main()
     except (PinError, redistributables.ExtractionError, subprocess.CalledProcessError, OSError, ValueError) as error:
-        raise SystemExit("pin swift runtime: " + str(error))
+        raise SystemExit("pin swift runtime: " + str(error)) from error

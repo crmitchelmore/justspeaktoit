@@ -14,8 +14,9 @@ final class FileSpeechBatchTests: XCTestCase {
     }
 
     func testCatalogueRoutesCredentialsNamesAndBillingStayInParity() throws {
-        for provider in FileSpeechProvider.allCases {
-            let model = provider.modelID
+        let models = FileSpeechProvider.allCases.flatMap { provider in provider.modelIDs.map { (provider, $0) } }
+        for (provider, model) in models {
+            XCTAssertEqual(FileSpeechProvider.provider(for: model), provider)
             XCTAssertEqual(ModelCatalog.batchTranscription.filter { $0.id == model }.count, 1)
             XCTAssertTrue(DesktopTranscription.batchModels.contains { $0.id == model })
             XCTAssertEqual(DesktopTranscription.provider(for: model)?.website, provider.metadata.website)
@@ -34,7 +35,12 @@ final class FileSpeechBatchTests: XCTestCase {
         XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: FileSpeechProvider.smallest.modelID),
                        Decimal(string: "0.004"))
         XCTAssertNil(TranscriptionPricing.pricePerMinuteUSD(modelID: FileSpeechProvider.stepfun.modelID))
-        XCTAssertNil(LiveTranscriptionRouting.route(for: FileSpeechProvider.reson8.modelID))
+        for model in Reson8Model.allCases {
+            XCTAssertNil(LiveTranscriptionRouting.route(for: model.batchID))
+            XCTAssertNil(TranscriptionPricing.pricePerMinuteUSD(modelID: model.batchID))
+        }
+        XCTAssertEqual(FileSpeechProvider.reson8.modelID, "reson8/resonant-1")
+        XCTAssertEqual(Reson8Model.rumble2.batchID, "reson8/rumble-2")
     }
 
     func testPulseProRawBytesLanguageWordsAndPrice() async throws {
@@ -65,7 +71,7 @@ final class FileSpeechBatchTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: audio.path))
     }
 
-    func testReson8UsesApiKeyAndNoInventedModelSelector() async throws {
+    func testReson8UsesApiKeyAndPinsResonant1() async throws {
         let audio = try fixture(extension: "m4a")
         defer { try? FileManager.default.removeItem(at: audio) }
         StubURLProtocol.handler = { request in
@@ -73,7 +79,7 @@ final class FileSpeechBatchTests: XCTestCase {
             XCTAssertEqual(request.url?.path, "/v1/speech-to-text/prerecorded")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "ApiKey synthetic")
             let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            XCTAssertFalse(items.contains { $0.name == "model" })
+            XCTAssertEqual(items.filter { $0.name == "model" }, [URLQueryItem(name: "model", value: "resonant-1")])
             XCTAssertTrue(items.contains(URLQueryItem(name: "language", value: "nl")))
             XCTAssertTrue(items.contains(URLQueryItem(name: "encoding", value: "m4a")))
             return .ok(Data("""
@@ -91,8 +97,10 @@ final class FileSpeechBatchTests: XCTestCase {
     func testStepAudio3JSONBase64AndAuthoritativeSSE() async throws {
         let audio = try fixture(extension: "m4a")
         defer { try? FileManager.default.removeItem(at: audio) }
+        let credential = try StepFunCredential.credentialsForSaving("synthetic", region: .international)
         StubURLProtocol.handler = { request in
-            XCTAssertEqual(request.url?.absoluteString, "https://api.stepfun.com/v1/audio/asr/sse")
+            XCTAssertEqual(request.url?.absoluteString, "https://api.stepfun.ai/v1/audio/asr/sse")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer synthetic")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "text/event-stream")
             let body = try XCTUnwrap(JSONSerialization.jsonObject(with: StubURLProtocol.body(of: request))
@@ -108,7 +116,7 @@ final class FileSpeechBatchTests: XCTestCase {
                 headerFields: ["Content-Type": "text/event-stream"]
             )!, Data(Self.correctedSSE.utf8))
         }
-        let result = try await transcribe(.stepfun, audio: audio, language: "zh-CN")
+        let result = try await transcribe(.stepfun, audio: audio, language: "zh-CN", apiKey: credential)
         XCTAssertEqual(result.text, "Corrected final.")
         XCTAssertEqual(result.segments, [])
         XCTAssertEqual(result.duration, 60)
@@ -161,7 +169,12 @@ final class FileSpeechBatchTests: XCTestCase {
                     _ = try await transcribe(provider, audio: audio)
                     XCTFail("Expected HTTP rejection")
                 } catch {
-                    XCTAssertEqual(error as? TranscriptionProviderError, .httpError(status, "rejected"))
+                    if provider == .stepfun, [401, 403].contains(status) {
+                        // A plain key predates region support, so it is the China region.
+                        XCTAssertEqual(error as? StepFunCredentialError, .rejected(.china, status))
+                    } else {
+                        XCTAssertEqual(error as? TranscriptionProviderError, .httpError(status, "rejected"))
+                    }
                 }
             }
         }
@@ -205,6 +218,58 @@ final class FileSpeechBatchTests: XCTestCase {
 }
 
 extension FileSpeechBatchTests {
+    func testStepFunRequestTargetsOnlyTheKeysRegion() throws {
+        let audio = try fixture()
+        defer { try? FileManager.default.removeItem(at: audio) }
+        let expected: [StepFunCredential.Region: String] = [
+            .international: "https://api.stepfun.ai/v1/audio/asr/sse",
+            .china: "https://api.stepfun.com/v1/audio/asr/sse"
+        ]
+        for region in StepFunCredential.Region.allCases {
+            let credential = try StepFunCredential.credentialsForSaving(" key-\(region.rawValue) ", region: region)
+            let request = try FileSpeechBatchClient(provider: .stepfun).makeRequest(
+                audioURL: audio, apiKey: credential, language: nil
+            )
+            XCTAssertEqual(request.url?.absoluteString, expected[region])
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer key-\(region.rawValue)")
+        }
+        // Keys saved before region support only ever worked on the China endpoint.
+        let legacy = try FileSpeechBatchClient(provider: .stepfun).makeRequest(
+            audioURL: audio, apiKey: "legacy", language: nil
+        )
+        XCTAssertEqual(legacy.url?.host, "api.stepfun.com")
+    }
+
+    func testStepFunRejectedKeyIsNeverRetriedInTheOtherRegion() async throws {
+        let audio = try fixture()
+        defer { try? FileManager.default.removeItem(at: audio) }
+        for region in StepFunCredential.Region.allCases {
+            StubURLProtocol.reset()
+            StubURLProtocol.handler = { _ in .status(401, Data("invalid api key".utf8)) }
+            let credential = try StepFunCredential.credentialsForSaving("wrong-region", region: region)
+            do {
+                _ = try await transcribe(.stepfun, audio: audio, apiKey: credential)
+                XCTFail("Expected the region rejection")
+            } catch {
+                XCTAssertEqual(error as? StepFunCredentialError, .rejected(region, 401))
+            }
+            XCTAssertEqual(StubURLProtocol.recordedRequests.map { $0.url?.host }, [region.asrURL.host])
+        }
+    }
+
+    func testStepFunCredentialRoundTripsAndKeepsAnEmbeddedRegion() throws {
+        let china = try StepFunCredential.credentialsForSaving("abc", region: .china)
+        XCTAssertEqual(try StepFunCredential(credentials: china), try StepFunCredential(region: .china, apiKey: "abc"))
+        // A transferred, already-tagged value is not re-tagged with the draft region.
+        XCTAssertEqual(try StepFunCredential.credentialsForSaving(china, region: .international), china)
+        XCTAssertThrowsError(try StepFunCredential(credentials: "{\"region\":\"mars\",\"apiKey\":\"abc\"}"))
+        XCTAssertThrowsError(try StepFunCredential.credentialsForSaving("  ", region: .international))
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "StepFunCredentialTests-\(UUID().uuidString)"))
+        XCTAssertEqual(StepFunCredential.newKeyRegion(defaults: defaults), .international)
+        defaults.set("china", forKey: StepFunCredential.newKeyRegionDefaultsKey)
+        XCTAssertEqual(StepFunCredential.newKeyRegion(defaults: defaults), .china)
+    }
+
     func testBoundedRead_RejectsFileGrowthAndAcceptsExactLimit() throws {
         let audio = try fixture()
         defer { try? FileManager.default.removeItem(at: audio) }
@@ -315,10 +380,10 @@ private extension FileSpeechBatchTests {
     }
 
     func transcribe(
-        _ provider: FileSpeechProvider, audio: URL, language: String? = nil
+        _ provider: FileSpeechProvider, audio: URL, language: String? = nil, apiKey: String = " synthetic \n"
     ) async throws -> TranscriptionResult {
         try await DesktopTranscription.transcribe(
-            audioURL: audio, model: provider.modelID, apiKey: " synthetic \n", duration: 60,
+            audioURL: audio, model: provider.modelID, apiKey: apiKey, duration: 60,
             language: language, session: StubURLProtocol.makeSession()
         )
     }

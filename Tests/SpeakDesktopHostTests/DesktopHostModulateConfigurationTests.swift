@@ -19,7 +19,7 @@ final class DesktopHostModulateConfigurationTests: XCTestCase {
         ]
         let settingsFile = root.appendingPathComponent("settings.json")
         try JSONEncoder().encode(settings).write(to: settingsFile)
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let configuration = try await controller.configuration()
         XCTAssertEqual(configuration.liveOptions.modulate, ModulateLiveOptions(emotionSignal: true))
         try await controller.saveConfiguration(configuration.entries)
@@ -29,7 +29,7 @@ final class DesktopHostModulateConfigurationTests: XCTestCase {
         XCTAssertEqual(exported.preferences.values[speaker], AnyCodable(.bool(false)))
         XCTAssertEqual(exported.preferences.values[emotion], AnyCodable(.bool(true)))
         await controller.close()
-        let restarted = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let restarted = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let restored = try await restarted.configuration()
         XCTAssertEqual(restored.liveOptions.modulate, configuration.liveOptions.modulate)
         XCTAssertEqual(restored.modulateBatchFeatures, configuration.modulateBatchFeatures)
@@ -69,7 +69,7 @@ final class DesktopHostModulateConfigurationTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = SettingsWriteEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         var values = Dictionary(uniqueKeysWithValues: DesktopConfiguration.modulatePreferenceKeys.map {
             ($0, AnyCodable(.bool(true)))
         })
@@ -109,7 +109,7 @@ final class DesktopHostModulateConfigurationTests: XCTestCase {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let model = "modulate/velma-2-stt-batch"
         let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
         FakeLog.shared.setKey("synthetic", name: credential)

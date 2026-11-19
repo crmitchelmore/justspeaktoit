@@ -1,0 +1,180 @@
+package com.justspeaktoit.android.cloud
+
+import com.justspeaktoit.android.dictation.DictationLanguages
+import com.justspeaktoit.android.settings.SettingsSearchAsset
+import org.json.JSONArray
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * `assets/cloud_catalog.json` is generated from SpeakCore (`CloudCatalogAndroidExport`, kept fresh by
+ * `CloudCatalogAndroidExportTests`), and the build generates [GeneratedCloudCatalog] from it. These
+ * tests are the one golden drift check on that generator: [CloudCatalog] and [CleanupPolicy] must
+ * expose exactly what the asset says, and every provider needs an Android transport.
+ */
+class CloudCatalogParityTest {
+    private val asset = JSONObject(SettingsSearchAsset.locate("app/src/main/assets/cloud_catalog.json").readText())
+
+    private fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObject(it) }
+
+    @Test
+    fun testAssetVersion_isUnderstood() {
+        assertEquals(1, asset.getInt("version"))
+        assertEquals(asset.getInt("version"), GeneratedCloudCatalog.VERSION)
+    }
+
+    @Test
+    fun testProviders_matchIdsAndCredentialIdsInOrder() {
+        val expected = asset.getJSONArray("providers").objects().map { it.getString("id") to it.getString("credentialId") }
+        assertEquals(expected, CloudCatalog.providers.map { it.id to it.credentialId })
+    }
+
+    @Test
+    fun testEveryTransport_belongsToAGeneratedProvider() {
+        assertEquals(
+            "a CloudProvider transport with no catalogue provider is dead code",
+            CloudProvider.entries.map { it.id }.toSet(),
+            CloudCatalog.providers.map { it.id }.toSet(),
+        )
+    }
+
+    @Test
+    fun testTranscriptionModels_matchTheGeneratedCatalogueInOrder() {
+        val expected = asset.getJSONArray("transcriptionModels").objects().map {
+            listOf(
+                it.getString("catalogId"),
+                it.getString("displayName"),
+                it.getString("provider"),
+                it.getString("apiName"),
+                it.getString("languageField"),
+                it.getBoolean("supportsPrompt").toString(),
+                it.optJSONArray("languageCodes")?.let { codes -> (0 until codes.length()).map(codes::getString) }.toString(),
+                it.optJSONObject("languageHints")?.let { hints ->
+                    hints.keys().asSequence().toSortedSet().associateWith(hints::getString)
+                }.toString(),
+                it.getBoolean("requiresPCM16WAV").toString(),
+            )
+        }
+        val actual = CloudCatalog.batchTranscriptionModels.map {
+            listOf(
+                it.catalogId,
+                it.displayName,
+                it.provider.id,
+                it.apiName,
+                it.languageField,
+                it.supportsPrompt.toString(),
+                it.languageCodes.toString(),
+                it.languageHints?.toSortedMap().toString(),
+                it.requiresPCM16WAV.toString(),
+            )
+        }
+        assertEquals(expected, actual)
+        assertEquals(CloudCatalog.batchTranscriptionModels.first(), CloudCatalog.defaultTranscriptionModel)
+    }
+
+    @Test
+    fun testLiveModels_matchTheGeneratedCatalogueInOrder() {
+        val expected = asset.getJSONArray("liveTranscriptionModels").objects().map {
+            listOf(
+                it.getString("catalogId"),
+                it.getString("displayName"),
+                it.getString("provider"),
+                it.getString("apiName"),
+                it.getInt("sampleRate").toString(),
+                it.getString("languageField"),
+                it.getString("vocabularyField"),
+                it.getInt("postStopFinalizeBudgetMs").toString(),
+            )
+        }
+        val actual = CloudCatalog.liveTranscriptionModels.map {
+            val live = checkNotNull(it.live)
+            listOf(
+                it.catalogId, it.displayName, it.provider.id, it.apiName, live.sampleRate.toString(),
+                live.languageField, live.vocabularyField, live.finalizeBudgetMs.toString(),
+            )
+        }
+        assertTrue(actual.isNotEmpty())
+        assertEquals(expected, actual)
+        assertEquals(
+            CloudCatalog.batchTranscriptionModels + CloudCatalog.liveTranscriptionModels,
+            CloudCatalog.transcriptionModels,
+        )
+    }
+
+    @Test
+    fun testCleanup_matchesModelProviderAndPrompt() {
+        val cleanup = asset.getJSONObject("cleanup")
+        assertEquals(cleanup.getString("model"), CloudCatalog.CLEANUP_MODEL)
+        assertEquals(cleanup.getString("provider"), CloudCatalog.cleanupProvider.id)
+        assertEquals(cleanup.getString("systemPrompt"), CleanupPolicy.systemPrompt())
+        assertEquals(cleanup.getString("systemPrompt"), CleanupPolicy.systemPrompt("  "))
+    }
+
+    @Test
+    fun testCustomCleanupPrompt_replacesTheBaseAndKeepsTheSharedClosing() {
+        val closing = asset.getJSONObject("cleanup").getString("customPromptClosing")
+        assertEquals("Answer in haiku.\n\n$closing", CleanupPolicy.systemPrompt("  Answer in haiku.\n"))
+    }
+
+    @Test
+    fun testCleanupModels_matchTheGeneratedCatalogueInOrder() {
+        val expected = asset.getJSONArray("cleanupModels").objects().map {
+            listOf(it.getString("selectionId"), it.getString("displayName"), it.getString("provider"), it.getString("apiName"))
+        }
+        val actual = CloudCatalog.cleanupModels.map { listOf(it.selectionId, it.displayName, it.cloudProvider.id, it.apiName) }
+        assertEquals(expected, actual)
+        assertEquals(CloudCatalog.CLEANUP_MODEL, CloudCatalog.cleanupModel(null).selectionId)
+    }
+
+    @Test
+    fun testGeminiNano_matchesTheGeneratedCatalogueAndStaysOutOfTheCloudModels() {
+        val nano = asset.getJSONObject("geminiNano")
+        assertEquals(nano.getString("selectionId"), CloudCatalog.geminiNano.selectionId)
+        assertEquals(nano.getString("displayName"), CloudCatalog.geminiNano.displayName)
+        assertEquals(nano.getInt("inputTokenLimit"), GeneratedCloudCatalog.GEMINI_NANO_INPUT_TOKEN_LIMIT)
+        assertTrue(CloudCatalog.geminiNano.isOnDevice)
+        assertTrue(CloudCatalog.cleanupModels.none { it.isOnDevice })
+        assertEquals(CloudCatalog.geminiNano, CloudCatalog.cleanupModel(nano.getString("selectionId")))
+    }
+
+    @Test
+    fun testCleanupModelSuccessors_matchTheGeneratedCatalogue() {
+        val successors = asset.getJSONObject("cleanupModelSuccessors")
+        assertTrue(successors.length() > 0)
+        successors.keys().forEach { removed ->
+            assertEquals(successors.getString(removed), CloudCatalog.cleanupModel(removed).selectionId)
+        }
+    }
+
+    @Test
+    fun testNativeCleanupEndpoints_matchSpeakCore() {
+        val urls = asset.getJSONArray("providers").objects()
+            .filter { it.has("chatCompletionsURL") }
+            .associate { it.getString("id") to it.getString("chatCompletionsURL") }
+        CloudCatalog.cleanupModels.filterNot { it.isOpenRouter }.map { it.cloudProvider }.distinct().forEach { provider ->
+            assertEquals(provider.id, urls[provider.id], "${provider.baseUrl}/chat/completions")
+        }
+    }
+
+    @Test
+    fun testLanguagesAndVocabularyPromptRules_matchTheGeneratedCatalogue() {
+        val expected = asset.getJSONArray("languages").objects().map { it.getString("id") to it.getString("displayName") }
+        assertEquals(expected, DictationLanguages.all.map { it.id to it.displayName })
+        val prompt = asset.getJSONObject("keywordPrompt")
+        assertEquals(prompt.getInt("maximumBytes"), GeneratedCloudCatalog.KEYWORD_PROMPT_MAX_BYTES)
+        assertEquals(prompt.getInt("maximumTerms"), GeneratedCloudCatalog.KEYWORD_PROMPT_MAX_TERMS)
+    }
+
+    @Test
+    fun testVoiceEditPromptAndFormattingWords_matchTheGeneratedCatalogue() {
+        val edit = asset.getJSONObject("voiceEdit")
+        fun strings(name: String) = edit.getJSONArray(name).let { array -> (0 until array.length()).map(array::getString) }
+        assertEquals(edit.getString("systemPrompt"), VoiceEditPolicy.systemPrompt)
+        assertTrue(VoiceEditPolicy.userMessage("a", "b").startsWith(edit.getString("userMessageIntro") + "\n\n"))
+        assertEquals(strings("quoteTerms"), GeneratedCloudCatalog.VOICE_EDIT_QUOTE_TERMS)
+        assertEquals(strings("codeFenceTerms"), GeneratedCloudCatalog.VOICE_EDIT_CODE_FENCE_TERMS)
+        assertEquals(strings("whitespaceTerms"), GeneratedCloudCatalog.VOICE_EDIT_WHITESPACE_TERMS)
+    }
+}

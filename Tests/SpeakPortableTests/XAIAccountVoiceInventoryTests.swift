@@ -116,9 +116,67 @@ final class XAIAccountVoiceInventoryTests: DeepgramSpeechStubTestCase {
         XCTAssertNotNil(capture.records.first?.estimatedCostUSD)
     }
 
+    func testCustomVoices_AreReadPageByPageAfterTheBuiltInListing() async throws {
+        StubURLProtocol.handler = { request in
+            let url = try XCTUnwrap(request.url)
+            let token = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+                .first { $0.name == "pagination_token" }?.value
+            let body = switch (url.path, token) {
+            case ("/v1/tts/voices", _): #"{"voices":[{"voice_id":"eve"},{"voice_id":"Built-in-B"}]}"#
+            case (_, nil): #"{"voices":[{"voice_id":"nlbqfwie","name":"Narrator"}],"pagination_token":"p2"}"#
+            default: #"{"voices":[{"voice_id":"abc123xy","name":"Clone"}],"pagination_token":null}"#
+            }
+            return .respond(DeepgramSpeechFixture.response(request), Data(body.utf8))
+        }
+        let inventory = try await fetch()
+        XCTAssertEqual(inventory.voices.map(\.id), ["Built-in-B", "nlbqfwie", "abc123xy"])
+        let custom = StubURLProtocol.recordedRequests.compactMap(\.url).filter { $0.path == "/v1/custom-voices" }
+        XCTAssertEqual(custom.count, 2)
+        XCTAssertEqual(custom.first?.query, "limit=\(XAITTSAPI.customVoicePageSize)")
+        XCTAssertEqual(custom.last?.query, "limit=\(XAITTSAPI.customVoicePageSize)&pagination_token=p2")
+    }
+
+    func testCustomVoices_AbsentLibraryKeepsBuiltInsButOtherFailuresAndEndlessPagesDoNot() async throws {
+        for status in [403, 404] {
+            route(builtIn: #"{"voices":[{"voice_id":"Built-in-B"}]}"#, custom: "", customStatus: status)
+            let inventory = try await fetch()
+            XCTAssertEqual(inventory.voices.map(\.id), ["Built-in-B"])
+        }
+        StubURLProtocol.handler = { request in
+            let url = try XCTUnwrap(request.url)
+            let body = url.path == "/v1/tts/voices" ? #"{"voices":[]}"#
+                : #"{"voices":[{"voice_id":"nlbqfwie","name":"Narrator"}],"pagination_token":"p2"}"#
+            let refused = url.query?.contains("pagination_token") == true
+            return .respond(DeepgramSpeechFixture.response(request, status: refused ? 403 : 200), Data(body.utf8))
+        }
+        do { _ = try await fetch(); XCTFail("A refused later page admitted a partial list") } catch {
+            XCTAssertEqual(error as? XAIAccountVoiceDiscoveryError, .service(403))
+        }
+        route(builtIn: #"{"voices":[]}"#, custom: "", customStatus: 500)
+        do { _ = try await fetch(); XCTFail("Failed custom listing admitted") } catch {
+            XCTAssertEqual(error as? XAIAccountVoiceDiscoveryError, .service(500))
+        }
+        route(builtIn: #"{"voices":[{"voice_id":"same"}]}"#, custom: #"{"voices":[{"voice_id":"same"}]}"#)
+        do { _ = try await fetch(); XCTFail("Duplicate custom voice admitted") } catch {
+            XCTAssertEqual(error as? XAIAccountVoiceDiscoveryError, .invalidInventory)
+        }
+        route(builtIn: #"{"voices":[]}"#, custom: #"{"voices":[],"pagination_token":"again"}"#)
+        do { _ = try await fetch(); XCTFail("Unbounded pagination admitted") } catch {
+            XCTAssertEqual(error as? XAIAccountVoiceDiscoveryError, .oversized)
+        }
+    }
+
     private func respond(_ body: String) {
-        let data = Data(body.utf8)
-        StubURLProtocol.handler = { .respond(DeepgramSpeechFixture.response($0), data) }
+        route(builtIn: body, custom: #"{"voices":[],"pagination_token":null}"#)
+    }
+
+    private func route(builtIn: String, custom: String, customStatus: Int = 200) {
+        StubURLProtocol.handler = { request in
+            guard request.url?.path == "/v1/custom-voices" else {
+                return .respond(DeepgramSpeechFixture.response(request), Data(builtIn.utf8))
+            }
+            return .respond(DeepgramSpeechFixture.response(request, status: customStatus), Data(custom.utf8))
+        }
     }
 
     private func fetch() async throws -> XAIAccountVoiceInventory {

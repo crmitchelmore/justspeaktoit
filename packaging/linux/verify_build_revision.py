@@ -7,7 +7,14 @@ import re
 
 WORKFLOW = '.github/workflows/linux-flatpak.yml'
 IDENTITY = ('runID', 'runAttempt', 'repository', 'repositoryID', 'workflow', 'event', 'sourceSHA')
-FIELDS = {*IDENTITY, 'version', 'builtRevision', 'parents', 'bundleSHA256', 'pullRequest'}
+FIELDS = {*IDENTITY, 'version', 'builtRevision', 'parents', 'bundleSHA256', 'pullRequest', 'postHogKeyStamped'}
+# The refs whose builds are stamped with the PostHog project key. Keep in step
+# with the stamp step's `if` in the Windows and Linux release workflows.
+STAMPED_TAG_PREFIXES = ('refs/tags/alpha-build-', 'refs/tags/stable-candidate-')
+
+
+def requires_stamped_key(event, ref):
+    return (event == 'push' and ref == 'refs/heads/main') or ref.startswith(STAMPED_TAG_PREFIXES)
 
 
 def positive(value):
@@ -18,9 +25,14 @@ def sha(value, length=40):
     return isinstance(value, str) and re.fullmatch('[0-9a-f]{' + str(length) + '}', value) is not None
 
 
-def verify_revision(built_sha, parents, metadata, record, bundle_sha256):
+def verify_revision(built_sha, parents, metadata, record, bundle_sha256, require_stamped=False):
     if not isinstance(record, dict) or set(record) != FIELDS or type(record['version']) is not int or record['version'] != 1:
         raise ValueError('Fresh build required: missing or unsupported immutable build record')
+    if type(record['postHogKeyStamped']) is not bool:
+        raise ValueError('Fresh build required: the build record does not say whether the bundle was stamped')
+    if require_stamped and not record['postHogKeyStamped']:
+        raise ValueError('Fresh build required: this retest needs a bundle stamped with the PostHog project key, '
+                         'but the recorded build was keyless')
     if (any(record[key] != metadata.get(key) for key in IDENTITY)
             or not isinstance(record['runID'], str) or re.fullmatch(r'[1-9][0-9]*', record['runID']) is None
             or not positive(record['runAttempt']) or not positive(record['repositoryID'])

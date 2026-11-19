@@ -91,7 +91,8 @@ behavior from an arm64 runner, or TestFlight/device background behavior.
   A blocked synchronous `AVAudioRecorder.stop()` also cannot be escaped merely by
   placing a structured task-group timeout around it.
 - Send to Mac's existing LAN transport is authenticated but unencrypted. Changing
-  that wire protocol needs an explicit compatibility migration.
+  that wire protocol needs an explicit compatibility migration. (Since encrypted
+  in protocol v2, #1585; see [the receiver doc](MACOS_RECEIVER.md#encryption).)
 - History still keeps its full snapshot in memory and preserves failed writes
   losslessly; visible pagination is not a bounded-storage architecture.
 

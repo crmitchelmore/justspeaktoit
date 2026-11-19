@@ -1,6 +1,7 @@
 package com.justspeaktoit.android.ime
 
 import android.text.InputType
+import android.view.inputmethod.EditorInfo
 import com.justspeaktoit.android.dictation.ModeAvailability
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.dictation.RecognizerAvailability
@@ -20,18 +21,67 @@ object KeyboardPolicy {
     }
 
     /**
-     * The keyboard never uses the app's Cloud (BYOK) providers until their privacy UX is reviewed
-     * (see Docs/android-input-surfaces.md); a saved Cloud choice is treated as no choice. An explicit
+     * Edits are learned only in ordinary text fields: never in password fields, fields that ask for
+     * no suggestions, or fields that ask keyboards not to learn from them (for example incognito tabs).
+     */
+    fun allowsLearning(inputType: Int, imeOptions: Int): Boolean =
+        (inputType and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT &&
+            allowsDictation(inputType) &&
+            (inputType and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) == 0 &&
+            (imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0
+
+    /**
+     * How long a stopped keyboard session may take to produce its final text, for every route. It
+     * matches the speech recogniser's own finalise deadline; a live Cloud stream that has not settled
+     * by then fails visibly.
+     */
+    const val FINISH_TIMEOUT_MS = 10_000L
+
+    /**
+     * Picks the keyboard's recogniser. A saved Cloud choice is used only after the user opted the
+     * keyboard in to live Cloud models in Settings, and only when the session's Cloud model streams
+     * live ([KeyboardCloud.Live]); a batch model is never uploaded instead and returns null, so the
+     * keyboard says why rather than switching route. Without the opt-in a Cloud choice is treated as
+     * no choice. Automatic never picks Cloud. A Downloaded choice is honoured only when [downloaded] says
+     * the chosen Whisper model is on the phone and its estimate fits the keyboard's finish bound
+     * ([KeyboardLocalModels.whisperLimitSeconds]); otherwise it is treated as no choice, because the user
+     * is waiting in another app's text field and the platform recogniser finishes sooner. An explicit
      * on-device or speech-service choice is honoured and never silently replaced if unusable.
      */
-    fun mode(chosen: RecognitionMode?, options: List<ModeAvailability>): RecognitionMode? {
-        val local = options.filter { it.mode != RecognitionMode.Cloud }
-        return if (chosen != null && chosen != RecognitionMode.Cloud) {
-            chosen.takeIf { mode -> local.any { it.mode == mode && it.usable } }
+    fun mode(
+        chosen: RecognitionMode?,
+        options: List<ModeAvailability>,
+        cloud: KeyboardCloud = KeyboardCloud.Off,
+        downloaded: Boolean = false,
+    ): RecognitionMode? {
+        if (chosen == RecognitionMode.Cloud && cloud != KeyboardCloud.Off) {
+            return RecognitionMode.Cloud.takeIf { cloud == KeyboardCloud.Live }
+        }
+        if (chosen == RecognitionMode.Downloaded && downloaded) return RecognitionMode.Downloaded
+        val platform = options.filter { it.mode !in APP_ONLY_MODES }
+        return if (chosen != null && chosen !in APP_ONLY_MODES) {
+            chosen.takeIf { mode -> platform.any { it.mode == mode && it.usable } }
         } else {
-            RecognizerAvailability.defaultMode(local)
+            RecognizerAvailability.defaultMode(platform)
         }
     }
+
+    /** What the opt-in allows for a session, given whether the session's Cloud model streams live. */
+    fun cloud(optedIn: Boolean, liveModel: Boolean): KeyboardCloud = when {
+        !optedIn -> KeyboardCloud.Off
+        liveModel -> KeyboardCloud.Live
+        else -> KeyboardCloud.NotLive
+    }
+
+    /**
+     * Whether an unavailable keyboard should name the batch Cloud model as the reason: only when the user
+     * chose Cloud and the opt-in is on, so an unusable on-device or speech-service choice never blames Cloud.
+     */
+    fun blamesBatchCloud(chosen: RecognitionMode?, cloud: KeyboardCloud): Boolean =
+        chosen == RecognitionMode.Cloud && cloud == KeyboardCloud.NotLive
+
+    /** Modes the keyboard never picks by itself: Cloud (BYOK, opt-in) and Downloaded models (when they fit). */
+    private val APP_ONLY_MODES = setOf(RecognitionMode.Cloud, RecognitionMode.Downloaded)
 
     /**
      * The speech service may send audio to its provider, so it is disclosed before capture unless
@@ -47,4 +97,16 @@ object KeyboardPolicy {
         val last = before?.lastOrNull() ?: return text
         return if (last.isWhitespace() || last in "([{\"'") text else " $text"
     }
+}
+
+/** Whether the keyboard may use the app's Cloud (BYOK) mode for a session. */
+enum class KeyboardCloud {
+    /** The user has not opted the keyboard in, so a Cloud choice is treated as no choice. */
+    Off,
+
+    /** Opted in, and the session's Cloud model streams live. */
+    Live,
+
+    /** Opted in, but the session's Cloud model is batch only, which the keyboard does not upload. */
+    NotLive,
 }

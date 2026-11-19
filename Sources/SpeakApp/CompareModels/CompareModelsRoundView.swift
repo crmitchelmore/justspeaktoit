@@ -29,14 +29,15 @@ struct CompareModelsRoundView: View {
             }
             Spacer()
             if controller.phase == .judging || isRevealed {
-                Picker("Diff against", selection: Binding(
+                LongListPicker(
+                    title: "Diff against", items: round.entriesInBlindOrder,
+                    id: { Optional($0.id) }, selection: Binding(
                     get: { controller.referenceEntryID ?? round.entriesInBlindOrder.first?.id },
                     set: { controller.referenceEntryID = $0 }
-                )) {
-                    ForEach(round.entriesInBlindOrder) { entry in
-                        Text(round.blindLabel(for: entry.id)).tag(Optional(entry.id))
-                    }
-                }
+                    ), searchText: { [round.blindLabel(for: $0.id)] },
+                  row: { entry in
+                    Text(round.blindLabel(for: entry.id))
+                })
                 .frame(maxWidth: 200)
             }
         }
@@ -255,15 +256,17 @@ struct CompareModelsColumnView: View {
     }
 
     private var rankPicker: some View {
-        Picker("Rank", selection: Binding(
+        LongListPicker(
+            title: "Rank",
+            items: [LongListChoice(id: 0, title: "Unranked")]
+                + (1...round.entries.count).map { LongListChoice(id: $0, title: "Rank \($0)") },
+            id: { $0.id }, selection: Binding(
             get: { controller.pendingRanks[entry.id] ?? 0 },
             set: { controller.setRank($0 == 0 ? nil : $0, for: entry.id) }
-        )) {
-            Text("Unranked").tag(0)
-            ForEach(1...round.entries.count, id: \.self) { rank in
-                Text("Rank \(rank)").tag(rank)
-            }
-        }
+            ), searchText: { [$0.title] },
+          row: { item in
+            Text(item.title)
+        })
         .accessibilityIdentifier("compareModelsRank-\(round.blindLabel(for: entry.id))")
     }
 }

@@ -2,6 +2,7 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 import SpeakDesktopHost
+import SpeakDesktopNativeBindings
 import SpeakLinuxPlatform
 import CLinuxSupport
 
@@ -24,53 +25,20 @@ extension LinuxHostPlatform: DesktopHostReadAloudPlatform {
 }
 
 extension LinuxHostPlatform {
+    package static func showVoiceAudioFormats(_ settings: DesktopVoiceOutputSettings, status: String) {
+        LinuxWindow.voiceAudioFormats(settings, status: status)
+    }
+
+    package static func showVoiceControls(
+        _ settings: DesktopVoiceOutputSettings, accountInventory: VoiceAccountInventory?
+    ) {
+        LinuxWindow.voiceControls(settings, accountInventory: accountInventory)
+    }
+
     package static func voiceDiscovery(_ shown: DesktopVoiceDiscoveryPresentation) {
-        let labels = shown.voices.map {
-            $0.label + (DesktopSpeechVoice.voices.contains($0) ? " (documented preset)" : " (account listing)")
-        }.joined(separator: "\n")
-        let ids = shown.voices.map(\.id).joined(separator: "\n")
-        let result = shown.requestID.withCString { token in
-            labels.withCString { names in
-                ids.withCString { identifiers in
-                    shown.message.withCString {
-                        jsti_window_set_voice_account_inventory(
-                            token, names, identifiers, Int32(shown.selected), $0, shown.loading ? 1 : 0)
-                    }
-                }
-            }
-        }
-        if result != 0 { update("The account voice listing could not be shown.") }
+        if !showVoiceAccountInventory(shown) { update("The account voice listing could not be shown.") }
         LinuxWindow.voiceOutput(shown.settings,
             accountInventory: shown.accountInventory ?? shown.inventory.map(VoiceAccountInventory.xai))
-    }
-    package static func voiceUsage(_ presentation: DesktopVoiceUsagePresentation) {
-        let result = presentation.requestID.withCString { token in
-            presentation.text.withCString {
-                jsti_window_set_voice_usage(token, $0, presentation.trackingEnabled ? 1 : 0)
-            }
-        }
-        if result < 0 { update("The Voice usage report could not be shown.") }
-    }
-
-    package static func voiceTextImportCancelled(_ requestID: String) {
-        let result = requestID.withCString { token in
-            "".withCString { empty in
-                "Text import stopped.".withCString { jsti_window_set_voice_text_import(token, empty, $0) }
-            }
-        }
-        if result < 0 { update("The stopped text import could not be shown.") }
-    }
-
-    package static func voiceGenerated(_ presentation: DesktopVoiceResultPresentation) {
-        let result = presentation.resultID.withCString { identifier in
-            presentation.message.withCString { message in
-                presentation.format.rawValue.withCString {
-                    jsti_window_set_voice_generated_result_with_format(
-                        identifier, presentation.working ? 1 : 0, message, $0)
-                }
-            }
-        }
-        if result < 0 { update("The generated voice result could not be shown.") }
     }
 }
 
@@ -81,23 +49,8 @@ extension LinuxAudioPlayback: DesktopHostPlayback, DesktopHostSpeechPlayback {}
 extension LinuxVoiceOutput: DesktopHostVoiceOutput {}
 
 extension LinuxWindow {
-    static func voiceTextImported(_ result: Result<String, Error>, requestID: String) {
-        let text: String
-        let error: String
-        switch result {
-        case .success(let value): text = value; error = ""
-        case .failure(let failure): text = ""; error = failure.localizedDescription
-        }
-        let status = requestID.withCString { token in
-            text.withCString { value in
-                error.withCString { jsti_window_set_voice_text_import(token, value, $0) }
-            }
-        }
-        if status < 0 { LinuxHostPlatform.update("The text import result could not be shown.") }
-    }
-
     static func voiceSources(context: UnsafeMutableRawPointer) {
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let sources = VoiceOutputSource.allCases.filter { $0 != .externalSelection }
         let names: [UnsafePointer<CChar>?] = sources.map { strings.add($0.displayName) }
         let result = withExtendedLifetime(strings) {
@@ -118,7 +71,7 @@ extension LinuxWindow {
 
     static func voiceOutput(_ settings: LinuxVoiceOutputSettings, accountInventory: VoiceAccountInventory?) {
         let presentation = settings.favoritePicker(accountInventory: accountInventory)
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let names: [UnsafePointer<CChar>?] = presentation.labels.map { strings.add($0) }
         let identifiers: [UnsafePointer<CChar>?] = presentation.identifiers.map { strings.add($0) }
         let selected = presentation.selected
@@ -166,21 +119,9 @@ extension LinuxWindow {
             }
         }
         if result != 0 { LinuxHostPlatform.update("The saved Voice synthesis controls could not be shown.") }
-        let strings = Strings()
-        let examples = VoiceSynthesisMarkup.examples.map {
-            JSTIVoiceMarkupExample(text: strings.add($0.text), description: strings.add($0.description))
+        if !DesktopNativeBindings.voiceMarkupHelper(enabled: shown.markupHelperEnabled) {
+            LinuxHostPlatform.update("The Voice SSML helper could not be configured.")
         }
-        let helper = withExtendedLifetime(strings) {
-            examples.withUnsafeBufferPointer {
-                jsti_window_set_voice_markup_helper(
-                    shown.markupHelperEnabled ? 1 : 0, $0.baseAddress, $0.count
-                ) { input, output, capacity, utf16, scalars in
-                    VoiceSynthesisMarkup.writeWrappedText(input, output: output, capacity: capacity,
-                        leadingUTF16: utf16, leadingScalars: scalars)
-                }
-            }
-        }
-        if helper != 0 { LinuxHostPlatform.update("The Voice SSML helper could not be configured.") }
     }
 }
 
@@ -188,7 +129,7 @@ func linuxVoicePickerEvent(_ action: Int32, _ identifier: UnsafePointer<CChar>?,
     // The window forwards its existing UI callback context, not a new native holder.
     guard let identifier, let context else { return }
     let voiceID = String(cString: identifier)
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return }
     holder.enqueueSettings {
         await holder.controller.handleVoicePicker(voiceID: voiceID, action: action)
         LinuxWindow.voiceOutput(await holder.controller.voiceOutputSettings(),
@@ -196,62 +137,24 @@ func linuxVoicePickerEvent(_ action: Int32, _ identifier: UnsafePointer<CChar>?,
     }
 }
 
-// The native callback preserves one validated event order and its fixed ABI.
-// swiftlint:disable:next function_parameter_count cyclomatic_complexity
+// The native callback's parameter list is fixed by the C ABI.
+// swiftlint:disable:next function_parameter_count
 func linuxVoiceSourceEvent(
     _ action: Int32, _ source: Int32, _ text: UnsafePointer<CChar>?,
     _ record: UnsafePointer<CChar>?, _ path: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
-    do {
-        let message = try DesktopVoiceSourceMessage(
-            action: action, source: source, text: text.map(String.init(cString:)) ?? "",
-            record: record.map(String.init(cString:)) ?? "", path: path.map(String.init(cString:)) ?? ""
-        )
-        switch message {
-        case .audioFormat(let identifier):
-            holder.enqueueSettings {
-                await holder.controller.beginVoiceAudioFormatSave(identifier) { saved, failure in
-                    guard let saved else { return }
-                    LinuxWindow.voiceAudioFormats(saved,
-                        status: failure ?? "Voice file format saved. Generated results keep their captured format.")
-                }
-            }
-        case .discoveryOpen, .discoveryOpenModern, .discoveryRefresh,
-             .discoveryClose, .discoveryChoose, .discoveryProvider:
-            holder.enqueueSettings { await holder.controller.handleVoiceDiscovery(message) }
-        case .event(let event): holder.submitHistoryPlayback(event)
-        case .preferences(let options):
-            holder.enqueueSettings {
-                await holder.controller.saveVoiceGenerationOptions(options)
-                let saved = await holder.controller.voiceOutputSettings()
-                if jsti_window_set_voice_generation_options(saved.generationOptions.nativeFlags) != 0 {
-                    LinuxHostPlatform.update("The saved Voice Output preferences could not be shown.")
-                }
-            }
-        case .usageReport(let text, let requestID):
-            holder.enqueueSettings { await holder.controller.showVoiceUsage(text: text, requestID: requestID) }
-        case .usageTracking(let enabled, let requestID):
-            holder.enqueueSettings { await holder.controller.saveVoiceUsageTracking(enabled, requestID: requestID) }
-        case .synthesisPreferences(let options, let requestID):
-            holder.enqueueSettings {
-                let saved = await holder.controller.saveVoiceSynthesisOptions(options)
-                LinuxWindow.voiceControls(await holder.controller.voiceOutputSettings(),
-                    accountInventory: await holder.controller.selectedVoiceAccountInventory)
-                if requestID.withCString({ jsti_window_finish_voice_synthesis_options($0, saved ? 1 : 0) }) != 0 {
-                    LinuxHostPlatform.update("The Voice controls save result could not be shown.")
-                }
-            }
-        }
-    } catch { LinuxHostPlatform.update(error.localizedDescription) }
+    LinuxEventContext.voiceSourceEvent(
+        action: action, source: source, strings: [text, record, path], context: context
+    )
 }
 
 /// Read aloud and voice picker events. Returns false for others.
-func linuxReadAloudEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+func linuxReadAloudEvent(
+    _ event: DesktopNativeLinuxEvent, value: String, slot: Int, holder: LinuxEventContext
+) -> Bool {
     switch event {
-    case Int(JSTI_EVENT_READ_ALOUD): holder.readAloud(value)
-    case Int(JSTI_EVENT_VOICE_OUTPUT): holder.selectVoice(slot)
+    case .readAloud: holder.readAloud(value)
+    case .voiceOutput: holder.selectVoice(slot)
     default: return false
     }
     return true

@@ -2,6 +2,7 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 import SpeakDesktopHost
+import SpeakDesktopNativeBindings
 import SpeakWindowsPlatform
 import CWindowsSupport
 
@@ -17,7 +18,7 @@ typealias WindowsNativeError = DesktopHostError
 
 /// Win32 window, Credential Manager, WASAPI, Media Foundation and UI Automation
 /// behind the shared desktop host.
-enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPlatform {
+enum WindowsHostPlatform: DesktopNativeWindowPlatform, DesktopHostLocalModelPlatform {
     static func handsFreeReadinessFailure() -> String? {
         jsti_window_hands_free_guard_ready() != 0 ? nil
             : "Session lock/sleep monitoring is unavailable. Hands-free stays off; manual recording still works."
@@ -29,31 +30,23 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
     typealias LocalRuntime = WindowsWhisperRuntime
 
     package static var issueReportActions: DesktopHostIssueReportActions? { WindowsIssueReportBridge.actions() }
+    package static var nativeWindow: DesktopNativeWindowCalls { DesktopNativeBindings.window }
+    package static var nativeComparison: DesktopNativeComparisonCalls { DesktopNativeBindings.comparison }
+    package static var nativeVoice: DesktopNativeVoiceCalls { DesktopNativeBindings.voice }
+    package static var nativeVoiceAccounts: DesktopNativeVoiceAccountCalls { DesktopNativeBindings.voiceAccounts }
 
     package static let displayName = "Windows"
     package static let credentialStoreName = "Windows Credential Manager"
     package static func requireVoiceAudioFormat(_ format: VoiceAudioFormat, sampleRate: Int) async throws {
-        try await WindowsVoiceAudioCodec.requireAvailable(format, sampleRate: sampleRate)
+        try await DesktopVoiceAudioCodec.windows.requireAvailable(format, sampleRate: sampleRate)
     }
     package static func encodeVoiceAudio(
         _ audio: VoiceGeneratedAudio, format: VoiceAudioFormat
     ) async throws -> VoiceGeneratedAudio {
-        try await WindowsVoiceAudioCodec.encode(audio, format: format)
+        try await DesktopVoiceAudioCodec.windows.encode(audio, format: format)
     }
     package static func makeRecordingFeedbackLoader() -> (any DesktopRecordingFeedbackLoader)? {
         WindowsRecordingFeedbackLoader()
-    }
-
-    package static var voiceConfigurationKeys: Set<String> {     DesktopConfiguration.voiceTransferKeys }
-    package static func exportVoiceConfiguration(
-        _ voiceOutput: VoiceOutputSettings?, over configuration: DesktopConfiguration
-    ) throws -> DesktopConfiguration {
-        try VoiceOutputSettings.exportConfiguration(voiceOutput, over: configuration)
-    }
-    package static func importVoiceConfiguration(
-        from configuration: DesktopConfiguration, into voiceOutput: inout VoiceOutputSettings?
-    ) throws -> DesktopConfiguration {
-        try VoiceOutputSettings.importConfiguration(from: configuration, into: &voiceOutput)
     }
 
     package static func update(_ status: String, transcript: String?, state: Int32) {
@@ -61,13 +54,6 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
     }
 
     package static func recordingState(_ state: Int32) { WindowsNative.recordingState(state) }
-    package static func beginCleanupPreview() -> UInt64 { jsti_window_begin_cleanup_preview() }
-    package static func cleanupPreview(_ text: String, ticket: UInt64) throws {
-        guard jsti_window_cleanup_preview(text, ticket) >= 0 else {
-            throw DesktopHostError(message: "Windows could not enqueue the cleanup preview.")
-        }
-    }
-    package static func endCleanupPreview(_ ticket: UInt64) { jsti_window_end_cleanup_preview(ticket) }
 
     package static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?, selectRecord: Bool) {
         WindowsNative.history(records, selected: selected, selectRecord: selectRecord)
@@ -75,20 +61,6 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
 
     package static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {
         WindowsNative.insights(all: all, visible: visible)
-    }
-
-    package static func historyManagement(identifiers: [UUID]) {
-        let value = identifiers.map(\.uuidString).joined(separator: "\n")
-        if jsti_window_set_history_management(value) != 0 {
-            update("History management could not be refreshed. Saved recordings remain on disk.")
-        }
-    }
-
-    package static func hud(_ state: DesktopHUDState) {
-        _ = jsti_window_set_hud_layout(
-            state.phase.rawValue, state.headline, state.subheadline, state.liveText,
-            Int32(((state.displayDuration ?? 0) * 1000).rounded()), state.compact ? 1 : 0, state.expanded ? 1 : 0
-        )
     }
 
     package static func historyPresentation(

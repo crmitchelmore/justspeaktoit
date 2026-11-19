@@ -1,0 +1,257 @@
+import Foundation
+
+/// The operation a model is selected for. The same catalogue identifier can
+/// use a different credential depending on the operation (for example OpenAI
+/// models routed through OpenRouter for post-processing).
+public enum ModelCredentialPurpose: Sendable {
+    case liveTranscription
+    case batchTranscription
+    case postProcessing
+    case voiceOutput
+}
+
+/// The credential a model needs before it can run.
+public enum ModelCredentialRequirement: Equatable, Sendable {
+    case notRequired
+    case apiKey(identifier: String, providerName: String)
+}
+
+/// User-facing readiness derived from a model requirement and the identifiers
+/// currently stored in secure storage.
+public enum ModelCredentialAvailability: Equatable, Sendable {
+    case ready(providerName: String)
+    case missing(providerName: String)
+    case notRequired
+}
+
+/// Canonical model-to-credential mapping shared by the macOS and iOS pickers.
+/// Runtime clients remain authoritative for requests; this resolver keeps the
+/// selection UX in sync with those routing rules.
+public enum ModelCredentialResolver {
+    public static func requirement(
+        for modelIdentifier: String,
+        purpose: ModelCredentialPurpose
+    ) -> ModelCredentialRequirement {
+        let trimmed = modelIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch purpose {
+        case .liveTranscription:
+            return liveTranscriptionRequirement(for: trimmed)
+        case .batchTranscription:
+            return batchTranscriptionRequirement(for: trimmed)
+        case .postProcessing:
+            return postProcessingRequirement(for: trimmed)
+        case .voiceOutput:
+            return voiceOutputRequirement(for: trimmed)
+        }
+    }
+
+    public static func availability(
+        for modelIdentifier: String,
+        purpose: ModelCredentialPurpose,
+        storedAPIKeyIdentifiers: some Sequence<String>
+    ) -> ModelCredentialAvailability {
+        let stored = Set(storedAPIKeyIdentifiers)
+        switch requirement(for: modelIdentifier, purpose: purpose) {
+        case .notRequired:
+            return .notRequired
+        case .apiKey(let identifier, let providerName):
+            return stored.contains(identifier)
+                ? .ready(providerName: providerName)
+                : .missing(providerName: providerName)
+        }
+    }
+
+    private static func liveTranscriptionRequirement(for modelIdentifier: String) -> ModelCredentialRequirement {
+        guard let route = LiveTranscriptionRouting.route(for: modelIdentifier) else {
+            return requirementForProviderPrefix(modelIdentifier, fallbackProvider: nil)
+        }
+        guard let identifier = route.apiKeyIdentifier else { return .notRequired }
+        return .apiKey(identifier: identifier, providerName: route.provider.displayName)
+    }
+
+    private static func batchTranscriptionRequirement(for modelIdentifier: String) -> ModelCredentialRequirement {
+        if modelIdentifier == ModelCatalog.customOptionID {
+            return openRouterRequirement
+        }
+        if isLocal(modelIdentifier) {
+            return .notRequired
+        }
+
+        // These models use OpenAI's own audio transcription endpoint. Other
+        // OpenAI-prefixed audio models in the batch catalogue are OpenRouter
+        // models, so an identifier prefix alone is not sufficient here.
+        if OpenAITranscriptionModels.directBatchModelIDs.contains(modelIdentifier) {
+            return .apiKey(
+                identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai"),
+                providerName: "OpenAI"
+            )
+        }
+
+        // Gemini 3.5 Transcribe uses Google's own Interactions API. The other
+        // google/-prefixed batch entries are OpenRouter-routed Gemini models,
+        // so the prefix alone is not sufficient here either.
+        if GeminiTranscribeModels.directBatchModelIDs.contains(modelIdentifier) {
+            return .apiKey(
+                identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: "google"),
+                providerName: GeminiTranscribeModels.providerDisplayName
+            )
+        }
+
+        if AzureTranscriptionModels.batchIDs.contains(modelIdentifier) {
+            return .apiKey(identifier: AzureSpeechConfiguration.credentialIdentifier, providerName: "Azure Speech")
+        }
+        let provider = providerPrefix(in: modelIdentifier)
+        if directBatchProviderIdentifiers.contains(provider) {
+            return .apiKey(
+                identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: provider),
+                providerName: providerDisplayName(provider)
+            )
+        }
+        return openRouterRequirement
+    }
+
+    private static func postProcessingRequirement(for modelIdentifier: String) -> ModelCredentialRequirement {
+        if isLocal(modelIdentifier) {
+            return .notRequired
+        }
+        if let native = NativeTextModels.route(for: modelIdentifier) {
+            return .apiKey(identifier: native.provider.credentialIdentifier, providerName: native.provider.displayName)
+        }
+        return openRouterRequirement
+    }
+
+    private static func voiceOutputRequirement(for modelIdentifier: String) -> ModelCredentialRequirement {
+        let lowered = modelIdentifier.lowercased()
+        if isLocal(lowered) || lowered.hasPrefix("system/") || lowered == "system" {
+            return .notRequired
+        }
+        if lowered.hasPrefix("aura") || lowered.hasPrefix("deepgram/") {
+            return .apiKey(
+                identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: "deepgram"),
+                providerName: "Deepgram"
+            )
+        }
+        if lowered.hasPrefix("elevenlabs/") {
+            return .apiKey(identifier: ElevenLabsTTSCatalog.credentialIdentifier, providerName: "ElevenLabs")
+        }
+        if lowered.hasPrefix("openai/") {
+            return .apiKey(
+                identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai.tts"),
+                providerName: "OpenAI"
+            )
+        }
+        if lowered.hasPrefix("azure/") {
+            return .apiKey(identifier: AzureSpeechConfiguration.credentialIdentifier, providerName: "Azure")
+        }
+        return requirementForProviderPrefix(lowered, fallbackProvider: nil)
+    }
+
+    private static func requirementForProviderPrefix(
+        _ modelIdentifier: String,
+        fallbackProvider: String?
+    ) -> ModelCredentialRequirement {
+        let provider = providerPrefix(in: modelIdentifier)
+        guard !provider.isEmpty, provider != ModelCatalog.customOptionID else {
+            guard let fallbackProvider else { return .notRequired }
+            return .apiKey(
+                identifier: "\(fallbackProvider).apiKey",
+                providerName: providerDisplayName(fallbackProvider)
+            )
+        }
+        if provider == "apple" || provider == "local" || provider == "system" {
+            return .notRequired
+        }
+        return .apiKey(
+            identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: provider),
+            providerName: providerDisplayName(provider)
+        )
+    }
+
+    private static func isLocal(_ modelIdentifier: String) -> Bool {
+        let lowered = modelIdentifier.lowercased()
+        return lowered.hasPrefix("apple/")
+            || lowered.hasPrefix("local/")
+            || lowered.hasPrefix("system/")
+    }
+
+    private static func providerPrefix(in modelIdentifier: String) -> String {
+        modelIdentifier
+            .split(separator: "/", maxSplits: 1)
+            .first
+            .map { String($0).lowercased() } ?? ""
+    }
+
+    private static func providerDisplayName(_ provider: String) -> String {
+        if let speechProvider = FileSpeechProvider(rawValue: provider) { return speechProvider.metadata.displayName }
+        return providerDisplayNames[provider] ?? provider.capitalized
+    }
+
+    private static let providerDisplayNames = [
+        "alibaba": "Alibaba Model Studio",
+        "anthropic": "Anthropic",
+        "assemblyai": "AssemblyAI",
+        "cartesia": "Cartesia",
+        "deepgram": "Deepgram",
+        "elevenlabs": "ElevenLabs",
+        "gladia": "Gladia",
+        "google": GeminiTranscribeModels.providerDisplayName,
+        "groq": "Groq",
+        "mistral": "Mistral",
+        "meta": "Meta",
+        "modulate": "Modulate",
+        "openai": "OpenAI",
+        "openrouter": "OpenRouter",
+        "revai": "Rev.ai",
+        "soniox": "Soniox",
+        "speechmatics": "Speechmatics",
+        "xai": "xAI"
+    ]
+
+    /// The OpenRouter credential. Batch catalogue entries that resolve to it, and are not
+    /// local, are served by OpenRouter's inline-audio chat route on every platform; the
+    /// shared route derives its model set from this rule rather than from a second list.
+    static let openRouterRequirement = ModelCredentialRequirement.apiKey(
+        identifier: ProviderCredentialCatalogue.apiKeyIdentifier(for: "openrouter"),
+        providerName: "OpenRouter"
+    )
+
+    private static let directBatchProviderIdentifiers = Set([
+        "alibaba",
+        "cartesia",
+        "assemblyai",
+        "deepgram",
+        "elevenlabs",
+        "gladia",
+        "groq",
+        "mistral",
+        "meta",
+        "modulate",
+        "revai",
+        "soniox",
+        "speechmatics",
+        "xai"
+    ]).union(FileSpeechProvider.allCases.map(\.rawValue))
+
+    /// Every API-key identifier the canonical catalogues can require, derived
+    /// from the same definitions the pickers and routing use. This is the
+    /// parity source for surfaces that must cover the whole credential set —
+    /// notably device-to-device configuration transfer (issue #699): a
+    /// provider added to any catalogue appears here automatically, and the
+    /// transfer parity test fails until its transfer capability is defined.
+    public static var allKnownAPIKeyIdentifiers: Set<String> {
+        var identifiers = Set(LiveTranscriptionProviderID.allCases.compactMap(\.apiKeyIdentifier))
+        identifiers.formUnion(directBatchProviderIdentifiers.map {
+            ProviderCredentialCatalogue.apiKeyIdentifier(for: $0)
+        })
+        // Direct OpenAI batch models, OpenRouter routing, and the voice-output
+        // credentials that use dedicated identifiers.
+        identifiers.insert(ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai"))
+        identifiers.insert(ProviderCredentialCatalogue.apiKeyIdentifier(for: "openrouter"))
+        identifiers.insert(ProviderCredentialCatalogue.apiKeyIdentifier(for: "openai.tts"))
+        identifiers.insert(AzureSpeechConfiguration.credentialIdentifier)
+        // Native cleanup providers, including those with no speech route (Anthropic).
+        identifiers.formUnion(NativeTextModels.providers.map(\.credentialIdentifier))
+        return identifiers
+    }
+}

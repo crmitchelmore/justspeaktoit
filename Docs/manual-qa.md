@@ -1,9 +1,18 @@
 # Owner manual QA
 
 Some issues can close only after the owner checks them on a physical iPhone,
-Apple Watch or Mac, or makes a product decision. They are collected in one
+Apple Watch, Mac, Windows PC, Linux desktop or Android phone, or makes a product decision. They are collected in one
 checklist so the owner can work through them in a few device sessions and
 submit every result with one click.
+
+Human checks never block a pull request or merge. Add a check to the
+catalogue in the same PR as the change it validates; after merge, the first
+Alpha containing it lists it under **Please test** in its release notes and
+TestFlight "What to Test" (see
+[alpha-stable-release-trains.md](alpha-stable-release-trains.md#please-test-human-checks)).
+Write `build` as the Alpha that includes the change, for example "Alpha build
+that includes #123". Ids starting `owner-` and decisions are owner-only and are
+left out of Alpha notes.
 
 - **Checklist:** <https://justspeaktoit.com/qa> (noindex). Answers are saved in
   the browser's local storage, so the owner can stop and resume.
@@ -45,7 +54,7 @@ results issue it has already processed.
 - Every item must close or materially unblock an issue. Mark it `core: true`
   when it should be done in the owner's next session, or `core: false` to
   collapse it under Optional. Keep core time within about 40 minutes for the
-  iPhone, 15 each for the Watch and Mac, and 10 for decisions. The page shows
+  iPhone and Android, 15 each for the Watch, Mac, Windows and Linux, and 10 for decisions. The page shows
   core minutes by device at the top.
 - Prefer one end-to-end scenario that verifies several issues (`issues:` takes
   up to 8 numbers) over separate checks. Drop checks for behaviour already

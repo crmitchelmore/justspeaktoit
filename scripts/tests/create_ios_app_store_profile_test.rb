@@ -157,7 +157,7 @@ module IOSProfileBootstrap
     def test_conflict_that_never_becomes_visible_fails_within_bound
       script = [
         ["GET", "/v1/bundleIds?filter", 200, { "data" => [] }],
-        ["POST", "/v1/bundleIds", 409, { "errors" => [] }],
+        ["POST", "/v1/bundleIds", 409, { "errors" => [{ "code" => "ENTITY_ERROR", "detail" => "Not available" }] }],
         ["GET", "/v1/bundleIds?filter", 200, { "data" => [] }],
         ["GET", "/v1/bundleIds?filter", 200, { "data" => [] }],
         ["GET", "/v1/bundleIds?filter", 200, { "data" => [] }],
@@ -166,6 +166,7 @@ module IOSProfileBootstrap
       provisioner, transport = build_provisioner(script, max_attempts: 3)
       error = assert_raises(ValidationError) { provisioner.provision }
       assert_match(/did not become visible/, error.message)
+      assert_match(/ENTITY_ERROR: Not available/, error.message)
       assert transport.drained?
       assert_equal 2, @sleeps.length
     end
@@ -324,7 +325,10 @@ module IOSProfileBootstrap
         sockets.concat([client, peer])
         @socket = Net::BufferedIO.new(client, read_timeout: @read_timeout, write_timeout: @write_timeout)
         if outcome == :reset
+          # net-http 0.10+ reads the status line with readuntil, older
+          # versions with readline; reset both.
           @socket.define_singleton_method(:readline) { raise Errno::ECONNRESET }
+          @socket.define_singleton_method(:readuntil) { |*_arguments| raise Errno::ECONNRESET }
         else
           body = JSON.generate("data" => [])
           peer.write("HTTP/1.1 #{outcome} Fixture\r\nContent-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n#{body}")

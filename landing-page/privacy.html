@@ -14,159 +14,16 @@
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,700,800&amp;f[]=general-sans@400,500,600&amp;display=swap" rel="stylesheet">
   <style>
-    :root {
-      color-scheme: light dark;
-      --bg: #121417;
-      --surface: #191c21;
-      --text: #f5f3f0;
-      --muted: #adb4bd;
-      --accent: #ff9166;
-      --border: rgba(255, 255, 255, 0.1);
-      --nav-bg: rgba(18, 20, 23, 0.88);
-      --display: 'Cabinet Grotesk', ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-      --body: 'General Sans', ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-    }
-
-    @media (prefers-color-scheme: light) {
-      :root {
-        --bg: #f7f5f2;
-        --surface: #ffffff;
-        --text: #16181c;
-        --muted: #464d56;
-        --accent: #b23d14;
-        --border: rgba(22, 24, 28, 0.12);
-        --nav-bg: rgba(247, 245, 242, 0.88);
-      }
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      background:
-        radial-gradient(circle at 90% 0%, rgba(255, 107, 61, 0.18), transparent 34rem),
-        var(--bg);
-      color: var(--text);
-      font-family: var(--body);
-      font-size: 17px;
-      line-height: 1.7;
-    }
-
-    a { color: var(--accent); }
-
-    :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-
-    .skip-link {
-      position: absolute;
-      left: 50%;
-      top: 0;
-      transform: translate(-50%, -140%);
-      z-index: 100;
-      background: var(--surface);
-      color: var(--text);
-      font-weight: 600;
-      padding: 0.7rem 1.1rem;
-      border-radius: 0 0 12px 12px;
-    }
-
-    .skip-link:focus { transform: translate(-50%, 0); }
-
-    @media (prefers-reduced-motion: reduce) {
-      * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
-    }
-
-    .nav {
-      border-bottom: 1px solid var(--border);
-      background: var(--nav-bg);
-      backdrop-filter: blur(18px);
-    }
-
-    .nav__inner,
-    main,
-    footer {
-      width: min(100% - 2rem, 860px);
-      margin-inline: auto;
-    }
-
-    .nav__inner {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      min-height: 68px;
-    }
-
-    .brand {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      color: var(--text);
-      font-family: var(--display);
-      font-size: 1.1rem;
-      font-weight: 800;
-      text-decoration: none;
-    }
-
-    .back {
-      color: var(--muted);
-      font-size: 0.95rem;
-      text-decoration: none;
-    }
-
-    main { padding: 5rem 0 3rem; }
-
-    .eyebrow {
-      color: var(--accent);
-      font-size: 0.82rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-    }
-
-    h1, h2 { font-family: var(--display); line-height: 1.15; }
-    h1 { margin: 0.4rem 0 1rem; font-size: clamp(2.5rem, 8vw, 4.4rem); }
-    h2 { margin: 2.6rem 0 0.7rem; font-size: 1.55rem; }
-    p, li { color: var(--muted); }
-    strong { color: var(--text); }
-
-    .summary {
-      margin: 2rem 0 3rem;
-      padding: 1.5rem;
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      background: linear-gradient(145deg, rgba(255, 107, 61, 0.09), var(--surface));
-    }
-
-    .summary p { margin: 0; color: var(--text); }
-    ul { padding-left: 1.4rem; }
-    li + li { margin-top: 0.55rem; }
-
-    footer {
-      padding: 2rem 0 4rem;
-      border-top: 1px solid var(--border);
-      color: var(--muted);
-      font-size: 0.92rem;
-    }
-
-    @media (max-width: 540px) {
-      body { font-size: 16px; }
-      main { padding-top: 3.5rem; }
-      .back { font-size: 0.88rem; }
-    }
+    <!-- partial:document-style -->
   </style>
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to content</a>
-  <nav class="nav" aria-label="Primary navigation">
-    <div class="nav__inner">
-      <a class="brand" href="/"><img src="/favicon.svg?v=20260909" width="32" height="32" alt="">Just Speak to It</a>
-      <a class="back" href="/">Back to the app</a>
-    </div>
-  </nav>
+  <!-- partial:document-header -->
 
   <main id="main">
     <p class="eyebrow">Privacy Policy</p>
     <h1>Your words stay under your control.</h1>
-    <p>Last updated: 7 October 2026</p>
+    <p>Last updated: 16 November 2026</p>
 
     <section class="summary" aria-label="Privacy summary">
       <p><strong>JustSpeakToIt does not sell your data, show ads, or track you across apps and websites.</strong> Local transcription can stay on your device. Cloud features are optional and send only the data needed to the service you choose.</p>
@@ -184,15 +41,23 @@
     <h2>API keys and credentials</h2>
     <p>Provider API keys are stored in Apple Keychain. When you use a cloud service, the app sends that provider its key with each request to authenticate it. If you turn on key sync, supported credentials are encrypted on your device with your sync passphrase before being written to your private CloudKit database. We do not receive or sell your keys.</p>
 
+    <h2>Android</h2>
+    <p>The Android app has no account or iCloud sync. Speech is recognised on your phone, or by your phone's speech service, which may send audio to its provider under that provider's policy. Cloud transcription and cleanup send audio or transcript text directly to the provider you choose, such as OpenAI, Groq or OpenRouter, using your key. Keys are encrypted with a key held in the Android Keystore. History stays on your phone and is excluded from Android backup and device transfer. On supported phones you can choose Gemini Nano for cleanup instead, which runs on the phone through Android's AICore, so the transcript stays on the phone. When the app checks for, downloads or uses Gemini Nano, Google's ML Kit sends Google diagnostic and usage data, such as the device model, app version, identifiers, input and output sizes and error codes, but not the transcript.</p>
+    <p>Two choices on Android are off until you turn them on, when the app first asks or later in Settings: optional product analytics, described below, and crash reports. Crash reports go to Sentry in the EU only from release builds and contain the error, stack trace, app version, device model, OS version and app lifecycle steps. They carry no installation identifier, transcripts, recordings, prompts or API keys. Turning crash reports off stops them and deletes any that have not been sent. Optional tips are one-time Google Play purchases handled by Google Play under its own privacy policy; we receive no payment details, and tips unlock nothing.</p>
+
+    <h2>Windows and Linux</h2>
+    <p>Two choices in the Windows and Linux apps' Settings are off until you turn them on: optional product analytics, described below, and crash reports. Crash reports go to Sentry in the EU only from release builds, when the app stops on an error it cannot recover from or finds that its previous session did not close cleanly. A report contains the error type, a shortened error message with quoted text, web addresses, keys, email addresses, identifiers and home-folder names removed, the app version, operating system version and processor type. It carries no installation identifier, transcripts, recordings, prompts, API keys or file names. A report that cannot be sent is dropped, not stored. Both choices stay on that computer: importing settings from another device never turns them on.</p>
+
     <h2>Clipboard and sharing</h2>
     <p>The app writes a transcript to the system clipboard only when you copy it or select an after-recording action that copies it. Clipboard contents may then be available to the operating system and other apps according to your device settings. Sharing or sending a transcript is always initiated by you or by an automation you configured.</p>
 
     <h2>Diagnostics</h2>
-    <p>JustSpeakToIt may send crash reports and performance diagnostics to Sentry so we can find and fix reliability problems. This diagnostic data is not used for advertising or tracking and is not linked to your identity. We configure diagnostics to avoid collecting transcript contents, recordings, and API keys.</p>
+    <p>Release builds of the Mac and iOS apps send crash reports, sampled performance diagnostics, diagnostic breadcrumbs, and release-health sessions to Sentry in the EU so we can find and fix reliability problems. Sentry associates these reports with a random installation identifier, not a name or email address. This is installation-linked diagnostic data, not advertising or cross-app tracking. We configure diagnostics to avoid collecting transcript contents, recordings, and API keys. This collection is separate from the optional product-analytics choice below.</p>
 
-    <h2>Optional anonymous product analytics</h2>
-    <p>The direct-download Mac app may ask you to opt in to anonymous product analytics hosted by PostHog EU Cloud in Frankfurt. Nothing is sent until you choose to share. Declining does not affect the app, and you can withdraw consent at any time in Settings.</p>
-    <p>The initial rollout records daily app activity, onboarding progress, and the first successful transcription using a fixed set of coarse properties. It never includes transcripts, audio, prompts, clipboard text, keystrokes, API keys, screen content, names, or email addresses. Each Mac uses a separate random identifier that is not synced through iCloud or linked to Sentry. Opting out deletes that identifier and any queued events. Raw product events are retained for no more than 12 months.</p>
+    <h2>Optional product analytics</h2>
+    <p>The direct-download Mac app, the Android app, and the Windows and Linux apps may ask you to opt in to pseudonymous product analytics hosted by PostHog EU Cloud in Frankfurt. No product-analytics events are sent until you choose to share. Declining does not affect the app, and you can withdraw consent at any time in Settings.</p>
+    <p>The initial rollout records daily app activity, onboarding progress, and the first successful transcription using a fixed set of coarse properties. It never includes transcripts, audio, prompts, clipboard text, keystrokes, API keys, screen content, names, or email addresses. Each Mac, Android, Windows or Linux installation uses a separate random identifier that is not synced through iCloud or linked to Sentry. Opting out deletes that identifier and any queued events. Raw product events are retained for no more than 12 months.</p>
+    <p>PostHog receives your IP address with each event and discards it rather than storing it. Before discarding it, PostHog's location lookup (GeoIP) can add an approximate location, such as country, region and city, to the event. The Mac, Android, Windows and Linux apps ask PostHog to skip this lookup for their events.</p>
     <p>This product-analytics transport is not included in the iOS or keyboard-extension builds, or in the retired Mac App Store build.</p>
 
     <h2>Data we do not collect</h2>
@@ -204,7 +69,16 @@
     </ul>
 
     <h2>Your choices</h2>
-    <p>You can use local transcription, disable anonymous analytics, remove provider credentials, disable iCloud features, clear History, and delete the app's local data at any time. You can also manage microphone, speech recognition, iCloud, and Live Activity permissions in system Settings.</p>
+    <p>You can use local transcription, disable product analytics, remove provider credentials, disable iCloud features, clear History, and delete the app's local data at any time. You can also manage microphone, speech recognition, iCloud, and Live Activity permissions in system Settings.</p>
+
+    <h2 id="delete-your-data">Deleting your data</h2>
+    <p>To ask us to delete the optional analytics events or crash reports sent from your device, email <a href="mailto:hello@justspeaktoit.com">hello@justspeaktoit.com</a> with the subject "Delete my data". Tell us which app and platform you use; we will confirm once the data is deleted. You can also delete data yourself at any time:</p>
+    <ul>
+      <li>Turning product analytics off deletes the installation's random analytics identifier and any events not yet sent.</li>
+      <li>Turning crash reports off deletes any reports not yet sent.</li>
+      <li>Clearing History, or uninstalling the app, deletes recordings and transcripts stored on the device.</li>
+    </ul>
+    <p>Raw product events are otherwise deleted after no more than 12 months. Data held by a cloud provider you chose is governed by that provider's own policy.</p>
 
     <h2>Children</h2>
     <p>JustSpeakToIt is a general-purpose productivity app and is not directed at children. We do not knowingly collect personal information from children through a developer-operated account or service.</p>
@@ -216,8 +90,6 @@
     <p>Questions about privacy can be sent to <a href="mailto:hello@justspeaktoit.com">hello@justspeaktoit.com</a>.</p>
   </main>
 
-  <footer>
-    © 2026 JustSpeakToIt. All rights reserved.
-  </footer>
+  <!-- partial:document-footer:privacy -->
 </body>
 </html>

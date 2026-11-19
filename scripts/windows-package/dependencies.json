@@ -19,7 +19,8 @@
     "Only the x64 tool directory is extracted, into a private job directory. The tools are used to build and sign packages; no SDK file is shipped in any package or artifact.",
     "makeappx.exe and signtool.exe must additionally carry valid Microsoft Authenticode signatures on the Windows runner.",
     "Microsoft.ArtifactSigning.Client is Microsoft's NuGet distribution of the Azure Artifact Signing SignTool dlib (Azure.CodeSigning.Dlib.dll and its .NET dependencies). Its SHA-512 and size are the nuget.org catalog packageHash and packageSize; only bin/x64 is extracted, only by the signing job, and the dlib must carry a valid Microsoft signature. It is never shipped in a package.",
-    "SSL.COM eSigner CKA is SSL.com's Windows key storage provider for eSigner cloud signing. It is downloaded from SSL.com's GitHub release only by the signing job when WINDOWS_SIGNING_PROVIDER is sslcom-esigner; the SHA-256 and size are the GitHub release asset digest and size, the installer must carry a valid Authenticode signature, and it is installed for the current user of the ephemeral runner only. It is never shipped in a package."
+    "SSL.COM eSigner CKA is SSL.com's Windows key storage provider for eSigner cloud signing. It is downloaded from SSL.com's GitHub release only by the signing job when WINDOWS_SIGNING_PROVIDER is sslcom-esigner; the SHA-256 and size are the GitHub release asset digest and size, the installer must carry a valid Authenticode signature, and it is installed for the current user of the ephemeral runner only. It is never shipped in a package.",
+    "The Microsoft Store Developer CLI (msstore) is Microsoft's open-source client for the Microsoft Store submission API. It is downloaded from the microsoft/msstore-cli GitHub release only by the Microsoft Store submission job; the SHA-256 and size are the GitHub release asset digest and size, the self-contained msstore.exe inside must carry a valid Microsoft Authenticode signature, and it is never shipped in a package."
   ],
   "artifactSigningClient": {
     "name": "microsoft.artifactsigning.client.1.0.128.nupkg",
@@ -39,5 +40,14 @@
     "release": "https://github.com/SSLcom/eSignerCKA/releases/tag/v1.1.2",
     "tool": "eSignerCKATool.exe",
     "documentation": "https://www.ssl.com/how-to/how-to-integrate-esigner-cka-with-ci-cd-tools-for-automated-code-signing/"
+  },
+  "microsoftStoreCli": {
+    "name": "MSStoreCLI-win-x64.zip",
+    "url": "https://github.com/microsoft/msstore-cli/releases/download/v0.4.4/MSStoreCLI-win-x64.zip",
+    "sha256": "d288a324541dc68244a683eb5b6445e9239bb47d1e6acf5cca4d1476017f1447",
+    "bytes": 57730890,
+    "release": "https://github.com/microsoft/msstore-cli/releases/tag/v0.4.4",
+    "tool": "msstore.exe",
+    "documentation": "https://learn.microsoft.com/windows/apps/publish/msstore-dev-cli/commands"
   }
 }

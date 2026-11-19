@@ -21,6 +21,38 @@ final class SharedClientLiveControllerRecoveryTests: XCTestCase {
         XCTAssertEqual(fixture.delegate.errors.count, 1)
     }
 
+    func testProviderConnectionIsListedInStatusOnlyWhileTheRunLasts() async throws {
+        let fixture = Fixture()
+        XCTAssertNil(fixture.controller.connectionHold)
+        try await fixture.controller.start()
+        let hold = try XCTUnwrap(fixture.controller.connectionHold)
+        let listed = SystemResourceRegistry.shared.holds.first { $0.id == hold.id }
+        XCTAssertEqual(listed?.kind, .providerConnection)
+        XCTAssertEqual(listed?.isReleasable, false)
+        await fixture.controller.stop()
+        XCTAssertNil(fixture.controller.connectionHold)
+        XCTAssertFalse(SystemResourceRegistry.shared.holds.contains { $0.id == hold.id })
+    }
+
+    func testHealthyResultWithoutProviderCostCarriesTheListPriceEstimate() async throws {
+        let fixture = Fixture()
+        fixture.controller.configure(language: nil, model: "deepgram/nova-3-streaming")
+        try await fixture.controller.start()
+        fixture.client.finish = { "priced" }
+        await fixture.controller.stop()
+        let result = try XCTUnwrap(fixture.delegate.results.last)
+        XCTAssertEqual(result.cost?.currency, "USD")
+        XCTAssertEqual(
+            result.cost?.totalCost,
+            TranscriptionPricing.estimatedCostUSD(modelID: result.modelIdentifier, durationSeconds: result.duration)
+        )
+
+        let unpriced = Fixture()
+        try await unpriced.controller.start()
+        await unpriced.controller.stop()
+        XCTAssertNil(unpriced.delegate.results.last?.cost, "An unpriced model must not invent a cost")
+    }
+
     func testFailedFinishRetainsVisibleDraftWhenConfirmationIsRevised() async throws {
         let fixture = Fixture()
         try await fixture.controller.start()

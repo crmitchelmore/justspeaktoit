@@ -10,6 +10,8 @@ static struct {
     GtkWindow *window;
     GtkLabel *title, *progress, *detail, *status;
     GtkWidget *actions, *footer, *back, *next;
+    /* The footer button that sent the pending request, focused again when its page arrives. */
+    GtkWidget *refocus;
     gint32 step;
     gboolean pending, last;
 } guide;
@@ -50,6 +52,9 @@ static void request(gint command, const char *action) {
         return;
     }
     guide.pending = TRUE;
+    /* Making the footer insensitive drops keyboard focus; apply_page restores it. */
+    GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(guide.window));
+    guide.refocus = focus != NULL && gtk_widget_is_ancestor(focus, guide.footer) ? focus : NULL;
     gtk_widget_set_sensitive(guide.footer, FALSE);
     gtk_widget_set_sensitive(guide.actions, FALSE);
     fn(ticket, command, guide.step, action != NULL ? action : "", data);
@@ -194,6 +199,21 @@ static void apply_page(gpointer data) {
     gtk_widget_set_sensitive(guide.footer, TRUE); gtk_widget_set_sensitive(guide.actions, TRUE);
     gtk_widget_set_sensitive(guide.back, page->page.has_previous);
     gtk_button_set_label(GTK_BUTTON(guide.next), guide.last ? "Finish" : "Next");
+    /* Keep focus on the footer button that was pressed; otherwise start at the page's first action. */
+    GtkWidget *target = guide.refocus;
+    if (target == NULL) target = gtk_widget_get_first_child(guide.actions);
+    if (target == NULL || !gtk_widget_is_sensitive(target)) target = guide.next;
+    guide.refocus = NULL;
+    gtk_widget_grab_focus(target);
+    GString *announcement = g_string_new(page->page.progress);
+    const char *parts[] = {page->page.title, page->page.status};
+    for (gsize index = 0; index < G_N_ELEMENTS(parts); ++index) {
+        if (parts[index][0] == '\0') continue;
+        if (announcement->len > 0) g_string_append(announcement, ". ");
+        g_string_append(announcement, parts[index]);
+    }
+    jsti_accessible_announce(GTK_WIDGET(guide.window), announcement->str, GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
+    g_string_free(announcement, TRUE);
 }
 int32_t jsti_setup_set_page(
     const JSTILinuxSetupPage *value, const JSTILinuxSetupAction *actions, size_t count, uint64_t ticket
@@ -246,7 +266,8 @@ int32_t jsti_setup_self_test(GtkWindow *owner, char *error, size_t capacity) {
             strcmp(gtk_label_get_text(guide.title), "Fixture title") == 0 &&
             strcmp(gtk_label_get_text(guide.progress), "Fixture progress") == 0 &&
             strcmp(gtk_label_get_text(guide.detail), "Fixture detail") == 0 &&
-            strcmp(gtk_label_get_text(guide.status), "Fixture status") == 0 && first != NULL;
+            strcmp(gtk_label_get_text(guide.status), "Fixture status") == 0 && first != NULL &&
+            gtk_root_get_focus(GTK_ROOT(guide.window)) == first;
         page->page.step = 5;
         apply_page(page);
         finish_apply(&opened);
@@ -270,7 +291,8 @@ int32_t jsti_setup_self_test(GtkWindow *owner, char *error, size_t capacity) {
     if (page != NULL) {
         apply_page(page); page_free(page);
         ok = ok && !gtk_widget_get_sensitive(guide.back) &&
-            strcmp(gtk_button_get_label(GTK_BUTTON(guide.next)), "Finish") == 0;
+            strcmp(gtk_button_get_label(GTK_BUTTON(guide.next)), "Finish") == 0 &&
+            gtk_root_get_focus(GTK_ROOT(guide.window)) == guide.next;
         clicked(GTK_BUTTON(guide.next), GINT_TO_POINTER(1));
         ok = ok && fixture.calls == 3 && fixture.command == 4 && guide.pending;
     } else { ok = FALSE; }

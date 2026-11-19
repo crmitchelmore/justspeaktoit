@@ -32,24 +32,6 @@ struct WindowsCredentialVault: DesktopCredentialVault {
     }
 }
 
-extension WindowsLoopbackListener: DesktopLoopbackListener {
-    public func nextRequest(within timeout: Duration) async throws -> Connection? {
-        do {
-            return try await accept(timeout: timeout)
-        } catch Failure.timedOut {
-            return nil
-        }
-    }
-}
-
-extension WindowsLoopbackListener.Connection: DesktopLoopbackRequest {
-    public var head: DesktopLoopbackRequestHead? { DesktopLoopbackRequestHead(parsing: request) }
-
-    public var peer: DesktopLoopbackPeer {
-        peerIsCurrentUser.map { $0 ? .currentUser : .otherUser } ?? .unknown
-    }
-}
-
 /// The window's event context as a sendable value, for the dialog callback.
 private struct WindowsSyncContext: @unchecked Sendable {
     let pointer: UnsafeMutableRawPointer
@@ -59,7 +41,7 @@ extension DesktopHostCloudSync where Platform == WindowsHostPlatform {
     /// Creates sync for a running (not smoke-test) window and shows the dialog's state.
     static func configure(_ holder: WindowsEventContext) async {
         guard !holder.smokeTest else { return }
-        let context = WindowsSyncContext(pointer: Unmanaged.passUnretained(holder).toOpaque())
+        let context = WindowsSyncContext(pointer: holder.callbackContext)
         do {
             let sync = try WindowsCloudSync(
                 controller: holder.controller,
@@ -124,8 +106,7 @@ func cloudSyncEvent(
     _ action: Int32, _ history: Int32, _ keys: Int32, _ passphrase: UnsafePointer<CChar>?,
     _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     let typed = passphrase.map(String.init(cString:)) ?? ""
     switch action {
     case 1: holder.cloudSync?.handle(.apply(history: history == 1, keys: keys == 1, passphrase: typed))
@@ -144,11 +125,12 @@ func saveKeyEvent(_ value: String, index: Int, holder: WindowsEventContext) {
 }
 
 extension SpeakWindowsMain {
-    /// Saved automation and iCloud sync, once the window's dialogs are configured.
+    /// Saved automation, iCloud sync and Send from phone, once the window's dialogs are configured.
     static func restoreServices(_ holder: WindowsEventContext) async {
         WindowsAutomationSetup.configure()
         if !holder.smokeTest { await WindowsAutomationSwitch.restore(holder) }
         await WindowsCloudSync.configure(holder)
+        WindowsPhoneReceiver.configure(holder)
     }
 
     /// Detaches dialogs that hold the event context before it can be released.
@@ -156,5 +138,6 @@ extension SpeakWindowsMain {
         jsti_window_clear_voice_output()
         jsti_window_clear_local_models()
         await WindowsCloudSync.shutDown(holder)
+        await WindowsPhoneReceiver.shutDown(holder)
     }
 }

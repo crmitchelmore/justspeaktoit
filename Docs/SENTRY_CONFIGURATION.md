@@ -5,7 +5,7 @@ iOS app does not currently initialise Sentry.
 
 ## Runtime configuration
 
-`Sources/SpeakApp/SentryManager.swift` owns the runtime configuration and starts
+`Sources/SpeakApp/Analytics/SentryManager.swift` owns the runtime configuration and starts
 Sentry when the macOS app launches. The production DSN points to the project's
 EU Sentry ingest endpoint and is intentionally safe to embed in the client; it
 permits event ingestion, not authenticated access to Sentry data.

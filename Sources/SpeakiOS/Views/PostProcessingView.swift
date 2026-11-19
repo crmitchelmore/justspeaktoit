@@ -6,20 +6,34 @@ import SpeakCore
 
 // MARK: - Post-Processing Manager
 
-/// Manages post-processing of transcriptions via OpenRouter API.
+/// Manages post-processing of transcriptions: on device, through a native
+/// provider, or through OpenRouter, following the selected model's route.
 @MainActor
-public final class iOSPostProcessingManager: ObservableObject {
+public final class iOSPostProcessingManager: ObservableObject { // swiftlint:disable:this type_name
     public static let shared = iOSPostProcessingManager()
-    
+
     @Published public var isProcessing = false
     @Published public var processedText = ""
     @Published public var error: String?
     @Published public var streamingText = ""
-    
+
     private var streamTask: Task<Void, Never>?
-    
+
     private init() {}
-    
+
+    /// A missing key, or a cloud provider the user has not allowed yet (#1805).
+    private func admissionError(model: String, apiKey: String, local: Bool) -> String? {
+        guard local || !apiKey.isEmpty else {
+            return PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model)).errorDescription
+        }
+        do {
+            try IOSCloudSharingConsentPrompt.shared.require(model: model, purpose: .postProcessing)
+        } catch {
+            return error.localizedDescription
+        }
+        return nil
+    }
+
     /// Process text using the configured model and prompt.
     public func process(
         text: String,
@@ -28,19 +42,20 @@ public final class iOSPostProcessingManager: ObservableObject {
     ) async {
         guard !text.isEmpty else { return }
         let usesAppleModel = model == AppleLocalModels.foundationModelID
-        guard usesAppleModel || !apiKey.isEmpty else {
-            error = "OpenRouter API key required for post-processing"
+        let usesDownloadedModel = IOSLocalCleanupModels.isCleanupModelID(model)
+        if let refusal = admissionError(model: model, apiKey: apiKey, local: usesAppleModel || usesDownloadedModel) {
+            error = refusal
             return
         }
-        
+
         isProcessing = true
         error = nil
         streamingText = ""
         processedText = ""
-        
+
         // Cancel any existing stream
         streamTask?.cancel()
-        
+
         streamTask = Task {
             do {
                 let effectivePrompt = Self.effectiveSystemPrompt()
@@ -49,6 +64,13 @@ public final class iOSPostProcessingManager: ObservableObject {
                     streamingText = try await AppleFoundationModelPolisher.process(
                         text: text,
                         systemPrompt: effectivePrompt
+                    )
+                } else if usesDownloadedModel {
+                    streamingText = try await IOSLocalCleanup().respond(
+                        transcript: text,
+                        systemPrompt: effectivePrompt,
+                        userMessage: TranscriptCleanupPolicy.userMessage(transcript: text),
+                        modelID: model
                     )
                 } else {
                     // Use streaming for real-time updates
@@ -62,7 +84,7 @@ public final class iOSPostProcessingManager: ObservableObject {
                         streamingText += chunk
                     }
                 }
-                
+
                 processedText = streamingText
                 isProcessing = false
             } catch {
@@ -73,7 +95,7 @@ public final class iOSPostProcessingManager: ObservableObject {
             }
         }
     }
-    
+
     /// Cancel any in-progress processing.
     public func cancel() {
         streamTask?.cancel()
@@ -118,7 +140,17 @@ public final class iOSPostProcessingManager: ObservableObject {
                 userMessage: userMessage
             )
         }
-        guard !apiKey.isEmpty else { throw PostProcessingError.apiKeyMissing }
+        if IOSLocalCleanupModels.isCleanupModelID(model) {
+            // Downloaded models never fall back to the cloud: a failure keeps
+            // the original transcript and reports why.
+            return try await IOSLocalCleanup().respond(
+                transcript: text, systemPrompt: systemPrompt, userMessage: userMessage, modelID: model
+            )
+        }
+        guard !apiKey.isEmpty else {
+            throw PostProcessingError.apiKeyMissing(providerName: Self.keyProviderName(for: model))
+        }
+        try IOSCloudSharingConsentPrompt.shared.require(model: model, purpose: .postProcessing)
 
         var result = ""
         for try await chunk in sendChatStreaming(
@@ -136,17 +168,26 @@ public final class iOSPostProcessingManager: ObservableObject {
     nonisolated static func effectiveSystemPrompt() -> String {
         TranscriptCleanupPolicy.systemPrompt()
     }
-    
-    // MARK: - OpenRouter API
 
-    /// Streams a chat completion through the shared SpeakCore OpenRouter client.
+    nonisolated static func keyProviderName(for model: String) -> String {
+        if case .apiKey(_, let providerName) = ModelCredentialResolver.requirement(
+            for: model, purpose: .postProcessing
+        ) { return providerName }
+        return "OpenRouter"
+    }
+
+    // MARK: - Remote API
+
+    /// Streams a chat completion through the shared SpeakCore client. `apiKey` is
+    /// the key for the model's route: the native provider's key for a `native/`
+    /// model, otherwise the OpenRouter key.
     private func sendChatStreaming(
         systemPrompt: String,
         userMessage: String,
         model: String,
         apiKey: String
     ) -> AsyncThrowingStream<String, Error> {
-        OpenRouterAPIClient(apiKey: apiKey).sendChatStreaming(
+        OpenRouterAPIClient(apiKey: apiKey, nativeAPIKeyProvider: { _ in apiKey }).sendChatStreaming(
             systemPrompt: systemPrompt,
             messages: [ChatMessage(role: .user, content: userMessage)],
             model: model,
@@ -159,15 +200,15 @@ enum PostProcessingError: LocalizedError {
     case invalidURL
     case invalidResponse
     case httpError(Int)
-    case apiKeyMissing
+    case apiKeyMissing(providerName: String)
     case emptyResult
-    
+
     var errorDescription: String? {
         switch self {
         case .invalidURL: return "Invalid API URL"
         case .invalidResponse: return "Invalid response from server"
         case .httpError(let code): return "Server error: \(code)"
-        case .apiKeyMissing: return "OpenRouter API key is required"
+        case .apiKeyMissing(let providerName): return "\(providerName) API key is required"
         case .emptyResult: return "Polishing returned no text"
         }
     }
@@ -181,18 +222,18 @@ public struct PostProcessingView: View {
     @Environment(\.appVisualDensity) private var density
     @StateObject private var processor = iOSPostProcessingManager.shared
     @ObservedObject private var settings = AppSettings.shared
-    
+
     @State private var inputText: String
     @State private var showingModelPicker = false
     @FocusState private var isTextFieldFocused: Bool
-    
+
     private let onComplete: (String) -> Void
-    
+
     public init(initialText: String, onComplete: @escaping (String) -> Void) {
         _inputText = State(initialValue: initialText)
         self.onComplete = onComplete
     }
-    
+
     public var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -210,8 +251,9 @@ public struct PostProcessingView: View {
                             Label("Input", systemImage: "text.alignleft")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            
+
                             TextEditor(text: $inputText)
+                                .accessibilityLabel("Input")
                                 .font(.body)
                                 .frame(minHeight: density.isCompact ? 64 : 120)
                                 .padding(density.isCompact ? 4 : 8)
@@ -221,9 +263,10 @@ public struct PostProcessingView: View {
                                 )
                                 .focused($isTextFieldFocused)
                         }
-                        
+
                         // Output section (shows during/after processing)
-                        if processor.isProcessing || !processor.streamingText.isEmpty || !processor.processedText.isEmpty {
+                        if processor.isProcessing || !processor.streamingText.isEmpty
+                            || !processor.processedText.isEmpty {
                             VStack(
                                 alignment: .leading,
                                 spacing: density.isCompact ? density.cardContentSpacing : 8
@@ -232,15 +275,15 @@ public struct PostProcessingView: View {
                                     Label("Output", systemImage: "wand.and.stars")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    
+
                                     Spacer()
-                                    
+
                                     if processor.isProcessing {
                                         ProgressView()
                                             .scaleEffect(0.8)
                                     }
                                 }
-                                
+
                                 Text(processor.isProcessing ? processor.streamingText : processor.processedText)
                                     .font(.body)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -252,7 +295,7 @@ public struct PostProcessingView: View {
                                     .textSelection(.enabled)
                             }
                         }
-                        
+
                         // Error display
                         if let error = processor.error {
                             Label(error, systemImage: "exclamationmark.triangle")
@@ -262,9 +305,9 @@ public struct PostProcessingView: View {
                     }
                     .padding(density.isCompact ? density.pagePadding : 16)
                 }
-                
+
                 Divider()
-                
+
                 // Model & Settings bar
                 VStack(spacing: density.isCompact ? density.cardContentSpacing : 12) {
                     // Model selector
@@ -288,7 +331,7 @@ public struct PostProcessingView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    
+
                     // Action buttons
                     HStack(spacing: density.isCompact ? 6 : 12) {
                         // Process button
@@ -298,7 +341,7 @@ public struct PostProcessingView: View {
                                 await processor.process(
                                     text: inputText,
                                     model: settings.postProcessingModel,
-                                    apiKey: settings.openRouterAPIKey
+                                    apiKey: settings.postProcessingAPIKey(for: settings.postProcessingModel)
                                 )
                             }
                         } label: {
@@ -315,8 +358,8 @@ public struct PostProcessingView: View {
                             .frame(height: 44)
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(inputText.isEmpty || !settings.hasOpenRouterKey || processor.isProcessing)
-                        
+                        .disabled(inputText.isEmpty || !settings.hasPostProcessingKey || processor.isProcessing)
+
                         // Use result button
                         if !processor.processedText.isEmpty {
                             Button {
@@ -332,10 +375,13 @@ public struct PostProcessingView: View {
                             .accessibilityIdentifier("postProcessingUseResult")
                         }
                     }
-                    
+
                     // API key warning
-                    if !settings.hasOpenRouterKey {
-                        Label("Add OpenRouter API key in Settings", systemImage: "key")
+                    if !settings.hasPostProcessingKey {
+                        Label(
+                            "Add \(settings.postProcessingKeyProviderName) API key in Settings",
+                            systemImage: "key"
+                        )
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
@@ -352,7 +398,7 @@ public struct PostProcessingView: View {
                         dismiss()
                     }
                 }
-                
+
                 ToolbarItem(placement: .confirmationAction) {
                     if !processor.processedText.isEmpty {
                         Button("Use") {
@@ -365,53 +411,27 @@ public struct PostProcessingView: View {
             .sheet(isPresented: $showingModelPicker) {
                 modelPickerSheet
             }
+            .cloudSharingConsentSheet()
         }
     }
 }
 
 private extension PostProcessingView {
     private var modelDisplayName: String {
-        ModelCatalog.friendlyName(for: settings.postProcessingModel)
+        let model = settings.postProcessingModel
+        return ModelPickerGrouping.selectionLabel(
+            for: model, displayName: ModelCatalog.friendlyName(for: model), purpose: .postProcessing
+        )
     }
-    
+
     // MARK: - Model Picker Sheet
-    
+
     @ViewBuilder
     private var modelPickerSheet: some View {
         NavigationStack {
             List {
-                ForEach(Array(AppSettings.postProcessingModels.enumerated()), id: \.offset) { _, model in
-                    Button {
-                        settings.postProcessingModel = model.id
-                        showingModelPicker = false
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(model.displayName)
-                                    .foregroundStyle(.primary)
-                                if !density.isCompact {
-                                    Text(model.description ?? "")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            
-                            Spacer()
-
-                            IOSModelCredentialStatusView(
-                                availability: ModelCredentialResolver.availability(
-                                    for: model.id,
-                                    purpose: .postProcessing,
-                                    storedAPIKeyIdentifiers: settings.storedAPIKeyIdentifiers
-                                )
-                            )
-                            
-                            if settings.postProcessingModel == model.id {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                        }
-                    }
+                PostProcessingModelPickerRows(settings: settings, showsDescriptions: !density.isCompact) {
+                    showingModelPicker = false
                 }
             }
             .navigationTitle("Select Model")
@@ -426,7 +446,7 @@ private extension PostProcessingView {
         }
         .presentationDetents([.medium])
     }
-    
+
 }
 
 #Preview {

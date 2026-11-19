@@ -1,0 +1,102 @@
+package com.justspeaktoit.android.telemetry
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import com.justspeaktoit.android.BuildConfig
+import com.justspeaktoit.android.cloud.CloudModel
+import com.justspeaktoit.android.dictation.RecognitionMode
+import java.util.Locale
+
+/** The app's analytics and crash reporting, both off until the user opts in. */
+class Telemetry(
+    private val store: TelemetryStore,
+    val analytics: ProductAnalytics,
+    val crashes: CrashReportingGate,
+) {
+    val analyticsEnabled: Boolean get() = store.analyticsConsent.permitsCollection
+    val diagnosticsEnabled: Boolean get() = store.diagnosticsConsent.permitsCollection
+    val needsConsentPrompt: Boolean get() = store.needsConsentPrompt
+
+    /** The first-run prompt's answer. Both switches start off, so dismissing it declines both. */
+    fun recordFirstRunChoices(analyticsOptIn: Boolean, diagnosticsGranted: Boolean) {
+        if (store.analyticsConsent == AnalyticsConsent.Unknown) {
+            analytics.setOptedIn(analyticsOptIn, OptInSurface.Onboarding)
+        }
+        if (store.diagnosticsConsent == DiagnosticsConsent.Undecided) crashes.setGranted(diagnosticsGranted)
+    }
+
+    fun transcriptionSucceeded(mode: RecognitionMode, cloudModel: CloudModel) {
+        val (provider, engine) = classify(mode, cloudModel)
+        analytics.transcriptionSucceeded(provider, engine)
+    }
+
+    companion object {
+        /** On-device and speech-service recognisers belong to the phone's vendor, so their provider is "other". */
+        fun classify(mode: RecognitionMode, cloudModel: CloudModel): Pair<ProviderType, EngineType> = when (mode) {
+            RecognitionMode.OnDevice -> ProviderType.Other to EngineType.OnDevice
+            RecognitionMode.SpeechService -> ProviderType.Other to EngineType.Cloud
+            RecognitionMode.Cloud -> ProviderType.forProviderId(cloudModel.provider.id) to EngineType.Cloud
+            RecognitionMode.Downloaded -> ProviderType.Local to EngineType.OnDevice
+        }
+
+        fun create(context: Context): Telemetry {
+            val store = TelemetryPreferences(context)
+            val version = "${BuildConfig.VERSION_NAME}+${BuildConfig.VERSION_CODE}"
+            val crashes = CrashReportingGate(
+                store,
+                SentryCrashReporter(
+                    context,
+                    release = "justspeaktoit-android@$version",
+                    environment = if (installedFromPlay(context)) "production" else "alpha",
+                ),
+                enabledInBuild = !BuildConfig.DEBUG,
+            )
+            val analytics = ProductAnalytics(
+                store,
+                AnalyticsContext(
+                    appVersion = BuildConfig.VERSION_NAME,
+                    build = BuildConfig.VERSION_CODE.toString(),
+                    osMajorMinor = Build.VERSION.RELEASE.orEmpty(),
+                    distributionChannel = when {
+                        BuildConfig.DEBUG -> DistributionChannel.Development
+                        installedFromPlay(context) -> DistributionChannel.GooglePlay
+                        else -> DistributionChannel.Direct
+                    },
+                    localeLanguageCode = Locale.getDefault().language,
+                    architecture = Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
+                ),
+                PostHogTransport(BuildConfig.POSTHOG_PROJECT_KEY),
+            )
+            return Telemetry(store, analytics, crashes)
+        }
+
+        // InstallSource.installer calls `current` only on API 30+, which Lint cannot see through the lambda.
+        @SuppressLint("NewApi")
+        private fun installedFromPlay(context: Context): Boolean {
+            val packageManager = context.packageManager
+            val installer = try {
+                InstallSource.installer(
+                    Build.VERSION.SDK_INT,
+                    current = { packageManager.getInstallSourceInfo(context.packageName).installingPackageName },
+                    // The only lookup API 29 has; minSdk is 29, and getInstallSourceInfo needs 30.
+                    legacy = @Suppress("DEPRECATION") { packageManager.getInstallerPackageName(context.packageName) },
+                )
+            } catch (_: PackageManager.NameNotFoundException) {
+                null
+            }
+            return InstallSource.isPlayStore(installer)
+        }
+    }
+}
+
+/** Which installer put the app on the device, by the API each Android version offers. */
+internal object InstallSource {
+    private const val PLAY_STORE = "com.android.vending"
+
+    fun installer(sdkInt: Int, current: () -> String?, legacy: () -> String?): String? =
+        if (sdkInt >= Build.VERSION_CODES.R) current() else legacy()
+
+    fun isPlayStore(installer: String?): Boolean = installer == PLAY_STORE
+}

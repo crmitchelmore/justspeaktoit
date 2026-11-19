@@ -91,8 +91,9 @@ envelope. This is not a location dimension or a new event family. PostHog's
 is serialized to that property by the
 [official SDK](https://github.com/PostHog/posthog-python/blob/3f6c80eb4df1ddffd9e5b9d1d8aae8facf9f83b2/posthog/client.py#L2432).
 The [IP-discard setting permits enrichment before discarding the raw IP](https://posthog.com/docs/privacy/data-storage#discarding-ip-addresses-at-project-level);
-it does not establish absence of stored location fields. Authorized server
-verification, historical-data handling and retention remain rollout gates.
+it does not establish absence of stored location fields. The project keeps
+GeoIP on (owner decision, 13 Nov 2026); the remaining rollout gate is listed in
+[PostHog maintenance](posthog-maintenance.md#rollout-gate).
 
 ### Bucket definitions (shared, versioned with the schema)
 
@@ -167,6 +168,34 @@ fail on any non-enum string property, exactly as issue #591 specifies.
   autocapture, replay, survey, person-profile or error-capture request path.
   This source boundary is not a full-process release network audit; any
   unapproved traffic still blocks rollout.
+- Android (#1594) mirrors that transport in `PostHogTransport.kt`: the same
+  envelope, the same first-rollout events and coarse context with
+  `platform=android`, one random ID deleted on opt-out, and no SDK. Release
+  builds get the key from `POSTHOG_PROJECT_KEY`; other builds send nothing.
+- Windows and Linux (#1624) use `DesktopPostHogSink`
+  (`Sources/SpeakDesktop/Telemetry/`) over the host's existing HTTPS transport
+  (WinHTTP on Windows, URLSession on Linux): the same envelope and shared
+  `ProductAnalyticsController`, `platform=windows`/`linux`, `$geoip_disable`,
+  and today only `analytics_opt_in`, `app_active_daily` and
+  `first_transcription_succeeded`. Its queue is in memory, capped at 50 events,
+  one request at a time; a failure drops the event and is never retried, and
+  opting out or quitting discards the queue. Consent and the random ID live in
+  the app data folder's `telemetry.json`, never in settings, so imports and
+  `speak config` cannot opt a desktop in. Release builds read a project key
+  that `scripts/desktop-analytics/configure-posthog-key.py` writes into
+  `DesktopAnalyticsBuildConfiguration` in the build's checkout (never a
+  commit) from `POSTHOG_PROJECT_KEY`. The Windows x64, Windows ARM64 and Linux
+  Flatpak workflows run it before building (#1744), but only for pushes to `main`
+  and the Alpha/Stable manifest tags (`alpha-build-*`, `stable-candidate-*`);
+  pull request, merge-batch, manual (`workflow_dispatch`) main and other branch
+  builds stay keyless. All three share one `if`, and
+  `test_configure_posthog_key.py` parses the workflows and checks it. The Flatpak
+  build record says whether the bundle was stamped, and a retest on a release tag
+  refuses a keyless bundle. A debug
+  build ignores a stamped key. A set `JSTI_POSTHOG_PROJECT_KEY` overrides the
+  stamped key for development; a key that is not `phc_` followed by 8 to 128
+  letters, digits, `-` or `_` counts as no key, and a keyless build sends
+  nothing even after opting in.
 
 ### Consent: opt-IN, three states, with a real preview
 
@@ -215,7 +244,8 @@ fail on any non-enum string property, exactly as issue #591 specifies.
 
 | Concern | Owner | Notes |
 | --- | --- | --- |
-| Crashes, hangs, HTTP client errors, performance traces | **Sentry** (macOS production only, as today — `Sources/SpeakApp/SentryManager.swift`) | PostHog crash capture stays disabled |
+| Crashes, hangs, HTTP client errors, performance traces | **Sentry** (macOS production only, as today — `Sources/SpeakApp/Analytics/SentryManager.swift`) | PostHog crash capture stays disabled |
+| Windows and Linux crash reports | **Sentry**, release builds only, with its own opt-in (`DesktopTelemetry`) | One envelope per fatal top-level error or unclean previous exit; type and scrubbed message only (`DesktopTelemetryScrubber`), no user, device name, stack locals or install ID |
 | Deliberate product events | **PostHog** | Typed catalogue only |
 | Shared identity between the two | **None** | Different IDs, never joined; `SentryManager.setUser` must not receive the analytics install ID |
 
@@ -422,7 +452,7 @@ than on the logo at the bottom of the dashboard.
 
 - Issue [#591](https://github.com/crmitchelmore/justspeaktoit/issues/591) — research base: Apple ATT rules, PostHog SDK configuration baseline, Element X / OpenUsage / Quotio / cmux patterns, keyboard-extension constraint
 - PR #590 — `docs: align telemetry privacy disclosures` (Sentry disclosure baseline this plan extends)
-- `Docs/PRIVACY.md`, `Docs/SECURITY_TRANSCRIPT_LOGGING.md`, `Docs/SENTRY_CONFIGURATION.md`, `Sources/SpeakApp/SentryManager.swift`
+- `Docs/PRIVACY.md`, `Docs/SECURITY_TRANSCRIPT_LOGGING.md`, `Docs/SENTRY_CONFIGURATION.md`, `Sources/SpeakApp/Analytics/SentryManager.swift`
 - [PostHog pricing](https://posthog.com/pricing) — 1M free events/month, EU Cloud (Frankfurt)
 - [TelemetryDeck pricing update, July 2026](https://telemetrydeck.com/blog/pricing-update-2026/) — free tier now 50k events/month for new accounts
 - [TelemetryDeck Swift platform overview](https://telemetrydeck.com/platforms/swift/) — funnels, retention, TQL

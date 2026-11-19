@@ -41,7 +41,9 @@ export async function enhanceMacDownloads(documentObject, navigatorObject) {
   documentObject.querySelectorAll("[data-auto-mac-download]").forEach((link) => {
     link.href = download;
     link.dataset.detectedArchitecture = architecture;
-    link.setAttribute("aria-label", `Download Just Speak to It for ${label}`);
+    // The accessible name must start with the visible "Download for Mac" so
+    // voice control and screen reader users can match it (WCAG 2.5.3).
+    link.setAttribute("aria-label", `Download for Mac, ${label}`);
   });
   documentObject.querySelectorAll("[data-download-architecture]").forEach((element) => {
     element.textContent = label;

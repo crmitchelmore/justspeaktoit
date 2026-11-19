@@ -114,7 +114,7 @@ private enum LinuxTroubleshooting {
     }
 
     static func show(_ snapshot: LinuxTroubleshootingSnapshot, summary: String) {
-        let strings = LinuxWindow.Strings()
+        let strings = DesktopNativeStrings()
         let rows = snapshot.findings.map { finding in
             let (title, page) = navigation(finding.destination)
             return JSTILinuxTroubleshootingRow(
@@ -151,8 +151,7 @@ private enum LinuxTroubleshooting {
 }
 
 private func linuxTroubleshootingEvent(_ command: Int32, _ revision: UInt64, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return }
     let previous = LinuxTroubleshootingState.shared.snapshot()
     holder.enqueueSettings {
         guard revision == jsti_troubleshooting_revision() else { return }
@@ -189,7 +188,7 @@ private func linuxTroubleshootingEvent(_ command: Int32, _ revision: UInt64, _ c
 extension LinuxWindow {
     static func configureTroubleshooting(_ holder: LinuxEventContext) throws {
         guard jsti_troubleshooting_configure(
-            linuxTroubleshootingEvent, Unmanaged.passUnretained(holder).toOpaque()
+            linuxTroubleshootingEvent, holder.callbackContext
         ) == 0 else { throw DesktopHostError(message: "Troubleshooting could not be configured.") }
     }
 }

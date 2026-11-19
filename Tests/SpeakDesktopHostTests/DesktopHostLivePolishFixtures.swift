@@ -149,7 +149,7 @@ final class AutoCleanHostFixture {
         let capability = DesktopHostOwnedDictationCapability(
             capability: .qualified, permission: .granted, makeWorker: { worker }
         )
-        host = try DesktopHostController(
+        host = try DesktopHostController.consented(
             directory: directory, effects: effects, ownedDictationCapability: owned ? capability : nil
         )
         await host.markReadyForSelfTest()

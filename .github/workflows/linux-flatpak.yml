@@ -3,7 +3,7 @@ name: Linux Flatpak
 on:
   push:
     branches: [main]
-    paths: &paths
+    paths:
       - Package.swift
       - LICENSE
       - .gitattributes
@@ -20,18 +20,22 @@ on:
       - Sources/SpeakCLI/**
       - Resources/**
       - packaging/linux/**
-      - scripts/linux-flatpak-checks.sh
-      - scripts/linux-flatpak-qualification.py
+      - scripts/linux/linux-flatpak-checks.sh
+      - scripts/linux/linux-flatpak-qualification.py
       - scripts/tests/test_linux_flatpak_sources.py
-      - scripts/stage-linux-desktop.py
-      - scripts/generate-desktop-icons.py
+      - scripts/linux/stage-linux-desktop.py
+      - scripts/desktop-analytics/**
+      - scripts/assets/generate-desktop-icons.py
       - scripts/local-llm-runtime/**
       - scripts/migration/verify-miniz.py
       - scripts/migration/migration_dependency.py
       - scripts/windows-local-runtime/dependencies.json
       - .github/workflows/linux-flatpak.yml
-  pull_request:
-    paths: *paths
+  # Pull requests build the Flatpak only when its own packaging changes;
+  # "Linux Desktop" proves shared and Linux source on pull requests, and every
+  # push to main still builds the full Flatpak.
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
   workflow_dispatch:
     inputs:
       qualification_run_id:
@@ -48,14 +52,14 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   flatpak:
     name: Flatpak build, bundle and installed runtime
     # Bubblewrap/Flatpak require a privileged disposable hosted container.
     # Only repository-owned branches may execute in that context.
-    if: inputs.qualification_run_id == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: inputs.qualification_run_id == '' && !startsWith(github.head_ref, 'merge-batch/') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50@sha256:1de59efef01a946d9f28f1ec3458bf6f61dcee3507d7fecdd473f8134da4ec77
@@ -64,7 +68,7 @@ jobs:
     env:
       MANIFEST: packaging/linux/com.justspeaktoit.JustSpeakToIt.yml
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Package the immutable requested source, not a synthetic merge whose
           # base can differ from the pull_request event payload.
@@ -89,6 +93,17 @@ jobs:
         run: >-
           flatpak-builder --download-only --force-clean
           --state-dir "$RUNNER_TEMP/flatpak-state" "$RUNNER_TEMP/flatpak-build" "$MANIFEST"
+
+      # The public PostHog project key for opt-in analytics (#1624), compiled in
+      # from the existing secret. Only a push to main and the release manifest
+      # tags (which the Alpha/Stable desktop qualification dispatches) get it;
+      # pull request, merge-batch, branch and manual main builds stay keyless
+      # and send nothing.
+      - name: Stamp the PostHog project key into release builds
+        if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/alpha-build-') || startsWith(github.ref, 'refs/tags/stable-candidate-') }}
+        env:
+          POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
+        run: python3 -B scripts/desktop-analytics/configure-posthog-key.py
 
       - name: Build offline
         run: >-
@@ -121,9 +136,9 @@ jobs:
           cp "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" flatpak-evidence/
           cp "$RUNNER_TEMP/flatpak-manifest.json" flatpak-evidence/
           sha256sum flatpak-evidence/JustSpeakToIt-x86_64.flatpak > flatpak-evidence/flatpak-bundle.sha256
-          python3 scripts/linux-flatpak-qualification.py record-build \
+          python3 scripts/linux/linux-flatpak-qualification.py record-build \
             flatpak-evidence/JustSpeakToIt-x86_64.flatpak flatpak-evidence/build-provenance.json
-          bash -o pipefail -c 'scripts/linux-flatpak-checks.sh "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" "$RUNNER_TEMP/jfk.wav" 2>&1 | tee flatpak-evidence/flatpak-installed-checks.log'
+          bash -o pipefail -c 'scripts/linux/linux-flatpak-checks.sh "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" "$RUNNER_TEMP/jfk.wav" 2>&1 | tee flatpak-evidence/flatpak-installed-checks.log'
           flatpak info --user com.justspeaktoit.JustSpeakToIt >> flatpak-evidence/flatpak-installed-checks.log
           flatpak info --user --show-permissions com.justspeaktoit.JustSpeakToIt >> flatpak-evidence/flatpak-installed-checks.log
 
@@ -147,7 +162,7 @@ jobs:
       options: --privileged
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -165,13 +180,13 @@ jobs:
           request = urllib.request.Request(f'https://api.github.com/repos/{repo}/actions/runs/{run_id}',
               headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'})
           run = json.load(urllib.request.urlopen(request, timeout=30))
-          verify = runpy.run_path('scripts/linux-flatpak-qualification.py')['source_metadata']
+          verify = runpy.run_path('scripts/linux/linux-flatpak-qualification.py')['source_metadata']
           metadata = verify(run, sha, repo, run_id, os.environ['GITHUB_SHA'])
           pathlib.Path('flatpak-evidence/source-run.json').write_text(json.dumps(metadata, indent=2) + '\n')
           PY
 
       - name: Download that run's authenticated bundle artifact
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: justspeaktoit-flatpak-x86_64
           run-id: ${{ inputs.qualification_run_id }}
@@ -185,7 +200,7 @@ jobs:
           [ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id
           python3 - <<'PY'
           import hashlib, json, os, pathlib, re, runpy, shutil, subprocess, urllib.request
-          helper = runpy.run_path('scripts/linux-flatpak-qualification.py')
+          helper = runpy.run_path('scripts/linux/linux-flatpak-qualification.py')
           bundle, revision, provenance = helper['artifact_files'](pathlib.Path('downloaded-flatpak'))
           record = helper['load_record'](provenance)
           built_sha = revision.read_text().strip()
@@ -195,10 +210,13 @@ jobs:
           evidence = pathlib.Path('flatpak-evidence/source-run.json')
           metadata = json.loads(evidence.read_text())
           parents = helper['checkout_parents'](git, built_sha)
-          helper['VERIFY']['verify_revision'](built_sha, parents, metadata, record, helper['file_digest'](bundle))
+          # A retest on a release tag must not reuse a bundle built without the PostHog key.
+          require_stamped = helper['VERIFY']['requires_stamped_key'](os.environ['GITHUB_EVENT_NAME'], os.environ['GITHUB_REF'])
+          helper['VERIFY']['verify_revision'](built_sha, parents, metadata, record, helper['file_digest'](bundle),
+                                              require_stamped)
           inputs = ['Package.swift', 'LICENSE', '.gitattributes', 'packaging/linux', 'Sources', 'Resources',
-                    'scripts/stage-linux-desktop.py', 'scripts/local-llm-runtime',
-                    'scripts/generate-desktop-icons.py', 'scripts/migration/verify-miniz.py',
+                    'scripts/linux/stage-linux-desktop.py', 'scripts/local-llm-runtime', 'scripts/desktop-analytics',
+                    'scripts/assets/generate-desktop-icons.py', 'scripts/migration/verify-miniz.py',
                     'scripts/migration/migration_dependency.py',
                     'scripts/windows-local-runtime/dependencies.json']
           subprocess.run([*git, 'diff', '--exit-code', built_sha, 'HEAD', '--', *inputs], check=True)
@@ -218,7 +236,7 @@ jobs:
 
       - name: Qualify the unchanged bundle in a real session
         run: >-
-          bash -o pipefail -c 'scripts/linux-flatpak-checks.sh
+          bash -o pipefail -c 'scripts/linux/linux-flatpak-checks.sh
           flatpak-evidence/JustSpeakToIt-x86_64.flatpak "$RUNNER_TEMP/jfk.wav"
           2>&1 | tee flatpak-evidence/flatpak-installed-checks.log'
 

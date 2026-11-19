@@ -1,0 +1,23 @@
+{
+  "products" : [
+    {
+      "displayName" : "Buy me a coffee",
+      "emoji" : "☕",
+      "id" : "com.justspeaktoit.tip.small",
+      "summary" : "A small token of appreciation"
+    },
+    {
+      "displayName" : "Buy me lunch",
+      "emoji" : "🍔",
+      "id" : "com.justspeaktoit.tip.medium",
+      "summary" : "Help fuel development"
+    },
+    {
+      "displayName" : "Generous support",
+      "emoji" : "💪",
+      "id" : "com.justspeaktoit.tip.large",
+      "summary" : "Super supporter!"
+    }
+  ],
+  "version" : 1
+}

@@ -15,7 +15,7 @@
 // presses, so the release is observed by polling the key state while the key
 // is held; nothing polls while it is up and no keyboard hook is installed.
 
-// Provided by WindowsWindow.cpp.
+// Provided by WindowsWindowBridge.cpp.
 void jsti_window_hotkey_event(HWND window, int event);
 int jsti_window_recording_state();
 
@@ -50,6 +50,10 @@ Configuration snapshot() {
     std::lock_guard<std::mutex> lock(configurationMutex);
     return configuration;
 }
+
+std::mutex observerMutex;
+JSTIHotKeyRegistrationCallback registrationObserver = nullptr;
+void *registrationContext = nullptr;
 
 bool modifierKey(UINT key) {
     switch (key) {
@@ -95,6 +99,21 @@ void stopRelease(HWND window) {
     runtime.held = false;
 }
 
+// Tells the host what is registered now, for System resources in use. UI
+// thread; the observer is called without the lock held.
+void announceRegistration() {
+    JSTIHotKeyRegistrationCallback callback;
+    void *context;
+    {
+        std::lock_guard<std::mutex> lock(observerMutex);
+        callback = registrationObserver;
+        context = registrationContext;
+    }
+    if (!callback) return;
+    const std::string name = runtime.registered ? jsti::utf8(comboName(runtime.modifiers, runtime.key)) : "";
+    callback(runtime.registered ? name.c_str() : nullptr, context);
+}
+
 // Probes availability on a separate identifier first, so a refused
 // combination never releases the working one.
 bool registerCombination(HWND window, UINT modifiers, UINT key) {
@@ -105,9 +124,11 @@ bool registerCombination(HWND window, UINT modifiers, UINT key) {
         runtime.registered = true;
         runtime.modifiers = modifiers;
         runtime.key = key;
+        announceRegistration();
         return true;
     }
     runtime.registered = runtime.registerKey(window, hotkeyID, runtime.modifiers | MOD_NOREPEAT, runtime.key) != 0;
+    announceRegistration();
     return false;
 }
 
@@ -127,7 +148,7 @@ struct Dialog {
     bool applied = false;
 };
 
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 
 void layout(HWND window) {
     RECT bounds{};
@@ -148,15 +169,7 @@ void layout(HWND window) {
     move(IDCANCEL, static_cast<int>(bounds.right) - margin - buttonWidth, top, buttonWidth, button);
 }
 
-void refreshFont(HWND window, Dialog &dialog) {
-    HFONT font = CreateFontW(-MulDiv(10, static_cast<int>(GetDpiForWindow(window)), 72), 0, 0, 0, FW_NORMAL,
-        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    if (!font) return;
-    for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    if (dialog.font) DeleteObject(dialog.font);
-    dialog.font = font;
-}
+void refreshFont(HWND window, Dialog &dialog) { jsti::chrome::refreshDialogFont(window, dialog.controls, dialog.font); }
 
 int selectedStyle(HWND window) {
     return static_cast<int>(SendDlgItemMessageW(window, styleID, CB_GETCURSEL, 0, 0));
@@ -252,66 +265,28 @@ void apply(HWND window, Dialog &dialog) {
     close(window);
 }
 
-LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
-    if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT themed = 0;
-    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
+constexpr jsti::chrome::DialogFrame dialogFrame{
+    minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, keyID, IDOK};
+
+bool handle(HWND window, Dialog &dialog, UINT message, WPARAM wparam, LPARAM, LRESULT &) {
     switch (message) {
-    case WM_CREATE: return createControls(window, *dialog) ? 0 : -1;
-    case WM_GETMINMAXINFO: {
-        RECT frame{0, 0, scale(window, minimumClientWidth), scale(window, minimumClientHeight)};
-        AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(window));
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {frame.right - frame.left, frame.bottom - frame.top};
-        return 0;
-    }
-    case WM_SIZE: layout(window); return 0;
-    case WM_DPICHANGED: {
-        const RECT *bounds = reinterpret_cast<RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
-        refreshFont(window, *dialog); layout(window); return 0;
-    }
-    case WM_ACTIVATE:
-        if (LOWORD(wparam) == WA_INACTIVE) { dialog->focus = GetFocus(); return 0; }
-        SetFocus(dialog->focus && IsChild(window, dialog->focus) ? dialog->focus : GetDlgItem(window, keyID));
-        return 0;
-    case DM_GETDEFID: return MAKELRESULT(IDOK, DC_HASDEFID);
     case WM_COMMAND:
-        if (LOWORD(wparam) == styleID && HIWORD(wparam) == CBN_SELCHANGE) { describe(window, *dialog); return 0; }
-        if (HIWORD(wparam) != BN_CLICKED) break;
-        if (LOWORD(wparam) == IDOK) { apply(window, *dialog); return 0; }
-        if (LOWORD(wparam) == IDCANCEL) { close(window); return 0; }
-        return 0;
-    case WM_CLOSE: close(window); return 0;
-    case WM_DESTROY:
-        if (dialog->font) { DeleteObject(dialog->font); dialog->font = nullptr; }
-        return 0;
+        if (LOWORD(wparam) == styleID && HIWORD(wparam) == CBN_SELCHANGE) { describe(window, dialog); return true; }
+        return jsti::chrome::dialogCommand(window, dialog, wparam, apply, close);
     }
-    return DefWindowProcW(window, message, wparam, lparam);
+    return false;
+}
+
+const jsti::chrome::DialogProcedure<Dialog> dialogParts{dialogFrame, layout, refreshFont, createControls, close, handle};
+
+LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    return jsti::chrome::dialogProcedure(dialogParts, window, message, wparam, lparam);
 }
 
 HWND createDialog(HWND owner, Dialog &dialog) {
-    const HINSTANCE instance = GetModuleHandleW(nullptr);
-    WNDCLASSW type{};
-    type.lpfnWndProc = procedure;
-    type.hInstance = instance;
-    type.lpszClassName = L"JustSpeakToItShortcut";
-    type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
-    RECT frame{0, 0, scale(owner, 540), scale(owner, 360)};
-    AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(owner));
-    RECT bounds{};
-    GetWindowRect(owner, &bounds);
     dialog.owner = owner;
-    return CreateWindowExW(windowExStyle, type.lpszClassName, L"Shortcut — Just Speak to It", windowStyle,
-        bounds.left + scale(owner, 40), bounds.top + scale(owner, 40), frame.right - frame.left,
-        frame.bottom - frame.top, owner, nullptr, instance, &dialog);
+    return jsti::chrome::createOwnedDialog(owner, L"JustSpeakToItShortcut", procedure, L"Shortcut — Just Speak to It",
+        540, 360, windowStyle, windowExStyle, &dialog);
 }
 } // namespace
 
@@ -348,8 +323,10 @@ bool jsti_hotkey_start(HWND window, std::string &failure) {
     runtime.key = config.key;
     if (runtime.registerKey(window, hotkeyID, config.modifiers | MOD_NOREPEAT, config.key)) {
         runtime.registered = true;
+        announceRegistration();
         return true;
     }
+    announceRegistration();
     failure = jsti::utf8(comboName(config.modifiers, config.key)) +
         " is unavailable. Another app may own it; choose another in Shortcut or use Record in this window.";
     return false;
@@ -360,6 +337,13 @@ void jsti_hotkey_stop(HWND window) {
     if (runtime.registered) runtime.unregisterKey(window, hotkeyID);
     runtime.registered = false;
     runtime.window = nullptr;
+    announceRegistration();
+}
+
+void jsti_hotkey_set_registration_observer(JSTIHotKeyRegistrationCallback callback, void *context) {
+    std::lock_guard<std::mutex> lock(observerMutex);
+    registrationObserver = callback;
+    registrationContext = callback ? context : nullptr;
 }
 
 // WM_HOTKEY and WM_TIMER from the main window. Returns true when handled.
@@ -410,18 +394,7 @@ void jsti_show_hotkey_settings(HWND owner) {
         jsti_window_update(jsti::systemError("Opening shortcut settings").c_str(), nullptr, -1);
         return;
     }
-    EnableWindow(owner, FALSE);
-    ShowWindow(window, SW_SHOW);
-    SetFocus(GetDlgItem(window, keyID));
-    MSG message{};
-    BOOL result = 1;
-    while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-        if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
-    }
-    if (IsWindow(window)) close(window);
-    if (IsWindow(owner)) { EnableWindow(owner, TRUE); SetActiveWindow(owner); }
-    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
-    else if (result < 0) jsti_window_update(jsti::systemError("Reading shortcut settings messages").c_str(), nullptr, -1);
+    jsti::chrome::runModalDialog(owner, window, keyID, close, "shortcut settings");
 }
 
 int jsti_window_set_hotkey(unsigned modifiers, unsigned virtualKey, const char *const *styleNames,
@@ -531,6 +504,19 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
     runtime.registerKey = fakeRegister;
     runtime.unregisterKey = fakeUnregister;
     runtime.keyState = fakeKeyState;
+    // System resources in use follows every registration change.
+    std::vector<std::string> announced;
+    JSTIHotKeyRegistrationCallback originalObserver;
+    void *originalObserverContext;
+    {
+        std::lock_guard<std::mutex> lock(observerMutex);
+        originalObserver = registrationObserver;
+        originalObserverContext = registrationContext;
+    }
+    jsti_hotkey_set_registration_observer([](const char *name, void *context) {
+        static_cast<std::vector<std::string> *>(context)->push_back(name ? name : "<none>");
+    }, &announced);
+    auto lastAnnounced = [&] { return announced.empty() ? std::string() : announced.back(); };
     auto check = [&]() -> bool {
         const char *names[] = {"Toggle", "Hold", "Tap"};
         const char *descriptions[] = {"Each press toggles.", "Hold to record.", "Double tap."};
@@ -548,8 +534,12 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
         std::string failure;
         jsti_hotkey_stop(owner);
         local.registered.clear();
+        const bool stopAnnounced = lastAnnounced() == "<none>";
         if (!jsti_hotkey_start(owner, failure) || !registeredAs(MOD_CONTROL | MOD_ALT, VK_SPACE)) {
             error = "The configured shortcut was not registered at start."; return false;
+        }
+        if (!stopAnnounced || lastAnnounced().rfind("Ctrl+Alt+", 0) != 0) {
+            error = "Starting or stopping the shortcut was not reported to System resources in use."; return false;
         }
         // Press-to-toggle keeps the native toggle event.
         SendMessageW(owner, WM_HOTKEY, hotkeyID, 0);
@@ -581,6 +571,9 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
         if (!applied || local.applies != 1 || local.lastModifiers != (MOD_CONTROL | MOD_ALT) || local.lastKey != 'J' ||
             local.lastStyle != 1 || !registeredAs(MOD_CONTROL | MOD_ALT, 'J') || !snapshot().gestures()) {
             error = "Applying an available shortcut did not register it and report one complete change."; return false;
+        }
+        if (lastAnnounced() != jsti::utf8(comboName(MOD_CONTROL | MOD_ALT, 'J'))) {
+            error = "A changed shortcut was not reported to System resources in use."; return false;
         }
         // Gesture styles report the press, then the release seen by polling.
         local.keyDown = true;
@@ -624,6 +617,8 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
     }
     runtime = originalRuntime;
     fixture = nullptr;
+    jsti_hotkey_set_registration_observer(originalObserver, originalObserverContext);
+    announceRegistration();
     jsti_window_update(nullptr, nullptr, -1);
     return passed;
 }

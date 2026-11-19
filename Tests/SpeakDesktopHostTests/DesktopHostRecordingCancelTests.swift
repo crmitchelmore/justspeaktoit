@@ -16,7 +16,7 @@ final class DesktopHostRecordingCancelTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("recording-cancel-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         effects = RecordingCancelEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         modelIndex = try XCTUnwrap(
             DesktopHostModels.all.firstIndex { DesktopTranscription.provider(for: $0.id) != nil }
@@ -171,7 +171,7 @@ final class DesktopHostRecordingCancelTests: XCTestCase {
     func testDisabledEscapeSurvivesRestartAndStaleEnabledEscapeCannotCancelNewRun() async throws {
         try await setEscapeCancellation(false)
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         await start()
         let original = await controller.recording?.record.id

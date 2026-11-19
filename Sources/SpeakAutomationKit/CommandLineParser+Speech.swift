@@ -5,13 +5,7 @@ import SpeakCore
 extension CommandLineParser {
     static func parseSay(_ arguments: [String]) throws -> CLIPlan {
         var plan = CLIPlan(command: .speakText)
-        let positional = try self.applyOptions(
-            &plan, arguments: arguments,
-            allowed: [
-                .json, .timeout, .voice, .output, .play, .file, .provider, .model,
-                .speed, .pitch, .quality, .language
-            ]
-        )
+        let positional = try self.applyOptions(&plan, arguments: arguments, allowed: self.options[.speakText] ?? [])
         if plan.speechSource != nil {
             guard positional.isEmpty else {
                 throw CLIUsageError(message: "`speak say` takes text or --file, not both.")

@@ -30,7 +30,7 @@ export async function claimOperation(request: Request, context: AuthenticatedCon
     if (receipt.operation !== operation) throw operationError(request, 'conflict');
     throw retainedOperation(request, receipt);
   }
-  const existing = await context.repository.claimRequest({ userId: context.session.userId,
+  const existing = await context.repository.usage.claimRequest({ userId: context.session.userId,
     idempotencyKey: key, operation, correlationId: context.correlationId, nowSeconds: context.nowSeconds });
   if (existing !== null) throw operationError(request, existing.operation !== operation ? 'conflict'
     : existing.status === 'completed' ? 'already_processed' : 'request_in_progress');

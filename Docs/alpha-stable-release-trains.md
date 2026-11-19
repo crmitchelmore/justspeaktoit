@@ -81,9 +81,24 @@ build, or establish live vault/API access; those require separate verification.
 
 ## Alpha
 
-Every successful main push CI allocates an immutable annotated
-`alpha-build-N` tag containing a manifest. Independent workers build direct Mac
-and iOS from that exact source. Allocation is idempotent; manual
+Alpha runs in two phases per main commit. Alpha may be broken up to 10% of
+the time; TestFlight, Windows installers, the Flatpak repository and Stable may
+not.
+
+- **Fast (push to main):** the newest pushed commit allocates an immutable
+  annotated `alpha-build-N` tag containing a manifest, then builds and publishes
+  the direct Mac Alpha (and its CLI) and qualifies the desktop bundles without
+  waiting for the full main suite. One fast run at a time; a newer push replaces
+  a waiting one. `publish-alpha` still refuses a source whose main CI has failed.
+- **Green (successful main push CI):** the same manifest (allocation is
+  idempotent per source) ships iOS to TestFlight, the Windows installer and the
+  Flatpak repository; the Mac and desktop jobs are no-ops when the fast phase
+  already delivered them. A green source is skipped only when a newer main
+  commit is already green. `release-train.mjs configure` refuses iOS and every
+  Stable surface unless the source's main CI passed, and `scripts/ci-metrics`
+  reports the broken-Alpha rate.
+
+Independent workers build direct Mac and iOS from that exact source. Allocation is idempotent; manual
 `rebuild` creates a new build number for an expired or invalid Apple upload.
 Hourly reconciliation retries missing deliveries, dispatching at most three
 sources per pass and checking every page of active runs to avoid duplicate
@@ -102,6 +117,18 @@ tests pin, so testing afterwards fails every build. Until the pointer exists,
 reports "An error occurred in retrieving update information". Hourly
 reconciliation dispatches with the workflow token (`actions: write`), not a
 personal token.
+
+### Please test (human checks)
+
+Human validation never blocks a pull request or merge; it happens on Alpha.
+Alpha notes (the GitHub release, Sparkle, the in-app catalogue and TestFlight
+"What to Test") end with a **Please test** section listing the
+[`Docs/manual-checks.yml`](manual-checks.yml) checks whose ids are new since the
+previous Alpha delivered on that surface (a `<surface>-receipt.json` asset), so
+checks from superseded or undelivered builds carry forward. Mac notes list Mac
+checks; iOS notes list iPhone and Watch checks. `owner-` items and decisions are
+never listed. `scripts/alpha-testing-notes-lib.mjs` builds the section; a
+catalogue that fails to parse omits it rather than failing the release.
 
 The local Codex Run action launches Alpha with `script/build_and_run.sh`.
 Alpha starts without a global recording hotkey; configure one in Settings.
@@ -203,12 +230,19 @@ owner action in App Store Connect.
    own candidate receipt verified; an unverified Apple candidate is skipped and
    keeps its previous Stable. Publication receipts advance Apple note baselines
    only after the exact build is publicly available.
+6. After publication, `submit-microsoft-store` builds the unsigned Microsoft
+   Store bundle from the candidate's qualified Windows runtime bundles and
+   submits it with the `microsoft-store` environment's Partner Center
+   credentials (`windows-store.yml`). It skips with a notice when the candidate
+   has no desktop qualification or the environment has no credentials. See
+   [Microsoft Store package](windows-installer.md#microsoft-store-package).
 
 For `ios-only`, only the selected Alpha's iOS delivery receipt is required.
 Prepare Stable builds only iOS; Mac builds and desktop qualification are skipped.
 Publish Stable requires a matching verified iOS candidate receipt and the same
-exact-hash owner approval, then submits only iOS. It creates no Mac release and
-does not update Homebrew, Sparkle or website downloads. The manifest retains
+exact-hash owner approval, then submits only iOS. It creates no Mac release,
+submits nothing to the Microsoft Store and does not update Homebrew, Sparkle or
+website downloads. The manifest retains
 unselected surface metadata for compatibility, but its frozen `publicationScope`
 limits workers and publication. Historical manifests without this field keep
 the combined-release behavior. Changing scope requires a new candidate and
@@ -219,6 +253,17 @@ review submission and a rejected version do not advance it. Initial Apple Store
 releases therefore include the full initial history. Paired reverts cancel only
 within the unpublished range. Candidate receipt hashes guard source, build and
 notes; direct assets are checked against recorded SHA-256 before promotion.
+
+For hand-written store text, commit `Config/StoreNotes/<surface>.md` (for example
+`Config/StoreNotes/ios.md`) before selecting the Alpha source. Prepare Stable
+reads the file from that exact source commit, not the current checkout. Non-empty,
+trimmed content replaces only that surface's `storeNotes` and is hashed into the
+candidate as usual; cumulative in-app notes stay unchanged. The text must be at
+most 4,000 characters after trimming: longer overrides fail rather than being
+truncated. Missing or whitespace-only files keep the existing generated store
+text. Alpha ignores these files. Update or remove each file for every Stable
+release so an old release's text is not reused. Changing it after a candidate is
+frozen requires selecting a new source and preparing a new candidate.
 
 ## Required rollout evidence
 
@@ -242,6 +287,19 @@ disabled is the commissioning exception; Stable publication remains owner-only.
 Required Alpha signing secrets are selected in the reusable Apple workflows.
 No signing material belongs in source control. Use the existing secure API key
 and local Apple Developer authentication for provisioning.
+
+## Android Alpha APK
+
+The green phase's `android` job (after `mac-direct` has made the Alpha public)
+builds the manifest source's release APK in the main-only `android-release`
+environment, signs it with the Play upload key, refuses a debug certificate, and
+attaches it to the Alpha as `JustSpeakToIt-android.apk`. It then advances
+`android-pointer.json` on `alpha-latest` (`{schemaVersion: 1, tag, asset,
+versionCode, sha256}`), never to an older Alpha. The website's
+`/alpha/download/android` follows that pointer, so it lags the Alpha pointer
+until the job finishes and answers 503 until the first APK exists. Without the
+upload keystore the job builds nothing. The version code uses the same
+build-time scheme as `android.yml`, so each APK installs over the last one.
 
 ## Windows and Linux release qualification
 

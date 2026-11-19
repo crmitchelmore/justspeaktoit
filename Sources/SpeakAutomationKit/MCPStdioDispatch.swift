@@ -35,19 +35,18 @@ final class MCPStdioDispatch: @unchecked Sendable {
                 id: nil, code: -32600, message: "Request exceeds the size limit.")))
             return
         }
-        let message = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        let params = message?["params"] as? [String: Any]
+        let message = JSONRPCRequest.decode(data)
         if self.handleCancellation(message, data: data) { return }
-        guard let message, message["method"] as? String == "tools/call",
-              params?["name"] as? String == AutomationCommand.awaitTranscript.rawValue else {
+        guard let message, message.methodName == "tools/call",
+              message.toolName == AutomationCommand.awaitTranscript.rawValue else {
             if let response = self.handler.handle(line: line) { self.write(response) }
             return
         }
         self.dispatchAwait(line: line, message: message, data: data)
     }
 
-    private func dispatchAwait(line: String, message: [String: Any], data: Data) {
-        guard message["id"] != nil else { return }
+    private func dispatchAwait(line: String, message: JSONRPCRequest, data: Data) {
+        guard let identifier = message.id else { return }
         guard let identity = MCPRequestHandler.awaitIdentity(in: data) else {
             self.write(MCPRequestHandler.encode(MCPRequestHandler.errorResponse(
                 id: nil, code: -32600, message: "Await requires a string or 64-bit integer JSON-RPC ID.")))
@@ -63,7 +62,8 @@ final class MCPStdioDispatch: @unchecked Sendable {
         }
         guard admitted else {
             self.write(MCPRequestHandler.encode(MCPRequestHandler.errorResponse(
-                id: message["id"], code: -32600, message: "Await worker limit or duplicate active JSON-RPC ID.")))
+                id: identifier.jsonRPCID, code: -32600,
+                message: "Await worker limit or duplicate active JSON-RPC ID.")))
             return
         }
         DispatchQueue.global(qos: .userInitiated).async { [self] in
@@ -73,8 +73,8 @@ final class MCPStdioDispatch: @unchecked Sendable {
         }
     }
 
-    private func handleCancellation(_ message: [String: Any]?, data: Data) -> Bool {
-        guard message?["method"] as? String == "notifications/cancelled", message?["id"] == nil else { return false }
+    private func handleCancellation(_ message: JSONRPCRequest?, data: Data) -> Bool {
+        guard let message, message.methodName == "notifications/cancelled", message.id == nil else { return false }
         if let identity = MCPRequestHandler.awaitIdentity(in: data, cancellation: true) {
             let wait = self.lock.withLock { self.waits[Data(identity.utf8)] }
             wait?.cancel()

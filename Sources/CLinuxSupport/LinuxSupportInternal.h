@@ -8,6 +8,7 @@
 void jsti_set_error(char *error, size_t capacity, const char *format, ...) G_GNUC_PRINTF(3, 4);
 int32_t jsti_x11_modifier_self_test(char *error, size_t capacity);
 int32_t jsti_x11_action_shortcuts_self_test(char *error, size_t capacity);
+int32_t jsti_portal_self_test(char *error, size_t capacity);
 
 /* Runs `work(data)` on the default (GTK) main context and waits for it, at
  * most `timeout_ms`. Runs inline on the owning thread. Returns FALSE on
@@ -36,6 +37,9 @@ struct _GtkEventControllerKey;
 struct _GtkWindow;
 void jsti_permissions_open(struct _GtkWindow *owner);
 void jsti_permissions_close(void);
+/* The window of allowed cloud AI providers, with a Withdraw button for each (LinuxCloudSharing.c). */
+void jsti_cloud_sharing_open(struct _GtkWindow *owner);
+void jsti_cloud_sharing_close(void);
 int32_t jsti_permissions_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 void jsti_api_keys_open(struct _GtkWindow *owner);
 void jsti_api_keys_close(void);
@@ -67,10 +71,36 @@ gboolean jsti_model_filters_live(void);
 gboolean jsti_model_filters_preferred_live(gboolean local);
 int32_t jsti_model_filters_self_test(char *error, size_t capacity);
 
+/* LinuxOpenRouterBrowser.c: Browse OpenRouter models… (#1618), a modal window
+ * over the host's JSTIOpenRouterBrowserQuery. `purpose` is
+ * JSTI_OPENROUTER_BROWSER_*; `selected_slot` is the picker's current choice.
+ * Choose closes the window, then calls `chosen` with the row's slot. Main thread. */
+typedef void (*jsti_openrouter_chosen_fn)(int32_t slot);
+void jsti_openrouter_browser_open(struct _GtkWindow *owner, int32_t purpose, int32_t selected_slot,
+                                  jsti_openrouter_chosen_fn chosen);
+void jsti_openrouter_browser_close(void);
+int32_t jsti_openrouter_browser_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
+
+/* LinuxSettingsSearch.c: the sidebar's settings search. Returns the entry over
+ * a stack that shows `navigation` (the page list) or the results. Ctrl+F and
+ * Ctrl+K call jsti_settings_search_focus. Main thread. */
+struct _GtkWidget *jsti_settings_search_new(struct _GtkWidget *navigation);
+void jsti_settings_search_focus(void);
+int32_t jsti_settings_search_self_test(char *error, size_t capacity);
+
 /* The iCloud sync group (LinuxCloudSync.c): built once for the window's
  * iCloud sync page, and exercised by the window self-test. */
 struct _GtkWidget *jsti_cloud_sync_group_new(void);
 int32_t jsti_cloud_sync_self_test(char *error, size_t capacity);
+/* The Send from phone group (LinuxPhoneReceiver.c), shown on the same page. */
+struct _GtkWidget *jsti_phone_receiver_group_new(void);
+int32_t jsti_phone_receiver_self_test(char *error, size_t capacity);
+/* General > System resources in use (LinuxSystemResources.c): built once for
+ * the window's lifetime; its self-test runs with the window's. */
+struct _GtkWidget *jsti_system_resources_group_new(void);
+int32_t jsti_system_resources_self_test(char *error, size_t capacity);
+struct _GtkWidget *jsti_raw_configuration_group_new(struct _GtkWindow *owner);
+int32_t jsti_raw_configuration_self_test(char *error, size_t capacity);
 struct _GtkWidget *jsti_history_filters_button_new(void);
 struct _GtkWidget *jsti_profiles_page_new(void);
 int32_t jsti_profiles_self_test(char *error, size_t capacity);
@@ -82,7 +112,6 @@ void jsti_troubleshooting_open(struct _GtkWindow *owner);
 void jsti_troubleshooting_close(void);
 int32_t jsti_troubleshooting_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 void jsti_show_voice_sources(struct _GtkWindow *owner, const char *record, const char *history);
-int32_t jsti_voice_sources_self_test(struct _GtkWindow *owner, char *error, size_t capacity);
 void jsti_voice_sources_close(void);
 guint64 jsti_voice_provider_generation(void);
 gboolean jsti_voice_provider_enter(guint64 generation);
@@ -123,8 +152,20 @@ struct _GtkWidget *jsti_brand_icon_new(int size);
 /* Paints the app icon into a size x size square at the origin. */
 struct _cairo;
 void jsti_brand_icon_paint(struct _cairo *cr, double size);
+/* A 620-pixel-wide window over `owner` that Escape closes, with a header bar;
+ * `*column` receives its margined content column (LinuxToolWindow.c). */
+struct _GtkWindow *jsti_tool_window_new(struct _GtkWindow *owner, const char *title, int height,
+                                        struct _GtkWidget **column);
 /* A scrolling page with centred content; `*content` receives its column. */
 struct _GtkWidget *jsti_page_new(struct _GtkWidget **content);
+/* Sets the AT-SPI name. GtkDropDown and labelled GtkButton point a labelled-by
+ * relation at their visible text, which outranks GTK_ACCESSIBLE_PROPERTY_LABEL,
+ * so that relation is cleared too. */
+void jsti_accessible_set_name(struct _GtkWidget *widget, const char *name);
+/* Announces through the widget's window. GTK drops an announcement from an
+ * accessible whose AT context is not realised yet, which is true of most child
+ * widgets until a screen reader has queried them; a shown window's always is. */
+void jsti_accessible_announce(struct _GtkWidget *widget, const char *text, int priority);
 void jsti_visual_density_apply(struct _GtkWidget *root, const JSTIVisualDensity *density);
 int32_t jsti_visual_density_self_test(struct _GtkWidget *root);
 /* A gradient header. `variant` is NULL (brand), "voice" or "settings".
@@ -160,6 +201,9 @@ gboolean jsti_hud_overlay_supported(void);
 void jsti_hud_destroy(void);
 /* The HUD's card and shadow, when on screen, for snapshots; NULL otherwise. */
 struct _GtkWidget *jsti_hud_card(void);
+/* LinuxWindowPost.c: speaks a finished HUD phase through the main window where
+ * no HUD window can be shown (Wayland), in place of the state-change status. */
+void jsti_window_announce_phase(const char *text, gboolean urgent);
 /* Checks the HUD never takes focus, sits at the bottom centre of the work
  * area on X11 and hides again. On Wayland it only checks nothing is shown. */
 int32_t jsti_hud_self_test(char *error, size_t capacity);
@@ -169,7 +213,7 @@ int32_t jsti_hud_self_test(char *error, size_t capacity);
  * Main thread. `state` is JSTI_STATE_*; `summary` the Sessions, Recording
  * Time and Spend line. */
 void jsti_tray_start(void);
-/* LinuxWindow.c: 1 Start or Stop Recording (Cancel while working), 2 Open,
+/* LinuxWindowActions.c: 1 Start or Stop Recording (Cancel while working), 2 Open,
  * 3 Settings, 4 Quit. */
 void jsti_window_tray_command(int command);
 void jsti_tray_set_state(int32_t state, const char *summary);

@@ -1,0 +1,389 @@
+import AppKit
+import Combine
+import Foundation
+import SpeakCore
+// @Implement: This file is the state manager for the Heads-Up display. It exposes lifecycle functions so that another
+// class can notify it when recording has started, transcribing has started, post-processing has started, etc. It has
+// an enum for all the states it can be in and is a state machine. It also has the ability to surface errors in any of
+// those things and it has an internal timer that shows the duration of each step.
+
+@MainActor
+final class HUDManager: ObservableObject {
+  struct Snapshot: Equatable {
+    var phase: HUDPhase
+    var headline: String
+    var subheadline: String?
+    var showRetryHint: Bool
+    var liveText: String?
+    var liveTextIsFinal: Bool
+    var liveTextConfidence: Double?
+    var streamingText: String?
+    var finalTranscript: String
+    var interimTranscript: String
+
+    static let hidden = Snapshot(
+      phase: .hidden, headline: "", subheadline: nil, showRetryHint: false,
+      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil,
+      finalTranscript: "", interimTranscript: ""
+    )
+  }
+
+  /// Threshold for auto-expanding HUD when transcript exceeds this character count
+  static let autoExpandThreshold = HUDExpansionPreference.autoExpandThreshold
+
+  /// Whether the HUD is in expanded mode showing full transcript
+  @Published var isExpanded: Bool = false
+
+  @Published private(set) var snapshot: Snapshot = .hidden
+  /// When the current phase's clock started, or `nil` for the phases that show
+  /// no clock (`armed`, the terminal phases and `hidden`).
+  ///
+  /// The HUD used to carry a `Snapshot.elapsed` that a 50 Hz timer wrote back
+  /// into the snapshot, so every tick republished phase, headline, transcripts
+  /// and capture health and re-rendered the whole HUD. Publishing only the
+  /// instant the clock started lets the views drive their own `TimelineView`
+  /// at the resolution they actually display, so nothing is published between
+  /// phase transitions.
+  @Published private(set) var sessionStart: Date?
+  /// Current capture-health data shown in the HUD during recording and failure phases.
+  @Published private(set) var captureHealth: CaptureHealthSnapshot = .empty
+  /// Normalized audio level (0.0 to 1.0) during recording phase
+  @Published private(set) var audioLevel: Float = 0
+  /// The recording pane is up but the microphone has not yet delivered real
+  /// audio (a Bluetooth headset can take ~0.7 s to switch into call mode). The
+  /// clock stays at zero until `markAudioLive()`, so it never counts time in
+  /// which the user's words could not be heard.
+  @Published private(set) var isAwaitingAudio = false
+  private var awaitingAudioSubheadline: String?
+
+  private let appSettings: AppSettings
+  private let accessibilityAnnouncementPoster: ((String) -> Void)?
+  /// Set by `HUDWindowPresenter`: an announcement made while the HUD panel is
+  /// still hidden waits for `hudWindowDidPresent()`. VoiceOver otherwise
+  /// handles the panel appearing after the announcement and drops the
+  /// announcement (it read the HUD's elements, never "Recording started").
+  var defersAnnouncementsUntilPresented = false
+  private var isWindowPresented = false
+  private(set) var pendingAccessibilityAnnouncement: String?
+  private var autoHideTimer: Timer?
+  /// The interval most recently passed to `scheduleAutoHide`. `Timer.timeInterval`
+  /// reads back as 0 for a non-repeating timer, so this is the only way to
+  /// observe which duration a `finishSuccess`/`finishFailure` call actually
+  /// scheduled - test-only visibility, never read by production code.
+  private(set) var lastScheduledAutoHideDuration: TimeInterval?
+
+  init(
+    appSettings: AppSettings,
+    accessibilityAnnouncementPoster: ((String) -> Void)? = nil
+  ) {
+    self.appSettings = appSettings
+    self.accessibilityAnnouncementPoster = accessibilityAnnouncementPoster
+  }
+
+  static func accessibilityAnnouncement(
+    for phase: HUDPhase,
+    subheadline: String?
+  ) -> String? {
+    let detail = subheadline.map { ". \($0)" } ?? ""
+    switch phase {
+    case .armed:
+      return "Hands-free dictation armed\(detail)"
+    case .recording:
+      return "Recording started\(detail)"
+    case .transcribing:
+      return "Transcribing\(detail)"
+    case .postProcessing:
+      return "Post-processing\(detail)"
+    case .delivering:
+      return "Delivering transcription\(detail)"
+    case .editing:
+      return "Editing\(detail)"
+    case .success(let message):
+      return "Success. \(message)"
+    case .failure(let message):
+      return "Failed. \(message)"
+    case .hidden:
+      return nil
+    }
+  }
+
+  /// Begins the recording phase. When a dictation profile is active for the
+  /// session, its name is surfaced in the HUD subheadline.
+  ///
+  /// - Parameter awaitingAudio: show the pane now, as "Getting ready" with the
+  ///   clock held at zero, and start the clock only when `markAudioLive()`
+  ///   reports the microphone is delivering audio.
+  func beginRecording(profileName: String? = nil, awaitingAudio: Bool = false) {
+    // Set initial expansion state based on user preference
+    switch appSettings.hudSizePreference {
+    case .compact:
+      isExpanded = false
+    case .expanded:
+      isExpanded = true
+    case .autoExpand:
+      isExpanded = false  // Will auto-expand when transcript exceeds threshold
+    }
+    let subheadline = profileName.map { "Profile: \($0)" } ?? "Capturing audio"
+    guard awaitingAudio else {
+      transition(.recording, headline: "Recording", subheadline: subheadline)
+      return
+    }
+    transition(
+      .recording,
+      headline: "Getting ready",
+      subheadline: "Opening microphone",
+      showsTimer: false,
+      announces: false
+    )
+    isAwaitingAudio = true
+    awaitingAudioSubheadline = subheadline
+  }
+
+  /// Shows the armed indicator for hands-free dictation. The HUD stays up
+  /// between utterances so "armed but silent" is never mistaken for "off".
+  func beginArmed(subheadline: String = "Hands-free dictation is armed") {
+    transition(
+      .armed,
+      headline: "Listening for speech",
+      subheadline: subheadline,
+      showsTimer: false
+    )
+  }
+
+  /// Update the current audio level during recording (0.0 to 1.0)
+  func updateAudioLevel(_ level: Float) {
+    guard case .recording = snapshot.phase else { return }
+    audioLevel = level
+  }
+
+  /// Update live transcription text, final state, and confidence
+  func updateLiveTranscription(text: String, isFinal: Bool, confidence: Double?) {
+    guard snapshot.phase == .recording || snapshot.phase == .editing else { return }
+    snapshot.liveText = text.isEmpty ? nil : text
+    snapshot.liveTextIsFinal = isFinal
+    snapshot.liveTextConfidence = confidence
+  }
+
+  func updateLiveTranscript(final: String, interim: String) {
+    snapshot.finalTranscript = final
+    snapshot.interimTranscript = interim
+    // Auto-expand if preference allows and transcript exceeds threshold
+    if appSettings.hudSizePreference == .autoExpand {
+      let totalLength = final.count + interim.count
+      if totalLength > Self.autoExpandThreshold && !isExpanded {
+        isExpanded = true
+      }
+    }
+  }
+
+  func toggleExpanded() {
+    isExpanded.toggle()
+  }
+
+  func beginTranscribing(subheadline: String = "Preparing raw transcript") {
+    audioLevel = 0
+    transition(.transcribing, headline: "Transcribing", subheadline: subheadline)
+  }
+
+  func beginPostProcessing() {
+    transition(.postProcessing, headline: "Post-processing", subheadline: "Cleaning up transcript")
+  }
+
+  func updateStreamingText(_ text: String) {
+    snapshot.streamingText = text
+  }
+
+  func beginDelivering() {
+    transition(.delivering, headline: "Delivering", subheadline: "Pasting into target app")
+  }
+
+  /// Voice-edit mode: a distinct "Editing" state reused across its listening, rewriting, and
+  /// applying stages (the subheadline tells them apart).
+  func beginEditing(subheadline: String) {
+    transition(.editing, headline: "Editing", subheadline: subheadline)
+  }
+
+  /// How long a success confirmation stays on screen before it auto-hides.
+  static let successDisplayDuration: TimeInterval = SpeechDefaults.successHUDDuration
+
+  /// The default interval a failure or cancellation message stays on screen.
+  static let standardFailureDisplayDuration: TimeInterval = SpeechDefaults.failureHUDDuration
+
+  /// The interval used when the "Shorten error display" preference is on -
+  /// 50% longer than `successDisplayDuration`, so a failure still reads as
+  /// slower than a success without lingering nearly 3x as long.
+  static let shortFailureDisplayDuration: TimeInterval = SpeechDefaults.shortFailureHUDDuration
+
+  /// Resolves the auto-hide interval for a failure/cancellation message from
+  /// the "Shorten error display" preference. A caller-supplied
+  /// `displayDuration` (eg the 3s "voice edit in progress" refusal) always
+  /// wins - the preference only changes the shared default the other
+  /// `finishFailure` call sites fall back to.
+  static func failureDisplayDuration(shortenErrorDisplay: Bool) -> TimeInterval {
+    shortenErrorDisplay ? shortFailureDisplayDuration : standardFailureDisplayDuration
+  }
+
+  func finishSuccess(message: String, displayDuration: TimeInterval? = nil) {
+    transition(
+      .success(message: message), headline: "Completed", subheadline: message, showsTimer: false)
+    scheduleAutoHide(after: displayDuration ?? Self.successDisplayDuration)
+  }
+
+  /// How long a failure stays on screen under the current preference. Also used
+  /// for successes that carry advice the user needs time to read.
+  var failureDisplayDuration: TimeInterval {
+    Self.failureDisplayDuration(shortenErrorDisplay: appSettings.shortenErrorDisplay)
+  }
+
+  func finishFailure(message: String) {
+    finishFailure(headline: "Something went wrong", message: message, showRetryHint: false)
+  }
+
+  func finishFailure(headline: String, message: String, displayDuration: TimeInterval? = nil) {
+    finishFailure(headline: headline, message: message, showRetryHint: false, displayDuration: displayDuration)
+  }
+
+  func finishFailure(headline: String, message: String, showRetryHint: Bool, displayDuration: TimeInterval? = nil) {
+    transition(
+      .failure(message: message),
+      headline: headline,
+      subheadline: message,
+      showsTimer: false,
+      showRetryHint: showRetryHint
+    )
+    let resolvedDuration = displayDuration
+      ?? Self.failureDisplayDuration(shortenErrorDisplay: appSettings.shortenErrorDisplay)
+    scheduleAutoHide(after: resolvedDuration)
+  }
+
+  func hide() {
+    guard snapshot.phase.isVisible else { return }
+    invalidateTimers()
+    audioLevel = 0
+    sessionStart = nil
+    isAwaitingAudio = false
+    awaitingAudioSubheadline = nil
+    snapshot = .hidden
+    if pendingAccessibilityAnnouncement != nil {
+      // Shown and hidden before the panel appeared: nothing was on screen.
+      pendingAccessibilityAnnouncement = nil
+      return
+    }
+    postAccessibilityAnnouncement("HUD dismissed")
+  }
+
+  func updateCaptureHealth(_ health: CaptureHealthSnapshot) {
+    captureHealth = health
+  }
+
+  private func transition(
+    _ phase: HUDPhase,
+    headline: String,
+    subheadline: String?,
+    showsTimer: Bool = true,
+    showRetryHint: Bool = false,
+    announces: Bool = true
+  ) {
+    invalidateTimers()
+    sessionStart = showsTimer ? Date() : nil
+    isAwaitingAudio = false
+    awaitingAudioSubheadline = nil
+    snapshot = Snapshot(
+      phase: phase, headline: headline, subheadline: subheadline, showRetryHint: showRetryHint,
+      liveText: nil, liveTextIsFinal: true, liveTextConfidence: nil, streamingText: nil,
+      finalTranscript: "", interimTranscript: ""
+    )
+    if announces, let announcement = Self.accessibilityAnnouncement(for: phase, subheadline: subheadline) {
+      postAccessibilityAnnouncement(announcement)
+    }
+  }
+
+  private func scheduleAutoHide(after delay: TimeInterval) {
+    lastScheduledAutoHideDuration = delay
+    autoHideTimer?.invalidate()
+    guard delay > 0 else { return }
+    // Use target-selector Timer pattern to completely bypass Swift concurrency runtime.
+    autoHideTimer = Timer.scheduledTimer(
+      timeInterval: delay,
+      target: self,
+      selector: #selector(autoHideTimerFired),
+      userInfo: nil,
+      repeats: false
+    )
+    if let autoHideTimer {
+      RunLoop.main.add(autoHideTimer, forMode: .common)
+    }
+  }
+
+  @objc private func autoHideTimerFired() {
+    defer { autoHideTimer = nil }
+    guard snapshot.phase.isTerminal else { return }
+    hide()
+  }
+
+  private func invalidateTimers() {
+    autoHideTimer?.invalidate()
+    autoHideTimer = nil
+  }
+
+  private func postAccessibilityAnnouncement(_ announcement: String) {
+    if defersAnnouncementsUntilPresented, !isWindowPresented, snapshot.phase.isVisible {
+      pendingAccessibilityAnnouncement = announcement
+      return
+    }
+    if let accessibilityAnnouncementPoster {
+      accessibilityAnnouncementPoster(announcement)
+      return
+    }
+    NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
+      .announcement: announcement,
+      .priority: NSAccessibilityPriorityLevel.high.rawValue
+    ])
+  }
+}
+
+// MARK: - Window presentation
+
+extension HUDManager {
+  /// The presenter has put the HUD panel on screen; post the announcement
+  /// that was waiting for it.
+  func hudWindowDidPresent() {
+    isWindowPresented = true
+    guard let announcement = pendingAccessibilityAnnouncement else { return }
+    pendingAccessibilityAnnouncement = nil
+    postAccessibilityAnnouncement(announcement)
+  }
+
+  /// The presenter has taken the HUD panel off screen.
+  func hudWindowDidDismiss() {
+    isWindowPresented = false
+  }
+}
+
+// MARK: - Waiting for audio
+
+extension HUDManager {
+  /// The microphone is delivering audio: switch "Getting ready" to "Recording"
+  /// and start the clock. Returns false (changing nothing) unless the recording
+  /// pane is still waiting for audio.
+  @discardableResult
+  func markAudioLive() -> Bool {
+    guard isAwaitingAudio, snapshot.phase == .recording else { return false }
+    isAwaitingAudio = false
+    sessionStart = Date()
+    snapshot.headline = "Recording"
+    snapshot.subheadline = awaitingAudioSubheadline
+    awaitingAudioSubheadline = nil
+    if let announcement = Self.accessibilityAnnouncement(for: .recording, subheadline: snapshot.subheadline) {
+      postAccessibilityAnnouncement(announcement)
+    }
+    return true
+  }
+
+  /// Hides the pane if it is still waiting for audio — a start abandoned
+  /// before capture came up must not leave "Getting ready" on screen.
+  func cancelAwaitingAudio() {
+    guard isAwaitingAudio else { return }
+    hide()
+  }
+}

@@ -88,7 +88,8 @@ final class AutomationTranscriptWaiterTests: XCTestCase {
             XCTFail("Already appended rows must never replay as a new capture")
 
         } catch {
-            XCTAssertEqual((error as? AutomationError)?.code, .invalidArgument) }
+            XCTAssertEqual((error as? AutomationError)?.code, .invalidArgument)
+        }
     }
 
     func testUnknownDeletedCursorAndDifferentCapture_AreRejected() async {
@@ -99,7 +100,8 @@ final class AutomationTranscriptWaiterTests: XCTestCase {
                 _ = try await waiter.wait(for: request)
                 XCTFail("Invalid identity accepted")
         } catch {
-            XCTAssertEqual((error as? AutomationError)?.code, .invalidArgument) }
+            XCTAssertEqual((error as? AutomationError)?.code, .invalidArgument)
+        }
         }
     }
 
@@ -114,7 +116,8 @@ final class AutomationTranscriptWaiterTests: XCTestCase {
         self.history.finishAutomationCapture(id: capture, item: nil)
         do { _ = try await self.value(pending); XCTFail("Failed capture succeeded")
         } catch {
-            XCTAssertEqual((error as? AutomationError)?.code, .transcriptionFailed) }
+            XCTAssertEqual((error as? AutomationError)?.code, .transcriptionFailed)
+        }
         let other = self.item()
         await self.history.append(other)
         self.history.finishAutomationCapture(id: other.id, item: other)
@@ -132,7 +135,8 @@ final class AutomationTranscriptWaiterTests: XCTestCase {
         self.history.finishAutomationCapture(id: capture, item: silent)
         do { _ = try await self.value(pending); XCTFail("Silent result succeeded")
         } catch {
-            XCTAssertEqual((error as? AutomationError)?.code, .transcriptionFailed) }
+            XCTAssertEqual((error as? AutomationError)?.code, .transcriptionFailed)
+        }
 
         let nextCapture = UUID()
         let next = AutomationTranscriptWaiter(history: self.history) { nextCapture }
@@ -143,7 +147,8 @@ final class AutomationTranscriptWaiterTests: XCTestCase {
         cancelled.cancel()
         do { _ = try await self.value(cancelled); XCTFail("Cancelled wait succeeded")
         } catch {
-            XCTAssertTrue(error is CancellationError) }
+            XCTAssertTrue(error is CancellationError)
+        }
         let later = self.item(nextCapture)
         await self.history.append(later)
         self.history.finishAutomationCapture(id: nextCapture, item: later)

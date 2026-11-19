@@ -133,7 +133,8 @@ private final class FeedbackFailureRelay: @unchecked Sendable {
 
 private final class WindowsRecordingFeedbackOutput: DesktopRecordingFeedbackOutput, @unchecked Sendable {
     private let lock = NSLock()
-    private let relay = FeedbackFailureRelay()
+    private let relay: FeedbackFailureRelay
+    private let callbacks: NativeCallbackContext<FeedbackFailureRelay>
     private var native: OpaquePointer?
     private var cancelled = false
     private var closed = false
@@ -141,6 +142,11 @@ private final class WindowsRecordingFeedbackOutput: DesktopRecordingFeedbackOutp
     private var destroying = false
     private var destroyed = false
     private var destructionError: String?
+
+    init() {
+        relay = FeedbackFailureRelay()
+        callbacks = NativeCallbackContext(relay)
+    }
 
     func setFailureHandler(_ handler: @escaping @Sendable (String) -> Void) {
         relay.install(handler)
@@ -155,10 +161,11 @@ private final class WindowsRecordingFeedbackOutput: DesktopRecordingFeedbackOutp
         let handle: OpaquePointer = try lock.withLock {
             if cancelled || closed { throw CancellationError() }
             guard let handle = jsti_recording_feedback_create({ message, context in
-                guard let message, let context else { return }
-                Unmanaged<FeedbackFailureRelay>.fromOpaque(context).takeUnretainedValue()
-                    .publish(String(cString: message))
-            }, Unmanaged.passUnretained(relay).toOpaque(), &error, error.count) else {
+                guard let message, let relay = NativeCallbackContext<FeedbackFailureRelay>.resolve(context) else {
+                    return
+                }
+                relay.publish(String(cString: message))
+            }, callbacks.pointer, &error, error.count) else {
                 throw WindowsRecordingFeedbackError(feedbackErrorMessage(error))
             }
             native = handle
@@ -276,9 +283,9 @@ private final class WindowsRecordingFeedbackOutput: DesktopRecordingFeedbackOutp
             return handle
         }
         var error = [CChar](repeating: 0, count: 1_024)
-        let status = withExtendedLifetime(relay) {
-            jsti_recording_feedback_destroy(handle, &error, error.count)
-        }
+        let status = jsti_recording_feedback_destroy(handle, &error, error.count)
+        // Only a joined native output stops calling; otherwise late failures find nothing.
+        if status == 0 { callbacks.release() } else { callbacks.unregister() }
         let message = status == 0 ? nil : feedbackErrorMessage(error)
         destruction.lock()
         destructionError = message

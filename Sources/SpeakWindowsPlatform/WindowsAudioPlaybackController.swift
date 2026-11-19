@@ -55,6 +55,11 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
 
     public var pendingReleaseCount: Int { lock.withLock { live.count } }
 
+    /// Speech runs also occupy `current`; only a run outside speech is saved audio.
+    public var isPlayingSavedAudio: Bool {
+        lock.withLock { speechState == nil && current.map { !$0.stopped } ?? false }
+    }
+
     public func isCurrent(revision: UInt64) -> Bool {
         lock.withLock { self.revision == revision && !closed }
     }

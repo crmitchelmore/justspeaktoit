@@ -13,7 +13,7 @@ final class DesktopHostVoiceFavoritesTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-favorites-\(UUID())")
         effects = SettingsWriteEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
     }
 
     override func tearDown() async throws {
@@ -31,12 +31,12 @@ final class DesktopHostVoiceFavoritesTests: XCTestCase {
     func testNativeActions_EditWithoutSelectingAndChooseExactFavorite() async throws {
         let voices = Array(DesktopSpeechVoice.voices.prefix(3))
         await controller.selectVoiceOutput(voices[0])
-        let epoch = await controller.voiceCredentialEpoch
+        let epoch = await controller.voiceCredentials.selectionEpoch
         await controller.handleVoicePicker(voiceID: voices[2].favoriteIdentifier, action: 1)
         var saved = await controller.voiceOutputSettings()
         XCTAssertEqual(saved.voiceID, voices[0].id)
         XCTAssertEqual(saved.favoriteVoices, [voices[2].favoriteIdentifier])
-        let unchangedEpoch = await controller.voiceCredentialEpoch
+        let unchangedEpoch = await controller.voiceCredentials.selectionEpoch
         XCTAssertEqual(epoch, unchangedEpoch)
         let picker = saved.favoritePicker(accountInventory: nil)
         let favorite = try XCTUnwrap(picker.favoriteRanks.firstIndex(of: 0))
@@ -67,7 +67,7 @@ final class DesktopHostVoiceFavoritesTests: XCTestCase {
         let exported = try JSONDecoder().decode(DesktopConfigurationDocument.self, from: Data(contentsOf: file))
         XCTAssertEqual(exported.preferences.values[VoiceFavoritePreference.key], VoiceFavoritePreference.encoded(ids))
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         let restored = await controller.voiceOutputSettings()
         XCTAssertEqual(restored, saved)
         try await importValues([VoiceFavoritePreference.key: VoiceFavoritePreference.encoded([])])
@@ -126,7 +126,7 @@ final class DesktopHostVoiceFavoritesTests: XCTestCase {
         ])
         let file = directory.appendingPathComponent("settings.json")
         try JSONEncoder().encode(settings).write(to: file)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         let adopted = await controller.voiceOutputSettings()
         XCTAssertEqual(adopted.favoriteVoices, ids)
         let config = try await controller.configuration()
@@ -137,7 +137,7 @@ final class DesktopHostVoiceFavoritesTests: XCTestCase {
         settings.voiceOutput = live
         await controller.close()
         try JSONEncoder().encode(settings).write(to: file)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         let restored = await controller.voiceOutputSettings()
         XCTAssertEqual(restored.favoriteVoices, [])
     }
@@ -164,7 +164,7 @@ final class DesktopHostVoiceFavoritesTests: XCTestCase {
         let configuration = try await controller.configuration()
         XCTAssertNil(configuration.values[VoiceFavoritePreference.key])
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         let restored = await controller.voiceOutputSettings()
         XCTAssertEqual(restored.favoriteVoices, favorites)
         XCTAssertEqual(restored.voiceID, voices[2].id)

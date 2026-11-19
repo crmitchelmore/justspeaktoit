@@ -271,6 +271,28 @@ final class IOSIssueReportFlowTests: XCTestCase {
 }
 
 @MainActor
+extension IOSIssueReportFlowTests {
+    func testSessionTimelineIsReportedAsRelativeDurationsWithoutTranscriptOrTimestamps() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let item = try XCTUnwrap(iOSHistoryItem.recordedTranscript(
+            text: "CANARY-transcript", model: "deepgram/nova-3", duration: 2, errorMessage: nil,
+            captureDetails: IOSCaptureDetails(
+                trigger: .inApp, isBatch: true, recordingStarted: start,
+                recordingEnded: start.addingTimeInterval(2), transcriptionEnded: start.addingTimeInterval(3)
+            )
+        ))
+        let report = IOSIssueReporter.snapshot(for: item).full
+        let events = try XCTUnwrap(try object(report)["timeline"] as? [[String: Any]])
+        XCTAssertEqual(events.first?["stage"] as? String, "request")
+        XCTAssertEqual(events.first?["elapsedMilliseconds"] as? Int, 1_000)
+        for surface in [report.body, report.jsonString] {
+            XCTAssertFalse(surface.contains("CANARY-transcript"))
+            XCTAssertFalse(surface.contains("1700000000"))
+        }
+    }
+}
+
+@MainActor
 private final class IssueReportEffects {
     var copied: [String] = []
     var opened: [URL] = []

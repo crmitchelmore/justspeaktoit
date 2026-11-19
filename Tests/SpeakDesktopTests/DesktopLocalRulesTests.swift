@@ -98,7 +98,7 @@ final class DesktopLocalRulesTests: XCTestCase {
             XCTAssertEqual(DesktopPostProcessing.migrated(restored), options)
         }
         for identifier in ["local/post-processing/downloaded", "LOCAL/post-processing/unknown",
-                           AppleLocalModels.foundationModelID] {
+                           AppleLocalModels.foundationModelID, AndroidLocalModels.geminiNanoID] {
             let original = DesktopPostProcessing.Options(
                 mode: .remote, modelIdentifier: identifier, customPrompt: "Keep."
             )

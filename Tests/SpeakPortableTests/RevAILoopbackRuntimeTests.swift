@@ -5,7 +5,7 @@ import FoundationNetworking
 import XCTest
 @testable import SpeakCore
 
-/// The Rev.ai scenarios of `scripts/websocket-loopback-probe.py` over the Apple
+/// The Rev.ai scenarios of `scripts/loopback/websocket-loopback-probe.py` over the Apple
 /// default transport (`URLSessionStreamingConnection`); `RevAIWinHTTPRuntimeTests`
 /// runs the same scenarios over WinHTTP. The client's own path and query reach
 /// the peer; only the origin is redirected. Enabled only with the

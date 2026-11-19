@@ -21,7 +21,12 @@ struct IOSBatchTranscriptionClient {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
         let model = ModelRetirements.successor(for: trimmed, mode: .batch) ?? trimmed
         try ModelRetirements.ensureAvailable(model)
+        // Covers every file upload: recordings, the Share extension's
+        // hand-off, recovery, offline upgrades, Watch audio and Shortcuts.
+        try await requireCloudSharingConsent(model: model, purpose: .batchTranscription)
         switch IOSBatchTranscriptionRoute.route(for: model) {
+        case .downloadedLocal:
+            return try await IOSLocalTranscriptionModels.transcribe(at: url, modelID: model, language: language)
         case .fileSpeech(let provider):
             return try await FileSpeechBatchClient(
                 provider: provider, session: session,
@@ -29,6 +34,10 @@ struct IOSBatchTranscriptionClient {
                     await resolvedTranscriptionDuration(reported: nil, lastSegmentEnd: nil, audioURL: url)
                 }
             ).transcribeFile(at: url, apiKey: try requireAPIKey(), model: model, language: language)
+        case .shared(let provider):
+            return try await transcribeWithSharedClient(
+                provider, at: url, model: model, language: language, apiKey: try requireAPIKey()
+            )
         case .appleSpeechAnalyzer:
             if #available(iOS 26.0, *) {
                 return try await AppleSpeechAnalyzerTranscriber.transcribeFile(

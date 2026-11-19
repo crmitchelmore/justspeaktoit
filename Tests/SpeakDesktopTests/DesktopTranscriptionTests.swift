@@ -380,6 +380,9 @@ private extension DesktopTranscriptionTests {
             }
             XCTAssertEqual(reportedStatus, status)
             XCTAssertEqual(body, Self.rejection)
+        } else if model == FileSpeechProvider.stepfun.modelID, status == 401 {
+            // A plain key predates region support, so StepFun names the China region.
+            XCTAssertEqual(error as? StepFunCredentialError, .rejected(.china, status))
         } else {
             XCTAssertEqual(error as? TranscriptionProviderError, .httpError(status, Self.rejection))
         }

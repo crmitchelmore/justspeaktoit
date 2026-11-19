@@ -1,0 +1,52 @@
+/* ---------- Captures ---------- */
+
+.capture {
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: .5rem .5rem .35rem;
+  box-shadow: 0 40px 80px -50px var(--shadow-deep);
+}
+
+.capture > a {
+  display: block;
+  border-radius: calc(var(--radius-lg) - 8px);
+  overflow: hidden;
+}
+
+.capture img { width: 100%; height: auto; }
+
+.capture picture { display: block; }
+
+.clip video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: calc(var(--radius-lg) - 8px);
+  background: var(--ground);
+}
+
+.mobile-clip video {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 2;
+  border-radius: 30px;
+  border: 1px solid var(--line);
+  background: var(--ground);
+  box-shadow: 0 40px 80px -50px var(--shadow-deep);
+}
+
+.capture figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1rem;
+  justify-content: space-between;
+  padding: .7rem .6rem .5rem;
+  font-size: .82rem;
+  color: var(--text-faint);
+}
+
+.capture figcaption a { color: var(--text-dim); }

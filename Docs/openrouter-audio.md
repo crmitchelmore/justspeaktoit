@@ -6,10 +6,20 @@ chat route. Direct provider and local models keep their existing settings.
 
 ## Choose a model
 
-In Remote Batch transcription settings, open **Browse OpenRouter Audio** (on Mac,
-**Browse OpenRouter speech-to-text models**). In voice-output settings, open the
-OpenRouter speech browser. Search by name or description, filter by provider, and
-inspect model-specific voices, capabilities, retirement dates, and pricing.
+Cleanup, batch transcription and voice output share one layout on Mac and iPhone.
+The main model picker lists native-provider models, and a separate **Browse
+OpenRouter models…** button (on Mac voice output, **Browse OpenRouter Speech…**)
+opens the shared discover-then-configure browser (`OpenRouterModelBrowser` in
+`SpeakCore/AppleUI`). On Mac this includes the dictation profile Batch and Polish
+model pickers. Streaming pickers have no button because OpenRouter models can't
+stream live. A chosen OpenRouter model then appears in the picker as
+**OpenRouter › model**. Search by name or description, filter by provider and listed
+price, and inspect each model's pricing, voices, capabilities and retirement dates.
+
+The transcription browser lists bundled OpenRouter batch models first, then the live
+speech-to-text catalogue. The cleanup browser lists bundled OpenRouter cleanup models
+and, with discovery turned on, newer OpenAI models. Each cleanup model's page shows
+its pricing and (on Mac) the cleanup temperature before **Use for cleanup**.
 
 Selecting a model updates the normal batch or speech preference. A missing model
 remains selected and appears unavailable in the browser; it is never silently
@@ -60,6 +70,19 @@ dedicated endpoint classification, selection persistence, credentials, payloads,
 sanitised errors, limits, cancellation, and temporary-file ownership. Both native
 targets must compile and pass their existing test gates before merge. Paid-provider
 acceptance across the changing catalogue is separate from these mocked contracts.
+
+Browser copy, ordering and the search/provider/zero-price filter live in
+`OpenRouterModelBrowserCatalog` and `OpenRouterBrowserFilter` (SpeakCore), so
+other platforms reuse them. Windows and Linux build their browser pages from them
+in `DesktopOpenRouterBrowser` (SpeakDesktop): the Transcription page shows
+**Browse OpenRouter models…** for Remote Batch only, the browser offers the
+OpenRouter batch routes the picker lists (bundled, then discovered), and choosing
+one selects that route, labelled `OpenRouter › name`. Android shows the same
+button under its cloud transcription models (and in each profile): the bundled
+OpenRouter batch models, then the live speech-to-text catalogue, with the same
+six-hour cache and fallback. A chosen live model is saved as
+`openrouter/transcription/<model ID>` and sent to `/api/v1/audio/transcriptions`
+with the limits above; Android has no streaming cloud picker (#1618).
 
 Issue #821 remains open for progressive speech playback, provider-specific cost
 enrichment and capability controls, and full real-provider/device qualification.

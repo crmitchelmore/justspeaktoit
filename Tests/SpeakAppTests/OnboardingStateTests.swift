@@ -9,7 +9,7 @@ final class OnboardingStateTests: XCTestCase {
     func testLocalSetup_waitsForInstallationAndConfirmationBeforeChangingSettings() async throws {
         let state = try makeState()
         state.settings.postProcessingEnabled = true
-        state.settings.postProcessingModel = "openai/gpt-5-mini"
+        state.settings.postProcessingModel = "openai/gpt-5.6-luna"
         state.settings.registerAPIKeyIdentifier("openrouter.apiKey")
         let preset = try batchPreset()
         let previousMode = state.settings.transcriptionMode
@@ -70,7 +70,7 @@ final class OnboardingStateTests: XCTestCase {
     func testLocalDownload_thenRemoteOrSkipDoesNotChangeRecordingOrCleanup() async throws {
         let state = try makeState()
         state.settings.selectRemoteTranscriptionMode(.batch)
-        state.settings.postProcessingModel = "openai/gpt-5-mini"
+        state.settings.postProcessingModel = "openai/gpt-5.6-luna"
         state.settings.postProcessingEnabled = true
         state.settings.registerAPIKeyIdentifier("openrouter.apiKey")
         await state.configureLocalModel(try batchPreset()) { .installed }
@@ -156,7 +156,7 @@ final class OnboardingStateTests: XCTestCase {
         let defaults = makeDefaults()
         let settings = AppSettings(defaults: defaults)
         settings.postProcessingEnabled = true
-        settings.postProcessingModel = "openai/gpt-5-mini"
+        settings.postProcessingModel = "openai/gpt-5.6-luna"
 
         OnboardingState.disableUnavailablePostProcessing(in: settings)
 

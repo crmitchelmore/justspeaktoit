@@ -97,20 +97,24 @@ We use Conventional Commits:
 
 ### Swift Style
 
-- **4-space indentation** (configured in `.swiftformat`)
+- **4-space indentation** for new files (`.swiftformat` does not reindent; match the existing indentation when editing a 2-space file)
 - **120 character line limit** (soft), 160 (hard)
 - Use `explicit_self` where configured
 - Follow SwiftUI conventions for view code
 
 ### Linting
 
-```bash
-# Run SwiftLint (resolves the isolated Tooling/ graph, pinned in Tooling/Package.resolved)
-make lint
+Every linter must report zero violations; there is no baseline.
 
-# Run SwiftFormat
-./scripts/swiftformat.sh .
+```bash
+brew install shellcheck actionlint   # once; Ruff installs itself on first use
+
+make fix       # autofix changed files (SwiftFormat, SwiftLint --fix, Ruff, ESLint)
+make quality   # SwiftFormat, Ruff, ShellCheck and actionlint over the whole repo
+make lint      # strict SwiftLint (isolated Tooling/ graph, pinned in Tooling/Package.resolved)
 ```
+
+`scripts/pre-pr` runs the autofix first and then the same checks as CI.
 
 ### Code Organization
 
@@ -126,6 +130,20 @@ make lint
 - Update documentation if needed
 - Ensure CI passes before requesting review
 - Reference related issues in the PR description
+
+### What CI runs on a pull request
+
+A pull request runs a cheap gate (see `release-paths` in
+`.github/workflows/ci.yml`): `Lint` (SwiftLint, accessibility and tooling
+tests) and `Portable Swift (Linux)` on Ubuntu, plus one macOS job that builds
+incrementally and runs only the unit tests your change can affect
+(`scripts/ci/affected-swift-tests.py`). Docs, website, Android and Workers-only
+changes skip all of them. Full macOS Debug and Release tests, iOS builds and
+simulator tests, keyboard and watch builds, the core journeys and public API
+compatibility run on each `merge-batch/*` head and on `main`; a failure opens
+a `ci-batch-failure` or `ci-main-failure` issue. Add the `ci:full` label (then
+push or re-run) to run every gate before merge. The required check is
+`CI Gate`.
 
 ## Getting Help
 

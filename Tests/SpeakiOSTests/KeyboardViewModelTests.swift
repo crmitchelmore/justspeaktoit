@@ -212,6 +212,42 @@ final class KeyboardViewModelTests: XCTestCase {
         harness.model.deactivate()
     }
 
+    func testMicWhileDisconnected_opensTheAppToConnectAndAutoStartsOnceReady() throws {
+        let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+        var opened: [URL] = []
+        activate(harness.model, document: DocumentProxy(before: "Host"), openContainingApp: {
+            opened.append($0)
+            return true
+        })
+        XCTAssertEqual(harness.model.handoff.presentation, .waitingForApp)
+
+        harness.model.micTapped()
+
+        XCTAssertEqual(opened, [KeyboardConnectLink.url()].compactMap { $0 })
+        XCTAssertNil(harness.handoffStore.activeRecord())
+        XCTAssertEqual(harness.model.handoff.presentation, .waitingForApp)
+
+        // The app started Instant Dictation; the next read starts recording.
+        _ = harness.instantStore.start(enabling: true)
+        harness.model.handoff.refresh()
+        XCTAssertNotNil(harness.handoffStore.activeRecord())
+        XCTAssertEqual(harness.model.handoff.presentation, .starting)
+        harness.model.deactivate()
+    }
+
+    func testMicWhileDisconnected_asksTheUserToOpenTheAppWhenItCannotBeOpened() {
+        let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+        activate(harness.model, document: DocumentProxy(before: "Host"), openContainingApp: { _ in false })
+
+        harness.model.micTapped()
+        XCTAssertEqual(harness.model.handoff.presentation, .openAppManually)
+
+        // The poll must not flip it back to the connect prompt.
+        harness.model.handoff.refresh()
+        XCTAssertEqual(harness.model.handoff.presentation, .openAppManually)
+        harness.model.deactivate()
+    }
+
     func testDelayedCallbacks_fromPreviousRunCannotReachNewRun() throws {
         let engine = FakeEngine()
         let document = DocumentProxy(before: "Host")
@@ -756,7 +792,8 @@ final class KeyboardViewModelTests: XCTestCase {
         documentIdentifier: UUID? = nil,
         isSecureField: Bool = false,
         activeInputModeCount: Int = 0,
-        handBack: (() -> Void)? = nil
+        handBack: (() -> Void)? = nil,
+        openContainingApp: ((URL) -> Bool)? = nil
     ) {
         model.activate(
             hasFullAccess: true,
@@ -764,6 +801,7 @@ final class KeyboardViewModelTests: XCTestCase {
             isSecureField: isSecureField,
             activeInputModeCount: activeInputModeCount,
             handBack: handBack,
+            openContainingApp: openContainingApp,
             insertText: document.insertText,
             deleteBackward: document.deleteBackward,
             contextBeforeInput: { document.contextBeforeInput },

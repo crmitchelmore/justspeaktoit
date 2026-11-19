@@ -1,0 +1,59 @@
+/* ---------- Providers ---------- */
+
+.provider-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(17rem, 100%), 1fr));
+  gap: 1.1rem;
+}
+
+@media (min-width: 900px) {
+  .provider-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.provider-group h3 {
+  display: flex;
+  align-items: baseline;
+  gap: .55rem;
+  font-size: 1.16rem;
+  margin-bottom: .85rem;
+}
+
+.count {
+  font-family: var(--mono);
+  font-size: .76rem;
+  font-weight: 500;
+  letter-spacing: .02em;
+  color: var(--accent);
+  background: rgba(255, 107, 61, .12);
+  border-radius: 999px;
+  padding: .12rem .55rem;
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: .4rem; list-style: none; margin: 0; padding: 0; }
+
+.chips li {
+  font-size: .86rem;
+  color: var(--text-dim);
+  background: var(--wash);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: .26rem .7rem;
+}
+
+.chips li.is-local {
+  color: var(--lagoon);
+  border-color: rgba(46, 212, 191, .3);
+  background: rgba(46, 212, 191, .09);
+}
+
+.provider-group > p { margin-top: .9rem; font-size: .88rem; color: var(--text-faint); }
+
+.provider-foot {
+  margin-top: 1.8rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .8rem 1.6rem;
+  align-items: center;
+  font-size: .93rem;
+  color: var(--text-faint);
+}

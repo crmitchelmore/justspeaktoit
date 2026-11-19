@@ -1,6 +1,7 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
+import SpeakDesktopHost
 import SpeakWindowsPlatform
 
 /// Local model checks for `--self-test` and `--local-transcription-self-test`.
@@ -14,23 +15,15 @@ enum WindowsLocalSelfTest {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("jsti-local-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let body = Data((0..<300_000).map { UInt8(truncatingIfNeeded: $0 &* 7) })
-        let digest = try WindowsSHA256Hasher.provider.sha256(of: body)
-        let item = LocalModelInstaller.Item(
-            identifier: "local/whisperkit/tiny", displayName: "Self-test model",
-            artifact: LocalModelFileArtifact(
-                url: URL(string: "https://huggingface.co/self-test/resolve/0/ggml-self-test.bin")!,
-                filename: "ggml-self-test.bin", byteCount: Int64(body.count), sha256: digest, license: "MIT",
-                provenance: "synthetic"
-            )
-        )
-        let transport = SelfTestTransport(body: body, dropAfter: 120_000)
+        let fixture = try DesktopHostLocalModelSelfTest(digests: WindowsSHA256Hasher.provider)
+        let (body, item, transport) = (fixture.body, fixture.item, fixture.transport)
         let installer = LocalModelInstaller(root: root, digests: WindowsSHA256Hasher.provider, transport: transport)
         do {
             _ = try await installer.install(item)
             throw WindowsNativeError(message: "An interrupted model download was reported as complete.")
         } catch is LocalModelDownloadError {}
-        guard case .partial(let received, _) = installer.state(of: item), received >= 120_000 else {
+        guard case .partial(let received, _) = installer.state(of: item),
+              received >= DesktopHostLocalModelSelfTest.interruptedAfter else {
             throw WindowsNativeError(message: "An interrupted model download did not keep its bytes.")
         }
         transport.dropAfter = nil
@@ -146,44 +139,5 @@ enum WindowsLocalSelfTest {
             )
             throw WindowsNativeError(message: "A model whose bytes do not match the digest was used.")
         } catch DesktopLocalTranscriptionError.modelDoesNotMatchDigest {}
-    }
-}
-
-/// Serves `body` like a range-capable HTTP server, optionally dropping the
-/// connection after a byte count.
-private final class SelfTestTransport: LocalModelDownloadTransport, @unchecked Sendable {
-    let body: Data
-    private let lock = NSLock()
-    private var drop: Int?
-    private(set) var offsets: [Int64] = []
-
-    var dropAfter: Int? {
-        get { lock.withLock { drop } }
-        set { lock.withLock { drop = newValue } }
-    }
-
-    init(body: Data, dropAfter: Int?) {
-        self.body = body
-        self.drop = dropAfter
-    }
-
-    func download(
-        _ request: LocalModelDownloadRequest, start: @escaping @Sendable (LocalModelDownloadStart) throws -> Void,
-        sink: @escaping @Sendable (Data) throws -> Void
-    ) async throws {
-        let limit = lock.withLock { () -> Int? in
-            offsets.append(request.resumeOffset)
-            return drop
-        }
-        var position = Int(request.resumeOffset)
-        try start(position > 0 ? .resumed(offset: Int64(position)) : .fromBeginning)
-        var sent = 0
-        while position < body.count {
-            if let limit, sent >= limit { throw LocalModelDownloadError.transport("synthetic reset") }
-            let end = min(position + 16_384, body.count)
-            try sink(body.subdata(in: position..<end))
-            sent += end - position
-            position = end
-        }
     }
 }

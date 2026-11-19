@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 import SpeakCore
 import SpeakDesktopHost
 import CWindowsSupport
@@ -13,6 +14,9 @@ extension WindowsHostPlatform {
 enum WindowsActionShortcutRun: Equatable {
     case record, page(String), playPause, stopSpeech, apiKeys, permissions, compareModels
     case quickVoice(Int), pasteLastHistoryItem, speakSelectedText, speakClipboard, troubleshooting, voiceEdit
+    /// Kept for the Mac: the command palette is opened by Ctrl+K in the window,
+    /// never run from itself.
+    case unavailable
 
     // swiftlint:disable:next cyclomatic_complexity
     init(_ action: DesktopShortcutAction) {
@@ -44,10 +48,11 @@ enum WindowsActionShortcutRun: Equatable {
         case .speakClipboard: self = .speakClipboard
         case .openTroubleshooting: self = .troubleshooting
         case .editSelectionByVoice: self = .voiceEdit
+        case .openCommandPalette: self = .unavailable
         }
     }
 
-    static let runnable = Set(DesktopShortcutAction.allCases)
+    static let runnable = Set(DesktopShortcutAction.allCases.filter { Self($0) != .unavailable })
 
     var code: Int32 {
         switch self {
@@ -66,6 +71,7 @@ enum WindowsActionShortcutRun: Equatable {
         case .speakClipboard: return Int32(JSTI_ACTION_RUN_SPEAK_CLIPBOARD)
         case .troubleshooting: return Int32(JSTI_ACTION_RUN_TROUBLESHOOTING)
         case .voiceEdit: return Int32(JSTI_ACTION_RUN_VOICE_EDIT)
+        case .unavailable: return Int32(JSTI_ACTION_RUN_NONE)
         }
     }
 
@@ -159,7 +165,7 @@ extension WindowsNative {
     static func configureActionShortcuts(_ holder: WindowsEventContext) async -> Bool {
         let bindings = await holder.controller.shortcutBindings
         let hotKey = await holder.controller.hotKeySettings()
-        let context = Unmanaged.passUnretained(holder).toOpaque()
+        let context = holder.callbackContext
         WindowsActionShortcutState.shared.update(bindings: bindings, hotKey: hotKey)
         if applyActionShortcuts(bindings, context: context) { return true }
         WindowsActionShortcutState.shared.update(bindings: .defaults)
@@ -215,7 +221,7 @@ func actionShortcutsCheck( // swiftlint:disable:this function_parameter_count
     _ message: UnsafeMutablePointer<CChar>?, _ capacity: Int, _ context: UnsafeMutableRawPointer?
 ) -> Int32 {
     guard let context, let rows else { return -1 }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return -1 }
     let (base, hotKey) = WindowsActionShortcutState.shared.snapshot()
     var edited: [DesktopHostShortcutRow] = []
     for index in 0..<count {
@@ -263,8 +269,7 @@ func actionShortcutsCheck( // swiftlint:disable:this function_parameter_count
 
 /// An imported configuration may have replaced the bindings.
 func actionShortcutsRefresh(_ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     holder.enqueueSettings { _ = await WindowsNative.configureActionShortcuts(holder) }
 }
 

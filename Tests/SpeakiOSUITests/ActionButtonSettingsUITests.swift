@@ -12,7 +12,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_GB"]
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_GB", "-diagnosticsConsent", "declined"]
         app.launch()
         #if targetEnvironment(simulator)
         try app.skipFirstRunForUITest(ready: app.buttons["Settings"])
@@ -28,14 +28,18 @@ final class ActionButtonSettingsUITests: XCTestCase {
 
     func testActionButtonDestinationCanBeConfigured() {
         openSettings()
+        openSettingsPage("recording", title: "Recording & Shortcuts")
 
-        let hardwareTriggerLink = app.buttons["hardwareTriggerSettingsLink"]
-        XCTAssertTrue(scrollUpUntilExists(hardwareTriggerLink), "hardwareTriggerSettingsLink not found in Settings")
-        hardwareTriggerLink.tap()
-
+        // Each step taps only a settled, fully visible control and re-taps a
+        // dropped tap: a row that merely existed after a swipe was tapped while
+        // still moving or under the bottom bar, and never opened (issue #1431).
         XCTAssertTrue(
-            app.navigationBars["Action Button & Shortcuts"].waitForExistence(timeout: Self.elementTimeout),
-            "Action Button & Shortcuts screen did not open"
+            app.tap(
+                app.buttons["hardwareTriggerSettingsLink"],
+                until: app.navigationBars["Action Button & Shortcuts"],
+                timeout: Self.elementTimeout
+            ),
+            "Action Button & Shortcuts screen did not open from hardwareTriggerSettingsLink"
         )
 
         let historyDestination = app.buttons["Save to History Only"]
@@ -43,7 +47,13 @@ final class ActionButtonSettingsUITests: XCTestCase {
             historyDestination.waitForExistence(timeout: Self.elementTimeout),
             "Save to History Only destination not offered"
         )
-        historyDestination.tap()
+        let historySummary = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Clipboard and post-processing are skipped")
+        ).firstMatch
+        XCTAssertTrue(
+            app.tap(historyDestination, until: historySummary, timeout: Self.elementTimeout),
+            "Choosing Save to History Only did not update the destination summary"
+        )
 
         let clipboardGuidance = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "Do not add a separate Copy to Clipboard action")
@@ -51,7 +61,15 @@ final class ActionButtonSettingsUITests: XCTestCase {
         XCTAssertTrue(scrollUpUntilExists(clipboardGuidance), "Clipboard guidance not shown for the history choice")
         XCTAssertTrue(scrollUpUntilExists(app.buttons["openShortcutsAppButton"]), "openShortcutsAppButton not found")
 
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(
+            app.tap(
+                app.navigationBars["Action Button & Shortcuts"].buttons.element(boundBy: 0),
+                until: app.navigationBars["Recording & Shortcuts"],
+                inChrome: true,
+                timeout: Self.elementTimeout
+            ),
+            "Back did not return to Recording & Shortcuts"
+        )
         XCTAssertTrue(
             app.staticTexts["Save to History Only"].waitForExistence(timeout: Self.elementTimeout),
             "Settings did not reflect the chosen destination after going back"
@@ -60,34 +78,39 @@ final class ActionButtonSettingsUITests: XCTestCase {
 
     func testModelPickersExposeCredentialReadiness() {
         openSettings()
+        openSettingsPage("transcription", title: "Transcription")
 
         let locationPicker = app.segmentedControls["transcriptionLocationPicker"]
         XCTAssertTrue(scrollUpUntilExists(locationPicker), "transcriptionLocationPicker not found in Settings")
 
-        let localModelPicker = app.descendants(matching: .any)["appleOnDeviceModelPicker"]
-        XCTAssertTrue(
-            localModelPicker.waitForExistence(timeout: Self.elementTimeout),
-            "appleOnDeviceModelPicker not found"
-        )
-        localModelPicker.tap()
-
+        // Existing is not enough: on a 874pt window this row existed at
+        // y 855-949 and the tap at its centre landed off screen.
         let noKeyStatus = app.descendants(matching: .any).matching(
             NSPredicate(format: "label CONTAINS %@", "No API key required")
         ).firstMatch
         XCTAssertTrue(
-            noKeyStatus.waitForExistence(timeout: Self.elementTimeout),
+            app.tap(
+                app.descendants(matching: .any)["appleOnDeviceModelPicker"],
+                until: noKeyStatus,
+                timeout: Self.elementTimeout
+            ),
             "Local model picker did not state that no API key is required"
         )
 
-        app.navigationBars.buttons.element(boundBy: 0).tap()
-        locationPicker.buttons["Remote"].tap()
-
+        XCTAssertTrue(
+            app.tap(
+                app.navigationBars.buttons.element(boundBy: 0),
+                until: app.navigationBars["Transcription"],
+                inChrome: true,
+                timeout: Self.elementTimeout
+            ),
+            "Back did not return to Transcription from the local model picker"
+        )
         let remoteModelPicker = app.descendants(matching: .any)["remoteStreamingModelPicker"]
         XCTAssertTrue(
-            remoteModelPicker.waitForExistence(timeout: Self.elementTimeout),
+            app.tap(locationPicker.buttons["Remote"], until: remoteModelPicker, timeout: Self.elementTimeout),
             "remoteStreamingModelPicker not found after switching to Remote"
         )
-        remoteModelPicker.tap()
 
         let readyOrMissingStatus = app.descendants(matching: .any).matching(
             NSPredicate(
@@ -97,7 +120,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
             )
         ).firstMatch
         XCTAssertTrue(
-            readyOrMissingStatus.waitForExistence(timeout: Self.elementTimeout),
+            app.tap(remoteModelPicker, until: readyOrMissingStatus, timeout: Self.elementTimeout),
             "Remote model picker did not state whether the API key is set"
         )
     }
@@ -105,14 +128,15 @@ final class ActionButtonSettingsUITests: XCTestCase {
     #if IOS_KEYBOARD_FEATURE
     func testKeyboardOnboardingExplainsSupportedSetup() {
         openSettings()
-
-        let keyboardSetupLink = app.buttons["keyboardSetupLink"]
-        XCTAssertTrue(scrollUpUntilExists(keyboardSetupLink), "keyboardSetupLink not found in Settings")
-        keyboardSetupLink.tap()
+        openSettingsPage("recording", title: "Recording & Shortcuts")
 
         XCTAssertTrue(
-            app.navigationBars["Just Speak Keyboard"].waitForExistence(timeout: Self.elementTimeout),
-            "Just Speak Keyboard screen did not open"
+            app.tap(
+                app.buttons["keyboardSetupLink"],
+                until: app.navigationBars["Just Speak Keyboard"],
+                timeout: Self.elementTimeout
+            ),
+            "Just Speak Keyboard screen did not open from keyboardSetupLink"
         )
         XCTAssertTrue(
             app.buttons["openKeyboardSettingsButton"].waitForExistence(timeout: Self.elementTimeout),
@@ -124,6 +148,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
     #else
     func testKeyboardOnboardingIsHiddenWhenFeatureIsDisabled() {
         openSettings()
+        openSettingsPage("recording", title: "Recording & Shortcuts")
 
         // Proving absence is the one place a long wait is pure cost.
         XCTAssertFalse(
@@ -152,6 +177,19 @@ final class ActionButtonSettingsUITests: XCTestCase {
             if settingsBar.waitForExistence(timeout: Self.elementTimeout) { return }
         }
         XCTAssertTrue(settingsBar.exists, "Settings did not open from settingsNavLink after \(attempts) taps")
+    }
+
+    /// Opens a Settings sub-page from the root list (#1470) and waits for its
+    /// navigation bar, so a dropped tap fails here rather than on a later row.
+    private func openSettingsPage(_ page: String, title: String) {
+        XCTAssertTrue(
+            app.tap(
+                app.buttons["settingsPage.\(page)"],
+                until: app.navigationBars[title],
+                timeout: Self.elementTimeout
+            ),
+            "\(title) did not open from settingsPage.\(page)"
+        )
     }
 
     /// Waits for `element`, swiping up between attempts. The first wait covers a

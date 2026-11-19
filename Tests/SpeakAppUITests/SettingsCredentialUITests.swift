@@ -80,7 +80,7 @@ final class SettingsCredentialUITests: XCTestCase {
         // Replace the whole argument list each time; invalid configuration
         // from the earlier process must not leak into the recovery launch.
         app.launchArguments = [
-            "-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES",
+            "-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES", "-diagnosticsConsent", "declined",
             "-alibaba.newKey.region", region, "-alibaba.newKey.workspace", "synthetic-settings"
         ]
         app.launch()

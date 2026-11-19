@@ -40,4 +40,4 @@ if __name__ == "__main__":
     try:
         main()
     except windows_msix.PackageError as error:
-        raise SystemExit("windows package verification: " + str(error))
+        raise SystemExit("windows package verification: " + str(error)) from error

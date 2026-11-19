@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import SpeakDesktopHost
 import SpeakLinuxPlatform
 import CLinuxSupport
@@ -16,12 +17,12 @@ extension LinuxAppController {
 extension LinuxWindow {
     static func configurePermissions(_ holder: LinuxEventContext) throws {
         guard jsti_permissions_configure(
-            linuxPermissionsEvent, Unmanaged.passUnretained(holder).toOpaque()
+            linuxPermissionsEvent, holder.callbackContext
         ) == 0 else { throw DesktopHostError(message: "Permissions could not be configured.") }
     }
 
     fileprivate static func showPermissions(_ items: [DesktopPermissionItem], revision: UInt64, hint: String) {
-        let strings = Strings()
+        let strings = DesktopNativeStrings()
         let rows = items.map {
             JSTILinuxPermissionRow(
                 title: strings.add($0.kind.title), status: strings.add($0.status.label),
@@ -42,8 +43,7 @@ extension LinuxWindow {
 }
 
 private func linuxPermissionsEvent(_ revision: UInt64, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return }
     holder.enqueueSettings {
         guard jsti_permissions_revision() == revision else { return }
         let items = await holder.controller.permissionItems()

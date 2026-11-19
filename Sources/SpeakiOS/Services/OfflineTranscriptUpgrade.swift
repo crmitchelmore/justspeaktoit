@@ -65,6 +65,13 @@ enum OfflineTranscriptUpgradePolicy {
             wordCount: text.split(whereSeparator: \.isWhitespace).count,
             originPlatform: item.originPlatform,
             errorMessage: item.errorMessage
+        ).withSessionDetails(
+            // The on-device transcription timings no longer describe this text.
+            modelUsages: [ApplicationModelUsage(modelIdentifier: model, phase: .transcriptionBatch)],
+            phaseTimestamps: item.phaseTimestamps.map {
+                ApplicationPhaseTimestamps(recordingStarted: $0.recordingStarted, recordingEnded: $0.recordingEnded)
+            },
+            trigger: item.trigger
         )
     }
 }
@@ -262,6 +269,9 @@ final class OfflineTranscriptUpgrader {
         } catch is CancellationError {
             // Consent, network or the row changed while keys loaded: nothing was sent.
             if !self.isStillWanted(ticket), self.canProceed { self.store.remove(historyID: ticket.historyID) }
+            return
+        } catch is CloudSharingConsentRequiredError {
+            // Nothing was sent and the on-device text stands; costs no retry (#1805).
             return
         } catch {
             self.logger.error(

@@ -32,7 +32,7 @@ struct Dialog {
     bool applied = false;
 };
 
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 
 void layout(HWND window) {
     RECT bounds{};
@@ -51,15 +51,7 @@ void layout(HWND window) {
     move(IDCANCEL, static_cast<int>(bounds.right) - margin - buttonWidth, top, buttonWidth, button);
 }
 
-void refreshFont(HWND window, Dialog &dialog) {
-    HFONT font = CreateFontW(-MulDiv(10, static_cast<int>(GetDpiForWindow(window)), 72), 0, 0, 0, FW_NORMAL,
-        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    if (!font) return;
-    for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    if (dialog.font) DeleteObject(dialog.font);
-    dialog.font = font;
-}
+void refreshFont(HWND window, Dialog &dialog) { jsti::chrome::refreshDialogFont(window, dialog.controls, dialog.font); }
 
 bool createControls(HWND window, Dialog &dialog) {
     auto add = [&](const wchar_t *kind, const wchar_t *text, DWORD style, int id) {
@@ -129,64 +121,26 @@ void apply(HWND window, Dialog &dialog) {
     close(window);
 }
 
-LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
-    if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT themed = 0;
-    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
+constexpr jsti::chrome::DialogFrame dialogFrame{
+    minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, endpointID, IDOK};
+
+bool handle(HWND window, Dialog &dialog, UINT message, WPARAM wparam, LPARAM, LRESULT &) {
     switch (message) {
-    case WM_CREATE: return createControls(window, *dialog) ? 0 : -1;
-    case WM_GETMINMAXINFO: {
-        RECT frame{0, 0, scale(window, minimumClientWidth), scale(window, minimumClientHeight)};
-        AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(window));
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {frame.right - frame.left, frame.bottom - frame.top};
-        return 0;
-    }
-    case WM_SIZE: layout(window); return 0;
-    case WM_DPICHANGED: {
-        const RECT *bounds = reinterpret_cast<RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
-        refreshFont(window, *dialog); layout(window); return 0;
-    }
-    case WM_ACTIVATE:
-        if (LOWORD(wparam) == WA_INACTIVE) { dialog->focus = GetFocus(); return 0; }
-        SetFocus(dialog->focus && IsChild(window, dialog->focus) ? dialog->focus : GetDlgItem(window, endpointID));
-        return 0;
-    case DM_GETDEFID: return MAKELRESULT(IDOK, DC_HASDEFID);
     case WM_COMMAND:
-        if (HIWORD(wparam) != BN_CLICKED) break;
-        if (LOWORD(wparam) == IDOK) { apply(window, *dialog); return 0; }
-        if (LOWORD(wparam) == IDCANCEL) { close(window); return 0; }
-        return 0;
-    case WM_CLOSE: close(window); return 0;
-    case WM_DESTROY:
-        if (dialog->font) { DeleteObject(dialog->font); dialog->font = nullptr; }
-        return 0;
+        return jsti::chrome::dialogCommand(window, dialog, wparam, apply, close);
     }
-    return DefWindowProcW(window, message, wparam, lparam);
+    return false;
+}
+
+const jsti::chrome::DialogProcedure<Dialog> dialogParts{dialogFrame, layout, refreshFont, createControls, close, handle};
+
+LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    return jsti::chrome::dialogProcedure(dialogParts, window, message, wparam, lparam);
 }
 
 HWND createDialog(HWND owner, Dialog &dialog) {
-    const HINSTANCE instance = GetModuleHandleW(nullptr);
-    WNDCLASSW type{};
-    type.lpfnWndProc = procedure;
-    type.hInstance = instance;
-    type.lpszClassName = L"JustSpeakToItAzureResource";
-    type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
-    RECT frame{0, 0, scale(owner, 600), scale(owner, 350)};
-    AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(owner));
-    RECT bounds{};
-    GetWindowRect(owner, &bounds);
-    return CreateWindowExW(windowExStyle, type.lpszClassName, L"Azure Speech resource — Just Speak to It",
-        windowStyle, bounds.left + scale(owner, 40), bounds.top + scale(owner, 40), frame.right - frame.left,
-        frame.bottom - frame.top, owner, nullptr, instance, &dialog);
+    return jsti::chrome::createOwnedDialog(owner, L"JustSpeakToItAzureResource", procedure, L"Azure Speech resource — Just Speak to It",
+        600, 350, windowStyle, windowExStyle, &dialog);
 }
 
 Configuration snapshot() {
@@ -209,18 +163,7 @@ void jsti_show_azure_resource_settings(HWND owner) {
         jsti_window_update(jsti::systemError("Opening Azure Speech resource settings").c_str(), nullptr, -1);
         return;
     }
-    EnableWindow(owner, FALSE);
-    ShowWindow(window, SW_SHOW);
-    SetFocus(GetDlgItem(window, endpointID));
-    MSG message{};
-    BOOL result = 1;
-    while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-        if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
-    }
-    if (IsWindow(window)) close(window);
-    if (IsWindow(owner)) { EnableWindow(owner, TRUE); SetActiveWindow(owner); }
-    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
-    else if (result < 0) jsti_window_update(jsti::systemError("Reading Azure Speech resource messages").c_str(), nullptr, -1);
+    jsti::chrome::runModalDialog(owner, window, endpointID, close, "Azure Speech resource");
 }
 
 int jsti_window_set_azure_resource(const char *endpoint, JSTIAzureResourceCallback callback, void *context) {

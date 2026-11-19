@@ -12,28 +12,22 @@ on:
       - "Package.swift"
       - "Package.resolved"
       - "Sources/SpeakCore/**"
-      - "scripts/verify-checksums.sh"
-  pull_request:
-    branches: [main]
-    paths:
-      - ".github/workflows/local-transcription-benchmark.yml"
-      - "Benchmarks/LocalTranscription/**"
-      - "Docs/TRANSCRIBE_CPP_ASSESSMENT.md"
-      - "Makefile"
-      - "Package.swift"
-      - "Package.resolved"
-      - "Sources/SpeakCore/**"
-      - "scripts/verify-checksums.sh"
-
+      - "scripts/dev/verify-checksums.sh"
+  # Pull requests benchmark only benchmark changes; SpeakCore and package
+  # changes are benchmarked on every push to main, keeping this macOS job out
+  # of the shared hosted macOS queue for ordinary product pull requests.
+  # No pull_request trigger: pull requests merge on their pre-pr record and
+  # main verifies every change after the merge (ci.yml, auto-revert.yml).
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   benchmark-package:
+    if: ${{ !startsWith(github.head_ref, 'merge-batch/') }}
     name: Build & Test Benchmark Package
     runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
     timeout-minutes: 30
@@ -46,14 +40,14 @@ jobs:
       # owner's shared SwiftPM cache and must not be overwritten by CI.
       - name: Cache Swift dependency sources
         if: runner.environment != 'self-hosted'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/Library/Caches/org.swift.swiftpm/repositories
           key: benchmark-${{ runner.os }}-${{ runner.arch }}-sources-${{ hashFiles('Package.resolved', 'Benchmarks/LocalTranscription/Package.resolved') }}
           restore-keys: benchmark-${{ runner.os }}-${{ runner.arch }}-sources-
 
       - name: Verify package resolution and CTranscribe checksum
-        run: make verify-checksums
+        run: scripts/ci/retry-network.sh make verify-checksums
 
       # verify-checksums resolves both graphs, so neither lockfile may change.
       - name: Check root and benchmark Package.resolved drift

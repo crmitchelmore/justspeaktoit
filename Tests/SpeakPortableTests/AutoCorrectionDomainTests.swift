@@ -101,6 +101,23 @@ final class AutoCorrectionDomainTests: XCTestCase {
         XCTAssertTrue(domain.candidates.isEmpty)
     }
 
+    func testRecordChangesCountsKeyboardWordPairsAndPromotesAtThreshold() async throws {
+        let lexicon = PersonalLexiconDomain(store: LexiconTestStore([]))
+        let domain = AutoCorrectionDomain(store: CandidateTestStore([]), lexiconService: lexicon,
+                                          promotionThreshold: { 10 })
+        let change = WordChange(type: .replacement, original: "Susie", corrected: "Susy")
+        try await domain.recordChanges([change], app: nil, threshold: 2)
+        XCTAssertEqual(domain.candidates.map(\.seenCount), [1])
+        try await domain.recordChanges([change], app: nil, threshold: 2)
+        XCTAssertTrue(domain.candidates.isEmpty)
+        XCTAssertEqual(lexicon.rules.map(\.canonical), ["Susy"])
+        XCTAssertEqual(lexicon.rules.map(\.source), [.automatic])
+        do {
+            try await domain.recordChanges([change], app: nil, threshold: 1)
+            XCTFail("An invalid threshold was accepted")
+        } catch {}
+    }
+
     func testInvalidCandidateLoadFailsClosedAndReloadCanRecover() async throws {
         let invalid = AutoCorrectionCandidate(original: "", corrected: "Susy", seenCount: 0)
         let store = CandidateTestStore([invalid])

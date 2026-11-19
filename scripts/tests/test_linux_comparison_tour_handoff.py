@@ -6,18 +6,17 @@ This tests driver ownership, not GTK rendering or screenshot contents.
 
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def final_stage_body():
-    source = (ROOT / "Sources/CLinuxSupport/LinuxWindow.c").read_text(encoding="utf-8")
+    source = (ROOT / "Sources/CLinuxSupport/LinuxWindowTour.c").read_text(encoding="utf-8")
     capture = source.index("static gboolean tour_capture(gpointer data) {")
     stage = source.index("if (tour->step == TOUR_VOICE_DISCOVERY)", capture)
     opening = source.index("{", stage)

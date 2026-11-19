@@ -6,8 +6,9 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseCommits } from './release-notes-lib.mjs';
+import { CATALOGUE_PATH, newAlphaChecks, pleaseTestMarkdown, previousDeliveredSource } from './alpha-testing-notes-lib.mjs';
 import { buildCatalogue, mergeEntries } from './release-notes-catalogue-lib.mjs';
-import { digest, validateManifest, surfaces, retiredSurfaces, frozenSurfaces, publicationSurfaces, stablePublicationSurfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
+import { digest, validateManifest, surfaces, retiredSurfaces, frozenSurfaces, publicationSurfaces, stablePublicationSurfaces, notesFor, storeNotesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/justspeaktoit';
 const run = runReleaseCommand;
@@ -40,6 +41,14 @@ function ci(source) {
     if(!latest || latest.conclusion !== 'success' || latest.status !== 'completed' || latest.head_repository.full_name !== repo) throw Error(`No successful main CI for ${source}`);
     return {id:latest.id,attempt:latest.run_attempt,url:latest.html_url};
 }
+// Alpha may ship before main CI finishes, but never once it has failed.
+function ciNotFailed(source) {
+    if(!/^[a-f0-9]{40}$/.test(source)) throw Error('Full source SHA required');
+    git('merge-base','--is-ancestor',source,'origin/main');
+    const runs=api(`repos/${repo}/actions/workflows/ci.yml/runs?head_sha=${source}&event=push&branch=main&per_page=100`).workflow_runs;
+    const latest=runs.sort((a,b)=>b.run_number-a.run_number)[0];
+    if(latest?.status === 'completed' && latest.conclusion === 'failure') throw Error(`Main CI failed for ${source}: ${latest.html_url}`);
+}
 function baseline(all, surface) {
     // Only a public non-prerelease receipt advances an Apple boundary. A
     // candidate, upload or review submission never counts as publication.
@@ -54,6 +63,13 @@ function baseline(all, surface) {
     // No version has ever been published on this surface: full initial range.
     return git('rev-list','--max-parents=0','HEAD').split('\n')[0];
 }
+const fileAt = (rev, path) => { try { return git('show',`${rev}:${path}`); } catch { return ''; } };
+const isAncestor = (ancestor, rev) => { try { git('merge-base','--is-ancestor',ancestor,rev); return true; } catch { return false; } };
+// Human checks added since the last Alpha delivered on this surface.
+function alphaTesting(manifests, all, surface, platform, source, fallback) {
+    const previous=previousDeliveredSource({manifests,releases:all,surface,source,isAncestor}) ?? fallback;
+    return pleaseTestMarkdown(newAlphaChecks({previous:fileAt(previous,CATALOGUE_PATH),current:fileAt(source,CATALOGUE_PATH),platform}));
+}
 function ensureRelease(manifest, all) {
     if(all.some(r=>r.tag_name===manifest.tag)) return;
     const bytes=JSON.stringify(manifest,null,2)+'\n';
@@ -67,7 +83,9 @@ if(command === 'allocate' || command === 'prepare') {
     const selected=publicationSurfaces({train, ...(scope === undefined ? {} : {publicationScope:scope})});
     const alpha=train === 'stable' ? manifestFor(required('alpha')) : null;
     const source=alpha?.source ?? required('source');
-    const proof=ci(source);
+    // Only the Alpha fast phase may allocate before main CI passes; Stable
+    // and every other path need the full green main run.
+    const proof=train === 'alpha' && option('require-ci','true') === 'false' ? (ciNotFailed(source), null) : ci(source);
     if(alpha) {
         if(alpha.train !== 'alpha') throw Error('Select an Alpha build');
         const release=all.find(r=>r.tag_name===alpha.tag);
@@ -112,8 +130,8 @@ if(command === 'allocate' || command === 'prepare') {
         const base=train === 'alpha' ? git('rev-parse', `${source}^1`) : retiredSurfaces.includes(surface) ? manifest.surfaces['mac-direct'].baseline : baseline(all,surface);
         git('merge-base','--is-ancestor',base,source);
         const commits=parseCommits(git('log','--first-parent','--reverse','--format=%H%x1f%s%x1f%b%x1e',`${base}..${source}`));
-        const notes=notesFor(commits,platform,`https://github.com/${repo}/compare/${base}...${source}`);
-        const storeNotes=notes.length <= 4000 ? notes : notes.slice(0,3900)+'\nFull release notes are available in the app.';
+        const notes=notesFor(commits,platform,`https://github.com/${repo}/compare/${base}...${source}`,train === 'alpha' ? alphaTesting(manifests,all,surface,platform,source,base) : '');
+        const storeNotes=storeNotesFor({train,source,surface,notes},git);
         manifest.surfaces[surface]={build:surface === "mac-direct" ? allocation.build : `${1000+Math.floor(allocation.ordinal/10000)}.${Math.floor(allocation.ordinal/100)%100}.${allocation.ordinal%100}`,version:versions[platform],baseline:base,notes,notesHash:digest(notes),storeNotes,storeNotesHash:digest(storeNotes),...(retiredSurfaces.includes(surface)?{retired:true}:{})};
     }
     validateManifest(manifest);
@@ -127,6 +145,8 @@ if(command === 'allocate' || command === 'prepare') {
     if(!surfaces.includes(surface)) throw Error('Invalid surface');
     if(!publicationSurfaces(manifest).includes(surface)) throw Error('Worker surface is outside the approved publication scope');
     if(git('rev-parse','HEAD') !== manifest.source) throw Error('Worker checked out wrong source');
+    // TestFlight and every Stable surface ship only a fully green main source.
+    if(manifest.train === 'stable' || surface === 'ios') ci(manifest.source);
     if(digest(readFileSync('Package.resolved','utf8').trim()) !== manifest.dependenciesHash) throw Error('Dependency lock does not match tested source');
     const config=json('Sources/SpeakCore/Resources/ReleaseTrains.json')[manifest.train];
     const item=manifest.surfaces[surface];
@@ -136,7 +156,7 @@ if(command === 'allocate' || command === 'prepare') {
         CLI_VERSION:manifest.train === "alpha" ? `${item.version}-alpha.${manifest.ordinal}` : item.version,
         BUNDLE_ID:config[surface==='ios'?'iosBundleIdentifier':surface==='mac-store'?'storeMacBundleIdentifier':'directMacBundleIdentifier'],
         PRODUCT_NAME:surface==='ios'?config.directMacProductName:config[surface==='mac-store'?'storeMacProductName':'directMacProductName'],
-        IOS_APP_GROUP:config.iosAppGroup,IOS_CLOUD_CONTAINER:config.iosCloudContainer,MAC_CLOUD_CONTAINER:config.macCloudContainer,
+        IOS_APP_GROUP:config.iosAppGroup,IOS_CLOUD_CONTAINER:config.iosCloudContainer,MAC_CLOUD_CONTAINER:config.cloudContainer,
         FEED_URL:config.feedURL,ARM64_FEED_URL:config.arm64FeedURL,TRAIN_DISPLAY_NAME:config.displayName,TRANSPORT_SERVICE:config.transportServiceType};
     if(!process.env.GITHUB_ENV) throw Error('Configure runs inside a release job');
     for(const [key,value] of Object.entries(values)) writeFileSync(process.env.GITHUB_ENV,`${key}=${value}\n`,{flag:'a'});
@@ -176,7 +196,7 @@ if(command === 'allocate' || command === 'prepare') {
     upload(manifest.tag,`${surface}-receipt.json`,receipt,true);
 } else if(command === 'publish-alpha') {
     const manifest=manifestFor(required('tag')); if(manifest.train !== 'alpha') throw Error('Alpha only');
-    ci(manifest.source);
+    ciNotFailed(manifest.source);
     const receiptAsset=releases().find(r=>r.tag_name===manifest.tag)?.assets.find(a=>a.name==='mac-direct-receipt.json');
     if(!receiptAsset) throw Error('No verified direct Alpha receipt');
     const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${receiptAsset.id}`,'-H','Accept: application/octet-stream'));
@@ -274,17 +294,13 @@ if(command === 'allocate' || command === 'prepare') {
     const pointer=pointerAsset ? JSON.parse(gh('api',`repos/${repo}/releases/assets/${pointerAsset.id}`,'-H','Accept: application/octet-stream')) : null;
     const allocated=new Map(existing.filter(r=>r.tag_name.startsWith('alpha-build-')).sort((a,b)=>Number(a.tag_name.split('-').at(-1))-Number(b.tag_name.split('-').at(-1))).map(r=>[git('rev-parse',`${r.tag_name}^{commit}`),r]));
     const active=JSON.parse(gh('api','--paginate','--slurp',`repos/${repo}/actions/workflows/alpha-release.yml/runs?per_page=100`)).flatMap(p=>p.workflow_runs).filter(r=>r.status !== 'completed');
-    // Bound catch-up work; undispatched sources remain in the successful-CI ledger.
-    let dispatched=0;
-    const dispatchLimit=3;
-    const seen=new Set();
-    // Newest successful main sources carry release repairs; do not starve them
-    // behind permanently failing historical manifests. Older sources remain queued.
+    // Alpha builds only the newest successful main source: each build holds
+    // the shared hosted macOS queue for hours, and a newer build supersedes
+    // every older one. Older sources are never caught up; an explicit
+    // workflow_dispatch with a source still builds any commit on demand.
     for(const r of runs.sort((a,b)=>b.run_number-a.run_number)) {
         try {git('merge-base','--is-ancestor',adoption,r.head_sha);} catch {continue;}
-        if(seen.has(r.head_sha)) continue;
-        seen.add(r.head_sha);
-        if(active.some(a=>a.display_title === `Alpha ${r.head_sha}`)) continue;
+        if(active.some(a=>a.display_title === `Alpha ${r.head_sha}`)) break;
         const allocatedRelease=allocated.get(r.head_sha);
         if(allocatedRelease) {
             const allocatedManifest=manifestFor(allocatedRelease.tag_name);
@@ -309,15 +325,11 @@ if(command === 'allocate' || command === 'prepare') {
             // Newer successful sources remain eligible and do not lose a slot.
             if(invalidAppleUpload) {
                 console.log(`${allocatedRelease.tag_name}: invalid Apple upload requires an explicit new build attempt.`);
-                continue;
+                break;
             }
-            if(complete && !allocatedRelease.draft && pointer && !canAdvance(pointer,allocatedManifest)) continue;
-        }
-        if(dispatched >= dispatchLimit) {
-            console.log('Alpha reconciliation dispatch limit reached; remaining sources retained for the next pass.');
-            break;
+            if(complete && !allocatedRelease.draft && pointer && !canAdvance(pointer,allocatedManifest)) break;
         }
         gh('workflow','run','alpha-release.yml','--repo',repo,'--ref','main','-f',`source=${r.head_sha}`);
-        dispatched++;
+        break;
     }
 } else { throw Error(`Unknown command ${command}`); }

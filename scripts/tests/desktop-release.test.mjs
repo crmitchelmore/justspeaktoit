@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {desktopDownloads, desktopWorkflows, latestDesktopRun, liveArtifact, reusableDesktopRun, desktopQualificationComplete, validateDesktopReceipt, verifyDesktopDownload} from '../desktop-release-lib.mjs';
+import {desktopDownloads, desktopWorkflows, equivalencePathspecs, equivalentDesktopRun, latestDesktopRun, liveArtifact, projectDesktopRun, reusableDesktopRun, desktopQualificationComplete, validateDesktopReceipt, verifyDesktopDownload, workflowPushPaths} from '../desktop-release-lib.mjs';
 const manifest = {source: 'a'.repeat(40), tag: 'stable-candidate-2', build: '202610281200'};
 const run = {id: 3, head_sha: manifest.source, head_branch: manifest.tag,
     event: 'workflow_dispatch', status: 'completed', conclusion: 'success', created_at: '2026-10-28T12:00:01Z'};
@@ -71,4 +71,70 @@ test('expired or ambiguous artifacts cannot supply a download', () => {
     assert.equal(liveArtifact([{name: 'a', expired: true}], 'a'), undefined);
     assert.equal(liveArtifact([{name: 'a', expired: false}, {name: 'a', expired: false}], 'a'), undefined);
     assert.equal(liveArtifact([], 'a'), undefined);
+});
+
+test('push paths are read from the on.push block only, including anchored lists', () => {
+    const text = `name: X
+on:
+  pull_request:
+    paths:
+      - pr-only/**
+  push:
+    branches: [main]
+    paths: &paths
+      - Package.swift
+      - 'Sources/SpeakCore/**'
+  workflow_dispatch:
+jobs:
+  a:
+    paths:
+      - not-this
+`;
+    assert.deepEqual(workflowPushPaths(text), ['Package.swift', 'Sources/SpeakCore/**']);
+    assert.equal(workflowPushPaths('on:\n  workflow_dispatch:\n'), undefined);
+    assert.deepEqual(equivalencePathspecs('linux.yml', ['a/**']),
+        [':(glob)a/**', ':(glob).github/workflows/linux.yml', ':(glob).github/actions/**']);
+});
+
+test('an equivalent main push or earlier manifest dispatch qualifies the source', () => {
+    const workflow = 'windows-arm64.yml';
+    const older = 'b'.repeat(40);
+    const base = {head_repository: {full_name: repo}, path: `.github/workflows/${workflow}`, status: 'completed',
+        conclusion: 'success', head_sha: older};
+    const push = {...base, id: 5, event: 'push', head_branch: 'main'};
+    const dispatch = {...base, id: 6, event: 'workflow_dispatch', head_branch: 'alpha-build-9'};
+    const same = () => true;
+    assert.equal(equivalentDesktopRun([push, dispatch], manifest, workflow, repo, same), dispatch);
+    assert.equal(equivalentDesktopRun([push], manifest, workflow, repo, () => false), undefined);
+    // The newest equivalent run decides: a newer failure is not papered over by an older success.
+    assert.equal(equivalentDesktopRun([push, {...dispatch, conclusion: 'failure'}], manifest, workflow, repo, same), undefined);
+    // A newer non-equivalent run does not hide an older equivalent success.
+    const newer = {...push, id: 9, head_sha: 'c'.repeat(40)};
+    assert.equal(equivalentDesktopRun([push, newer], manifest, workflow, repo, sha => sha === older), push);
+    for (const patch of [{event: 'pull_request'}, {head_branch: 'feature'}, {head_repository: {full_name: 'fork/x'}},
+        {path: '.github/workflows/other.yml'}, {status: 'in_progress'}, {event: 'workflow_dispatch', head_branch: 'main'}]) {
+        assert.equal(equivalentDesktopRun([{...push, ...patch}], manifest, workflow, repo, same), undefined);
+    }
+
+    const proof = receipt();
+    proof.runs[workflow] = projectDesktopRun({...dispatch, run_attempt: 1, html_url: 'u'}, manifest.source);
+    assert.equal(proof.runs[workflow].equivalentTo, manifest.source);
+    assert.equal(validateDesktopReceipt(manifest, proof), proof);
+    for (const patch of [{equivalentTo: undefined}, {equivalentTo: 'd'.repeat(40)}, {head_branch: 'feature'},
+        {event: 'push'}, {head_sha: 'short'}]) {
+        const value = receipt(); value.runs[workflow] = {...proof.runs[workflow], ...patch};
+        assert.throws(() => validateDesktopReceipt(manifest, value), JSON.stringify(patch));
+    }
+    assert.equal(projectDesktopRun({...run}, manifest.source).equivalentTo, undefined, 'exact runs carry no marker');
+});
+
+test('reused downloads are checked against the commit their run built', () => {
+    const digest = 'c'.repeat(64);
+    const built = 'b'.repeat(40);
+    const [x64, , flatpak] = desktopDownloads;
+    const bundle = {application: {sourceCommit: built}, architecture: 'x64', zip: {name: 'a.zip', sha256: digest}};
+    assert.equal(verifyDesktopDownload(x64, manifest, bundle, digest, built), 'a.zip');
+    assert.throws(() => verifyDesktopDownload(x64, manifest, bundle, digest));
+    const provenance = {sourceSHA: built, builtRevision: built, bundleSHA256: digest};
+    assert.equal(verifyDesktopDownload(flatpak, manifest, provenance, digest, built), 'JustSpeakToIt-x86_64.flatpak');
 });

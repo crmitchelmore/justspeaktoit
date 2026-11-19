@@ -12,7 +12,8 @@ on:
 permissions: {}
 concurrency:
   group: openai-api-review-${{ github.event.pull_request.number || inputs.pr-number }}
-  cancel-in-progress: false
+  # A new head supersedes an older head's pending review; dispatches finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 jobs:
   review:
     # Manual runs must use the trusted main workflow and script, never a branch copy.
@@ -31,7 +32,7 @@ jobs:
       pull-requests: write
     steps:
       # Only trusted base code runs with credentials; PR contents are API data.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false

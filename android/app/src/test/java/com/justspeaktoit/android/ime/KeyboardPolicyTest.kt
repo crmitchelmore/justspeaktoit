@@ -1,7 +1,9 @@
 package com.justspeaktoit.android.ime
 
 import android.text.InputType
+import android.view.inputmethod.EditorInfo
 import com.justspeaktoit.android.dictation.LanguageSupport
+import com.justspeaktoit.android.dictation.ModeStatus
 import com.justspeaktoit.android.dictation.RecognitionMode
 import com.justspeaktoit.android.dictation.RecognizerAvailability
 import com.justspeaktoit.android.dictation.RecognizerCapabilities
@@ -25,6 +27,15 @@ class KeyboardPolicyTest {
     }
 
     @Test
+    fun testLearning_onlyInOrdinaryTextFieldsThatAllowIt() {
+        assertTrue(KeyboardPolicy.allowsLearning(text or InputType.TYPE_TEXT_FLAG_MULTI_LINE, 0))
+        assertFalse(KeyboardPolicy.allowsLearning(text or InputType.TYPE_TEXT_VARIATION_PASSWORD, 0))
+        assertFalse(KeyboardPolicy.allowsLearning(text or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS, 0))
+        assertFalse(KeyboardPolicy.allowsLearning(text, EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING))
+        assertFalse(KeyboardPolicy.allowsLearning(InputType.TYPE_CLASS_NUMBER, 0))
+    }
+
+    @Test
     fun testOrdinaryFields_allowDictation() {
         assertTrue(KeyboardPolicy.allowsDictation(text))
         assertTrue(KeyboardPolicy.allowsDictation(text or InputType.TYPE_TEXT_FLAG_MULTI_LINE))
@@ -33,7 +44,7 @@ class KeyboardPolicyTest {
     }
 
     @Test
-    fun testMode_neverUsesCloudAndNeverReplacesAnUnusableChoice() {
+    fun testMode_withoutOptIn_neverUsesCloudAndNeverReplacesAnUnusableChoice() {
         val both = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = true)
         val options = RecognizerAvailability.evaluate(both, LanguageSupport.Installed, cloudKeySaved = true)
         assertEquals(RecognitionMode.OnDevice, KeyboardPolicy.mode(null, options))
@@ -46,6 +57,65 @@ class KeyboardPolicyTest {
 
         val none = RecognizerCapabilities(34, speechServiceAvailable = false, onDeviceAvailable = false)
         assertNull(KeyboardPolicy.mode(null, RecognizerAvailability.evaluate(none, LanguageSupport.Unknown, true)))
+    }
+
+    @Test
+    fun testMode_optedInWithLiveModel_usesChosenCloudOnly() {
+        val both = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = true)
+        val options = RecognizerAvailability.evaluate(both, LanguageSupport.Installed, cloudKeySaved = true)
+        assertEquals(RecognitionMode.Cloud, KeyboardPolicy.mode(RecognitionMode.Cloud, options, KeyboardCloud.Live))
+        // Automatic and explicit local choices never become Cloud, even when opted in.
+        assertEquals(RecognitionMode.OnDevice, KeyboardPolicy.mode(null, options, KeyboardCloud.Live))
+        assertEquals(
+            RecognitionMode.SpeechService,
+            KeyboardPolicy.mode(RecognitionMode.SpeechService, options, KeyboardCloud.Live),
+        )
+    }
+
+    @Test
+    fun testMode_optedInWithBatchModel_failsInsteadOfFallingBack() {
+        val both = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = true)
+        val options = RecognizerAvailability.evaluate(both, LanguageSupport.Installed, cloudKeySaved = true)
+        assertNull(KeyboardPolicy.mode(RecognitionMode.Cloud, options, KeyboardCloud.NotLive))
+    }
+
+    @Test
+    fun testCloud_requiresOptInAndALiveModel() {
+        assertEquals(KeyboardCloud.Off, KeyboardPolicy.cloud(optedIn = false, liveModel = true))
+        assertEquals(KeyboardCloud.Live, KeyboardPolicy.cloud(optedIn = true, liveModel = true))
+        assertEquals(KeyboardCloud.NotLive, KeyboardPolicy.cloud(optedIn = true, liveModel = false))
+    }
+
+    @Test
+    fun testUnavailableExplicitLocalChoice_neverBlamesCloud() {
+        // On-device chosen but missing, with the opt-in on and a batch Cloud model saved.
+        val noOnDevice = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = false)
+        val options = RecognizerAvailability.evaluate(noOnDevice, LanguageSupport.Unknown, cloudKeySaved = true)
+        assertNull(KeyboardPolicy.mode(RecognitionMode.OnDevice, options, KeyboardCloud.NotLive))
+        assertFalse(KeyboardPolicy.blamesBatchCloud(RecognitionMode.OnDevice, KeyboardCloud.NotLive))
+        assertFalse(KeyboardPolicy.blamesBatchCloud(null, KeyboardCloud.NotLive))
+        assertFalse(KeyboardPolicy.blamesBatchCloud(RecognitionMode.Cloud, KeyboardCloud.Off))
+        assertTrue(KeyboardPolicy.blamesBatchCloud(RecognitionMode.Cloud, KeyboardCloud.NotLive))
+    }
+
+    @Test
+    fun testMode_usesADownloadedModelOnlyWhenItFits() {
+        val both = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = true)
+        val options = RecognizerAvailability.evaluate(both, LanguageSupport.Installed, downloaded = ModeStatus.Ready)
+        assertEquals(RecognitionMode.OnDevice, KeyboardPolicy.mode(RecognitionMode.Downloaded, options))
+        assertEquals(
+            RecognitionMode.Downloaded,
+            KeyboardPolicy.mode(RecognitionMode.Downloaded, options, downloaded = true),
+        )
+        assertEquals(
+            "a fitting downloaded model is never used unless chosen",
+            RecognitionMode.OnDevice,
+            KeyboardPolicy.mode(null, options, downloaded = true),
+        )
+
+        val onlyDownloaded = RecognizerCapabilities(34, speechServiceAvailable = false, onDeviceAvailable = false)
+        val unusable = RecognizerAvailability.evaluate(onlyDownloaded, LanguageSupport.Unknown, downloaded = ModeStatus.Ready)
+        assertNull(KeyboardPolicy.mode(RecognitionMode.Downloaded, unusable))
     }
 
     @Test

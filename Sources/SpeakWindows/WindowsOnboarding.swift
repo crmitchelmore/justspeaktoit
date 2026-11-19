@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 import CWindowsSupport
 import SpeakCore
 import SpeakDesktopHost
@@ -117,8 +118,7 @@ enum WindowsOnboarding {
 /// A guide button on the UI thread. Navigation and completion run in
 /// settings order, so a choice applied in a settings dialog is shown.
 func guideEvent(_ command: Int32, _ step: Int32, _ value: Int32, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     let controller = holder.controller
     let shown = WindowsOnboarding.step(step)
     switch command {
@@ -151,7 +151,7 @@ func guideEvent(_ command: Int32, _ step: Int32, _ value: Int32, _ context: Unsa
 
 extension WindowsEventContext {
     func configureGuide() {
-        _ = jsti_guide_configure(guideEvent, Unmanaged.passUnretained(self).toOpaque())
+        _ = jsti_guide_configure(guideEvent, callbackContext)
     }
 
     /// The first launch opens the guide once the window is ready.

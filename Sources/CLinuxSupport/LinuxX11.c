@@ -14,7 +14,7 @@
 
 /*
  * X11 sessions only. Wayland clients cannot observe or inject into other
- * clients; there the portal paths in LinuxPortal.c apply. Each call opens its
+ * clients; there the portal paths in LinuxPortal*.c apply. Each call opens its
  * own display connection, so nothing here shares Xlib state with GTK.
  */
 

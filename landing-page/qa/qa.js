@@ -67,6 +67,13 @@ function restore() {
   }
 }
 
+// Arrow keys change the checked radio as focus moves through a group, so only a
+// pointer choice of Fail may move focus to the note; otherwise keyboard and
+// screen reader users would be pulled out of the group before reaching Skip.
+let pointerChoice = false;
+document.addEventListener('pointerdown', () => { pointerChoice = true; }, true);
+document.addEventListener('keydown', () => { pointerChoice = false; }, true);
+
 document.addEventListener('change', event => {
   const input = event.target;
   if (!(input instanceof HTMLInputElement) || !input.name.startsWith('result-')) return;
@@ -76,7 +83,7 @@ document.addEventListener('change', event => {
   answers[id] = item.kind === 'decision' ? { choice: input.value } : { result: input.value, note: answers[id]?.note || '' };
   save();
   render();
-  if (input.value === 'fail') document.getElementById(`note-${id}`)?.focus();
+  if (input.value === 'fail' && pointerChoice) document.getElementById(`note-${id}`)?.focus();
 });
 
 document.addEventListener('input', event => {

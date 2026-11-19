@@ -39,6 +39,28 @@ final class PronunciationRendererParityTests: XCTestCase {
         }
     }
 
+    /// The shared symbol defaults match on their own, which word boundaries
+    /// never allowed, while word entries still never match inside a word.
+    func testSymbolDefaults_MatchStandaloneAndWordsStayWhole() {
+        let symbols = PronunciationEntry.defaultEntries.filter { ["@", "#", "&"].contains($0.word) }
+        XCTAssertEqual(symbols.count, 3)
+        let renderer = PronunciationRenderer()
+
+        XCTAssertEqual(
+            renderer.applyReplacements(to: "email @ home, #1 & co", entries: symbols),
+            "email  at  home,  hashtag 1  and  co"
+        )
+        let words = [
+            PronunciationEntry(word: "API", pronunciation: "x", replacement: "A P I"),
+            PronunciationEntry(word: "C++", pronunciation: "x", replacement: "C plus plus"),
+            PronunciationEntry(word: "_id", pronunciation: "x", replacement: "I D")
+        ]
+        XCTAssertEqual(
+            renderer.applyReplacements(to: "API apiary rapid C++ _id my_id", entries: words),
+            "A P I apiary rapid C plus plus I D my_id"
+        )
+    }
+
     /// A dictionary larger than any small fixed cache stays compiled across
     /// utterances, on both the plain and SSML paths, as the manager always did.
     @MainActor

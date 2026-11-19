@@ -68,6 +68,38 @@ final class KeyboardDictationProfileTests: XCTestCase {
         XCTAssertEqual(decoded.selectedProfile.route, .directAppleSpeech)
     }
 
+    /// Issue #661: the menu must not show an unavailable App profile as if it would run.
+    func testAppProfileCarriesUnavailabilityThroughTheAppGroupProjection() throws {
+        var unavailable = configuration
+        unavailable.availability = TranscriptionModelAvailability(
+            status: .missingCredential, providerName: "Azure Speech"
+        )
+        let selection = KeyboardDictationProfileCatalog.selection(for: unavailable)
+        let decoded = try JSONDecoder().decode(
+            KeyboardProfileSelection.self, from: JSONEncoder().encode(selection)
+        )
+
+        XCTAssertFalse(decoded.selectedProfile.isAvailable)
+        XCTAssertEqual(decoded.selectedProfile.unavailableNote, "Unavailable: Azure Speech API key not set")
+        XCTAssertTrue(decoded.availableProfiles[0].isAvailable, "Local runs in the keyboard and needs no key")
+        XCTAssertNil(decoded.availableProfiles[0].unavailableNote)
+        XCTAssertTrue(KeyboardDictationProfileCatalog.selection(for: configuration).selectedProfile.isAvailable)
+    }
+
+    func testProfileWrittenBeforeAvailabilityExistedDecodesAsAvailable() throws {
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(makeSelection().selectedProfile))
+                as? [String: Any]
+        )
+        object.removeValue(forKey: "availability")
+        let decoded = try JSONDecoder().decode(
+            KeyboardDictationProfileOption.self, from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertNil(decoded.availability)
+        XCTAssertTrue(decoded.isAvailable)
+    }
+
     private var configuration: KeyboardAppProfileConfiguration {
         KeyboardAppProfileConfiguration(
             transcriptionMode: .batch,

@@ -2,6 +2,7 @@
 import Foundation
 import XCTest
 import SpeakCore
+import SpeakDesktop
 import SpeakLinuxPlatform
 
 final class LinuxVoiceAudioCodecTests: XCTestCase {
@@ -25,7 +26,7 @@ final class LinuxVoiceAudioCodecTests: XCTestCase {
     }
     func testNativeWAV_IsLosslessAndDoesNotRequireInstalledCompressedCodecs() async throws {
         let input = try syntheticAudio(rate: 48_000)
-        let output = try await LinuxVoiceAudioCodec.encode(input, format: .wav)
+        let output = try await DesktopVoiceAudioCodec.linux.encode(input, format: .wav)
         XCTAssertEqual(output.data, input.data)
         XCTAssertEqual(output.wav, input.wav)
         XCTAssertEqual(output.format, .wav)
@@ -33,11 +34,11 @@ final class LinuxVoiceAudioCodecTests: XCTestCase {
             encoded: Data([0xFF, 0xF3, 0x90, 0]), format: .mp3,
             decodedWAV: input.wav, sampleRate: input.sampleRate)
         do {
-            _ = try await LinuxVoiceAudioCodec.encode(syntheticCompressed, format: .wav)
+            _ = try await DesktopVoiceAudioCodec.linux.encode(syntheticCompressed, format: .wav)
             XCTFail("Compressed bytes must not pass through as a WAV result.")
         } catch VoiceAudioFormatError.invalidContainer {}
         do {
-            try await LinuxVoiceAudioCodec.requireAvailable(.m4a, sampleRate: -1)
+            try await DesktopVoiceAudioCodec.linux.requireAvailable(.m4a, sampleRate: -1)
             XCTFail("Invalid sample rate must refuse without an integer conversion trap.")
         } catch DeepgramSpeechError.unsupportedAudioFormat {}
     }
@@ -63,12 +64,12 @@ final class LinuxVoiceAudioCodecTests: XCTestCase {
     }
 
     private func roundTrip(_ format: VoiceAudioFormat, rate: Int) async throws {
-        do { try await LinuxVoiceAudioCodec.requireAvailable(format, sampleRate: rate) } catch {
+        do { try await DesktopVoiceAudioCodec.linux.requireAvailable(format, sampleRate: rate) } catch {
             guard case VoiceAudioFormatError.unavailable(let reason) = error, !reason.isEmpty else { throw error }
             throw XCTSkip("UNAVAILABLE \(format.rawValue), mono \(rate) Hz: \(reason)")
         }
         let input = try syntheticAudio(rate: rate)
-        let output = try await LinuxVoiceAudioCodec.encode(input, format: format)
+        let output = try await DesktopVoiceAudioCodec.linux.encode(input, format: format)
         try format.validateContainer(output.data)
         XCTAssertNotEqual(output.data.prefix(4), Data("RIFF".utf8))
         XCTAssertEqual(output.format.fileExtension, format.fileExtension)

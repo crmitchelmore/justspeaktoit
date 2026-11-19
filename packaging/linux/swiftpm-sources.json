@@ -9,22 +9,22 @@
   {
     "type": "git",
     "url": "https://github.com/apple/swift-collections.git",
-    "tag": "1.7.0",
-    "commit": "a66de878e87ef5a3d5d390e0f6d9002aa5541a43",
+    "tag": "1.7.6",
+    "commit": "88754449ab766a739610b660e117762115fabc9c",
     "dest": "swiftpm-deps/swift-collections"
   },
   {
     "type": "git",
     "url": "https://github.com/apple/swift-nio.git",
-    "tag": "2.103.0",
-    "commit": "21de5f08c1a166a6dd293d0e587ad977bf8dac5d",
+    "tag": "2.105.0",
+    "commit": "2f58d8ef84438d6517fc78bcea2f8527e3c72936",
     "dest": "swiftpm-deps/swift-nio"
   },
   {
     "type": "git",
     "url": "https://github.com/apple/swift-nio-ssl.git",
-    "tag": "2.37.5",
-    "commit": "322f3c2a4a21df31c84ca416bf65ee5e9059e440",
+    "tag": "2.37.6",
+    "commit": "15e0b9e495786807272dd4891fa4bac76aa43034",
     "dest": "swiftpm-deps/swift-nio-ssl"
   },
   {

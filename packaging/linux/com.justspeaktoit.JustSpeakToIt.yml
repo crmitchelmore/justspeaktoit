@@ -37,6 +37,9 @@ finish-args:
   # The status notifier (panel icon and menu) registers with the desktop's
   # watcher under the app's own bus name.
   - --talk-name=org.kde.StatusNotifierWatcher
+  # Send from phone announces the receiver through the host's avahi-daemon on
+  # the system bus (mDNS/DNS-SD), so paired phones can find this computer.
+  - --system-talk-name=org.freedesktop.Avahi
 build-options:
   append-path: /usr/lib/sdk/swift6/bin
   prepend-ld-library-path: /usr/lib/sdk/swift6/lib
@@ -60,9 +63,9 @@ modules:
 
   # Local transcription runtime. The app dlopens libwhisper.so.1 from
   # /app/lib/justspeaktoit (<executable dir>/../lib/justspeaktoit) and loads
-  # the ggml backends from the same directory. Same pin and options as the
-  # Windows runtime (scripts/windows-local-runtime/dependencies.json) and
-  # scripts/linux-build-whisper.sh.
+  # the ggml backends from the same directory. Same whisper.cpp pin as the
+  # Windows runtime (scripts/windows-local-runtime/dependencies.json) and the
+  # native Linux runtime (scripts/linux-local-runtime/build-whisper-runtime.py).
   - name: whisper-cpp
     buildsystem: cmake-ninja
     builddir: true
@@ -156,7 +159,7 @@ modules:
       # Share the SDK runtime between GUI and CLI instead of statically embedding it twice.
       # The stager copies only DT_NEEDED libraries and sets relative runtime search paths.
       # Flatpak keeps separate debug symbols during its normal cleanup phase.
-      - python3 scripts/stage-linux-desktop.py --binary .build/release/SpeakLinux
+      - python3 scripts/linux/stage-linux-desktop.py --binary .build/release/SpeakLinux
         --output .build/linux-desktop-layout --prefix /app --cli .build/release/speak
         --swift-runtime "$(swift -print-target-info | python3 -c 'import json,sys; print(json.load(sys.stdin)["paths"]["runtimeLibraryPaths"][0])')"
       - cp -r .build/linux-desktop-layout/. /app/

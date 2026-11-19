@@ -109,11 +109,13 @@ public enum DataMigrationPreferenceCatalog {
     private static func kind(for key: ApplicationPreferenceKey) -> Kind? {
         switch key {
         // Discovery is a per-install opt-in; transferring settings must not enable metadata requests.
-        case .cleanupModelDiscoveryEnabled, .trackedKeyIdentifiers, .transcriptionKeywordsLastReconciled:
+        // Likewise, an imported archive must not let local processes rewrite settings.
+        case .cleanupModelDiscoveryEnabled, .trackedKeyIdentifiers, .transcriptionKeywordsLastReconciled,
+             .allowAutomationConfigurationChanges:
             return nil
         case .analyticsEnabled, .audioPreWarmingEnabled, .autoCorrectionsEnabled, .cancelRecordingOnEscape,
              .compactStatusBarIcon, .connectionPreWarmingEnabled, .enableAutomationServer,
-             .enableSendToMac, .handsFreeDictationEnabled, .modulateAccentSignal,
+             .enableSendToMac, .handsFreeDictationEnabled, .keepAudioOnCancel, .modulateAccentSignal,
              .modulateEmotionSignal, .modulatePIIPhiTagging, .modulateSpeakerDiarization,
              .paidAccessRoutingEnabled, .pasteRemoteTranscriptsAtCursor, .postProcessingEnabled,
              .postProcessingIncludeContextTags, .postProcessingIncludeLexiconDirectives,

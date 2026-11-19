@@ -5,7 +5,7 @@ import SpeakCore
 
 // Shortcuts automation surface for iOS, extending the recording intents in
 // `TranscriptionIntents.swift`. The intents are thin: parameter mapping and
-// validation live in `SpeakCore/AutomationIntentSupport.swift` where they are
+// validation live in `SpeakCore/Automation/AutomationIntentSupport.swift` where they are
 // unit-tested, and all real work happens in the existing services. They are
 // internal on purpose — nothing outside SpeakiOSLib references them, and the
 // AppIntents metadata extractor does not need public visibility.
@@ -31,7 +31,7 @@ enum AutomationIntentError: LocalizedError {
             return "No transcriptions in history yet."
         case .unsupportedBatchModel(let model):
             return "The configured batch model (\(model)) isn't supported for file transcription "
-                + "on iPhone. Choose a supported model in Settings."
+                + "on this device. Choose a supported model in Settings."
         case .openRouterKeyMissing:
             return "Polish Text needs an OpenRouter API key. Add one in Settings."
         case .noPolishOutput:
@@ -50,17 +50,24 @@ enum AutomationIntentError: LocalizedError {
 /// actions can consume it directly (the destination side-effects — clipboard,
 /// history, background polish — still apply).
 @available(iOS 18, *)
-struct StopDictationIntent: AudioRecordingIntent {
-    static var title: LocalizedStringResource = "Stop Dictation and Get Text"
-    static var description = IntentDescription(
-        "Stops the current recording and returns the final transcript for use in later Shortcut actions."
+public struct StopDictationIntent: AudioRecordingIntent {
+    public static var title: LocalizedStringResource = "Stop Dictation and Get Text"
+    public static var description = IntentDescription(
+        """
+        Stops a recording started with Start Recording or Toggle Recording and returns the transcript \
+        to the next action. Requires the device to be unlocked.
+        """,
+        categoryName: "Recording",
+        searchKeywords: ["finish", "end", "transcription", "get text"]
     )
 
-    static var openAppWhenRun: Bool = false
+    public static var openAppWhenRun: Bool = false
     /// Returns private transcript data, so never run on a locked device.
     /// (The plain Stop Recording intent, which returns no transcript, stays
     /// available for locked Action Button flows.)
-    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+    public static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+
+    public init() {}
 
     /// The transcript comes back either way; this only redirects the
     /// side-effects (clipboard, history, background polish).
@@ -68,7 +75,7 @@ struct StopDictationIntent: AudioRecordingIntent {
         title: "Destination",
         description: "Where the transcript goes. Leave unset to use the destination from Settings."
     )
-    var destination: CaptureDestinationAppEnum?
+    public var destination: CaptureDestinationAppEnum?
 
     /// Issue #1015: without this, a "Clipboard and Polish" run hands the
     /// Shortcut the raw transcript and then quietly replaces the clipboard
@@ -88,14 +95,14 @@ struct StopDictationIntent: AudioRecordingIntent {
     )
     var waitForPolish: Bool
 
-    static var parameterSummary: some ParameterSummary {
+    public static var parameterSummary: some ParameterSummary {
         Summary("Stop dictation and get text") {
             \.$destination
             \.$waitForPolish
         }
     }
 
-    func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    public func perform() async throws -> some IntentResult & ReturnsValue<String> {
         // The budget is the whole operation's, not the polish wait's alone.
         // `stopRecording` awaits transcription finalisation, History and the
         // destination side effects first; starting a full 12-second wait after
@@ -149,7 +156,8 @@ struct StopDictationIntent: AudioRecordingIntent {
 struct TranscribeAudioFileIntent: AppIntent {
     static var title: LocalizedStringResource = "Transcribe Audio File"
     static var description = IntentDescription(
-        "Transcribes an audio file with your configured batch model and returns the text."
+        "Transcribes an audio file with your batch model and returns the text.",
+        categoryName: "Transcripts"
     )
 
     static var openAppWhenRun: Bool = false
@@ -201,7 +209,11 @@ struct TranscribeAudioFileIntent: AppIntent {
         // Only models with an iOS upload client may run. A retained direct-
         // provider identifier (for example a Soniox model configured on Mac)
         // would otherwise fall through to OpenRouter with the wrong credential.
-        guard AppSettings.supportedBatchModels.contains(where: { $0.id == modelID }) else {
+        if IOSLocalTranscriptionModels.isDownloadedModelID(modelID) {
+            // Says which download is missing rather than "unsupported".
+            _ = try IOSLocalTranscriptionModels.requireReady(modelID)
+        }
+        guard AppSettings.canRunBatchModel(modelID) else {
             throw AutomationIntentError.unsupportedBatchModel(modelID)
         }
         let temporaryURL = try await Self.stageAudioForTranscription(
@@ -285,29 +297,28 @@ struct TranscribeAudioFileIntent: AppIntent {
 
 // MARK: - Get Last Transcription
 
-struct GetLastTranscriptionIntent: AppIntent {
-    static var title: LocalizedStringResource = "Get Last Transcription"
-    static var description = IntentDescription(
-        "Returns the most recent transcription from history, preferring the polished text."
+public struct GetLastTranscriptionIntent: AppIntent {
+    public static var title: LocalizedStringResource = "Get Last Transcription"
+    public static var description = IntentDescription(
+        "Returns the latest transcript from History as plain text, polished when available.",
+        categoryName: "Transcripts"
     )
 
-    static var openAppWhenRun: Bool = false
+    public static var openAppWhenRun: Bool = false
     /// Returns private transcript data, so never run on a locked device.
-    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+    public static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+
+    public init() {}
 
     @MainActor
-    func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    public func perform() async throws -> some IntentResult & ReturnsValue<String> {
         let history = iOSHistoryManager.shared
         await history.loadIfNeededAndWait()
-        let text = history.items.lazy
-            .compactMap { item in
-                AutomationIntentSupport.bestTranscript(
-                    raw: item.transcription,
-                    polished: item.postProcessedTranscription
-                )
-            }
-            .first
-        guard let text else {
+        guard let text = AutomationIntentSupport.mostRecentTranscript(
+            in: history.items,
+            raw: \.transcription,
+            polished: \.postProcessedTranscription
+        ) else {
             throw AutomationIntentError.noTranscriptionYet
         }
         return .result(value: text)
@@ -319,7 +330,8 @@ struct GetLastTranscriptionIntent: AppIntent {
 struct PolishTextIntent: AppIntent {
     static var title: LocalizedStringResource = "Polish Text"
     static var description = IntentDescription(
-        "Cleans up text with your post-processing model. A custom prompt overrides the cleanup instructions."
+        "Cleans up text with your post-processing model. A custom prompt overrides the cleanup instructions.",
+        categoryName: "Transcripts"
     )
 
     static var openAppWhenRun: Bool = false
@@ -339,7 +351,7 @@ struct PolishTextIntent: AppIntent {
         await settings.ensureKeysLoaded()
         let model = settings.postProcessingModel
         try settings.requireAvailableCredentials(for: model, purpose: .postProcessing)
-        guard model == AppleLocalModels.foundationModelID || settings.hasOpenRouterKey else {
+        guard settings.hasPostProcessingKey(for: model) else {
             throw AutomationIntentError.openRouterKeyMissing
         }
         let request = AutomationIntentSupport.polishRequest(
@@ -352,12 +364,12 @@ struct PolishTextIntent: AppIntent {
             systemPrompt: request.systemPrompt,
             userMessage: request.userMessage,
             model: model,
-            apiKey: settings.openRouterAPIKey
+            apiKey: settings.postProcessingAPIKey(for: model)
         )
-        guard !polished.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard let output = AutomationIntentSupport.nonBlankPolishOutput(polished) else {
             throw AutomationIntentError.noPolishOutput
         }
-        return .result(value: polished)
+        return .result(value: output)
     }
 }
 #endif

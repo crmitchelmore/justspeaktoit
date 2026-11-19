@@ -73,24 +73,24 @@ final class OpenRouterAudioSettingsTests: XCTestCase {
         ]
         for item in cases {
             XCTAssertEqual(
-                OpenRouterIOSAudioPlayback.interruptsPlayback(
+                VoiceOutputAudioPlayback.interruptsPlayback(
                     Notification(name: item.name, userInfo: [item.key: item.value])
                 ),
                 item.expected
             )
         }
-        XCTAssertTrue(OpenRouterIOSAudioPlayback.interruptsPlayback(
+        XCTAssertTrue(VoiceOutputAudioPlayback.interruptsPlayback(
             Notification(name: AVAudioSession.mediaServicesWereLostNotification)
         ))
     }
 
     func testPlaybackRate_RejectsNonfiniteValuesAndClampsFiniteValues() {
-        XCTAssertEqual(OpenRouterIOSAudioPlayback.playbackRate(for: .nan), 1)
-        XCTAssertEqual(OpenRouterIOSAudioPlayback.playbackRate(for: .infinity), 1)
-        XCTAssertEqual(OpenRouterIOSAudioPlayback.playbackRate(for: -.infinity), 1)
+        XCTAssertEqual(VoiceOutputAudioPlayback.playbackRate(for: .nan), 1)
+        XCTAssertEqual(VoiceOutputAudioPlayback.playbackRate(for: .infinity), 1)
+        XCTAssertEqual(VoiceOutputAudioPlayback.playbackRate(for: -.infinity), 1)
         let range = VoiceOutputProvider.openrouter.speedRange
-        XCTAssertEqual(OpenRouterIOSAudioPlayback.playbackRate(for: -10), Float(range.lowerBound))
-        XCTAssertEqual(OpenRouterIOSAudioPlayback.playbackRate(for: 10), Float(range.upperBound))
+        XCTAssertEqual(VoiceOutputAudioPlayback.playbackRate(for: -10), Float(range.lowerBound))
+        XCTAssertEqual(VoiceOutputAudioPlayback.playbackRate(for: 10), Float(range.upperBound))
     }
 
     func testMissingKeyAndInvalidSelection_ReportActionableErrors() async throws {

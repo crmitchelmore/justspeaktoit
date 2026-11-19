@@ -27,8 +27,10 @@ refusal, upgrade and uninstall; ARM64 execution was native, not x64 emulation.
 This checkpoint supersedes older pending compilation/native-fixture statements
 below for that source tree. It does not qualify physical microphones, focus and
 external insertion, real provider accounts, GPU/performance acceptance or live
-CloudKit sync. Public Artifact Signing was skipped; Windows updates and public
-release identities remain unresolved. Linux Flatpak build, installed runtime and
+CloudKit sync. Public Artifact Signing was skipped. The Microsoft Store identity
+is reserved and Publish Stable submits a Store bundle once the owner connects
+Partner Center ([Microsoft Store package](windows-installer.md#microsoft-store-package));
+Windows updates outside the Store remain unresolved. Linux Flatpak build, installed runtime and
 portal acceptance are separate from the passing GTK job. The developer packages
 are not a public Alpha or Stable Windows release.
 
@@ -212,7 +214,7 @@ In PowerShell from the repository root:
 
 ```powershell
 swift --version
-python scripts/verify-portable-core-boundary.py
+python scripts/ci/verify-portable-core-boundary.py
 swift build --configuration release --product SpeakWindows
 swift test --configuration release
 $bin = swift build --configuration release --show-bin-path
@@ -238,13 +240,21 @@ Reson8 and StepFun. The canonical
 shared catalogue owns their identifiers, metadata and routes. OpenRouter model
 discovery uses the same cache and refresh policy as Apple; native model controls
 refresh without changing an active recording or reusing an earlier model index.
+With Remote Batch selected, **Browse OpenRouter models…** opens a Win32 browser
+(`WindowsOpenRouterBrowser.cpp`) over the picker's OpenRouter routes, with search,
+provider and zero-listed-price filters and a details pane; Choose selects that
+route while idle. The Post-processing dialog has the same button for its Remote
+source; Apply saves the choice. Pages come from the shared
+`DesktopOpenRouterBrowser` through `OpenRouterBrowser.h` (#1618).
 Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs,
 Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, three Azure live routes and xAI's
 dedicated speech-to-text live models use shared Swift clients with the native
-WinHTTP transport. Reson8 (`reson8/resonant-1-streaming`, 16 kHz PCM) also uses
+WinHTTP transport. Reson8 (`reson8/rumble-2-streaming` and
+`reson8/resonant-1-streaming`, 16 kHz PCM) also uses
 the shared native transport with handshake-gated audio and a bounded,
 correlated flush confirmation; Smallest AI Pulse Pro and StepAudio 3 ASR Max
-are file-only routes. These additional Reson8/Smallest AI/StepFun routes have
+are file-only routes. Desktop hosts save new StepFun keys for the International
+region (`api.stepfun.ai`) and have no region picker yet. These additional Reson8/Smallest AI/StepFun routes have
 fake-transport evidence only and no native Windows provider receipt; see
 [batch transcription contracts](batch-transcription-providers.md).
 
@@ -872,7 +882,7 @@ scales with the monitor's DPI.
 - Totals and row wording come from the shared `DesktopHistoryInsights` and
   `DesktopHistoryRowSummary` (SpeakDesktop), counted and formatted as the Mac
   counts them, so Windows, Linux and the Mac show the same figures.
-- Colours are the brand tokens in `SpeakCore/BrandColors.swift`
+- Colours are the brand tokens in `SpeakCore/App/Apple/BrandColors.swift`
   (`WindowsWindowChrome.cpp`). The window follows Windows' app mode
   (`AppsUseLightTheme`) with a dark title bar and dark common controls;
   **General › Appearance** overrides it (Follow Windows, Light, Dark), saved as
@@ -953,8 +963,8 @@ flowchart TB
 | Layer | Current responsibility | Source |
 |---|---|---|
 | Canonical domain | Model identifiers, provider routes, transcript semantics, Unicode reconciliation, lifecycle ownership, PCM/WAV, comparison and history projections | `Sources/SpeakCore/` |
-| Shared batch transport | Seventeen provider routes reuse shared clients, including their HTTP, polling and cancellation behaviour | `Sources/SpeakCore/` provider clients; `Sources/SpeakDesktop/DesktopTranscription.swift` |
-| Shared post-processing | Canonical cloud models, cleanup prompts, silence policy and OpenRouter execution | `Sources/SpeakCore/OpenRouterChatClient.swift`, `Sources/SpeakDesktop/DesktopPostProcessing.swift` |
+| Shared batch transport | Seventeen provider routes reuse shared clients, including their HTTP, polling and cancellation behaviour | `Sources/SpeakCore/` provider clients; `Sources/SpeakDesktop/Transcription/DesktopTranscription.swift` |
+| Shared post-processing | Canonical cloud models, cleanup prompts, silence policy and OpenRouter execution | `Sources/SpeakCore/OpenRouter/OpenRouterChatClient.swift`, `Sources/SpeakDesktop/Transcription/DesktopPostProcessing.swift` |
 | Desktop behaviour | Implemented-model projection, durable recording records, recovery, export and streaming WAV writes | `Sources/SpeakDesktop/` |
 | Windows host | Native-event handling, recording orchestration, settings and credential access | `Sources/SpeakWindows/` |
 | Windows services | Event-driven WASAPI capture with a bounded writer queue, native History playback through Media Foundation decoding and event-driven WASAPI rendering, native history/settings UI, hotkey, Credential Manager, clipboard, and captured-field insertion through native controls, UI Automation and a guarded paste | `Sources/CWindowsSupport/` |
@@ -964,10 +974,12 @@ flowchart TB
 
 `Package.swift` selects the portable graph on Windows/Linux and when explicitly
 requested on macOS. New `SpeakCore` source files enter the portable build by
-default. `appleCoreSources` names the existing Apple-bound dependency closure;
-a new exception must be an intentional platform adapter, not a duplicate
-implementation of domain behaviour. The boundary check rejects duplicate,
-missing or stale exclusions and a return to a portable-source allow-list. Native
+default. `appleCoreSources` names the Apple-only folders (each feature's
+`Apple/` subfolder, plus `AppleUI/`, `AppleSpeech/`, `AppleSupport/` and
+`SpeechInsights/`); a file placed there must be an intentional platform
+adapter, not a duplicate implementation of domain behaviour. The boundary check
+rejects duplicate, file, nested, missing or stale entries and a return to a
+portable-source allow-list. Native
 Windows/Linux CI then catches accidental Apple framework dependencies.
 
 The catalogue remains canonical. Metadata formerly inside Meta, Cartesia,
@@ -1550,14 +1562,16 @@ but must not be presented as the identical Apple-only engine or service.
 | Personal vocabulary | Native Corrections/Pronunciation editors; shared durable CRUD, order, validation and preview; stored-candidate review/promotion/dismissal/removal/clear; canonical correction matching before post-processing in recording/import/retry/live completion; separately retained provider/corrected/processed text and applied/suggested snapshots; native History correction results; xAI/Azure batch and xAI/AssemblyAI live keyword hints | Final-head native/Apple CI and physical editing/recording/speech acceptance; OS-wide safe edit observation |
 | Profiles and settings | Native ordered per-app editor and shared validation; immutable recording overrides, model-specific live language hints and preserved unknown values | Final-head native UI, physical executable matching, remaining settings and lexicon overrides |
 | History | Native record selection, case/diacritic-insensitive search over original/processed text and friendly model names, original/processed transcript selection for copy and export, retry, text export, external audio opening and in-app playback with Play/Pause, Stop and elapsed/remaining through Media Foundation and WASAPI; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, physical speaker/Bluetooth/USB playback, history import and retention controls. The Mac History flush interval is stored only because each record is already saved durably |
-| Backup and restore | General saves a Mac-compatible ZIP (History text, optional audio), inspects one read-only, and restores from one: a no-write preview of counts, conflicts and not-applied categories, explicit confirmation, then History text merge and app-profile merge/replace with a stale check and rollback to the prior files. Restored History never sets `originPlatform`. Settings, audio, credentials, vocabulary, connections and models stay in the backup unapplied | Restoring the remaining categories (credentials only with consent), a Linux GTK restore entry point, native dialog self-test and screenshots, and physical Mac round-trip acceptance |
+| Backup and restore | General saves a Mac-compatible ZIP of every category (History text, settings, connections, vocabulary and model references, plus optional audio, app profiles and, after a prompt that defaults to No, API keys), inspects one read-only, and restores from one: a no-write preview of counts, conflicts and skipped items, explicit Merge or Replace, then one all-or-nothing apply with a stale check and rollback. Restored History never sets `originPlatform`. API keys are restored only after a second opt-in; model files are never copied, and Mac pairing details and native-only choices are skipped with a reason. See [data migration](data-migration.md#windows-and-linux) | Native compilation, dialog self-test and screenshots, and physical Mac round-trip acceptance |
 | Model comparison | Native Compare Models editor; isolated File and multi-sample Batch runs; one microphone fan-out with readiness, lane errors, bounded finalization and 600s capture safety; persisted blind rankings/reveal and canonical scoreboard/JSON/Markdown exports; confirmed delete/discard with durable tombstones, owned sample cleanup and startup orphan pruning; account/consent-fenced canonical metadata sync with explicit consent/retry. Synthetic portable orchestration/host/sync tests, native smoke checks and named screenshots | Final-head Windows/Linux native CI, physical microphone/playback, Narrator, high contrast and multi-monitor/DPI acceptance, real provider and real-account CloudKit receipts |
 | Voice output | Native History-default, typed/pasted, explicit Clipboard and UTF-8 snapshots; shared Read/Generate, retained replay and chosen WAV export for executable Deepgram, Azure neural/MAI, xAI, Cartesia, Mistral, Soniox, OpenAI, Groq, canonical Gemini, Speechmatics and ElevenLabs routes. Model-qualified OpenAI/Gemini/ElevenLabs rows keep compatible tuples and voice-scoped favorites. Explicit credential-bound account evidence remains required where supported; ElevenLabs is offline presets only. Canonical language settings are provider-aware: Gemini retains regional tags in captured requests, Soniox retains its base-language/Automatic policy, and unused choices remain stored; Cartesia keeps its Automatic resolver. Quality maps OpenAI/ElevenLabs models, Cartesia/Soniox 16/24/48 kHz and Deepgram/Azure 24/48 kHz; other fixed-format routes disable unused quality, and explicit Eleven v3 stays fixed. Speed ranges: OpenAI 0.25-4, Azure neural 0.5-2, xAI 0.7-1.5, Cartesia 0.6-1.5, Soniox 0.7-1.3; others normal only. Azure neural supports whole-semitone pitch -12 to12 and SSML, MAI SSML with normal numeric controls. Native SSML Helper uses canonical Copy/Close/whole-current-draft Wrap semantics only for enabled editable SSML routes. Unsupported/unknown settings refuse before keys; immutable jobs, History-or-nil ownership, cancellation and local usage/opt-out remain shared. ElevenLabs uses genuine 24 kHz WAV and actual v4-dialogue/v3 fallback identities, not fabricated PCM headers or provider acceptance. See [contracts and limitations](desktop-voice-sources.md) | Source-only additions are uncompiled/unexecuted; the separate 48 kHz generated-audio admission repair is included in this composed source. Exact-head portable/native/Apple qualification, provider/account WAV entitlements, physical playback/microphone/Bluetooth, keyboard/screen-reader/DPI and installed-app acceptance remain required. WAV-only export: MP3/M4A and other formats/rates/decoders, progressive playback, additional canonical models, ElevenLabs account discovery, OpenRouter/system speech and broader workspace parity remain gaps. External selected text stays unavailable without a proven external captured target, including honest Wayland gating; Clipboard is never substituted |
-| Hands-free and silence | Native sound-activation replacement: hotkey arm/disarm, bounded RAM pre-roll, ordinary utterance/provider/output pipeline and rearm; app profile re-resolved per utterance (retained target process, or foreground process for clipboard-only output) with record-bound provider inputs, and a profile needing a different PCM rate refuses before WAV/provider startup; manual silence auto-stop; canonical native controls; WTS/power guard fails closed | Not Apple's ML detector. Physical microphone/noise/start-latency and lock/sleep acceptance, exact-head native/Apple CI, installed packages and physical per-utterance foreground-target/profile refresh remain unqualified; see [settings coverage](desktop-settings-parity.md) |
+| Hands-free and silence | Native sound-activation replacement: hotkey arm/disarm, bounded RAM pre-roll, ordinary utterance/provider/output pipeline and rearm; app profile re-resolved per utterance (retained target process, or foreground process for clipboard-only output) with record-bound provider inputs, and a profile needing a different PCM rate refuses before WAV/provider startup; manual silence auto-stop; canonical native controls; WTS/power guard fails closed | Fixed threshold, not the Apple apps' adaptive noise-floor gate. Physical microphone/noise/start-latency and lock/sleep acceptance, exact-head native/Apple CI, installed packages and physical per-utterance foreground-target/profile refresh remain unqualified; see [settings coverage](desktop-settings-parity.md) |
 | Credentials | Windows Credential Manager uses canonical identifiers for the seventeen transcription provider families. Transcription → All API keys… lists every catalogue credential Windows can use (transcription, OpenRouter, Voice Output, Azure key + region) with masked status, Save/Replace after a check, confirmed Remove, Check validity and the provider key page, and keeps `trackedKeyIdentifiers` (source only, NOT_RUN; see [API Keys page](desktop-settings-parity.md#api-keys-page-windows-source-only-not_run)) | Build and native qualification of the API Keys page, physical credential lifecycle acceptance, and providers outside the shared catalogue |
 | Sync and Apple companion flows | History syncs with the Mac App Store build's CloudKit container (`iCloud.com.justspeaktoit`) through CloudKit Web Services: Settings, iCloud sync signs in with an Apple ID in the browser (loopback callback), shows Mac History as audio-less synced copies and uploads Windows History in the Mac's record format. Opt-in, read-only import of the API keys the Mac syncs, unlocked with the Mac's key-sync passphrase. Native WinHTTP transport, CNG envelope, Credential Manager for the rotating token. Portable tests and Windows loopback tests run against a fake CloudKit server; see [iCloud sync](#icloud-sync) and [Model comparison](#model-comparison) for its separate metadata sync | The CloudKit Console steps below, then a live receipt: Mac to Windows and Windows to Mac History create, edit and delete, key import, account switch and token expiry. Settings do not sync (the Mac uses the iCloud key-value store, which has no web API); iPhone History (a separate container) and Handoff are not wired |
 | Automation and integrations | Opt-in `speak` CLI and MCP server over an owner-only local named pipe: status, history, file transcription, start/stop dictation, and `speak say`/`speak voices` text to speech through the Voice settings' providers and saved keys (no on-device voice, so a voice must be configured). It shares the protocol, framing, dispatch and replay with the Mac socket transport. Loopback client/server, CLI path resolution and MCP tests pass under a local Windows ABI runner. The native pipe self-test (runs in `--self-test` and CI) needs real Windows, because the local runner does not enforce first-instance ownership. General › CLI and MCP setup (source only) shows on/off, the pipe name, consent text and copyable `speak`, MCP and Claude Code text for `speak.exe` beside the app or the MSIX `JustSpeakToItDeveloperCLI.exe` alias | Windows CI for this revision, a physical check of the General toggle, the setup dialog and `speak` against a running app, a `speak` name on PATH (the bundle changes no PATH; the MSIX alias is not `speak`), moving Windows from legacy `automationEnabled` to the shared device-local consent, deep links, AppleScript/Shortcuts-equivalent surfaces |
-| Diagnostics and insights | Dashboard and History show Sessions, Errors, Recording Time, Average Length and Spend from the shared `DesktopHistoryInsights`; shared timing and comparison data available | Timing diagnostics UI and end-to-end diagnostic receipts. Windows sends no analytics or crash reports; General's Analytics switch is stored for the Mac and gates nothing, so any future telemetry must honour it with consent/redaction |
+| Diagnostics and insights | Dashboard and History show Sessions, Errors, Recording Time, Average Length and Spend from the shared `DesktopHistoryInsights`; shared timing and comparison data available | Timing diagnostics UI and end-to-end diagnostic receipts. Opt-in analytics and crash reports (#1624) use General's two device-local consent switches, both off; the Mac's `analyticsEnabled` is retained for transfer and gates nothing here |
+| System resources status | Settings › General › App behaviour › *System resources in use…* opens a native window listing the shared host's holds (dictation, provider socket, warm-ups, hands-free, Compare Models, preparation, speech) and the dictation shortcut's `RegisterHotKey` registration, with per-row release (the preparation row ends within a second of the `WindowsCapturePrewarm` worker's lifetime ending) and Release everything. `jsti_audio_process_capturing` reads this process's `IAudioSessionManager2` sessions on every active capture endpoint as the OS view of the microphone; `--self-test` covers the window, its buttons and the probe's range ([system resources](system-resources.md)) | Physical check that the warning appears for an unclaimed microphone and clears after release |
+| Tip jar | About › Support development: a label and one button per shared `TipWebLink` (GitHub Sponsors, Ko-fi) opening the page in the default browser; the amount is chosen there and nothing unlocks. No Microsoft Store add-on and no paid access (#1625) | Compilation and Windows CI for this revision; the `--ui-smoke-test` tip-link checks; Narrator and DPI review of the extra About row |
 | Distribution and updates | Unsigned developer executable, self-contained runtime bundle (including the on-device runtime), an unsigned x64 developer MSIX, and a beta `.msixbundle` with an App Installer file and automatic updates whose CI rehearsal installs, upgrades and uninstalls it on x64 and ARM64 ([public beta installer](windows-installer.md#public-beta-installer)) with a CI install/upgrade/uninstall lifecycle job that keeps user data in the portable data directory. A CI `sign` job signs a copy with Azure Artifact Signing through GitHub OIDC once its secrets and variables exist, and otherwise logs that the unsigned package is kept ([windows-installer.md](windows-installer.md#signing)) | x64/ARM64 developer lifecycle receipts pass at the current checkpoint; the beta installer publishes only after the owner's signing setup; the owner's Artifact Signing identity validation and first publicly signed receipt, clean physical Windows 10/11 installs, update channel and Alpha/Stable Windows identities remain |
 
 Apple-specific UI surfaces such as Siri, Live Activities, the iOS keyboard and
@@ -1676,7 +1690,8 @@ What the Windows app does:
   Apple's sign-in page, opens it in the default browser (only `https` pages on
   `apple.com` or `icloud.com`), and listens on
   `http://127.0.0.1:47823/cloudkit-sign-in` for the redirect carrying
-  `ckWebAuthToken`. The listener runs only during sign-in, for at most ten
+  `ckWebAuthToken`, which Apple sends to the token's registered
+  `https://justspeaktoit.com/cloudkit-sign-in` and the site forwards there. The listener runs only during sign-in, for at most ten
   minutes, and takes the redirect only from a process of the signed-in
   Windows user and only as a top-level browser navigation (see
   [Sign-in callback](windows-cloudkit-sync.md#sign-in-callback)). The token rotates on every response and is kept in Credential
@@ -1732,16 +1747,23 @@ to use the Development environment) before starting the app.
    new **API Token**:
    - Name: `Just Speak to It for Windows`.
    - **Sign in Callback**: choose **URL Redirect** and enter exactly
-     `http://127.0.0.1:47823/cloudkit-sign-in`.
+     `https://justspeaktoit.com/cloudkit-sign-in`. The Console refuses
+     `http://` callbacks, so this site page forwards the token to the app's
+     loopback listener, `http://127.0.0.1:47823/cloudkit-sign-in` (see
+     [Sign-in callback](windows-cloudkit-sync.md#sign-in-callback)).
    - Allowed origins: leave the default. The Windows client is not a browser
      and sends no `Origin` header.
    - Save it and copy the token value.
 3. **Add the CI secret.** In GitHub, open **crmitchelmore/justspeaktoit >
-   Settings > Secrets and variables > Actions > New repository secret**, name
-   it `CLOUDKIT_WEB_API_TOKEN`, and paste the token. The macOS to Windows Swift
-   Proof workflow writes it into the build with
-   `scripts/windows-cloudkit/configure-cloudkit-web.py` on pushes to `main` and
-   manual runs. Pull request builds never receive it.
+   Settings > Environments**, and in both the `cloudkit` and `android-release`
+   environments add an environment secret named `CLOUDKIT_WEB_API_TOKEN` with
+   the token (it is not a repository secret, #1827). The `cloudkit`
+   environment admits `main` and the `alpha-build-*` and `stable-candidate-*`
+   tags. The macOS to Windows Swift Proof workflow writes the token into the
+   build with `scripts/windows-cloudkit/configure-cloudkit-web.py` on pushes to
+   `main` and runs on those tags. Pull request and merge-batch builds never
+   receive it. The 1Password item "CloudKit Web Services API token —
+   iCloud.com.justspeaktoit (Production)" holds the value.
 4. **Check the callback once.** Install a build made with the secret, sign in
    from Settings > iCloud sync, and confirm the browser lands on "Signed in".
    If Console refuses a plain `http://127.0.0.1` callback, record that in issue
@@ -1753,12 +1775,14 @@ to use the Development environment) before starting the app.
 [The Windows workflow](../.github/workflows/windows.yml) builds the native x64
 executable in release configuration, runs shared and Windows adapter tests,
 runs `--self-test`, then requires `--ui-smoke-test` to finish within 30 seconds.
-It also runs release tests for the portable graph on macOS and
-Linux. The actions have read-only repository permissions and require no real
+It also runs release tests for the portable graph on macOS. It runs nightly
+and when Alpha qualification dispatches it: every test it runs also runs on
+pull requests and main in the native ARM64 and Mac-built x64 workflows, and
+the portable Linux graph is tested by `ci.yml` and `linux.yml`. The actions have read-only repository permissions and require no real
 provider keys.
 
 The Windows, Windows ARM64, macOS to Windows proof and Linux workflows are
-advisory: they run on pull requests and on `main`, but they are not required
+advisory: they run on pull requests, on `main` or nightly, but they are not required
 checks in the `main` ruleset, and nothing else waits for them. Alpha releases
 follow `CI` only. A red desktop workflow is still a regression to fix, but it
 never blocks an Apple merge or release.

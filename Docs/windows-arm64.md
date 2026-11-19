@@ -9,6 +9,13 @@ bundle and a developer MSIX from the same executable and exercises them. Every
 ARM64 program it runs must be a native ARM64 image running as an ARM64
 process, not an x64 build running under Windows' x64 emulation.
 
+Pull requests run its native build and tests only when Windows sources, native
+dependencies, packaging or the workflow change; shared Swift is proven on pull
+requests by `ci.yml`'s portable Linux gate. Merge-batch heads and main run the
+full path set. The macOS-assembled bundle, bundle execution and MSIX jobs run
+on merge batches, main and Alpha only; `windows-cross-proof.yml` proves x64 bundle tooling on pull
+requests. The native x64 `windows.yml` workflow runs nightly.
+
 **Status — 25 October 2026.** [Native ARM64 run 40190709985](https://github.com/crmitchelmore/justspeaktoit/actions/runs/40190709985)
 passed at `a6b5b53912af4e6024d0d65542df8dd0786005fc`, including the native
 host/tests, runtime provenance, standalone bundle execution without installed
@@ -43,7 +50,7 @@ and the [Windows parity matrix](windows-development.md#feature-parity-matrix).
 |---|---|---|
 | `local-runtime` (reusable `windows-local-runtime.yml`, `architecture: arm64`) | `windows-11-arm` | whisper.cpp 1.9.4 built natively from the pinned commit with clang, CPU only; every DLL must be a native ARM64 image. Cached by pin |
 | `native` | `windows-11-arm`, 60 min | Pinned ARM64 Swift 6.2.3; native host check; separate release builds of `SpeakWindows` and `speak`; production `SpeakWindows.exe` and `speak.exe` retained and hashed before tests (`stage-native-app.py`); `swift test` in release; native image checks of both production roots, the test executable and the runtime; the three WinHTTP loopback probe suites; `--self-test`, `--ui-smoke-test` (30 s) and on-device JFK transcription with the pinned tiny model, each run observed natively |
-| `bundle` | `macos-15`, 30 min | Extracts the Swift runtime from the pinned ARM64 installer with the pinned 7-Zip. Assembles the ARM64 bundle from the `native` job's production executable, that runtime, the ARM64 Visual C++ runtime and the ARM64 whisper.cpp runtime |
+| `bundle` | `ubuntu-latest`, 30 min | Extracts the Swift runtime from the pinned ARM64 installer with the 7-Zip console pinned for the host (macOS or Linux), so it needs no macOS slot. Assembles the ARM64 bundle from the `native` job's production executable, that runtime, the ARM64 Visual C++ runtime and the ARM64 whisper.cpp runtime |
 | `bundle-execute` | `windows-11-arm`, no Swift, 20 min | `verify-windows-bundle.ps1`: hashes, isolated PATH, `STATUS_DLL_NOT_FOUND` negative control, missing-resource control, loaded-module provenance, on-device transcription from the bundle, and a native ARM64 process for every run |
 | `package-lifecycle` | `windows-11-arm`, 45 min | ARM64 developer MSIX (`ProcessorArchitecture="arm64"`, same identity) packed with the pinned MakeAppx. The x64 install, launch, failed-upgrade, upgrade, uninstall and admission-control checks, unchanged |
 

@@ -2,6 +2,8 @@
  * Simple Bun development server for the landing page
  * Run with: bun run serve.ts
  */
+import { pages, renderPage } from "./chrome.mjs";
+import { renderStylesheet } from "./stylesheet.mjs";
 
 const server = Bun.serve({
   port: 3000,
@@ -18,6 +20,19 @@ const server = Bun.serve({
     const filePath = `.${path}`;
     const file = Bun.file(filePath);
     
+    // Pages are rendered from chrome.mjs markers, as build.mjs does.
+    const page = path.slice(1);
+    if (page === "site.css") {
+      return new Response(await renderStylesheet(), {
+        headers: { "Content-Type": "text/css; charset=utf-8", "Cache-Control": "no-cache" },
+      });
+    }
+    if (pages.includes(page)) {
+      return new Response(await renderPage(page), {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
+      });
+    }
+
     if (await file.exists()) {
       // Determine content type
       const ext = path.split('.').pop()?.toLowerCase();

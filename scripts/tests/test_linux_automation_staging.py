@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("linux_stage", ROOT / "scripts/stage-linux-desktop.py")
+SPEC = importlib.util.spec_from_file_location("linux_stage", ROOT / "scripts/linux/stage-linux-desktop.py")
 STAGE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(STAGE)
 
@@ -127,7 +127,8 @@ class LinuxAutomationStagingTests(unittest.TestCase):
             "Tests/SpeakLinuxAutomationTests/**", "Tests/SpeakAutomationKitTests/**",
             "scripts/tests/test_linux_automation_staging.py",
         )
-        for event in ("push", "pull_request"):
+        self.assertNotIn("  pull_request:", lines)
+        for event in ("push",):
             start = lines.index(f"  {event}:") + 1
             end = next((index for index in range(start, len(lines))
                         if lines[index].strip() and not lines[index].startswith("    ")

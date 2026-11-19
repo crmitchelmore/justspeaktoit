@@ -22,17 +22,8 @@ enum LinuxLocalSelfTest {
     }
 
     private static func checkInstallerCycle(root: URL) async throws {
-        let body = Data((0..<300_000).map { UInt8(truncatingIfNeeded: $0 &* 7) })
-        let digest = try LinuxSHA256Hasher.provider.sha256(of: body)
-        let item = LocalModelInstaller.Item(
-            identifier: "local/whisperkit/tiny", displayName: "Self-test model",
-            artifact: LocalModelFileArtifact(
-                url: URL(string: "https://huggingface.co/self-test/resolve/0/ggml-self-test.bin")!,
-                filename: "ggml-self-test.bin", byteCount: Int64(body.count), sha256: digest, license: "MIT",
-                provenance: "synthetic"
-            )
-        )
-        let transport = SelfTestTransport(body: body, dropAfter: 120_000)
+        let fixture = try DesktopHostLocalModelSelfTest(digests: LinuxSHA256Hasher.provider)
+        let (body, item, transport) = (fixture.body, fixture.item, fixture.transport)
         let installer = LocalModelInstaller(
             root: root, digests: LinuxSHA256Hasher.provider, transport: transport,
             prepareDirectory: { url in
@@ -43,7 +34,8 @@ enum LinuxLocalSelfTest {
             _ = try await installer.install(item)
             throw failure("an interrupted model download was reported as complete")
         } catch is LocalModelDownloadError {}
-        guard case .partial(let received, _) = installer.state(of: item), received >= 120_000 else {
+        guard case .partial(let received, _) = installer.state(of: item),
+              received >= DesktopHostLocalModelSelfTest.interruptedAfter else {
             throw failure("an interrupted model download did not keep its bytes")
         }
         transport.dropAfter = nil
@@ -256,46 +248,5 @@ extension LinuxLocalSelfTest {
             throw DesktopHostError(message: "Local live transcription did not finish with the expected phrase.")
         }
         print("Local live runtime: transcript delivered before finish; expected phrase retained in the final session.")
-    }
-}
-
-/// Serves `body` like a range-capable HTTP server, optionally dropping the
-/// connection after a byte count.
-private final class SelfTestTransport: LocalModelDownloadTransport, @unchecked Sendable {
-    let body: Data
-    private let lock = NSLock()
-    private var drop: Int?
-    private var requested: [Int64] = []
-
-    var dropAfter: Int? {
-        get { lock.withLock { drop } }
-        set { lock.withLock { drop = newValue } }
-    }
-
-    var offsets: [Int64] { lock.withLock { requested } }
-
-    init(body: Data, dropAfter: Int?) {
-        self.body = body
-        self.drop = dropAfter
-    }
-
-    func download(
-        _ request: LocalModelDownloadRequest, start: @escaping @Sendable (LocalModelDownloadStart) throws -> Void,
-        sink: @escaping @Sendable (Data) throws -> Void
-    ) async throws {
-        let limit = lock.withLock { () -> Int? in
-            requested.append(request.resumeOffset)
-            return drop
-        }
-        var position = Int(request.resumeOffset)
-        try start(position > 0 ? .resumed(offset: Int64(position)) : .fromBeginning)
-        var sent = 0
-        while position < body.count {
-            if let limit, sent >= limit { throw LocalModelDownloadError.transport("synthetic reset") }
-            let end = min(position + 16_384, body.count)
-            try sink(body.subdata(in: position..<end))
-            sent += end - position
-            position = end
-        }
     }
 }

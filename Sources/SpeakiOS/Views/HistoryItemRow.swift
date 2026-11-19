@@ -16,6 +16,8 @@ struct HistoryItemRow: View {
     var onReprocess: () -> Void = {}
     var onDelete: () -> Void = {}
     var onReport: () -> Void = {}
+    /// Nil hides the action, as when no Mac is paired.
+    var onSendToMac: (() -> Void)?
     @State private var isExpanded = false
 
     var body: some View {
@@ -37,6 +39,13 @@ struct HistoryItemRow: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .lineLimit(isExpanded ? nil : 2)
+                    .accessibilityLabel("Error: \(error)")
+                    .accessibilityIdentifier("historyRowError-\(item.id)")
+            }
+
+            let details = item.sessionDetails
+            if !details.rows.isEmpty {
+                HistorySessionDetailsView(details: details, itemID: item.id)
             }
 
             metadataFooter
@@ -63,6 +72,13 @@ struct HistoryItemRow: View {
                 } label: {
                     Label("Copy Polished", systemImage: "doc.on.doc.fill")
                 }
+            }
+
+            if let onSendToMac, !item.bestText.isEmpty {
+                Button(action: onSendToMac) {
+                    Label("Send to Mac", systemImage: "desktopcomputer")
+                }
+                .accessibilityIdentifier("historySendToMac")
             }
 
             Button {
@@ -246,14 +262,7 @@ struct HistoryItemRow: View {
     }
 
     private var modelDisplayName: String {
-        if item.model.contains("deepgram") {
-            return "Deepgram"
-        } else if item.model.contains("elevenlabs") {
-            return "ElevenLabs"
-        } else if item.model.contains("apple") {
-            return "Apple Speech"
-        }
-        return item.model
+        ModelCatalog.friendlyName(for: item.model)
     }
 
     private var platformDisplayName: String {
@@ -261,7 +270,7 @@ struct HistoryItemRow: View {
         case "macos":
             return "Mac"
         case "ios":
-            return "iPhone"
+            return "iPhone or iPad"
         default:
             return item.originPlatform
         }
@@ -277,4 +286,35 @@ struct HistoryItemRow: View {
     }
 }
 
+/// The collapsible "Session details" rows for one History entry.
+private struct HistorySessionDetailsView: View {
+    let details: HistoryDetailSummary
+    let itemID: UUID
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+            } label: {
+                Label("Session details", systemImage: isExpanded ? "chevron.up" : "info.circle")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44, alignment: .leading)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint("Shows trigger, models, timings and cost")
+            .accessibilityIdentifier("historySessionDetailsButton-\(itemID)")
+
+            if isExpanded {
+                ForEach(details.rows) { row in
+                    LabeledContent(row.title, value: row.value)
+                        .font(.caption)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("historySessionDetail-\(row.id)-\(itemID)")
+                }
+            }
+        }
+    }
+}
 #endif

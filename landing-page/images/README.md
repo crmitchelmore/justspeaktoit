@@ -9,7 +9,7 @@ The PNG screenshot files below show native app UI, not HTML reproductions or gen
   2 November 2026 by `.github/workflows/site-media.yml` on a hosted macOS
   runner. Debug build of main just after the 3.2.0 release, isolated CoreJourney launch profile
   with the `SPEAK_CORE_JOURNEY_SITE_MEDIA` fixture
-  (`Sources/SpeakApp/CoreJourneySiteMediaFixture.swift`): five fictional
+  (`Sources/SpeakApp/CoreJourney/CoreJourneySiteMediaFixture.swift`): five fictional
   History entries, no credentials, no network providers. The runner grants no
   privacy permissions, so the dashboard honestly shows them as not granted.
   The WebP copies are `cwebp -q 90` encodes of the PNGs.

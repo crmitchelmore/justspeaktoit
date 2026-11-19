@@ -5,7 +5,7 @@ import XCTest
 
 final class TranscriptionManagerRoutingTests: XCTestCase {
   func testResolvedLiveTranscriptionModel_usesLiveModelOutsideLocalStreaming() throws {
-    let model = try TranscriptionManager.resolvedLiveTranscriptionModel(
+    let model = try LiveTranscriptionRouter.resolvedLiveTranscriptionModel(
       transcriptionMode: .liveNative,
       localTranscriptionMode: .streaming,
       localStreamingModelSource: "",
@@ -18,7 +18,7 @@ final class TranscriptionManagerRoutingTests: XCTestCase {
 
   func testResolvedLiveTranscriptionModel_returnsValidLocalStreamingSource() throws {
     let sourceID = "local/streaming/example"
-    let model = try TranscriptionManager.resolvedLiveTranscriptionModel(
+    let model = try LiveTranscriptionRouter.resolvedLiveTranscriptionModel(
       transcriptionMode: .localModel,
       localTranscriptionMode: .streaming,
       localStreamingModelSource: sourceID,
@@ -41,7 +41,7 @@ final class TranscriptionManagerRoutingTests: XCTestCase {
     }
 
     for (mode, localMode) in modes {
-      let model = try TranscriptionManager.resolvedLiveTranscriptionModel(
+      let model = try LiveTranscriptionRouter.resolvedLiveTranscriptionModel(
         transcriptionMode: mode,
         localTranscriptionMode: localMode,
         localStreamingModelSource: "local/streaming/unavailable",
@@ -62,7 +62,7 @@ final class TranscriptionManagerRoutingTests: XCTestCase {
       return [sourceID]
     }
 
-    let model = try TranscriptionManager.resolvedLiveTranscriptionModel(
+    let model = try LiveTranscriptionRouter.resolvedLiveTranscriptionModel(
       transcriptionMode: .localModel,
       localTranscriptionMode: .streaming,
       localStreamingModelSource: sourceID,
@@ -82,7 +82,7 @@ final class TranscriptionManagerRoutingTests: XCTestCase {
       return []
     }
 
-    XCTAssertThrowsError(try TranscriptionManager.resolvedLiveTranscriptionModel(
+    XCTAssertThrowsError(try LiveTranscriptionRouter.resolvedLiveTranscriptionModel(
       transcriptionMode: .localModel,
       localTranscriptionMode: .streaming,
       localStreamingModelSource: sourceID,
@@ -101,7 +101,7 @@ final class TranscriptionManagerRoutingTests: XCTestCase {
       return ["invalid/source"]
     }
 
-    XCTAssertThrowsError(try TranscriptionManager.resolvedLiveTranscriptionModel(
+    XCTAssertThrowsError(try LiveTranscriptionRouter.resolvedLiveTranscriptionModel(
       transcriptionMode: .localModel,
       localTranscriptionMode: .streaming,
       localStreamingModelSource: "invalid/source",
@@ -122,7 +122,7 @@ final class TranscriptionManagerRoutingTests: XCTestCase {
       return sources
     }
 
-    let model = try TranscriptionManager.resolvedLiveTranscriptionModel(
+    let model = try LiveTranscriptionRouter.resolvedLiveTranscriptionModel(
       transcriptionMode: .localModel,
       localTranscriptionMode: .streaming,
       localStreamingModelSource: sourceID,
@@ -133,7 +133,7 @@ final class TranscriptionManagerRoutingTests: XCTestCase {
     XCTAssertEqual(evaluations, 1)
     sources = []
 
-    XCTAssertThrowsError(try TranscriptionManager.resolvedLiveTranscriptionModel(
+    XCTAssertThrowsError(try LiveTranscriptionRouter.resolvedLiveTranscriptionModel(
       transcriptionMode: .localModel,
       localTranscriptionMode: .streaming,
       localStreamingModelSource: sourceID,
@@ -264,7 +264,7 @@ final class TranscriptionManagerRoutingTests: XCTestCase {
 
   func testResolvedLiveTranscriptionModel_rejectsInvalidLocalStreamingSource() {
     XCTAssertThrowsError(
-      try TranscriptionManager.resolvedLiveTranscriptionModel(
+      try LiveTranscriptionRouter.resolvedLiveTranscriptionModel(
         transcriptionMode: .localModel,
         localTranscriptionMode: .streaming,
         localStreamingModelSource: "",

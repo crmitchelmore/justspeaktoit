@@ -8,7 +8,7 @@ import SpeakCore
 // pair that is the only text-returning path today.
 //
 // The end-pointing this depends on is issue #1012's, and every rule about when
-// to stop is in `SpeakCore/CaptureEndPointing.swift` where it is unit-tested.
+// to stop is in `SpeakCore/Capture/CaptureEndPointing.swift` where it is unit-tested.
 // This file is the Shortcuts-facing wrapper and the wait.
 
 /// One-shot dictation that returns its transcript.
@@ -26,14 +26,21 @@ import SpeakCore
 /// then this runs inside the ordinary `perform()` budget, which is what caps
 /// ``CaptureEndPointingPolicy/intentMaximumDurationRange``.
 @available(iOS 18, *)
-struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
-    static var title: LocalizedStringResource = "Dictate"
-    static var description = IntentDescription(
-        "Records, finishes on its own once you stop speaking, and returns the transcript."
+public struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
+    public static var title: LocalizedStringResource = "Dictate"
+    public static var description = IntentDescription(
+        """
+        Records until you stop speaking, then returns the transcript to the next action. \
+        Use it inside a shortcut that needs the words, such as one that creates a note.
+        """,
+        categoryName: "Recording",
+        searchKeywords: ["transcribe", "transcription", "speech to text", "get text"]
     )
 
-    static var openAppWhenRun: Bool = false
-    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+    public static var openAppWhenRun: Bool = false
+    public static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+
+    public init() {}
 
     // The literals in `default:` and `inclusiveRange:` below are not a second
     // copy of the budgets: AppIntents requires compile-time constants there, so
@@ -69,7 +76,7 @@ struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
             Leave unset to use the destination from Settings.
             """
     )
-    var destination: CaptureDestinationAppEnum?
+    public var destination: CaptureDestinationAppEnum?
 
     @Parameter(
         title: "Language",
@@ -104,7 +111,7 @@ struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
     )
     var waitForPolish: Bool
 
-    static var parameterSummary: some ParameterSummary {
+    public static var parameterSummary: some ParameterSummary {
         Summary("Dictate and get text") {
             \.$pauseLength
             \.$maximumLength
@@ -116,7 +123,7 @@ struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
         }
     }
 
-    func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    public func perform() async throws -> some IntentResult & ReturnsValue<String> {
         // The whole operation's budget starts here, not when the polish wait
         // does: recording, end-pointing and the stop all spend from it.
         let startedAt = ContinuousClock.now

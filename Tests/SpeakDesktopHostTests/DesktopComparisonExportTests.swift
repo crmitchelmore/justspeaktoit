@@ -9,7 +9,7 @@ final class DesktopComparisonExportTests: XCTestCase {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.openComparison()
         let store = try await controller.loadComparisonStore()
         try await store.upsert(round("First raw transcript"))
@@ -48,7 +48,7 @@ final class DesktopComparisonExportTests: XCTestCase {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.openComparison()
         let store = try await controller.loadComparisonStore()
         try await store.upsert(round("Must not leak through a missing selection"))
@@ -73,7 +73,7 @@ final class DesktopComparisonExportTests: XCTestCase {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.openComparison()
         await controller.comparisonEvent(126, text: "", index: 0)
         XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("no saved comparisons") == true)
@@ -94,7 +94,7 @@ final class DesktopComparisonExportTests: XCTestCase {
         FakeLog.shared.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.openComparison()
         let store = try await controller.loadComparisonStore()
         let value = round("Raw\0transcript")

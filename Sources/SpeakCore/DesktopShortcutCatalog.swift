@@ -34,6 +34,7 @@ public enum DesktopShortcutAction: String, CaseIterable, Codable, Sendable {
     case quickVoice3
     case pasteLastHistoryItem
     case editSelectionByVoice
+    case openCommandPalette
 
     public var displayName: String {
         switch self {
@@ -64,6 +65,7 @@ public enum DesktopShortcutAction: String, CaseIterable, Codable, Sendable {
         case .quickVoice3: "Quick Switch Voice 3"
         case .pasteLastHistoryItem: "Paste Last History Item"
         case .editSelectionByVoice: "Edit Selection by Voice"
+        case .openCommandPalette: "Search for Anything"
         }
     }
 
@@ -99,7 +101,7 @@ public enum DesktopShortcutAction: String, CaseIterable, Codable, Sendable {
         case .openSettings: return binding(18, command)
         case .showHistory: return binding(16, command)
         case .openVoiceOutput: return binding(32, command)
-        case .openCorrections: return binding(40, command)
+        case .openCorrections: return binding(40, commandShift)
         case .openTroubleshooting: return binding(17, command)
         case .openTranscriptionSettings: return binding(19, command)
         case .openPostProcessingSettings: return binding(20, command)
@@ -117,6 +119,7 @@ public enum DesktopShortcutAction: String, CaseIterable, Codable, Sendable {
         case .quickVoice3: return binding(20, commandOption)
         case .pasteLastHistoryItem: return binding(9, commandOption)
         case .editSelectionByVoice: return binding(14, commandOption)
+        case .openCommandPalette: return binding(40, command)
         }
     }
 
@@ -134,7 +137,7 @@ public enum DesktopShortcutAction: String, CaseIterable, Codable, Sendable {
         case .openDashboard: return legacy(18, commandOption)
         case .showHistory: return legacy(19, commandOption)
         case .openVoiceOutput: return legacy(20, commandOption)
-        case .openCorrections: return legacy(21, commandOption)
+        case .openCorrections: return legacy(21, commandOption) + legacy(40, .command)
         case .openTroubleshooting: return legacy(23, commandOption)
         case .openSettings: return legacy(43, .command)
         case .openTranscriptionSettings: return legacy(18, commandOptionShift)

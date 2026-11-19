@@ -105,7 +105,7 @@ final class PostProcessingDiagnosticOwnershipTests: XCTestCase {
     private func run(_ client: ChatLLMClient, streaming: Bool = true,
                      observe: ((RequestDiagnosticContext.PostProcessingObservation) -> Void)?)
         async -> Result<PostProcessingOutcome, Error> {
-        await PostProcessingManager.performRemoteProcess(
+        await RemotePostProcessor.process(
             client: client, rawText: PostDiagnosticClient.canary,
             promptPayload: .init(modelIdentifier: "openai/gpt-4o-mini", customPrompt: nil,
                                  systemPrompt: PostDiagnosticClient.canary, userPrompt: PostDiagnosticClient.canary),

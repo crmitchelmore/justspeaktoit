@@ -23,14 +23,15 @@ final class TranscriptionPricingTests: XCTestCase {
     }
 
     func testStreamingAndFileRatesRemainDistinct() {
+        // November 2026 rates: Deepgram's streaming promotion ended; Scribe repriced.
         XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "deepgram/nova-3-streaming"),
-                       Decimal(string: "0.0048"))
+                       Decimal(string: "0.0077"))
         XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "elevenlabs/scribe_v2"),
-                       Decimal(string: "0.22")! / 60)
+                       Decimal(string: "0.20")! / 60)
         XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "elevenlabs/scribe-v2-streaming"),
-                       Decimal(string: "0.39")! / 60)
-        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "elevenlabs/scribe_v2_medical"),
                        Decimal(string: "0.22")! / 60)
+        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "elevenlabs/scribe_v2_medical"),
+                       Decimal(string: "0.20")! / 60)
     }
 
     func testExactIdsWinOverProviderPrefixes() {
@@ -116,9 +117,13 @@ final class TranscriptionPricingTests: XCTestCase {
             "speechmatics/enhanced-streaming",
             "speechmatics/enhanced",
             "speechmatics/standard",
-            // Reson8's engine is server-selected; no verified public USD quote.
+            // Reson8 publishes EUR rates only (Rumble-2 from €0.16/h prerecorded,
+            // €0.24/h realtime on Launch), not a USD quote; Resonant-1 has none.
+            // https://www.reson8.dev/pricing
             FileSpeechProvider.reson8.modelID,
             FileSpeechProvider.reson8LiveID,
+            Reson8Model.rumble2.batchID,
+            Reson8Model.rumble2.liveID,
             // StepAudio 3 publishes 2.8 CNY/hour, not a USD conversion.
             FileSpeechProvider.stepfun.modelID,
             "apple/local/Dictation"

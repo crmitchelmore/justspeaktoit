@@ -95,13 +95,18 @@ public struct VaultWebAuthTokenStore: CloudKitWebAuthTokenStore {
     }
 }
 
-/// The loopback sign-in callback registered on the container's API token.
+/// The loopback listener that completes iCloud web sign-in.
 ///
 /// Apple's web sign-in finishes by redirecting the browser to the API token's
-/// sign-in callback with `?ckWebAuthToken=…`. A packaged desktop app receives
-/// that on a fixed loopback port it listens on only during sign-in. The URL
-/// must match the token's callback in CloudKit Console exactly.
+/// registered sign-in callback, `registeredCallbackURL`, with
+/// `?ckWebAuthToken=…`. CloudKit Console accepts only `https://` callbacks, so
+/// that page on justspeaktoit.com forwards the token with a 302 to
+/// `callbackURL` on a fixed loopback port, which a packaged desktop app listens
+/// on only during sign-in.
 public enum DesktopCloudSyncSignIn {
+    /// The sign-in callback set on the API token in CloudKit Console. It must
+    /// match the Console exactly; the site forwards it to `callbackURL`.
+    public static let registeredCallbackURL = "https://justspeaktoit.com/cloudkit-sign-in"
     public static let callbackHost = "127.0.0.1"
     public static let callbackPort: UInt16 = 47_823
     public static let callbackPath = "/cloudkit-sign-in"

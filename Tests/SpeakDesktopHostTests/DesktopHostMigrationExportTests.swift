@@ -80,7 +80,7 @@ final class DesktopHostMigrationExportTests: XCTestCase {
             await fixture.controller.beginMigrationExport(fixture.destination, includeAudio: true, using: adapter)
         }.value
         await gate.waitUntilHeld()
-        let task = await fixture.controller.migrationExportTask
+        let task = await fixture.controller.migrationWork.exportTask
         let statuses = FakeLog.shared.allStatuses
         let report = await queue.read { await fixture.controller.close() }.value
         XCTAssertEqual(report.unfinishedOperations, 1)
@@ -262,7 +262,7 @@ struct BackupHostFixture {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
             try profileData.write(to: directory.appendingPathComponent(DesktopDictationProfileStore.filename))
         }
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: root.appendingPathComponent("Application"), effects: SyntheticEffects(), shutdownGrace: grace
         )
     }
@@ -294,7 +294,7 @@ struct BackupHostFixture {
     }
 
     func finish() async {
-        let task = await controller.migrationExportTask
+        let task = await controller.migrationWork.exportTask
         await task?.value
     }
 

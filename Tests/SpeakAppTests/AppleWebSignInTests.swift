@@ -68,7 +68,7 @@ final class AppleWebSignInTests: XCTestCase {
         XCTAssertEqual(client.attempts.count, 1)
         XCTAssertEqual(attempt.identityToken, "header.claims.sig")
         let url = try XCTUnwrap(requested)
-        XCTAssertEqual(self.query(url)["nonce"], PaidAccessManager.sha256Hex(attempt.rawNonce))
+        XCTAssertEqual(self.query(url)["nonce"], PaidAccessNonce.sha256Hex(attempt.rawNonce))
         XCTAssertNotEqual(self.query(url)["state"], attempt.rawNonce, "state and nonce are independent")
         XCTAssertFalse(manager.isBusy)
     }

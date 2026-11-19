@@ -9,6 +9,13 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
+def windows_main_window_source():
+    """The main window's translation units (WindowsWindow.cpp, its WindowsWindow*.cpp parts and self-test)."""
+    paths = [*(ROOT / "Sources/CWindowsSupport").glob("WindowsWindow*.cpp"),
+             *(ROOT / "Sources/CWindowsSelfTest").glob("WindowsWindow*.cpp")]
+    return "\n".join(path.read_text() for path in sorted(paths) if path.name != "WindowsWindowChrome.cpp")
+
+
 def load(name, path):
     spec = importlib.util.spec_from_file_location(name, ROOT / path)
     module = importlib.util.module_from_spec(spec)
@@ -16,8 +23,8 @@ def load(name, path):
     return module
 
 
-ICONS = load("desktop_icons", "scripts/generate-desktop-icons.py")
-STAGE = load("stage_linux", "scripts/stage-linux-desktop.py")
+ICONS = load("desktop_icons", "scripts/assets/generate-desktop-icons.py")
+STAGE = load("stage_linux", "scripts/linux/stage-linux-desktop.py")
 
 
 def ico_frames(data):
@@ -131,12 +138,12 @@ class DesktopIconTests(unittest.TestCase):
         native = (ROOT / "Sources/CWindowsSupport/WindowsAppIcon.cpp").read_text()
         self.assertIn("idleResource = 101, recordingResource = 102", native)
         self.assertIn("GetSystemMetricsForDpi", native)
-        window = (ROOT / "Sources/CWindowsSupport/WindowsWindow.cpp").read_text()
+        window = windows_main_window_source()
         self.assertIn("jsti::appIcon::selfTest(window, failure)", window)
         self.assertIn("jsti::appIcon::refresh(window, HIWORD(wparam)", window)
         self.assertNotIn("IDI_APPLICATION", window)
         flatpak = (ROOT / f"packaging/linux/{ICONS.APP_ID}.yml").read_text()
-        self.assertIn("python3 scripts/stage-linux-desktop.py --binary .build/release/SpeakLinux", flatpak)
+        self.assertIn("python3 scripts/linux/stage-linux-desktop.py --binary .build/release/SpeakLinux", flatpak)
         self.assertIn("--output .build/linux-desktop-layout --prefix /app", flatpak)
         self.assertIn("cp -r .build/linux-desktop-layout/. /app/", flatpak)
         linux = (ROOT / "Sources/CLinuxSupport/LinuxAppIcon.c").read_text()
@@ -146,17 +153,18 @@ class DesktopIconTests(unittest.TestCase):
     def test_windows_accessors_do_not_collide_with_rpc_small_macro(self):
         header = (ROOT / "Sources/CWindowsSupport/WindowsAppIcon.hpp").read_text()
         source = (ROOT / "Sources/CWindowsSupport/WindowsAppIcon.cpp").read_text()
-        window = (ROOT / "Sources/CWindowsSupport/WindowsWindow.cpp").read_text()
+        window = windows_main_window_source()
         self.assertNotRegex(header + source + window, r"\bsmall\s*\(")
         self.assertIn("HICON smallHandle();", header)
         self.assertIn("HICON smallHandle()", source)
         self.assertIn("jsti::appIcon::smallHandle()", window)
 
     def test_asset_attributes_trigger_resource_and_native_workflows(self):
-        for workflow in ("desktop-icons.yml", "windows.yml", "windows-arm64.yml",
+        for workflow in ("desktop-icons.yml", "windows-arm64.yml",
                          "windows-cross-proof.yml", "linux.yml"):
             lines = (ROOT / ".github/workflows" / workflow).read_text().splitlines()
-            for event in ("push", "pull_request"):
+            self.assertNotIn("  pull_request:", lines, workflow)
+            for event in ("push",):
                 with self.subTest(workflow=workflow, event=event):
                     start = lines.index(f"  {event}:") + 1
                     end = next((index for index in range(start, len(lines))
@@ -173,7 +181,7 @@ class DesktopIconTests(unittest.TestCase):
                 self.assertRegex(action, r"^[^@]+@[0-9a-f]{40}$")
 
     def test_linux_integration_assertion_includes_high_dpi_tray_pixmaps(self):
-        integration = (ROOT / "scripts/linux-integration-checks.sh").read_text()
+        integration = (ROOT / "scripts/linux/linux-integration-checks.sh").read_text()
         self.assertIn("[22, 22], [32, 32], [48, 48], [64, 64], [96, 96]", integration)
 
     def test_msix_includes_high_dpi_and_light_dark_unplated_start_menu_icons(self):
@@ -356,9 +364,9 @@ class DesktopIconTests(unittest.TestCase):
             root = pathlib.Path(scratch)
             (root / "Resources/Desktop").mkdir(parents=True)
             (root / "Resources/Desktop/AppIcon.ico").write_bytes(expected[:-1])
-            from unittest import mock
             import contextlib
             import io
+            from unittest import mock
             with mock.patch.object(ICONS, "ROOT", root), mock.patch.object(ICONS, "exports",
                     return_value={"Resources/Desktop/AppIcon.ico": expected}), mock.patch.object(
                     sys, "argv", ["icons", "--check"]), contextlib.redirect_stderr(io.StringIO()) as failure:

@@ -1,0 +1,390 @@
+import Foundation
+import SpeakCore
+import SpeakDesktop
+
+package enum DesktopConfigurationSaveIntent: Equatable, Sendable {
+    case apply, persistOnly
+}
+
+extension DesktopHostController {
+    package func configuration() throws -> DesktopConfiguration {
+        var values = settings.configuration?.values ?? [:]
+        for key in DesktopConfiguration.editorProjectionKeys { values.removeValue(forKey: key) }
+        values[DesktopPostProcessingConfiguration.streamingKey] = AnyCodable(
+            .bool((settings.postProcessing ?? .init()).streamingEnabled)
+        )
+        if let polish = settings.postProcessing {
+            values["postProcessingTemperature"] = AnyCodable(.double(polish.temperature))
+            values["postProcessingOutputLanguage"] = AnyCodable(.string(polish.outputLanguage ?? ""))
+        }
+        return try DesktopAppSwitchOutput.project(
+            Platform.appSwitchPolicy(settings.textOutput),
+            over: DesktopHostLocalModelTransfer.project(settings, over: DesktopConfiguration(values: values))
+        )
+    }
+
+    package func configurationForNativeEditor() throws -> DesktopConfiguration {
+        let configuration = try configuration()
+        let projected = try Platform.exportVoiceConfiguration(settings.voiceOutput, over: configuration)
+        var values = configuration.values
+        for key in SonioxVoicePreference.keys { values[key] = projected.values[key] }
+        values[VoiceAudioFormat.preferenceKey] = projected.values[VoiceAudioFormat.preferenceKey]
+        let qualityKey = VoiceSynthesisPreference.quality.key.rawValue
+        values[qualityKey] = projected.values[qualityKey]
+        values[DesktopConnectionPreWarming.approvalProjectionKey] = AnyCodable(.bool(connectionWarm.approved))
+        let consent = telemetry.store.snapshot()
+        values[DesktopTelemetryConsent.analyticsKey] = AnyCodable(.bool(consent.analyticsConsent == .optedIn))
+        values[DesktopTelemetryConsent.diagnosticsKey] = AnyCodable(.bool(consent.diagnosticsConsent == .granted))
+        if values[qualityKey] == nil, let voice = settings.voiceOutput as? DesktopVoiceOutputSettings {
+            values[qualityKey] = AnyCodable(.string(voice.qualityForNativeEditor))
+        }
+        let storedRegion = try SonioxVoicePreference.string(SonioxVoicePreference.regionKey, in: values)
+        if let region = SonioxTTSRegion.recognized(from: storedRegion) {
+            values[SonioxVoicePreference.regionKey] = AnyCodable(.string(region.rawValue))
+        }
+        return try DesktopAppSwitchOutput.project(
+            Platform.appSwitchPolicy(settings.textOutput), over: DesktopConfiguration(values: values), editor: true
+        )
+    }
+
+    package func saveConfiguration(_ entries: [String]) async throws {
+        try await saveConfiguration(entries, intent: .apply)
+    }
+
+    package func saveConfiguration(_ entries: [String], intent: DesktopConfigurationSaveIntent) async throws {
+        try await saveConfiguration(entries, intent: intent, editorID: nil)
+    }
+
+    package func saveConfiguration(
+        _ entries: [String], intent: DesktopConfigurationSaveIntent, editorID: String?
+    ) async throws {
+        guard !closed, !busy, recording == nil else {
+            throw DesktopHostError(message: "Finish dictation before changing configuration.")
+        }
+        let previous = try configurationForNativeEditor()
+        let editor = try activeConfigurationEditor()
+        try requireConfigurationEditorID(editorID, editor: editor)
+        let canonical = try canonicalConfigurationEntries(entries, from: previous, editor: editor)
+        let configuration = try await reconcilingPronunciationSelection(
+            previous.applying(canonical), from: previous, editor: editor
+        )
+        try await persistConfiguration(
+            configuration, intent: intent, status: "Configuration saved. New recordings use these preferences."
+        )
+        if intent == .apply { await applyTelemetryConsent(configuration, previous: previous) }
+    }
+
+    /// Only an explicit change in the native editor moves consent: an unchanged
+    /// "off" keeps an undecided state undecided, and nothing else can grant it.
+    private func applyTelemetryConsent(_ configuration: DesktopConfiguration, previous: DesktopConfiguration) async {
+        func changed(_ key: String) -> Bool? {
+            let value = configuration.enabled(key)
+            return value == previous.enabled(key) ? nil : value
+        }
+        await telemetry.updateConsent(
+            analytics: changed(DesktopTelemetryConsent.analyticsKey),
+            diagnostics: changed(DesktopTelemetryConsent.diagnosticsKey)
+        )
+    }
+
+    package func previewRecordingFeedback(
+        _ sound: RecordingFeedbackSound, configurationEntries: [String]
+    ) async throws {
+        try await previewRecordingFeedback(sound, configurationEntries: configurationEntries, editorID: nil)
+    }
+
+    package func previewRecordingFeedback(
+        _ sound: RecordingFeedbackSound, configurationEntries: [String], editorID: String?
+    ) async throws {
+        try await saveConfiguration(configurationEntries, intent: .persistOnly, editorID: editorID)
+        try previewRecordingFeedback(sound)
+    }
+
+    package func recoverConfigurationKeywords(_ entries: [String], selected: String) async throws {
+        try await recoverConfigurationKeywords(entries, selected: selected, editorID: nil)
+    }
+
+    package func recoverConfigurationKeywords(
+        _ entries: [String], selected: String, editorID: String?
+    ) async throws {
+        guard !closed, !busy, recording == nil else {
+            throw DesktopHostError(message: "Finish dictation before recovering keywords.")
+        }
+        let previous = try configurationForNativeEditor()
+        let editor = try activeConfigurationEditor()
+        try requireConfigurationEditorID(editorID, editor: editor)
+        let canonical = try canonicalConfigurationEntries(entries, from: previous, editor: editor)
+        let recovered = try await reconcilingPronunciationSelection(
+            previous.applying(canonical).recoveringKeywords(selected), from: previous, editor: editor
+        )
+        try await persistConfiguration(
+            recovered, intent: .persistOnly, status: "Recovered keywords restored. New recordings use this shared list."
+        )
+    }
+
+    func reconcilingPronunciationSelection(
+        _ configuration: DesktopConfiguration, from previous: DesktopConfiguration,
+        editor: DesktopHostConfigurationEditorBasis?
+    ) async throws -> DesktopConfiguration {
+        guard DesktopHostModels.provider(for: settings.model)?.id == "assemblyai" else { return configuration }
+        guard configuration.text("transcriptionKeywords") != previous.text("transcriptionKeywords")
+            // swiftlint:disable:next line_length
+            || configuration.text("assemblyAIKeyterms") != previous.text("assemblyAIKeyterms") else { return configuration }
+        let model = settings.model
+        let hints = try await recognitionVocabulary()
+        // swiftlint:disable:next line_length
+        guard !closed, !busy, recording == nil, settings.model == model, try configurationForNativeEditor() == previous else {
+            // swiftlint:disable:next line_length
+            throw DesktopHostError(message: "Preferences changed while loading pronunciation hints. Refresh and try again.")
+        }
+        if let editor {
+            try requireConfigurationEditorID(editor.id.uuidString, editor: activeConfigurationEditor())
+        }
+        if let displayed = editor?.pronunciationWords, hints.pronunciationWords != displayed {
+            throw DesktopHostError(message: "Pronunciation hints changed since this editor opened. Reopen preferences.")
+        }
+        // swiftlint:disable:next line_length
+        return try configuration.recordingPronunciationKeytermSelection(from: previous, modern: hints.pronunciationWords)
+    }
+
+    func persistConfiguration( // swiftlint:disable:this function_body_length
+        _ configuration: DesktopConfiguration, intent: DesktopConfigurationSaveIntent, status: String
+    ) async throws {
+        invalidateConnectionPreWarming(resetCapture: true)
+        let approved = configuration.enabled(DesktopConnectionPreWarming.approvalProjectionKey)
+            && configuration.enabled(DesktopConnectionPreWarming.preferenceKey)
+            && (intent == .apply || connectionWarm.approved)
+        let configuration = try configuration.removingEditorProjections()
+        var changed = settings
+        var voice = changed.voiceOutput
+        changed.configuration = try importingAutomationPreferences(
+            Platform.importVoiceConfiguration(from: configuration, into: &voice)
+        )
+        applyingAutomationRevocation(to: &changed)
+        changed.voiceOutput = voice
+        changed.configuration = try DesktopHostLocalModelTransfer.removingMirrors(
+            Platform.importingAppSwitchPolicy(from: changed.configuration ?? configuration, into: &changed.textOutput),
+            settings: changed
+        )
+        var polish = changed.postProcessing ?? .init()
+        polish.temperature = configuration.number("postProcessingTemperature")
+        polish.outputLanguage = configuration.text("postProcessingOutputLanguage")
+        polish.streamingEnabled = configuration.enabled(DesktopPostProcessingConfiguration.streamingKey)
+        changed.postProcessing = polish
+        if let stored = changed.configuration {
+            changed.configuration = try DesktopConfiguration(values: stored.values.filter {
+                $0.key != DesktopPostProcessingConfiguration.streamingKey
+            })
+        }
+        switch intent {
+        case .apply:
+            changed.livePolishApproved = configuration.text("speedMode") == SpeedModeID.livePolish.rawValue
+        case .persistOnly:
+            changed.livePolishApproved = try retainedLivePolishApproval(after: changed)
+        }
+        let previousVoice = settings.voiceOutput
+        try await persistAutomationAwareSettings(changed)
+        connectionWarm.approved = approved
+        reconcileSonioxRegionChange(previousVoice)
+        reconcileVoiceQualityChange(previousVoice)
+        let cleanup = await disarmHandsFreeForConfiguration()
+        try await configureRecordingFeedback(configuration)
+        Platform.applyShell(configuration.shellPreferences)
+        Platform.hud(.hidden)
+        let approval = intent == .persistOnly && changed.livePolishApproved != true
+            && configuration.text("speedMode") == SpeedModeID.livePolish.rawValue
+            ? " Auto-Clean is not authorized; use Apply preferences to enable cleanup requests." : ""
+        let preparation = connectionWarm.approved
+            ? " Connection preparation approved until exit, after successful capture only; not live or streaming."
+            : configuration.enabled(DesktopConnectionPreWarming.preferenceKey)
+                // swiftlint:disable:next line_length
+                ? " Connection preparation intent retained; approve probes on this device for this session to enable it."
+                : ""
+        update(status + approval + preparation + cleanup)
+        await configureCleanupDiscovery(refresh: intent == .apply)
+    }
+
+    func persistLegacyPronunciationDictionary(
+        _ dictionary: [String: String], from configuration: DesktopConfiguration
+    ) async throws {
+        var values = configuration.values
+        values[ApplicationPreferenceKey.ttsPronunciationDictionary.rawValue] = AnyCodable(
+            .object(dictionary.mapValues { .string($0) })
+        )
+        try await persistConfiguration(
+            DesktopConfiguration(values: values), intent: .persistOnly, status: "Legacy pronunciation dictionary saved."
+        )
+    }
+
+    // Permission follows the effective cleanup route, not unrelated sound settings
+    // or the ordinary post-processing prompt/temperature that Auto-Clean does not use.
+    func retainedLivePolishApproval(after changed: Settings) throws -> Bool {
+        guard settings.livePolishApproved == true,
+              let before = settings.configuration, let after = changed.configuration,
+              before.text("speedMode") == SpeedModeID.livePolish.rawValue,
+              after.text("speedMode") == SpeedModeID.livePolish.rawValue else { return false }
+        return try livePolishApprovalSelection(before, options: settings.postProcessing)
+            == livePolishApprovalSelection(after, options: changed.postProcessing)
+    }
+
+    private func livePolishApprovalSelection(
+        _ configuration: DesktopConfiguration, options: DesktopPostProcessing.Options?
+    ) throws -> LivePolishPreferences {
+        let preferences = try configuration.livePolishPreferences
+        return LivePolishPreferences(
+            mode: preferences.mode,
+            model: LivePolishPolicy.model(
+                configured: preferences.model,
+                postProcessing: options?.modelIdentifier ?? DesktopPostProcessing.Options().modelIdentifier
+            ),
+            debounceMilliseconds: preferences.debounceMilliseconds,
+            minimumDeltaCharacters: preferences.minimumDeltaCharacters,
+            skipPostProcessing: preferences.skipPostProcessing
+        )
+    }
+
+    /// Export portable preferences, never keys, device paths or native hotkeys.
+    /// Retained cloud enable/model values do not grant permission to use them.
+    package func exportConfiguration(path: String) throws {
+        guard !closed else { throw DesktopHostError(message: "The app is closing.") }
+        let preferences = try DesktopConfiguration(values: portableConfigurationValues())
+        try DesktopConfigurationDocument(preferences: preferences).write(to: path)
+        update("Portable preferences exported, including preserved imported values. Credential stores were not read.")
+    }
+
+    package func importConfiguration(path: String) async throws {
+        guard !closed else { throw DesktopHostError(message: "The app is closing.") }
+        let document = try DesktopConfigurationDocument.read(from: path)
+        if busy || recording != nil || (automationUsesLocalConsent && dictationSessionID != nil) {
+            if automationUsesLocalConsent,
+               document.preferences.values["enableAutomationServer"]?.storage == .bool(false) {
+                try await persistAutomationAwareSettings(automationSettings(enabled: false))
+                throw DesktopHostError(
+                    message: "Automation access revoked. Finish dictation before importing the remaining configuration."
+                )
+            }
+            throw DesktopHostError(message: "Finish dictation before importing configuration.")
+        }
+        let (changed, cleanup) = try await applyConfigurationDocument(document)
+        update(configurationImportStatus(document, settings: changed) + cleanup)
+    }
+
+    /// Applies a portable document as configuration import does. The caller
+    /// owns admission; backup restore calls this while it holds the busy slot.
+    func applyConfigurationDocument(
+        _ document: DesktopConfigurationDocument
+    ) async throws -> (settings: Settings, cleanup: String) {
+        let changed = try prepareConfigurationImport(document)
+        invalidateConnectionPreWarming(resetCapture: true)
+        let previous = settings
+        let previousVoice = settings.voiceOutput
+        try await persistAutomationAwareSettings(changed)
+        connectionWarm.approved = false
+        await configureCleanupDiscovery(refresh: false)
+        reconcileSonioxRegionChange(previousVoice)
+        reconcileVoiceQualityChange(previousVoice)
+        let cleanup = await disarmHandsFreeForConfiguration()
+        try await configureRecordingFeedback(document.preferences)
+        Platform.applyShell(document.preferences.shellPreferences)
+        Platform.hud(.hidden)
+        try publishImportedLocalChoices(from: previous)
+        return (changed, cleanup)
+    }
+
+    private func prepareConfigurationImport(_ document: DesktopConfigurationDocument) throws -> Settings {
+        var changed = settings
+        var voice = changed.voiceOutput
+        changed.configuration = try importingAutomationPreferences(
+            Platform.importVoiceConfiguration(
+                from: keepingLocalAutomationWriteGrant(
+                    document.preferences.removingEditorProjections()
+                ),
+                into: &voice
+            )
+        )
+        applyingAutomationRevocation(to: &changed)
+        changed.voiceOutput = voice
+        changed.configuration = try Platform.importingAppSwitchPolicy(
+            from: changed.configuration ?? document.preferences, into: &changed.textOutput
+        )
+        if !LivePolishPreference.keys.isDisjoint(with: document.preferences.values.keys) {
+            changed.livePolishApproved = false
+        }
+        changed.configuration = try DesktopPostProcessingConfiguration.importOptions(
+            from: changed.configuration ?? document.preferences, into: &changed.postProcessing
+        )
+        if document.preferences.values["postProcessingTemperature"] != nil
+            || document.preferences.values["postProcessingOutputLanguage"] != nil {
+            var polish = changed.postProcessing ?? .init()
+            if document.preferences.values["postProcessingTemperature"] != nil {
+                polish.temperature = document.preferences.number("postProcessingTemperature")
+            }
+            if document.preferences.values["postProcessingOutputLanguage"] != nil {
+                polish.outputLanguage = document.preferences.text("postProcessingOutputLanguage")
+            }
+            changed.postProcessing = polish
+        }
+        let localConfiguration = try DesktopHostLocalModelTransfer.importing(
+            changed.configuration ?? document.preferences, into: &changed
+        )
+        changed.configuration = localConfiguration
+        return changed
+    }
+
+    private func configurationImportStatus(
+        _ document: DesktopConfigurationDocument, settings changed: Settings
+    ) -> String {
+        let supported = DesktopConfiguration.supportedKeys.union(Platform.voiceConfigurationKeys)
+            .union(Platform.shortcutConfigurationKeys)
+        let unknown = (changed.configuration?.values.keys ?? document.preferences.values.keys)
+            .filter { !supported.contains($0) }.sorted()
+        let hasSynthesis = !DesktopConfiguration.voiceSynthesisTransferKeys
+            .isDisjoint(with: document.preferences.values.keys)
+        let localRules = changed.postProcessing?.modelIdentifier == LocalPostProcessingModel.builtInRulesModelID
+        let status: String
+        if localRules {
+            status = "Configuration imported. Built-in Local Cleanup follows the imported enable choice; "
+                + "no credentials accessed."
+        } else if !VoiceSelectionPreference.keys.intersection(Platform.voiceConfigurationKeys)
+            .isDisjoint(with: document.preferences.values.keys) {
+            status = "Configuration imported. Voice selection is stored; unavailable choices refuse speech. "
+                + "Choose an executable voice in Voice Output or explicitly refresh its account inventory. "
+                + "No service permission was granted."
+        } else if document.preferences.values[VoiceSynthesisPreference.quality.key.rawValue] != nil {
+            status = "Configuration imported. Voice quality selects the compatible provider model or PCM rate. "
+                + "Unknown choices are preserved; no service permission was granted."
+        } else if hasSynthesis {
+            status = "Configuration imported. Voice controls require a compatible provider; service choices unchanged."
+        } else {
+            status = "Configuration imported. Provider/model choices and service permissions are unchanged."
+        }
+
+        let autoClean = document.preferences.text("speedMode") == SpeedModeID.livePolish.rawValue
+            ? " Auto-Clean is retained but not authorized: review and Apply preferences to allow cleanup requests."
+            : ""
+        let preparation = document.preferences.values[DesktopConnectionPreWarming.preferenceKey] != nil
+            ? " Connection preparation intent retained without session approval. "
+                + "Approve on this device, then complete a successful capture; live/streaming warming is unavailable."
+            : ""
+        return status + autoClean + preparation + automationImportNotice()
+            + localModelImportNotice(document, settings: changed)
+            + (unknown.isEmpty ? "" : " Preserved but not applied: \(unknown.joined(separator: ", ")).")
+    }
+
+    func reconcileVoiceQualityChange(_ previous: Platform.VoiceOutputSettings?) {
+        let oldVoice = previous as? DesktopVoiceOutputSettings
+        let newVoice = settings.voiceOutput as? DesktopVoiceOutputSettings
+        if oldVoice != newVoice { voiceSettingsRevision &+= 1 }
+        if oldVoice?.quality != newVoice?.quality || oldVoice?.modelID != newVoice?.modelID
+            || oldVoice?.voiceID != newVoice?.voiceID
+            || oldVoice?.strictVoiceSelection != newVoice?.strictVoiceSelection {
+            voiceCredentials.selectionEpoch = UUID()
+        }
+    }
+
+    private func disarmHandsFreeForConfiguration() async -> String {
+        guard handsFreeMachine.isArmed else { return "" }
+        let failure = await disarmHandsFree(status: "Hands-free disarmed after configuration changed.")
+        return failure.map { " Hands-free cleanup failed: \($0)" } ?? ""
+    }
+}

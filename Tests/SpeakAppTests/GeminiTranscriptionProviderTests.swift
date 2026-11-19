@@ -18,26 +18,25 @@ final class GeminiTranscriptionProviderTests: XCTestCase {
 
   // MARK: - Catalogue
 
-  func testModelCatalogLiveTranscription_includesGeminiTranscribeLiveMarkedPreview() throws {
+  func testModelCatalogLiveTranscription_includesStableGeminiTranscribeLive() throws {
     let option = try XCTUnwrap(
       ModelCatalog.liveTranscription.first { $0.id == "google/gemini-3.5-transcribe-live" })
 
-    XCTAssertEqual(option.displayName, "Gemini 3.5 Transcribe Live (Preview)")
+    // Google lists both models as stable (deprecations page, 2026-11-11).
+    XCTAssertEqual(option.displayName, "Gemini 3.5 Transcribe Live")
     XCTAssertEqual(option.latencyTier, .fast)
-    // The catalogue has no availability field, so preview status has to be
-    // legible in the copy the picker shows.
-    XCTAssertTrue(try XCTUnwrap(option.description).contains("Public preview"))
+    XCTAssertFalse(try XCTUnwrap(option.description).contains("preview"))
   }
 
-  func testModelCatalogBatchTranscription_includesGeminiTranscribeMarkedPreview() throws {
+  func testModelCatalogBatchTranscription_includesStableGeminiTranscribe() throws {
     let option = try XCTUnwrap(
       ModelCatalog.batchTranscription.first { $0.id == "google/gemini-3.5-transcribe" })
 
-    XCTAssertEqual(option.displayName, "Gemini 3.5 Transcribe (Google, Preview)")
-    XCTAssertTrue(try XCTUnwrap(option.description).contains("Public preview"))
+    XCTAssertEqual(option.displayName, "Gemini 3.5 Transcribe (Google)")
+    XCTAssertFalse(try XCTUnwrap(option.description).contains("preview"))
   }
 
-  func testNeitherPreviewModelIsADefault() {
+  func testNeitherGeminiTranscribeModelIsADefault() {
     XCTAssertNotEqual(ModelCatalog.defaultBatchTranscriptionModel, "google/gemini-3.5-transcribe")
     XCTAssertNotEqual(
       ModelCatalog.defaultOnDeviceLiveTranscriptionModel, "google/gemini-3.5-transcribe-live")

@@ -235,22 +235,22 @@ final class OpenRouterAPIClientTests: XCTestCase {
 
     func testStreamedContent_ParsesDeltaLinesAndIgnoresOtherLines() {
         XCTAssertEqual(
-            OpenRouterAPIClient.streamedContent(
+            OpenRouterStreamingChat.content(
                 fromSSELine: #"data: {"choices":[{"delta":{"content":"Hi"}}]}"#
             ),
             "Hi"
         )
-        XCTAssertNil(OpenRouterAPIClient.streamedContent(fromSSELine: ""))
-        XCTAssertNil(OpenRouterAPIClient.streamedContent(fromSSELine: ": comment"))
-        XCTAssertNil(OpenRouterAPIClient.streamedContent(fromSSELine: "data: [DONE]"))
+        XCTAssertNil(OpenRouterStreamingChat.content(fromSSELine: ""))
+        XCTAssertNil(OpenRouterStreamingChat.content(fromSSELine: ": comment"))
+        XCTAssertNil(OpenRouterStreamingChat.content(fromSSELine: "data: [DONE]"))
         XCTAssertNil(
-            OpenRouterAPIClient.streamedContent(
+            OpenRouterStreamingChat.content(
                 fromSSELine: #"data: {"choices":[{"delta":{"role":"assistant"}}]}"#
             )
         )
-        XCTAssertNil(OpenRouterAPIClient.streamedContent(fromSSELine: "data: not-json"))
-        XCTAssertTrue(OpenRouterAPIClient.isSSETerminator("data: [DONE]"))
-        XCTAssertFalse(OpenRouterAPIClient.isSSETerminator("data: {}"))
+        XCTAssertNil(OpenRouterStreamingChat.content(fromSSELine: "data: not-json"))
+        XCTAssertTrue(OpenRouterStreamingChat.isTerminator("data: [DONE]"))
+        XCTAssertFalse(OpenRouterStreamingChat.isTerminator("data: {}"))
     }
 
     // MARK: - Helpers

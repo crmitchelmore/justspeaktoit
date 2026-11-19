@@ -13,6 +13,7 @@ struct WatchRecordingComplication: Widget {
         StaticConfiguration(kind: Self.kind, provider: WatchComplicationProvider()) { entry in
             WatchRecordingComplicationView(entry: entry)
                 .containerBackground(.clear, for: .widget)
+                .widgetURL(WatchRecordingRequest.watchFaceLaunchURL)
         }
         .configurationDisplayName("Record")
         .description("Start or stop a voice note from your watch face.")

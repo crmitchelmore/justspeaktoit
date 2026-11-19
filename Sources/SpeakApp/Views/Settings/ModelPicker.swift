@@ -1,237 +1,20 @@
-// swiftlint:disable file_length
 import SpeakCore
 import SwiftUI
 
-// swiftlint:disable:next type_body_length
+/// Builds the live OpenRouter browser that a picker's separate Browse OpenRouter
+/// button opens, given a closure that applies the chosen model.
+typealias ModelPickerOpenRouterBrowser = (_ select: @escaping (String) -> Void) -> AnyView
+
 struct ModelPicker: View {
   let title: String
   let help: String?
-  let options: [ModelCatalog.Option]
+  let allOptions: [ModelCatalog.Option]
   let credentialPurpose: ModelCredentialPurpose
   let storedAPIKeyIdentifiers: Set<String>
   let usesDetailedChooser: Bool
   let allowsCustom: Bool
+  let openRouterBrowser: ModelPickerOpenRouterBrowser?
   @Binding var value: String
-
-  private struct ModelTagBadges: View {
-    let tags: [ModelCatalog.Tag]
-    let compact: Bool
-
-    var body: some View {
-      if tags.isEmpty {
-        EmptyView()
-      } else {
-        HStack(spacing: 6) {
-          ForEach(tags.prefix(compact ? 2 : tags.count), id: \.self) { tag in
-            Text(tag.displayName)
-              .font(.caption2.weight(.semibold))
-              .foregroundStyle(tagForegroundColor(tag))
-              .padding(.horizontal, 8)
-              .padding(.vertical, 3)
-              .background(
-                Capsule(style: .continuous)
-                  .fill(tagBackgroundColor(tag))
-              )
-          }
-        }
-      }
-    }
-
-    private func tagBackgroundColor(_ tag: ModelCatalog.Tag) -> Color {
-      switch tag {
-      case .fast: return Color.brandLagoon.opacity(0.12)
-      case .cheap: return Color.green.opacity(0.14)
-      case .quality: return Color.brandAccent.opacity(0.12)
-      case .leading: return Color.brandAccentWarm.opacity(0.14)
-      case .privacy: return Color.brandLagoon.opacity(0.14)
-      }
-    }
-
-    private func tagForegroundColor(_ tag: ModelCatalog.Tag) -> Color {
-      switch tag {
-      case .fast: return .brandLagoon
-      case .cheap: return .green
-      case .quality: return .brandAccent
-      case .leading: return .brandAccentWarm
-      case .privacy: return .brandLagoon
-      }
-    }
-  }
-
-  private struct ModelPricingBadges: View {
-    let option: ModelCatalog.Option
-    let compact: Bool
-
-    var body: some View {
-      if let pricing = option.pricing {
-        HStack(spacing: 8) {
-          if !compact, let contextLength = option.contextLength {
-            Text(formatContext(contextLength))
-              .font(.caption2.monospacedDigit())
-              .foregroundStyle(.secondary)
-          }
-          Text(pricing.compactDisplay)
-            .font(.caption2.monospacedDigit())
-            .foregroundStyle(.secondary)
-        }
-      }
-    }
-
-    private func formatContext(_ contextLength: Int) -> String {
-      if contextLength >= 1_000_000 {
-        return "\(Int(Double(contextLength) / 1_000_000.0))M ctx"
-      }
-      return "\(Int(Double(contextLength) / 1_000.0))k ctx"
-    }
-  }
-
-  private struct ModelChooserSheet: View {
-    let title: String
-    let options: [ModelCatalog.Option]
-    let credentialPurpose: ModelCredentialPurpose
-    let storedAPIKeyIdentifiers: Set<String>
-    @Binding var selection: String
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var query: String = ""
-    @State private var selectedTag: ModelCatalog.Tag? = nil
-
-    var body: some View {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack {
-          Text(title)
-            .font(.headline)
-          Spacer()
-          Button("Done") { dismiss() }
-            .keyboardShortcut(.cancelAction)
-        }
-
-        Picker("Filter", selection: $selectedTag) {
-          Text("All").tag(ModelCatalog.Tag?.none)
-          ForEach(ModelCatalog.Tag.allCases, id: \.self) { tag in
-            Text(tag.displayName).tag(ModelCatalog.Tag?.some(tag))
-          }
-        }
-        .pickerStyle(.segmented)
-
-        List {
-          if isShowingNoSearchResults {
-            ContentUnavailableView.search(text: trimmedQuery)
-          }
-          ForEach(filteredOptions) { option in
-            Button {
-              selection = option.id
-              dismiss()
-            } label: {
-              VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 10) {
-                  Text(option.displayName)
-                    .font(.body)
-                  Spacer()
-                  if let contextLength = option.contextLength {
-                    Text(formatContext(contextLength))
-                      .font(.caption.monospacedDigit())
-                      .foregroundStyle(.secondary)
-                  }
-                  if let pricing = option.pricing {
-                    Text(pricing.compactDisplay)
-                      .font(.caption.monospacedDigit())
-                      .foregroundStyle(.secondary)
-                  }
-                  ModelCredentialStatusView(
-                    availability: ModelCredentialResolver.availability(
-                      for: option.id,
-                      purpose: credentialPurpose,
-                      storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
-                    )
-                  )
-                  ModelTagBadges(tags: option.tags, compact: true)
-                  LatencyBadgeCompact(option: option)
-                }
-
-                if let description = option.description, !description.isEmpty {
-                  Text(description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-              }
-              .padding(.vertical, 4)
-            }
-            .buttonStyle(.plain)
-          }
-
-          Divider()
-
-          Button {
-            selection = ModelCatalog.customOptionID
-            dismiss()
-          } label: {
-            HStack {
-              Text("Custom…")
-              Spacer()
-              ModelCredentialStatusView(
-                availability: ModelCredentialResolver.availability(
-                  for: ModelCatalog.customOptionID,
-                  purpose: credentialPurpose,
-                  storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
-                )
-              )
-            }
-          }
-          .buttonStyle(.plain)
-        }
-        .searchable(text: $query)
-      }
-      .padding(16)
-      .frame(minWidth: 780, minHeight: 520)
-    }
-
-    private var trimmedQuery: String {
-      query.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// True when a search is active but matched nothing, so the sheet can say so
-    /// instead of showing a bare list with only the Custom row.
-    private var isShowingNoSearchResults: Bool {
-      !trimmedQuery.isEmpty && filteredOptions.isEmpty
-    }
-
-    private var filteredOptions: [ModelCatalog.Option] {
-      var result = options
-      if let selectedTag {
-        result = result.filter { $0.tags.contains(selectedTag) }
-      }
-      let trimmed = trimmedQuery
-      if !trimmed.isEmpty {
-        let lowered = trimmed.lowercased()
-        result = result.filter {
-          $0.displayName.lowercased().contains(lowered)
-            || $0.id.lowercased().contains(lowered)
-            || ($0.description?.lowercased().contains(lowered) ?? false)
-        }
-      }
-      result.sort { lhs, rhs in
-        let lhsLeading = lhs.tags.contains(.leading)
-        let rhsLeading = rhs.tags.contains(.leading)
-        if lhsLeading != rhsLeading { return lhsLeading && !rhsLeading }
-        let lhsCheap = lhs.tags.contains(.cheap)
-        let rhsCheap = rhs.tags.contains(.cheap)
-        if lhsCheap != rhsCheap { return lhsCheap && !rhsCheap }
-        let lhsFast = lhs.tags.contains(.fast)
-        let rhsFast = rhs.tags.contains(.fast)
-        if lhsFast != rhsFast { return lhsFast && !rhsFast }
-        return lhs.displayName < rhs.displayName
-      }
-      return result
-    }
-
-    private func formatContext(_ contextLength: Int) -> String {
-      if contextLength >= 1_000_000 {
-        return "\(Int(Double(contextLength) / 1_000_000.0))M ctx"
-      }
-      return "\(Int(Double(contextLength) / 1_000.0))k ctx"
-    }
-  }
 
   @State var selection: String
   @State private var customValue: String
@@ -245,46 +28,37 @@ struct ModelPicker: View {
     credentialPurpose: ModelCredentialPurpose,
     storedAPIKeyIdentifiers: Set<String>,
     usesDetailedChooser: Bool = false,
-    allowsCustom: Bool = true
+    allowsCustom: Bool = true,
+    openRouterBrowser: ModelPickerOpenRouterBrowser? = nil
   ) {
     self.title = title
     self.help = help
-    self.options = options
+    self.allOptions = options
     self.credentialPurpose = credentialPurpose
     self.storedAPIKeyIdentifiers = storedAPIKeyIdentifiers
     self.usesDetailedChooser = usesDetailedChooser
     self.allowsCustom = allowsCustom
+    self.openRouterBrowser = openRouterBrowser
     _value = value
 
-    let trimmed = value.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let match = options.first(where: { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }) {
-      _selection = State(initialValue: match.id)
-      _customValue = State(initialValue: "")
-    } else if trimmed.isEmpty, let first = options.first {
-      _selection = State(initialValue: first.id)
-      _customValue = State(initialValue: "")
-      Self.repair(value, from: value.wrappedValue, to: first.id)
-    } else if !allowsCustom, let first = options.first {
-      _selection = State(initialValue: first.id)
-      _customValue = State(initialValue: "")
-      Self.repair(value, from: value.wrappedValue, to: first.id)
-    } else if !allowsCustom {
-      _selection = State(initialValue: "")
-      _customValue = State(initialValue: "")
-    } else {
-      _selection = State(initialValue: ModelCatalog.customOptionID)
-      _customValue = State(initialValue: trimmed)
+    let initial = ModelPickerSelection.initial(
+      for: value.wrappedValue, options: options, allowsCustom: allowsCustom
+    )
+    _selection = State(initialValue: initial.selection)
+    _customValue = State(initialValue: initial.customValue)
+    if let replacement = initial.replacementValue {
+      Self.repair(value, from: value.wrappedValue, to: replacement)
     }
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if usesDetailedChooser {
+      if usesDetailedChooser || LongListPickerPolicy.usesSheet(count: options.count) {
         Button {
           isShowingChooser = true
         } label: {
           HStack {
-            Text(selectedOption?.displayName ?? (customValue.isEmpty ? "Custom…" : customValue))
+            Text(selectedOption.map(selectionLabel) ?? (customValue.isEmpty ? "Custom…" : customValue))
             Spacer()
             ModelCredentialStatusView(availability: selectedCredentialAvailability)
             if let option = selectedOption {
@@ -310,19 +84,22 @@ struct ModelPicker: View {
             options: options,
             credentialPurpose: credentialPurpose,
             storedAPIKeyIdentifiers: storedAPIKeyIdentifiers,
+            allowsCustom: allowsCustom,
+            groupsOpenRouter: openRouterBrowser == nil,
             selection: $selection
           )
         }
       } else {
         Picker(title, selection: $selection) {
-          ForEach(options) { option in
-            HStack {
-              Text(option.displayName)
-              Spacer()
-              ModelCredentialStatusView(availability: credentialAvailability(for: option.id))
+          let groups = ModelPickerGrouping.groups(options, purpose: credentialPurpose)
+          if groups.direct.isEmpty || groups.openRouter.isEmpty {
+            menuRows(groups.direct + groups.openRouter)
+          } else {
+            // Native routes first; OpenRouter routes in their own labelled group.
+            menuRows(groups.direct)
+            Section(ModelPickerGrouping.openRouterTitle) {
+              menuRows(groups.openRouter)
             }
-            .accessibilityElement(children: .combine)
-            .tag(option.id)
           }
           if allowsCustom {
             HStack {
@@ -338,6 +115,14 @@ struct ModelPicker: View {
         }
         .settingsMenuPicker()
         .speakTooltip(tooltipText)
+      }
+
+      if let openRouterBrowser {
+        ModelPickerOpenRouterButton(
+          identifier: "modelPicker.\(Self.accessibilityIdentifierComponent(for: title)).browseOpenRouter",
+          browser: openRouterBrowser,
+          value: $value
+        )
       }
 
       if let help {
@@ -411,6 +196,14 @@ struct ModelPicker: View {
     }
   }
 
+  /// With a Browse OpenRouter button, OpenRouter models live in the browser;
+  /// the picker lists native ones plus the saved OpenRouter choice, as the voice
+  /// picker does.
+  private var options: [ModelCatalog.Option] {
+    guard openRouterBrowser != nil else { return allOptions }
+    return ModelPickerSelection.nativeOptions(allOptions, selected: value, purpose: credentialPurpose)
+  }
+
   /// Replaces an invalid value on the next turn unless something else has
   /// changed it in the meantime.
   private static func repair(_ value: Binding<String>, from invalidValue: String, to replacement: String) {
@@ -427,20 +220,27 @@ struct ModelPicker: View {
   }
 
   /// The label VoiceOver reads as the picker's current value.
-  private var selectedDisplayName: String {
-    selectedOption?.displayName ?? (customValue.isEmpty ? "Custom" : customValue)
+  private func menuRows(_ rows: [ModelCatalog.Option]) -> some View {
+    ForEach(rows) { option in
+      HStack {
+        Text(option.displayName)
+        Spacer()
+        ModelCredentialStatusView(availability: credentialAvailability(for: option.id))
+      }
+      .accessibilityElement(children: .combine)
+      .tag(option.id)
+    }
   }
 
-  /// Stable, UI-test friendly component derived from the picker's title,
-  /// e.g. "Post-processing model" -> "postProcessingModel".
-  static func accessibilityIdentifierComponent(for title: String) -> String {
-    let words = title
-      .components(separatedBy: CharacterSet.alphanumerics.inverted)
-      .filter { !$0.isEmpty }
-    guard let first = words.first else { return "model" }
-    return ([first.prefix(1).lowercased() + first.dropFirst()]
-      + words.dropFirst().map { $0.prefix(1).uppercased() + $0.dropFirst() })
-      .joined()
+  private var selectedDisplayName: String {
+    selectedOption.map(selectionLabel) ?? (customValue.isEmpty ? "Custom" : customValue)
+  }
+
+  /// "OpenRouter › Model" for OpenRouter routes, so the route is never ambiguous.
+  private func selectionLabel(_ option: ModelCatalog.Option) -> String {
+    ModelPickerGrouping.selectionLabel(
+      for: option.id, displayName: option.displayName, purpose: credentialPurpose
+    )
   }
 
   private var selectedCredentialAvailability: ModelCredentialAvailability {
@@ -465,40 +265,32 @@ struct ModelPicker: View {
     return "Choose which model Speak should use for this step."
   }
 
-  // swiftlint:disable:next cyclomatic_complexity
   private func syncSelection(with newValue: String, repairsInvalidValue: Bool) {
-    let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let match = options.first(where: { $0.id.caseInsensitiveCompare(trimmed) == .orderedSame }) {
-      if selection != match.id {
-        selection = match.id
-      }
-      if !customValue.isEmpty {
-        customValue = ""
-      }
-    } else if allowsCustom {
-      if selection != ModelCatalog.customOptionID {
-        selection = ModelCatalog.customOptionID
-      }
-      if customValue != trimmed {
-        customValue = trimmed
-      }
-    } else if repairsInvalidValue, let first = options.first {
-      if selection != first.id {
-        selection = first.id
-      }
-      if !customValue.isEmpty {
-        customValue = ""
-      }
-      if value != first.id {
-        value = first.id
-      }
-    } else {
-      if !selection.isEmpty {
-        selection = ""
-      }
-      if !customValue.isEmpty {
-        customValue = ""
-      }
+    let synced = ModelPickerSelection.synced(
+      with: newValue, options: options, allowsCustom: allowsCustom, repairsInvalidValue: repairsInvalidValue
+    )
+    if selection != synced.selection {
+      selection = synced.selection
     }
+    if customValue != synced.customValue {
+      customValue = synced.customValue
+    }
+    if let replacement = synced.replacementValue, value != replacement {
+      value = replacement
+    }
+  }
+}
+
+extension ModelPicker {
+  /// Stable, UI-test friendly component derived from the picker's title,
+  /// e.g. "Post-processing model" -> "postProcessingModel".
+  static func accessibilityIdentifierComponent(for title: String) -> String {
+    let words = title
+      .components(separatedBy: CharacterSet.alphanumerics.inverted)
+      .filter { !$0.isEmpty }
+    guard let first = words.first else { return "model" }
+    return ([first.prefix(1).lowercased() + first.dropFirst()]
+      + words.dropFirst().map { $0.prefix(1).uppercased() + $0.dropFirst() })
+      .joined()
   }
 }

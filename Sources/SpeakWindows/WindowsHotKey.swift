@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 import SpeakCore
 import SpeakDesktopHost
 import SpeakWindowsPlatform
@@ -88,8 +89,7 @@ extension WindowsNative {
 /// combination is registered. Gestures restart under the new style at once;
 /// saving joins the settings queue like every other setting.
 func hotKeyEvent(_ modifiers: UInt32, _ key: UInt32, _ style: Int32, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     let styles = HotKeyActivationStyle.windowsStyles
     guard styles.indices.contains(Int(style)) else { return }
     let settings = WindowsHotKeySettings(modifiers: modifiers, virtualKey: key, style: styles[Int(style)].rawValue)
@@ -97,7 +97,7 @@ func hotKeyEvent(_ modifiers: UInt32, _ key: UInt32, _ style: Int32, _ context: 
     holder.enqueueSettings {
         await holder.controller.saveHotKey(settings)
         let saved = await holder.controller.hotKeySettings()
-        if !WindowsNative.configureHotKey(saved, context: Unmanaged.passUnretained(holder).toOpaque()) {
+        if !WindowsNative.configureHotKey(saved, context: holder.callbackContext) {
             WindowsNative.update("The saved shortcut could not be shown. Reopen Keyboard shortcut and try again.")
         }
         await WindowsNative.configureActionShortcuts(holder)

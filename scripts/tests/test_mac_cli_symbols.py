@@ -1,13 +1,12 @@
 """Exercise the real symbol-preparation shell with owned, inert tool fixtures."""
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PREPARE = ROOT / "scripts/prepare-mac-cli-symbols.sh"
@@ -103,7 +102,7 @@ class MacCLISymbolTests(unittest.TestCase):
         if universal:
             env["FAKE_UNIVERSAL"] = "1"
         return subprocess.run(["/bin/bash", str(PREPARE), str(self.binary), str(self.destination)],
-                              env=env, capture_output=True, text=True, timeout=10)
+                              env=env, capture_output=True, text=True, timeout=60)
 
     def assert_refused_before_strip(self, mode, universal=False):
         original = self.binary.read_bytes()
@@ -245,7 +244,7 @@ class MacCLISymbolTests(unittest.TestCase):
                                 env={**self.env, "FAKE_MODE": "warning", "FAKE_BUILD": str(build),
                                      "TUIST_RELEASE_TRAIN": train,
                                      **({"FAKE_UNIVERSAL": "1"} if embedded else {})},
-                                capture_output=True, text=True, timeout=10)
+                                capture_output=True, text=True, timeout=60)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("incomplete or invalid debug information", result.stderr)
         self.assertTrue(any("dsymutil" in call for call in self.calls()))

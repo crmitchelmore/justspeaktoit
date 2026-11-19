@@ -15,7 +15,7 @@ final class DesktopLegacyCapturePolicyTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("legacy-silence-\(UUID())")
         let finishing = expectation(description: "Captured silence policy stopped the real legacy recording")
         let effects = LegacyPolicyEffects { finishing.fulfill() }
-        let host = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        let host = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         addTeardownBlock {
             await effects.client.finishRelease.signal()
             await host.close()
@@ -146,7 +146,7 @@ final class DesktopLegacyCapturePolicyTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("legacy-failure-\(UUID())")
         let effects = TailEffects()
         effects.failStart = true
-        let host = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        let host = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         addTeardownBlock {
             await host.close()
             try FileManager.default.removeItem(at: directory)

@@ -232,8 +232,7 @@ static Discovery *make_discovery(GtkWindow *owner, JSTIVoiceSourceCallback callb
     GtkWidget *provider_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     dialog->providers = GTK_DROP_DOWN(gtk_drop_down_new(NULL, NULL));
     gtk_widget_set_hexpand(GTK_WIDGET(dialog->providers), TRUE);
-    gtk_accessible_update_property(GTK_ACCESSIBLE(dialog->providers), GTK_ACCESSIBLE_PROPERTY_LABEL,
-        "Account Voice provider", -1);
+    jsti_accessible_set_name(GTK_WIDGET(dialog->providers), "Account Voice provider");
     gtk_widget_set_size_request(GTK_WIDGET(dialog->providers), 240, 44);
     dialog->key = GTK_BUTTON(gtk_button_new_with_label("Provider key..."));
     gtk_widget_set_size_request(GTK_WIDGET(dialog->key), 140, 44);
@@ -242,7 +241,7 @@ static Discovery *make_discovery(GtkWindow *owner, JSTIVoiceSourceCallback callb
     gtk_box_append(GTK_BOX(box), provider_row);
     dialog->voices = GTK_DROP_DOWN(gtk_drop_down_new(NULL, NULL));
     gtk_drop_down_set_enable_search(dialog->voices, TRUE);
-    gtk_accessible_update_property(GTK_ACCESSIBLE(dialog->voices), GTK_ACCESSIBLE_PROPERTY_LABEL, "Account Voice voice", -1);
+    jsti_accessible_set_name(GTK_WIDGET(dialog->voices), "Account Voice voice");
     gtk_widget_set_size_request(GTK_WIDGET(dialog->voices), 340, 44);
     gtk_box_append(GTK_BOX(box), GTK_WIDGET(dialog->voices));
     dialog->status = GTK_LABEL(gtk_label_new("Preparing choices. No source text is sent."));

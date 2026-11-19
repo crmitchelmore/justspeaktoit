@@ -35,7 +35,7 @@ fixture tests do not prove physical microphone quality or consented Wayland inpu
 
 ## Reproduction
 
-`scripts/linux-ui-benchmark.py /absolute/path/to/staged/bin/justspeaktoit
+`scripts/linux/linux-ui-benchmark.py /absolute/path/to/staged/bin/justspeaktoit
 --output results.json` measures seven launches and a ten-second settled idle
 sample on Hyprland. Close the existing app first. It uses its own temporary data
 folder and only terminates its own child processes. Run baseline and candidate

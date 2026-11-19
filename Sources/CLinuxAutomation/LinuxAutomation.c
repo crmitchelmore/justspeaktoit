@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <poll.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,9 +18,13 @@
 
 enum { MAX_CONNECTIONS = 4 };
 struct JSTIAutomationConnection {
-    int fd;
+    int fd, cancel;
     JSTIAutomationListener *owner;
     struct JSTIAutomationConnection *next;
+};
+struct JSTIAutomationCancel {
+    int pipe[2];
+    atomic_bool signalled;
 };
 struct JSTIAutomationListener {
     int fd, cancel[2], directory;
@@ -237,6 +242,7 @@ int jsti_automation_accept(JSTIAutomationListener *listener, JSTIAutomationConne
         bool admitted = !listener->stopped && listener->count < MAX_CONNECTIONS;
         if (admitted) {
             connection->fd = fd;
+            connection->cancel = -1;
             connection->owner = listener;
             connection->next = listener->connections;
             listener->connections = connection;
@@ -278,8 +284,37 @@ void jsti_automation_release(JSTIAutomationListener *listener) {
     free(listener);
 }
 
+JSTIAutomationCancel *jsti_automation_cancel_create(void) {
+    JSTIAutomationCancel *cancel = calloc(1, sizeof(*cancel));
+    if (!cancel) return NULL;
+    if (pipe2(cancel->pipe, O_CLOEXEC | O_NONBLOCK) != 0) { free(cancel); return NULL; }
+    atomic_init(&cancel->signalled, false);
+    return cancel;
+}
+
+void jsti_automation_cancel_signal(JSTIAutomationCancel *cancel) {
+    if (!cancel || atomic_exchange(&cancel->signalled, true)) return;
+    char byte = 1;
+    /* The pipe stays readable: every later wait on this request sees it. */
+    (void)write(cancel->pipe[1], &byte, 1);
+}
+
+void jsti_automation_cancel_release(JSTIAutomationCancel *cancel) {
+    if (!cancel) return;
+    close(cancel->pipe[0]);
+    close(cancel->pipe[1]);
+    free(cancel);
+}
+
 int jsti_automation_connect(const char *path, uint64_t deadline, JSTIAutomationConnection **output) {
+    return jsti_automation_connect_cancellable(path, deadline, NULL, output);
+}
+
+int jsti_automation_connect_cancellable(
+    const char *path, uint64_t deadline, JSTIAutomationCancel *cancellation, JSTIAutomationConnection **output) {
     *output = NULL;
+    int cancel = cancellation ? cancellation->pipe[0] : -1;
+    if (cancellation && atomic_load(&cancellation->signalled)) return JSTI_AUTOMATION_CANCELLED;
     int directory = -1;
     char name[sizeof(((struct sockaddr_un *)0)->sun_path)];
     int result = open_directory(path, false, name, &directory);
@@ -302,7 +337,7 @@ int jsti_automation_connect(const char *path, uint64_t deadline, JSTIAutomationC
             close(fd); close(directory);
             return failure == ECONNREFUSED || failure == ENOENT ? JSTI_AUTOMATION_UNAVAILABLE : JSTI_AUTOMATION_IO;
         }
-        result = wait_fd(fd, POLLOUT, -1, deadline);
+        result = wait_fd(fd, POLLOUT, cancel, deadline);
         int error = 0;
         socklen_t size = sizeof(error);
         if (result != JSTI_AUTOMATION_OK || getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) != 0 || error) {
@@ -319,6 +354,7 @@ int jsti_automation_connect(const char *path, uint64_t deadline, JSTIAutomationC
     JSTIAutomationConnection *connection = calloc(1, sizeof(*connection));
     if (!connection) { close(fd); return JSTI_AUTOMATION_IO; }
     connection->fd = fd;
+    connection->cancel = cancel;
     *output = connection;
     return JSTI_AUTOMATION_OK;
 }
@@ -327,7 +363,7 @@ static int exchange(JSTIAutomationConnection *connection, void *bytes, size_t co
     size_t offset = 0;
     while (offset < count) {
         int result = wait_fd(connection->fd, writing ? POLLOUT : POLLIN,
-                             connection->owner ? connection->owner->cancel[0] : -1, deadline);
+                             connection->owner ? connection->owner->cancel[0] : connection->cancel, deadline);
         if (result != JSTI_AUTOMATION_OK) return result;
         ssize_t transferred = writing
             ? send(connection->fd, (const char *)bytes + offset, count - offset, MSG_NOSIGNAL)

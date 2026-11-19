@@ -62,7 +62,7 @@ std::vector<Row> rows(const std::string &value) {
     }
     return result;
 }
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 std::string text(HWND window, int id) {
     HWND control = GetDlgItem(window, id);
     std::wstring value(static_cast<size_t>(GetWindowTextLengthW(control)) + 1, 0);

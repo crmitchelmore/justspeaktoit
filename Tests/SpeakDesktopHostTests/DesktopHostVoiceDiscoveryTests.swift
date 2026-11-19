@@ -17,8 +17,8 @@ final class DesktopHostVoiceDiscoveryTests: XCTestCase {
         FakeLog.shared.reset(); FakeSpeech.shared.reset(); StubURLProtocol.reset()
         DesktopHostModels.configure(streamingQualified: false)
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-discovery-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects(),
-                                                             shutdownGrace: .milliseconds(60))
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects(), shutdownGrace: .milliseconds(60))
         session = StubURLProtocol.makeSession()
         await controller.markReadyForSelfTest()
         FakeLog.shared.setKey("synthetic-key", name: XAITTSCatalog.credentialIdentifier)
@@ -146,7 +146,8 @@ final class DesktopHostVoiceDiscoveryTests: XCTestCase {
     private func listing() async throws -> XAIAccountVoiceInventory {
         StubURLProtocol.handler = {
             .respond(try XCTUnwrap(HTTPURLResponse(url: try XCTUnwrap($0.url),
-                statusCode: 200, httpVersion: nil, headerFields: nil)),
+                statusCode: $0.url?.path == "/v1/custom-voices" ? 404 : 200,
+                httpVersion: nil, headerFields: nil)),
                 Data(#"{"voices":[{"voice_id":"Account-A","name":"Synthetic account voice"}]}"#.utf8))
         }
         return try await .fetch(session: session, credential: { "synthetic-key" })

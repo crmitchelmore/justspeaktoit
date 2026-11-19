@@ -21,7 +21,7 @@ extension LinuxHostPlatform {
         _ rows: [DesktopLocalLLMStore.Row], status: String, presenter: UnsafeMutableRawPointer?
     ) {
         guard let presenter else { return }
-        let strings = LinuxWindow.Strings()
+        let strings = DesktopNativeStrings()
         let native = rows.map {
             JSTILocalCleanupRow(
                 identifier: strings.add($0.model.id), name: strings.add($0.model.displayName),
@@ -41,8 +41,7 @@ func linuxLocalCleanupEvent(
     _ action: Int32, _ identifier: UnsafePointer<CChar>?, _ repository: UnsafePointer<CChar>?,
     _ filename: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
 ) {
-    guard let context else { return }
-    let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<LinuxEventContext>.resolve(context) else { return }
     let id = identifier.map(String.init(cString:)) ?? ""
     let repo = repository.map(String.init(cString:)) ?? ""
     let file = filename.map(String.init(cString:)) ?? ""

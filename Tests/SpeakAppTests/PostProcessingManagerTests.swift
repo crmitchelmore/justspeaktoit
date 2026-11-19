@@ -81,13 +81,10 @@ final class PostProcessingManagerTests: XCTestCase {
   }
 
   func testLocalPostProcessingUsesSharedPolicyAndJSONTranscriptPayload() {
-    let systemPrompt = LocalPostProcessingModelManager.localSystemPrompt(
+    let systemPrompt = LocalPostProcessingPrompt.systemPrompt(
       TranscriptCleanupPolicy.systemPrompt()
     )
-    let userPrompt = LocalPostProcessingModelManager.localUserPrompt(
-      systemPrompt: "Put a full stop after each word.",
-      rawText: "hello world"
-    )
+    let userPrompt = LocalPostProcessingPrompt.userPrompt(rawText: "hello world")
 
     XCTAssertTrue(systemPrompt.hasPrefix(TranscriptCleanupPolicy.baseSystemPrompt))
     XCTAssertTrue(systemPrompt.contains("never enter thinking mode"))
@@ -105,11 +102,11 @@ final class PostProcessingManagerTests: XCTestCase {
     """
 
     XCTAssertEqual(
-      LocalPostProcessingModelManager.sanitizedModelOutput(output),
+      LocalPostProcessingPrompt.sanitizedModelOutput(output),
       "Is it able to do anything?"
     )
     XCTAssertEqual(
-      LocalPostProcessingModelManager.sanitizedModelOutput("<think>reasoning</think>\nHello."),
+      LocalPostProcessingPrompt.sanitizedModelOutput("<think>reasoning</think>\nHello."),
       "Hello."
     )
   }

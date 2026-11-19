@@ -3,6 +3,7 @@
 #include "WindowsSupportInternal.hpp"
 
 #include <string>
+#include <vector>
 
 // The desktop window's look: the Mac app's brand tokens (SpeakCore
 // BrandColors), its card and hero shapes, and light or dark surfaces that
@@ -25,6 +26,9 @@ const Palette &palette();
 // colours and stay black, so dark mode draws those unthemed and the parent's
 // WM_CTLCOLORSTATIC colours apply. Owner-drawn buttons are left alone.
 void themeControl(HWND control);
+// Whether themeControl has made multiline `control` hand Tab back to dialog
+// navigation while it is read-only.
+bool releasesDialogKeys(HWND control);
 // A light or dark title bar.
 void themeTitleBar(HWND window);
 // The window's title bar and every child control.
@@ -36,6 +40,131 @@ void themeWindow(HWND window);
 // mode it paints the background and gives labels, check boxes and fields light
 // text on dark surfaces; in light mode the system colours stay.
 bool dialogMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam, LRESULT &result);
+
+// Dialog plumbing shared by the native settings dialogs. Each dialog keeps its
+// own controls, layout and messages; these are only the identical steps.
+// Logical (96-DPI) pixels at the window's DPI.
+int scale(HWND window, int value);
+// The instance passed as CreateWindowExW's lpParam, bound on WM_NCCREATE.
+template<typename Instance>
+Instance *dialogInstance(HWND window, UINT message, LPARAM lparam) {
+    if (message == WM_NCCREATE) {
+        auto instance = static_cast<Instance *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(instance));
+        return instance;
+    }
+    return reinterpret_cast<Instance *>(GetWindowLongPtrW(window, GWLP_USERDATA));
+}
+// WM_GETMINMAXINFO: the smallest frame around a client area of the given logical size.
+void minimumTrackSize(HWND window, LPARAM lparam, int clientWidth, int clientHeight, DWORD style, DWORD exStyle);
+// WM_DPICHANGED: moves the window to the bounds Windows suggests.
+void applySuggestedBounds(HWND window, LPARAM lparam);
+// The dialogs' body font: 10-point Segoe UI at the window's DPI, or nullptr.
+HFONT dialogFont(HWND window);
+// Gives `controls` a fresh dialogFont and frees the one in `font`, which it replaces.
+// Keeps the current font when a new one cannot be created.
+void refreshDialogFont(HWND window, const std::vector<HWND> &controls, HFONT &font);
+// A visible child control at 1x1 for the dialog's layout to place; false when refused.
+bool addControl(HWND parent, const wchar_t *type, const wchar_t *text, DWORD style, int id, DWORD exStyle = 0);
+// Registers `className` once and opens a dialog of the given logical client size
+// 40 logical pixels below and right of the owner's top-left corner, with
+// `instance` as its lpParam. nullptr when the class or window cannot be created.
+HWND createOwnedDialog(HWND owner, const wchar_t *className, WNDPROC procedure, const wchar_t *title,
+                       int clientWidth, int clientHeight, DWORD style, DWORD exStyle, void *instance);
+// WM_ACTIVATE: remembers the focused control on deactivation and restores it,
+// or the control `fallback` when it is gone, hidden or disabled, on activation.
+void rememberFocus(HWND window, WPARAM wparam, HWND &focus, int fallback);
+
+// A native settings dialog's window frame: its smallest logical client size,
+// window styles, the control focused when nothing else was, and the button
+// Enter presses (IDOK or IDCANCEL).
+struct DialogFrame {
+    int minimumClientWidth, minimumClientHeight;
+    DWORD style, exStyle;
+    int focusFallback;
+    int defaultButton;
+};
+// The window messages every settings dialog answers the same way: appearance
+// theming, the minimum size, resizing, DPI moves, remembered focus and the
+// default button. Call it after binding the instance; when it returns true,
+// return `result`. `dialog` needs `focus`; `layout(window)` places the controls
+// and `refreshFont(window, dialog)` replaces the font after a DPI change.
+template<typename Dialog, typename Layout, typename RefreshFont>
+bool standardDialogMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam, const DialogFrame &frame,
+                           Dialog &dialog, Layout layout, RefreshFont refreshFont, LRESULT &result) {
+    if (dialogMessage(window, message, wparam, lparam, result)) return true;
+    result = 0;
+    switch (message) {
+    case WM_GETMINMAXINFO:
+        minimumTrackSize(window, lparam, frame.minimumClientWidth, frame.minimumClientHeight, frame.style,
+                         frame.exStyle);
+        return true;
+    case WM_SIZE: layout(window); return true;
+    case WM_DPICHANGED:
+        applySuggestedBounds(window, lparam);
+        refreshFont(window, dialog);
+        layout(window);
+        return true;
+    case WM_ACTIVATE: rememberFocus(window, wparam, dialog.focus, frame.focusFallback); return true;
+    case DM_GETDEFID: result = MAKELRESULT(frame.defaultButton, DC_HASDEFID); return true;
+    default: return false;
+    }
+}
+// One settings dialog's procedure, minus the frame every dialog shares. The
+// dialog keeps its controls (`create`, `layout`, `refreshFont`) and its own
+// messages (`handle`); `close` ends it.
+template<typename Dialog>
+struct DialogProcedure {
+    const DialogFrame &frame;
+    void (*layout)(HWND);
+    void (*refreshFont)(HWND, Dialog &);
+    bool (*create)(HWND, Dialog &);
+    void (*close)(HWND);
+    // Sees every message after the standard ones and WM_CREATE. Returns true,
+    // with `result`, when it answered; WM_CLOSE and WM_DESTROY then run only if
+    // it did not. Extra WM_DESTROY cleanup returns false so the font is freed.
+    bool (*handle)(HWND, Dialog &, UINT, WPARAM, LPARAM, LRESULT &);
+};
+// The window procedure frame of every settings dialog: binds the instance,
+// answers standardDialogMessage, creates the controls on WM_CREATE, closes on
+// WM_CLOSE and frees `dialog.font` on WM_DESTROY. Everything else goes to
+// `procedure.handle`, then DefWindowProcW.
+template<typename Dialog>
+LRESULT dialogProcedure(const DialogProcedure<Dialog> &procedure, HWND window, UINT message, WPARAM wparam,
+                        LPARAM lparam) {
+    Dialog *dialog = dialogInstance<Dialog>(window, message, lparam);
+    if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
+    LRESULT result = 0;
+    if (standardDialogMessage(window, message, wparam, lparam, procedure.frame, *dialog, procedure.layout,
+                              procedure.refreshFont, result)) return result;
+    if (message == WM_CREATE) return procedure.create(window, *dialog) ? 0 : -1;
+    result = 0;
+    if (procedure.handle(window, *dialog, message, wparam, lparam, result)) return result;
+    switch (message) {
+    case WM_CLOSE: procedure.close(window); return 0;
+    case WM_DESTROY:
+        if (dialog->font) { DeleteObject(dialog->font); dialog->font = nullptr; }
+        return 0;
+    default: return DefWindowProcW(window, message, wparam, lparam);
+    }
+}
+// WM_COMMAND for a dialog whose buttons are Apply (IDOK) and Cancel: their
+// clicks run `apply` or `close`. True for every button click, which the dialog
+// consumes; false for other notifications.
+template<typename Dialog>
+bool dialogCommand(HWND window, Dialog &dialog, WPARAM wparam, void (*apply)(HWND, Dialog &), void (*close)(HWND)) {
+    if (HIWORD(wparam) != BN_CLICKED) return false;
+    if (LOWORD(wparam) == IDOK) apply(window, dialog);
+    else if (LOWORD(wparam) == IDCANCEL) close(window);
+    return true;
+}
+
+// Shows `window` modally over `owner`, focuses `focusID`, runs `shown` and
+// pumps messages until the dialog is gone; then closes it if needed with
+// `close`, re-enables the owner and forwards WM_QUIT. A failed message read is
+// reported as "Reading <what> messages".
+void runModalDialog(HWND owner, HWND window, int focusID, void (*close)(HWND), const char *what,
+                    void (*shown)(HWND, void *) = nullptr, void *context = nullptr);
 
 // GDI+ for the process; idempotent.
 bool startup();

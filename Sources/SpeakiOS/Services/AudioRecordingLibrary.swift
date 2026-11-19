@@ -93,6 +93,17 @@ extension AudioRecordingPersistence {
     public static func deleteRecording(at url: URL) {
         try? FileManager.default.removeItem(at: url)
     }
+
+    /// Whether a cancelled capture stays in the library. Saved Recordings
+    /// lists every file in the directory, so a kept file is one to play or
+    /// transcribe later; under half a second holds no word, so it is never
+    /// worth keeping.
+    static func shouldKeepCancelledRecording(at url: URL, startedAt: Date?, keepAudio: Bool,
+                                             now: Date = Date()) -> Bool {
+        guard keepAudio, let startedAt, now.timeIntervalSince(startedAt) >= 0.5 else { return false }
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber
+        return (size?.int64Value ?? 0) > 0
+    }
 }
 
 // MARK: - Supporting Types

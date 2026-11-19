@@ -8,11 +8,16 @@ struct ProfileEditorView: View {
   @ObservedObject var settings: AppSettings
   private let originalID: UUID?
   private let onSave: (DictationProfile) -> Void
+  private let storage: SecureAppStorage
 
   @State private var draft: ProfileEditorDraft
 
-  init(profile: DictationProfile?, settings: AppSettings, onSave: @escaping (DictationProfile) -> Void) {
+  init(
+    profile: DictationProfile?, settings: AppSettings, storage: SecureAppStorage,
+    onSave: @escaping (DictationProfile) -> Void
+  ) {
     self.settings = settings
+    self.storage = storage
     self.originalID = profile?.id
     self.onSave = onSave
     _draft = State(initialValue: ProfileEditorDraft(profile: profile, settings: settings))
@@ -80,7 +85,8 @@ extension ProfileEditorView {
         ModelPicker(
           title: "Streaming Model",
           help: "Model used while recording when this profile is active. "
-            + "Custom identifiers must belong to a supported live provider.",
+            + "Custom identifiers must belong to a supported live provider. "
+            + "OpenRouter models can't stream; choose Remote Batch to use one.",
           options: ModelCatalog.liveTranscription,
           value: $draft.streamingModel,
           credentialPurpose: .liveTranscription,
@@ -90,10 +96,13 @@ extension ProfileEditorView {
         ModelPicker(
           title: "Batch Model",
           help: "Model the finished recording is sent to when this profile is active.",
-          options: ModelCatalog.batchTranscription,
+          options: ModelPickerOpenRouterBrowsers.batchOptions(selected: draft.batchModel),
           value: $draft.batchModel,
           credentialPurpose: .batchTranscription,
-          storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
+          storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
+          openRouterBrowser: ModelPickerOpenRouterBrowsers.batchTranscription(
+            selection: draft.batchModel, storage: storage
+          )
         )
       } else if draft.transcriptionChoice == .local {
         ModelPicker(
@@ -129,12 +138,19 @@ extension ProfileEditorView {
           title: "Polish Model",
           help: "LLM used to clean up the transcript for this profile. "
             + "Runs after recording even when Live Polish is your usual speed mode.",
-          options: ModelCatalog.postProcessing,
+          options: ModelPickerOpenRouterBrowsers.cleanupOptions(
+            ModelCatalog.postProcessing, selected: draft.polishModel
+          ),
           value: $draft.polishModel,
           credentialPurpose: .postProcessing,
           storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),
           usesDetailedChooser: true,
-          allowsCustom: false
+          allowsCustom: false,
+          openRouterBrowser: ModelPickerOpenRouterBrowsers.cleanup(
+            selection: draft.polishModel,
+            discoveryEnabled: $settings.cleanupModelDiscoveryEnabled,
+            temperature: nil
+          )
         )
 
         if draft.usesRulesCleanup {
@@ -156,6 +172,7 @@ extension ProfileEditorView {
       Toggle("Custom polish prompt", isOn: $draft.useCustomPrompt)
       if draft.useCustomPrompt {
         TextEditor(text: $draft.customPrompt)
+          .accessibilityLabel("Custom polish prompt")
           .font(.body.monospaced())
           .frame(minHeight: 120)
           .overlay(
@@ -167,12 +184,14 @@ extension ProfileEditorView {
           .foregroundStyle(.secondary)
       }
 
-      Picker("Output Language", selection: $draft.outputLanguage) {
-        Text("Use app setting").tag("")
-        ForEach(Self.outputLanguages, id: \.self) { language in
-          Text(language).tag(language)
-        }
-      }
+      LongListPicker(
+        title: "Output Language",
+        items: [LongListChoice(id: "", title: "Use app setting")]
+          + Self.outputLanguages.map { LongListChoice(id: $0, title: $0) },
+        id: { $0.id }, selection: $draft.outputLanguage, searchText: { [$0.title] },
+        row: { item in
+        Text(item.title)
+      })
       .pickerStyle(.menu)
 
       Toggle("Include personal lexicon directives", isOn: $draft.includeLexiconDirectives)
@@ -184,12 +203,14 @@ extension ProfileEditorView {
     VStack(alignment: .leading, spacing: 8) {
       Text("Spoken Language")
         .font(.subheadline.weight(.semibold))
-      Picker("Spoken Language", selection: $draft.languageIdentifier) {
-        Text("Use app setting").tag("")
-        ForEach(TranscriptionLanguageCatalog.options) { option in
-          Text(option.displayName).tag(option.id)
-        }
-      }
+      LongListPicker(
+        title: "Spoken Language",
+        items: [LongListChoice(id: "", title: "Use app setting")]
+          + TranscriptionLanguageCatalog.options.map { LongListChoice(id: $0.id, title: $0.displayName) },
+        id: { $0.id }, selection: $draft.languageIdentifier, searchText: { [$0.title, $0.id] },
+        row: { item in
+        Text(item.title)
+      })
       .pickerStyle(.menu)
       .labelsHidden()
     }

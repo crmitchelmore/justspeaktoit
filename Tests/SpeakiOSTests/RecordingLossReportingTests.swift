@@ -30,7 +30,7 @@ final class RecordingLossReportingTests: XCTestCase {
             urls.append(try XCTUnwrap(recorder.currentFileURL))
 
             // Exhaust the real capture pool; writer never sees these upstream gaps.
-            let pool = PCMBufferPool(maximumBuffers: 1)
+            let pool = LivePCMBufferPool(maximumBuffers: 1, maximumOutstanding: 1)
             let held = try XCTUnwrap(run.copyCapture(buffer, using: pool))
             XCTAssertNil(run.copyCapture(buffer, using: pool))
             XCTAssertNil(run.copyCapture(buffer, using: pool))

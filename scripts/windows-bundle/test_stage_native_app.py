@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for stage-native-app.py."""
 import hashlib
-import importlib.util
 import json
 import pathlib
 import sys
@@ -12,15 +11,15 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 
 
+sys.path.insert(0, str(HERE))
+import pe_test_fixtures as FIXTURES  # noqa: E402
+
+
 def load(name, file_name):
-    spec = importlib.util.spec_from_file_location(name, HERE / file_name)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return FIXTURES.load_script(name, HERE / file_name)
 
 
 STAGE = load("stage_native_app", "stage-native-app.py")
-BUNDLE_TESTS = load("test_windows_bundle", "test_windows_bundle.py")
 ARM64 = STAGE.windows_pe.IMAGE_FILE_MACHINE_ARM64
 VERSIONS = {"swiftCompiler": "Swift version 6.2.3 (swift-6.2.3-RELEASE)", "nativeCompiler": "clang version 17.0.0"}
 
@@ -32,9 +31,9 @@ class StageTests(unittest.TestCase):
         root = pathlib.Path(self.directory.name)
         self.bin = root / ".build" / "aarch64-unknown-windows-msvc" / "release"
         self.bin.mkdir(parents=True)
-        self.executable = BUNDLE_TESTS.build_pe(["KERNEL32.dll", "swiftCore.dll"], machine=ARM64, subsystem=2)
+        self.executable = FIXTURES.build_pe(["KERNEL32.dll", "swiftCore.dll"], machine=ARM64, subsystem=2)
         (self.bin / "SpeakWindows.exe").write_bytes(self.executable)
-        self.cli = BUNDLE_TESTS.build_pe(["KERNEL32.dll", "swiftCore.dll"], machine=ARM64)
+        self.cli = FIXTURES.build_pe(["KERNEL32.dll", "swiftCore.dll"], machine=ARM64)
         (self.bin / "speak.exe").write_bytes(self.cli)
         (self.bin / "SpeakApp_SpeakCore.resources").mkdir()
         (self.bin / "SpeakApp_SpeakCore.resources" / "ReleaseNotes.json").write_bytes(b"[]")
@@ -55,7 +54,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual(metadata["executables"]["speak.exe"], hashlib.sha256(self.cli).hexdigest())
         self.assertEqual(metadata["imageArchitectures"], {"SpeakWindows.exe": "arm64", "speak.exe": "arm64"})
         # A later test build cannot change the retained production CLI.
-        (self.bin / "speak.exe").write_bytes(BUNDLE_TESTS.build_pe(["Testing.dll"], machine=ARM64))
+        (self.bin / "speak.exe").write_bytes(FIXTURES.build_pe(["Testing.dll"], machine=ARM64))
         self.assertEqual((self.output / "speak.exe").read_bytes(), self.cli)
         self.assertIs(metadata["appBuiltForTesting"], False)
         written = json.loads((self.output / "app-build-metadata.json").read_text(encoding="utf-8"))
@@ -68,10 +67,10 @@ class StageTests(unittest.TestCase):
             self.stage()
         self.assertFalse(self.output.exists())
         for data, message in (
-            (BUNDLE_TESTS.build_pe(), "speak.exe is a x64 image"),
-            (BUNDLE_TESTS.build_pe(delay_imports=["Testing.dll"], machine=ARM64), "speak.exe imports Testing.dll"),
-            (BUNDLE_TESTS.build_pe(machine=ARM64, dll=True), "not a native arm64 executable"),
-            (BUNDLE_TESTS.build_pe(machine=ARM64, subsystem=2), "console subsystem"),
+            (FIXTURES.build_pe(), "speak.exe is a x64 image"),
+            (FIXTURES.build_pe(delay_imports=["Testing.dll"], machine=ARM64), "speak.exe imports Testing.dll"),
+            (FIXTURES.build_pe(machine=ARM64, dll=True), "not a native arm64 executable"),
+            (FIXTURES.build_pe(machine=ARM64, subsystem=2), "console subsystem"),
         ):
             path.write_bytes(data)
             with self.assertRaisesRegex(STAGE.StageError, message):
@@ -79,7 +78,7 @@ class StageTests(unittest.TestCase):
             self.assertFalse(self.output.exists())
 
     def test_console_application_is_refused(self):
-        (self.bin / "SpeakWindows.exe").write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"], machine=ARM64))
+        (self.bin / "SpeakWindows.exe").write_bytes(FIXTURES.build_pe(["KERNEL32.dll"], machine=ARM64))
         with self.assertRaisesRegex(STAGE.StageError, "SpeakWindows.exe must use the windows subsystem"):
             self.stage()
         self.assertFalse(self.output.exists())
@@ -88,7 +87,7 @@ class StageTests(unittest.TestCase):
         root = pathlib.Path(self.directory.name) / "x64" / "x86_64-unknown-windows-msvc" / "release"
         root.mkdir(parents=True)
         for name, subsystem in (("SpeakWindows.exe", 2), ("speak.exe", 3)):
-            (root / name).write_bytes(BUNDLE_TESTS.build_pe(["swiftCore.dll"], subsystem=subsystem))
+            (root / name).write_bytes(FIXTURES.build_pe(["swiftCore.dll"], subsystem=subsystem))
         metadata = self.stage("x64", root)
         for name in STAGE.EXECUTABLES:
             self.assertEqual((root / name).read_bytes(), (self.output / name).read_bytes())
@@ -104,10 +103,10 @@ class StageTests(unittest.TestCase):
         self.assertEqual((self.output / "SpeakApp_Future.resources/nested/payload.json").read_bytes(), b"{}")
 
     def test_foreign_test_enabled_or_misplaced_builds_are_refused(self):
-        (self.bin / "SpeakWindows.exe").write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"], subsystem=2))
+        (self.bin / "SpeakWindows.exe").write_bytes(FIXTURES.build_pe(["KERNEL32.dll"], subsystem=2))
         with self.assertRaisesRegex(STAGE.StageError, "x64 image, not a native arm64 executable"):
             self.stage()
-        (self.bin / "SpeakWindows.exe").write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"], ["XCTest.dll"], machine=ARM64, subsystem=2))
+        (self.bin / "SpeakWindows.exe").write_bytes(FIXTURES.build_pe(["KERNEL32.dll"], ["XCTest.dll"], machine=ARM64, subsystem=2))
         with self.assertRaisesRegex(STAGE.StageError, "imports XCTest.dll"):
             self.stage()
         with self.assertRaisesRegex(STAGE.StageError, "not a x86_64-unknown-windows-msvc release build"):

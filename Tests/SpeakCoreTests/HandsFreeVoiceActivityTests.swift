@@ -21,7 +21,8 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
         )
         XCTAssertEqual(
             HandsFreeDictationMachine.Failure(AppleLocalModelError.compatibleAudioFormatUnavailable),
-            .audioUnavailable
+            .audioFormatUnavailable,
+            "An empty SpeechAnalyzer format is not a microphone failure (#1553)"
         )
         XCTAssertEqual(
             HandsFreeDictationMachine.Failure(URLError(.notConnectedToInternet)),
@@ -32,11 +33,53 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
     func testEveryFailure_HasAUserFacingMessage() {
         let failures: [HandsFreeDictationMachine.Failure] = [
             .detectorUnavailable, .assetsUnavailable, .localeUnsupported,
-            .audioUnavailable, .captureFailed, .unsupportedConfiguration
+            .audioUnavailable, .audioFormatUnavailable, .captureFailed, .unsupportedConfiguration
         ]
         for failure in failures {
             XCTAssertFalse(failure.message.isEmpty, "\(failure) has no message")
         }
+        XCTAssertEqual(Set(failures.map(\.message)).count, failures.count, "Every failure reads differently")
+        XCTAssertFalse(HandsFreeDictationMachine.Failure.audioFormatUnavailable.message.contains("microphone"))
+    }
+
+    // MARK: - Microphone voice-activity session
+
+    func testVoiceActivitySession_ReportsSpeechFromMicrophoneBuffersButNotSilence() throws {
+        let format = try XCTUnwrap(
+            AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 48_000, channels: 2, interleaved: true)
+        )
+        let reports = LockedReports()
+        let session = HandsFreeVoiceActivitySession { reports.append($0) }
+        func send(seconds: Double, amplitude: Double) throws {
+            for _ in 0 ..< Int(seconds * 10) {
+                let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4_800))
+                buffer.frameLength = 4_800
+                let samples = try XCTUnwrap(buffer.int16ChannelData)[0]
+                for frame in 0 ..< 4_800 {
+                    let value = Int16(amplitude * 32_767 * sin(Double(frame) * 2 * .pi * 200 / 48_000))
+                    samples[frame * 2] = value
+                    samples[frame * 2 + 1] = value
+                }
+                session.send(buffer)
+            }
+        }
+
+        try send(seconds: 2, amplitude: 0)
+        XCTAssertFalse(reports.values.contains { $0.speechDetected })
+        try send(seconds: 0.5, amplitude: 0.2)
+        XCTAssertTrue(reports.values.last?.speechDetected ?? false)
+
+        session.cancel()
+        let count = reports.values.count
+        try send(seconds: 0.5, amplitude: 0.2)
+        XCTAssertEqual(reports.values.count, count, "A cancelled session reports nothing")
+    }
+
+    func testVoiceActivitySession_IgnoresAnEmptyFormatBuffer() throws {
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16))
+        buffer.frameLength = 0
+        XCTAssertNil(HandsFreeVoiceActivitySession.monoSamples(from: buffer))
     }
 
     // MARK: - Voice activity debounce
@@ -179,5 +222,22 @@ final class HandsFreeVoiceActivityTests: XCTestCase {
         preRoll.append(emptyBuffer)
 
         XCTAssertTrue(preRoll.takeSnapshot().isEmpty)
+    }
+}
+
+private final class LockedReports: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [AppleSpeechActivityUpdate] = []
+
+    func append(_ update: AppleSpeechActivityUpdate) {
+        lock.lock()
+        stored.append(update)
+        lock.unlock()
+    }
+
+    var values: [AppleSpeechActivityUpdate] {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
     }
 }

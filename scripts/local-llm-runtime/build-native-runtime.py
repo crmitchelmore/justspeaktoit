@@ -21,6 +21,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 import local_llm_package
+
 COMMIT = local_llm_package.COMMIT
 
 
@@ -113,4 +114,4 @@ if __name__ == "__main__":
     try:
         main()
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
-        raise SystemExit("native local LLM provisioning failed: " + str(error))
+        raise SystemExit("native local LLM provisioning failed: " + str(error)) from error

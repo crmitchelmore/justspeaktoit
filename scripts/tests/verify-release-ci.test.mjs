@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const script = fileURLToPath(new URL('../verify-release-ci.sh', import.meta.url));
+const script = fileURLToPath(new URL('../release-maintenance/verify-release-ci.sh', import.meta.url));
 const sha = 'a'.repeat(40);
 
 function verify(t, { main = sha, conclusion = 'success', apiExit = '0', commit = sha,

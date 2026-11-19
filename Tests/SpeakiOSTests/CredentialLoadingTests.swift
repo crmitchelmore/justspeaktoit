@@ -10,6 +10,16 @@ import XCTest
 
 @MainActor
 final class CredentialLoadingTests: XCTestCase {
+    override func setUp() async throws {
+        try await super.setUp()
+        CloudSharingConsentTestSupport.grantAll()
+    }
+
+    override func tearDown() async throws {
+        CloudSharingConsentTestSupport.withdrawAll()
+        try await super.tearDown()
+    }
+
     func testFailedBootstrap_retriesWithoutChangingProviderOrPolish() async throws {
         let fixture = Fixture()
         defer { fixture.cleanUp() }
@@ -22,7 +32,8 @@ final class CredentialLoadingTests: XCTestCase {
         XCTAssertFalse(settings.credentialsAvailable)
         XCTAssertEqual(settings.selectedModel, selected)
         XCTAssertTrue(settings.postProcessingEnabled)
-        XCTAssertTrue(settings.credentialFallbackReason.contains("unavailable"))
+        let locked = settings.transcriptionAvailability(for: "deepgram/nova-3-streaming", usesBatch: false)
+        XCTAssertEqual(locked.status, .credentialsUnavailable, "A locked Keychain is not a missing key")
         XCTAssertFalse(fixture.defaults.bool(forKey: "hasLaunchedBefore"))
 
         await permissions.allow()
@@ -263,7 +274,33 @@ final class CredentialLoadingTests: XCTestCase {
         XCTAssertNoThrow(try settings.requireAvailableCredentials(
             for: "deepgram/nova-3-streaming", purpose: .liveTranscription
         ))
-        XCTAssertEqual(settings.credentialFallbackReason, "no API key")
+    }
+}
+
+/// Issue #661: a missing key is reported, never answered with Apple speech.
+@MainActor
+final class TranscriptionAvailabilityTests: XCTestCase {
+    func testMissingKey_isReportedAndRefusedWhileOnDeviceSpeechStillRuns() async {
+        let fixture = Fixture()
+        defer { fixture.cleanUp() }
+        let permissions = RetryPermissions()
+        await permissions.allow()
+        let settings = fixture.settings(permissions: permissions)
+        let loaded = await settings.ensureKeysLoaded()
+        XCTAssertTrue(loaded)
+        let model = "deepgram/nova-3-streaming"
+
+        let availability = settings.transcriptionAvailability(for: model, usesBatch: false)
+        XCTAssertEqual(
+            availability, TranscriptionModelAvailability(status: .missingCredential, providerName: "Deepgram")
+        )
+        XCTAssertThrowsError(try settings.requireTranscriptionAvailable(model, usesBatch: false)) {
+            XCTAssertEqual(($0 as? TranscriptionModelUnavailableError)?.availability, availability)
+        }
+        XCTAssertNoThrow(
+            try settings.requireTranscriptionAvailable(AppleLocalModels.legacySpeechModelID, usesBatch: false),
+            "On-device speech needs no key"
+        )
     }
 }
 

@@ -103,7 +103,7 @@ read from the release assets:
 
 Every Mac release records each DMG's download, installed app, main executable
 and embedded CLI sizes in the `release-mac.yml` job summary. The Flatpak
-installed check (`scripts/linux-flatpak-checks.sh`) now logs the bundle size
+installed check (`scripts/linux/linux-flatpak-checks.sh`) now logs the bundle size
 and the installed app deployment size, excluding the shared GNOME runtime, in
 `flatpak-installed-checks.log` in the `justspeaktoit-flatpak-x86_64` artifact.
 The first CI measurement (PR #1339, Linux Flatpak run 41813047402, from Alpha 45

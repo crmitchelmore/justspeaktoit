@@ -23,7 +23,7 @@ jobs:
     runs-on: ${{ inputs.architecture == 'arm64' && 'windows-11-arm' || 'windows-2022' }}
     timeout-minutes: ${{ inputs.architecture == 'arm64' && 45 || 90 }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Check the runtime pins
@@ -35,7 +35,7 @@ jobs:
       # import policy produces a new cache entry and a fresh build.
       - name: Restore a runtime built from the same pins
         id: cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: local-runtime-output
           key: whisper-runtime-${{ inputs.architecture }}-${{ hashFiles('scripts/windows-local-runtime/dependencies.json', 'scripts/windows-local-runtime/build-whisper-runtime.py', 'scripts/windows-bundle/runtime-policy.json', 'scripts/windows-bundle/windows_pe.py') }}

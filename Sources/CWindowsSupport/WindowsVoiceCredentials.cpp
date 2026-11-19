@@ -38,7 +38,7 @@ std::deque<Delivery> deliveries;
 bool sameUUID(const std::string &first, const std::string &second) {
     return first.size() == 36 && second.size() == 36 && _stricmp(first.c_str(), second.c_str()) == 0;
 }
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 std::string uuid() {
     GUID value{}; wchar_t text[40]{};
     if (FAILED(CoCreateGuid(&value)) || StringFromGUID2(value, text, 40) != 39) return {};
@@ -87,8 +87,7 @@ void layout(HWND window) {
     MoveWindow(GetDlgItem(window, closeID), bounds.right - margin - button, top, button, scale(window, 36), TRUE);
 }
 void font(HWND window, Dialog &dialog) {
-    HFONT next = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    HFONT next = jsti::chrome::dialogFont(window);
     if (!next) return;
     for (int id = titleID; id <= closeID; ++id)
         SendDlgItemMessageW(window, id, WM_SETFONT, reinterpret_cast<WPARAM>(next), TRUE);
@@ -152,11 +151,7 @@ void deliver(HWND window, Dialog &dialog, const Delivery &value) {
     enable(window, dialog);
 }
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
+    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
     LRESULT themed = 0;
     if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
@@ -192,21 +187,13 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         else if (LOWORD(wparam) == closeID || LOWORD(wparam) == IDCANCEL) DestroyWindow(window);
         return 0;
     case DM_GETDEFID: return MAKELRESULT(saveID, DC_HASDEFID);
-    case WM_ACTIVATE:
-        if (LOWORD(wparam) == WA_INACTIVE) { dialog->focus = GetFocus(); return 0; }
-        SetFocus(dialog->focus && IsChild(window, dialog->focus) ? dialog->focus : GetDlgItem(window, keyID));
-        return 0;
+    case WM_ACTIVATE: jsti::chrome::rememberFocus(window, wparam, dialog->focus, keyID); return 0;
     case WM_SIZE: layout(window); return 0;
-    case WM_GETMINMAXINFO: {
-        RECT size{0, 0, scale(window, 540), scale(window, 460)};
-        AdjustWindowRectExForDpi(&size, style, FALSE, extended, GetDpiForWindow(window));
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {size.right - size.left, size.bottom - size.top};
+    case WM_GETMINMAXINFO:
+        jsti::chrome::minimumTrackSize(window, lparam, 540, 460, style, extended);
         return 0;
-    }
     case WM_DPICHANGED: {
-        const auto bounds = reinterpret_cast<const RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        jsti::chrome::applySuggestedBounds(window, lparam);
         font(window, *dialog); layout(window); return 0;
     }
     case WM_CLOSE: DestroyWindow(window); return 0;

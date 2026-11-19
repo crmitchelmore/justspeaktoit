@@ -148,7 +148,7 @@ final class PostProcessingRequestDiagnosticTests: XCTestCase {
         temperature: @escaping () -> Double = { 0.3 },
         observe: ((RequestDiagnosticContext.PostProcessingObservation) -> Void)?, update: ((String) -> Void)? = nil
     ) async -> Result<PostProcessingOutcome, Error> {
-        await PostProcessingManager.performRemoteProcess(
+        await RemotePostProcessor.process(
             client: client, rawText: PostDiagnosticClient.canary,
             promptPayload: .init(modelIdentifier: model, customPrompt: nil, systemPrompt: PostDiagnosticClient.canary,
                                  userPrompt: PostDiagnosticClient.canary),

@@ -82,8 +82,19 @@ export function effectiveCommits(commits) {
         seen.add(key); return true;
     });
 }
-export function notesFor(commits, platform, compareURL) {
-    return deterministicNotes({commits: filterCommitsForTrack(effectiveCommits(commits), platform), compareURL});
+export function notesFor(commits, platform, compareURL, testing = '') {
+    return deterministicNotes({commits: filterCommitsForTrack(effectiveCommits(commits), platform), compareURL, testing});
+}
+export function storeNotesFor({train, source, surface, notes}, git) {
+    if (train === 'stable') {
+        const path = `Config/StoreNotes/${surface}.md`;
+        if (git('ls-tree', '--name-only', source, '--', path)) {
+            const override = git('show', `${source}:${path}`).trim();
+            if (override.length > 4000) throw Error(`${path} at ${source} exceeds the 4,000-character store notes limit (${override.length})`);
+            if (override) return override;
+        }
+    }
+    return notes.length <= 4000 ? notes : notes.slice(0,3900)+'\nFull release notes are available in the app.';
 }
 export function notesHTML(manifest, surface) { return markdownToHTML(manifest.surfaces[surface].notes); }
 export function canAdvance(current, incoming) { return !current || BigInt(incoming.build) > BigInt(current.build); }

@@ -20,6 +20,8 @@ param(
     [Parameter(Mandatory = $true)] [string] $X64Bundle,
     [Parameter(Mandatory = $true)] [string] $Arm64Bundle,
     [Parameter(Mandatory = $true)] [string] $ExpectedCommit,
+    [string] $X64Commit = $ExpectedCommit,
+    [string] $Arm64Commit = $ExpectedCommit,
     [Parameter(Mandatory = $true)] [string] $BaseVersion,
     [Parameter(Mandatory = $true)] [string] $UpgradeVersion,
     [Parameter(Mandatory = $true)] [string] $ToolCache,
@@ -60,7 +62,7 @@ try {
         $version = if ($kind -eq 'base') { $BaseVersion } else { $UpgradeVersion }
         $root = Join-Path $workspace "bundle-$kind"
         & (Join-Path $PSScriptRoot 'build-windows-installer-bundle.ps1') -X64Bundle $X64Bundle -Arm64Bundle $Arm64Bundle `
-            -ExpectedCommit $ExpectedCommit -Version $version -Publisher $publisher -Output $root -ToolCache $ToolCache -Python $Python
+            -ExpectedCommit $ExpectedCommit -X64Commit $X64Commit -Arm64Commit $Arm64Commit -Version $version -Publisher $publisher -Output $root -ToolCache $ToolCache -Python $Python
         $unsigned = Join-Path $root ("JustSpeakToIt-windows_{0}_unsigned.msixbundle" -f $version)
         $output = Join-Path $site ("JustSpeakToIt-windows_{0}.msixbundle" -f $version)
         & (Join-Path $PSScriptRoot 'sign-windows-installer.ps1') -Bundle $unsigned -Output $output `

@@ -16,7 +16,7 @@ final class DesktopHostConnectionPreWarmingTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("warm-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         effects = ConnectionWarmEffects()
-        controller = try DesktopHostController(
+        controller = try DesktopHostController.consented(
             directory: directory, effects: effects, shutdownGrace: .milliseconds(10)
         )
         await controller.markReadyForSelfTest()
@@ -80,7 +80,7 @@ final class DesktopHostConnectionPreWarmingTests: XCTestCase {
         let edited = try await entries(approved: true)
         try await controller.saveConfiguration(edited)
         await controller.close()
-        controller = try DesktopHostController(directory: directory, effects: effects)
+        controller = try DesktopHostController.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         let editor = try await controller.configurationForNativeEditor()
         XCTAssertTrue(editor.enabled(DesktopConnectionPreWarming.preferenceKey))

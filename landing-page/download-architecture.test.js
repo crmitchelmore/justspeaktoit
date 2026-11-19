@@ -4,6 +4,7 @@ import {
   classifyArchitecture,
   detectMacArchitecture,
   downloadForArchitecture,
+  enhanceMacDownloads,
 } from "./download-architecture.js";
 
 test("classifies browser architecture hints", () => {
@@ -32,4 +33,14 @@ test("falls back to the compatible universal download", () => {
   assert.equal(downloadForArchitecture("arm64"), "/download/mac");
   assert.equal(downloadForArchitecture("intel"), "/download/mac-intel");
   assert.equal(downloadForArchitecture("unknown"), "/download/mac-intel");
+});
+
+test("download buttons keep their visible text in the accessible name", async () => {
+  const attributes = {};
+  const link = { dataset: {}, textContent: "↓ Download for Mac", setAttribute: (name, value) => { attributes[name] = value; } };
+  const documentObject = {
+    querySelectorAll: selector => (selector === "[data-auto-mac-download]" ? [link] : []),
+  };
+  await enhanceMacDownloads(documentObject, { platform: "MacIntel" });
+  assert.match(attributes["aria-label"], /^Download for Mac\b/);
 });

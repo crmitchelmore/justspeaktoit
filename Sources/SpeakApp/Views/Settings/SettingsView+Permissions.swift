@@ -17,11 +17,6 @@ extension SettingsView {
   func statusLabel(for status: PermissionStatus) -> String {
     PermissionsSettingsContent.statusLabel(for: status)
   }
-
-  func volumeLabel(for volume: Float) -> String {
-    let percent = Int(volume * 100)
-    return "\(percent)%"
-  }
 }
 
 struct PermissionsSettingsContent: View {
@@ -30,6 +25,7 @@ struct PermissionsSettingsContent: View {
 
   var body: some View {
     SpeakDensitySettingsSection(density: density) {
+      SystemResourcesStatusCard(monitor: SystemResourceMonitor.shared)
       SettingsCard(title: "System permissions", systemImage: "lock.shield", tint: Color.red) {
         VStack(alignment: .leading, spacing: 12) {
           ForEach(PermissionType.availablePermissions(for: DistributionChannel.current)) { permission in

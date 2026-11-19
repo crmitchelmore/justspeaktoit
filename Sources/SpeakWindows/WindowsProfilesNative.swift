@@ -45,7 +45,7 @@ extension WindowsNative {
                             drafts.baseAddress, drafts.count, transcription.baseAddress, transcription.count,
                             polish.baseAddress, polish.count, languages.baseAddress, languages.count,
                             strings.add(snapshot.notice), profilesEvent,
-                            Unmanaged.passUnretained(coordinator).toOpaque()
+                            coordinator.callbacks.pointer
                         )
                     }
                 }

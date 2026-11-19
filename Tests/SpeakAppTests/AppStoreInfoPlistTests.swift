@@ -28,16 +28,17 @@ final class AppStoreInfoPlistTests: XCTestCase {
         XCTAssertNil(appStorePlist["PostHogHost"])
     }
 
-    func testAppStorePlist_declaresLocalNetworkUsage() {
-        let value = appStorePlist["NSLocalNetworkUsageDescription"] as? String
-        let expected = "Just Speak to It uses your local network to connect iPhone and Mac "
-            + "for Send to Mac transcription transfer."
-        XCTAssertEqual(value, expected)
+    /// The Store build compiles Send to Mac out and has no network-server
+    /// entitlement, so it must not declare the local network or a Bonjour service.
+    func testAppStorePlist_omitsLocalNetworkDeclarations() {
+        XCTAssertNil(appStorePlist["NSLocalNetworkUsageDescription"])
+        XCTAssertNil(appStorePlist["NSBonjourServices"])
     }
 
-    func testAppStorePlist_declaresBonjourService() {
-        let services = appStorePlist["NSBonjourServices"] as? [String]
+    func testDirectPlist_declaresSendToMacBonjourService() {
+        let services = directPlist["NSBonjourServices"] as? [String]
         XCTAssertEqual(services, ["_speaktransport._tcp"])
+        XCTAssertNotNil(directPlist["NSLocalNetworkUsageDescription"])
     }
 
     func testAppStorePlist_matchesDirectPlistExceptSparkleKeys() {
@@ -50,7 +51,10 @@ final class AppStoreInfoPlistTests: XCTestCase {
             // exemption it needs exist for Sparkle alone, so they stay off the
             // App Store build, which updates through the store.
             "SpeakSparkleSmokeSupported",
-            "NSAppTransportSecurity"
+            "NSAppTransportSecurity",
+            // Send to Mac's receiver is Direct-only.
+            "NSLocalNetworkUsageDescription",
+            "NSBonjourServices"
         ]
         var directWithoutSparkle = directPlist!
         sparkleKeys.forEach { directWithoutSparkle.removeValue(forKey: $0) }
@@ -77,6 +81,50 @@ final class AppStoreInfoPlistTests: XCTestCase {
         XCTAssertEqual(appStorePlist["CFBundleDisplayName"] as? String, "Just Speak to It (App Store)")
         XCTAssertEqual(directPlist["CFBundleName"] as? String, "Just Speak to It")
         XCTAssertEqual(appStorePlist["CFBundleName"] as? String, "Just Speak to It App Store")
+    }
+
+    func testRecordingPurposeStringsDescribeCloudAndLocalProcessing() {
+        for info in [directPlist!, appStorePlist!] {
+            let microphone = info["NSMicrophoneUsageDescription"] as? String ?? ""
+            XCTAssertTrue(microphone.contains("provider you choose in Settings"))
+            XCTAssertTrue(microphone.contains("on-device model"))
+            let speech = info["NSSpeechRecognitionUsageDescription"] as? String ?? ""
+            XCTAssertTrue(speech.contains("processed by Apple"))
+        }
+    }
+
+    func testMacPrivacyManifestsKeepProductAnalyticsOutOfTheStore() throws {
+        let store = try Self.loadPlist(at: "Sources/SpeakApp/Resources/AppStore/PrivacyInfo.xcprivacy")
+        let direct = try Self.loadPlist(at: "Sources/SpeakApp/Resources/Direct/PrivacyInfo.xcprivacy")
+        let storeEntries = try XCTUnwrap(store["NSPrivacyCollectedDataTypes"] as? [[String: Any]])
+        let directEntries = try XCTUnwrap(direct["NSPrivacyCollectedDataTypes"] as? [[String: Any]])
+        let baseline = Set([
+            "NSPrivacyCollectedDataTypeAudioData", "NSPrivacyCollectedDataTypeOtherUserContent",
+            "NSPrivacyCollectedDataTypeCrashData", "NSPrivacyCollectedDataTypePerformanceData",
+            "NSPrivacyCollectedDataTypeOtherDiagnosticData", "NSPrivacyCollectedDataTypeDeviceID"
+        ])
+        XCTAssertEqual(Set(storeEntries.compactMap { $0["NSPrivacyCollectedDataType"] as? String }), baseline)
+        for type in ["NSPrivacyCollectedDataTypeProductInteraction", "NSPrivacyCollectedDataTypeDeviceID"] {
+            let entry = try XCTUnwrap(directEntries.first { $0["NSPrivacyCollectedDataType"] as? String == type })
+            XCTAssertEqual(entry["NSPrivacyCollectedDataTypeLinked"] as? Bool, true)
+            XCTAssertEqual(entry["NSPrivacyCollectedDataTypeTracking"] as? Bool, false)
+            let purposes = try XCTUnwrap(entry["NSPrivacyCollectedDataTypePurposes"] as? [String])
+            XCTAssertTrue(purposes.contains("NSPrivacyCollectedDataTypePurposeAnalytics"))
+        }
+        for entry in storeEntries {
+            let purposes = try XCTUnwrap(entry["NSPrivacyCollectedDataTypePurposes"] as? [String])
+            XCTAssertEqual(purposes, ["NSPrivacyCollectedDataTypePurposeAppFunctionality"])
+            if !["NSPrivacyCollectedDataTypeAudioData", "NSPrivacyCollectedDataTypeOtherUserContent"]
+                .contains(entry["NSPrivacyCollectedDataType"] as? String ?? "") {
+                XCTAssertEqual(entry["NSPrivacyCollectedDataTypeLinked"] as? Bool, true)
+            }
+        }
+        XCTAssertEqual(store["NSPrivacyTracking"] as? Bool, false)
+        XCTAssertEqual(direct["NSPrivacyTracking"] as? Bool, false)
+        XCTAssertEqual(
+            store["NSPrivacyAccessedAPITypes"] as? NSArray,
+            direct["NSPrivacyAccessedAPITypes"] as? NSArray
+        )
     }
 
     private static func loadPlist(at path: String) throws -> [String: Any] {

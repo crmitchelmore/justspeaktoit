@@ -28,12 +28,13 @@ final class KeyboardProfileGuardTests: XCTestCase {
     }
 
     func testProfileMenuShowsRouteAndIsDisabledWhileBusy() throws {
-        let rootView = try source("JustSpeakKeyboard/KeyboardRootView.swift")
+        // The profile menu lives in the control row the root view composes.
+        let controlRow = try source("JustSpeakKeyboard/KeyboardControlRow.swift")
 
-        XCTAssertTrue(rootView.contains("Menu {"))
-        XCTAssertTrue(rootView.contains("profile.route.displayName"))
-        XCTAssertTrue(rootView.contains("model.selectProfile(profile.id)"))
-        XCTAssertTrue(rootView.contains(".disabled(model.isBusy)"))
+        XCTAssertTrue(controlRow.contains("Menu {"))
+        XCTAssertTrue(controlRow.contains("profile.route.displayName"))
+        XCTAssertTrue(controlRow.contains("model.selectProfile(profile.id)"))
+        XCTAssertTrue(controlRow.contains(".disabled(surface.isBusy)"))
     }
 
     func testEveryOwningAppSettingPublishesAtItsMutationBoundary() throws {

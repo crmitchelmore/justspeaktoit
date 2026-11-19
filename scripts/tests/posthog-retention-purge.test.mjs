@@ -124,17 +124,12 @@ test('zero matches submits nothing even when live', async () => {
   assert.equal(calls.filter((c) => c.method === 'POST').length, 1);
 });
 
-test('geoip mode targets GeoIP properties and refuses above the expected maximum', async () => {
-  const ok = fakeFetch({previewCount: 7});
-  assert.equal((await runWith({env: env({PURGE_MODE: 'geoip-test-events', DRY_RUN: 'false'}), fetch: ok.fetch})).code, 0);
-  const q = JSON.parse(ok.calls.at(-1).body).query;
-  assert.match(q, /\$geoip_city_name/);
-  assert.match(q, /\$geoip_postal_code/);
-  const tooMany = fakeFetch({previewCount: 8});
-  const {code, out} = await runWith({env: env({PURGE_MODE: 'geoip-test-events', DRY_RUN: 'false'}), fetch: tooMany.fetch});
+test('the retired geoip-test-events mode fails closed without any request', async () => {
+  const {fetch, calls} = fakeFetch({previewCount: 8});
+  const {code, out} = await runWith({env: env({PURGE_MODE: 'geoip-test-events', DRY_RUN: 'false'}), fetch});
   assert.equal(code, 1);
-  assert.match(out, /refusing/);
-  assert.equal(tooMany.calls.filter((c) => c.method === 'POST').length, 1);
+  assert.match(out, /PURGE_MODE must be retention/);
+  assert.equal(calls.length, 0);
 });
 
 test('pagination is bounded and must stay on the configured origin', async () => {

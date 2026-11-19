@@ -134,6 +134,42 @@ final class HistoryViewRefreshTests: XCTestCase {
         }
     }
 
+    func testFilterKeyQuery_usesTheSharedDayPolicyAndKeepsStoredItems() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/London"))
+        func date(_ day: Int, _ hour: Int, _ minute: Int = 0) throws -> Date {
+            let components = DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute)
+            return try XCTUnwrap(calendar.date(from: components))
+        }
+        let key = try HistoryViewFilterKey(
+            searchText: "  NOTES ", errorsOnly: true, selectedModel: "model-a", dateRangeEnabled: true,
+            startDate: date(10, 15), endDate: date(11, 9)
+        )
+        let query = key.query(calendar: calendar)
+        XCTAssertEqual(query.dateRange, HistorySearchQuery.normalizedDayRange(
+            from: try date(10, 0), through: try date(11, 0), calendar: calendar
+        ))
+        XCTAssertTrue(key.hasActiveFilters)
+
+        let early = try item(text: "notes", date: date(10, 0).timeIntervalSince1970).withError("failed")
+        let late = try item(text: "notes", date: date(11, 23, 59).timeIntervalSince1970).withError("failed")
+        let nextDay = try item(text: "notes", date: date(12, 0).timeIntervalSince1970).withError("failed")
+        let otherModel = try item(text: "notes", model: "model-b", date: date(10, 12).timeIntervalSince1970)
+            .withError("failed")
+        let noError = try item(text: "notes", date: date(10, 12).timeIntervalSince1970)
+        let items = [early, late, nextDay, otherModel, noError]
+        let state = HistoryViewDerivedState(items: items, query: query)
+        XCTAssertEqual(state.filteredItems.map(\.id), [early.id, late.id])
+        XCTAssertEqual(items.count, 5)
+
+        let searchOnly = HistoryViewFilterKey(
+            searchText: "notes", errorsOnly: false, selectedModel: nil, dateRangeEnabled: false,
+            startDate: key.startDate, endDate: key.endDate
+        )
+        XCTAssertFalse(searchOnly.hasActiveFilters)
+        XCTAssertNil(searchOnly.query(calendar: calendar).dateRange)
+    }
+
     private func item(
         id: UUID = UUID(), text: String, model: String = "model-a",
         duration: TimeInterval = 1, date: TimeInterval = 100

@@ -1,5 +1,5 @@
 #include "LinuxSupportInternal.h"
-#include "include/VoiceAudioCodec.h"
+#include "../CWindowsSupport/include/VoiceAudioCodec.h"
 #include <gst/app/gstappsrc.h>
 #include <gst/app/gstappsink.h>
 #include <gst/gst.h>

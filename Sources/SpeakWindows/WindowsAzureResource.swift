@@ -21,7 +21,7 @@ func azureResourceEvent(
     _ errorBuffer: UnsafeMutablePointer<CChar>?, _ capacity: Int
 ) -> Int32 {
     guard let context, let entry else { return -1 }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return -1 }
     let endpoint: String
     do {
         endpoint = try WindowsAzureResource.normalized(String(cString: entry))
@@ -32,7 +32,7 @@ func azureResourceEvent(
     holder.enqueueSettings {
         await holder.controller.saveAzureResourceEndpoint(endpoint)
         let saved = await holder.controller.azureResourceEndpoint()
-        if !WindowsNative.configureAzureResource(saved, context: Unmanaged.passUnretained(holder).toOpaque()) {
+        if !WindowsNative.configureAzureResource(saved, context: holder.callbackContext) {
             WindowsNative.update("The saved Azure Speech resource could not be shown. Reopen it and try again.")
         }
     }

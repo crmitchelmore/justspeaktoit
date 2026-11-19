@@ -98,7 +98,7 @@ struct CloudKitSyncSettingsSection: View {
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Sign in to iCloud in Settings to sync History across your devices. "
-                    + "Until iCloud History Sync is available, History stays on this iPhone.")
+                    + "Until iCloud History Sync is available, History stays on \(DeviceCopy.thisDevice).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -108,68 +108,28 @@ struct CloudKitSyncSettingsSection: View {
 
 struct CloudKitKeySyncSettingsSection: View {
     @ObservedObject private var keySync = CloudKitKeySync.shared
-    @State private var passphrase = ""
-    @State private var syncError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Encrypted API-Key Sync", systemImage: "lock.icloud")
-                Spacer()
-                Text(keySync.status.message)
-                    .foregroundStyle(keySync.status.isEnabled ? .green : .secondary)
-            }
-            .accessibilityElement(children: .combine)
-
-            if !keySync.status.isEnabled {
-                SecureField("Sync passphrase", text: $passphrase)
-                    .textContentType(.password)
-                    .autocorrectionDisabled()
-                    .privacySensitive()
-
-                Button {
-                    Task {
-                        do {
-                            try await keySync.enable(passphrase: passphrase)
-                            await AppSettings.shared.reloadSyncedAPIKeys()
-                            passphrase = ""
-                            syncError = nil
-                        } catch {
-                            syncError = error.localizedDescription
-                        }
-                    }
-                } label: {
-                    Label("Enable API-Key Sync", systemImage: "lock.open")
-                }
-                .disabled(passphrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            } else {
-                HStack {
-                    Button {
-                        Task {
-                            do {
-                                try await keySync.syncNow()
-                                await AppSettings.shared.reloadSyncedAPIKeys()
-                                syncError = nil
-                            } catch {
-                                syncError = error.localizedDescription
-                            }
-                        }
-                    } label: {
-                        Label("Sync Keys Now", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    .disabled(keySync.status.isSyncing)
-
-                    Button("Disable", role: .destructive) {
-                        Task { await keySync.disable() }
-                    }
-                }
-            }
-
-            if let syncError {
-                Text(syncError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
+            EncryptedKeySyncControls(
+                status: EncryptedKeySyncDisplayStatus(
+                    isEnabled: keySync.status.isEnabled,
+                    isSyncing: keySync.status.isSyncing,
+                    message: keySync.status.message
+                ),
+                statusTitle: "Encrypted API-Key Sync",
+                statusSystemImage: "lock.icloud",
+                spacing: 8,
+                enable: { passphrase in
+                    try await keySync.enable(passphrase: passphrase)
+                    try await Self.reloadSyncedKeys()
+                },
+                syncNow: {
+                    try await keySync.syncNow()
+                    try await Self.reloadSyncedKeys()
+                },
+                disable: { await keySync.disable() }
+            )
 
             Text("Keys are encrypted on this device before they are written to your private CloudKit database.")
                 .font(.caption)
@@ -179,6 +139,23 @@ struct CloudKitKeySyncSettingsSection: View {
             _ = await AppSettings.shared.syncCloudKitKeys()
         }
     }
+
+    /// Reloads the synced keys into settings, failing visibly when the
+    /// credential store could not be read so the error line reports it.
+    @MainActor
+    private static func reloadSyncedKeys() async throws {
+        guard await AppSettings.shared.reloadSyncedAPIKeys() else {
+            throw KeySyncReloadError(
+                message: "Keys synced, but \(DeviceCopy.thisDevice) could not read them from the Keychain. "
+                    + "Try again after unlocking."
+            )
+        }
+    }
+}
+
+private struct KeySyncReloadError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
 }
 
 #endif

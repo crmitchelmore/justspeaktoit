@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import os
 import SpeakCore
 import UIKit
 
@@ -24,10 +25,10 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         return base.appendingPathComponent("WatchCaptures", isDirectory: true)
     }
 
-    /// Sends one acknowledgement to the Watch. Set by the receiver, which
-    /// owns the WCSession; delivery confirmation comes back through
-    /// `handleAckTransferFinished`.
-    nonisolated(unsafe) public var sendAck: (@Sendable (WatchCaptureAck) -> Void)?
+    /// Backs `sendAck`: set from the receiver's nonisolated initialiser and
+    /// read on the main actor, so the handler is guarded, not unsynchronised.
+    nonisolated let sendAckHandler =
+        OSAllocatedUnfairLock<(@Sendable (WatchCaptureAck) -> Void)?>(initialState: nil)
 
     let journal: WatchCaptureImportJournal
     var credentialSettings: AppSettings?
@@ -208,6 +209,10 @@ public final class WatchCaptureImportPipeline: ObservableObject {
             // Loading failed before transcription began. Keep the existing
             // job and retry budget intact until Keychain access recovers.
             return
+        } catch is CloudSharingConsentRequiredError {
+            // Nothing was sent: the audio stays parked, and the job keeps its
+            // retry budget until the user allows the provider (issue #1805).
+            return
         } catch {
             SpeakLogger.logError(error, context: "WatchCaptureImportPipeline.import")
             let urlError = error as? URLError
@@ -285,7 +290,7 @@ public final class WatchCaptureImportPipeline: ObservableObject {
 
         await offerToKeyboard(text)
 
-        if settings.autoPostProcess && settings.hasOpenRouterKey {
+        if settings.autoPostProcess && settings.hasPostProcessingKey {
             await iOSHistoryManager.shared.reprocess(item)
         }
     }
@@ -336,24 +341,6 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         // Transport callbacks may synchronously re-enter the delivery path.
         if completed { replayPendingAcks() }
         return completed
-    }
-
-    // MARK: - Acknowledgements
-
-    /// Re-sends every acknowledgement whose delivery is unconfirmed.
-    public func replayPendingAcks() {
-        guard let sendAck else { return }
-        for record in journal.pendingAcks() {
-            sendAck(record.ack)
-        }
-    }
-
-    /// Transport confirmation from the receiver's `didFinish` delegate: a
-    /// confirmed delivery clears the retained acknowledgement; a failed one
-    /// keeps it for the next replay, without retranscribing anything.
-    nonisolated public func handleAckTransferFinished(captureID: UUID, delivered: Bool) {
-        guard delivered else { return }
-        journal.confirmAckDelivered(captureID: captureID)
     }
 
 }

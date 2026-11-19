@@ -11,7 +11,7 @@ final class DesktopHostLiveProjectionTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("host-live-projection-\(UUID().uuidString)")
         let effects = HostLiveProjectionEffects()
-        let controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         let modelIndex = try XCTUnwrap(DesktopHostModels.all.firstIndex {
             $0.id == AssemblyAIModels.universal36ProStreamingID

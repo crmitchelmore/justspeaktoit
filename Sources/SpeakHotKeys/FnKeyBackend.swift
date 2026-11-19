@@ -25,6 +25,8 @@ final class FnKeyBackend {
   private var localMonitor: Any?
   private var eventTap: CFMachPort?
   private var eventTapRunLoopSource: CFRunLoopSource?
+  /// The tap's retained `userInfo`, released once the tap is invalidated.
+  private var eventTapContext: UnsafeMutableRawPointer?
   private var hardwareStateTimer: Timer?
   private var hardwareStateInterval: TimeInterval?
   private var hardwareStatePollingEnabled = false
@@ -35,12 +37,11 @@ final class FnKeyBackend {
   func start() -> Bool {
     guard globalMonitor == nil else { return true }
 
-    globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown, .keyUp]) {
-      [weak self] event in
+    let events: NSEvent.EventTypeMask = [.flagsChanged, .keyDown, .keyUp]
+    globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: events) { [weak self] event in
       self?.handleNSEvent(event: event)
     }
-    localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown, .keyUp]) {
-      [weak self] event in
+    localMonitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self] event in
       self?.handleNSEvent(event: event)
       return event
     }
@@ -80,9 +81,15 @@ final class FnKeyBackend {
     }
     if let tap = eventTap {
       CGEvent.tapEnable(tap: tap, enable: false)
+      CFMachPortInvalidate(tap)
+    }
+    if let eventTapContext {
+      Context.release(eventTapContext)
     }
     hardwareStateTimer?.invalidate()
   }
+
+  private typealias Context = HotKeyCallbackContext<FnKeyBackend>
 
   // MARK: - NSEvent Handling (Fallback)
 
@@ -112,6 +119,7 @@ final class FnKeyBackend {
   private func startEventTap() -> Bool {
     stopEventTap()
     let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
+    let context = Context(owner: self).retainedPointer()
     guard
       let tap = CGEvent.tapCreate(
         tap: .cgSessionEventTap,
@@ -119,23 +127,29 @@ final class FnKeyBackend {
         options: .listenOnly,
         eventsOfInterest: mask,
         callback: { _, type, cgEvent, refcon in
-          guard let refcon else { return Unmanaged.passUnretained(cgEvent) }
-          let backend = Unmanaged<FnKeyBackend>.fromOpaque(refcon).takeUnretainedValue()
+          // A listen-only tap hands the event back unretained, as CGEvent requires.
+          guard let refcon,
+            let backend = HotKeyCallbackContext<FnKeyBackend>.context(from: refcon).owner
+          else { return Unmanaged.passUnretained(cgEvent) }
           return backend.handleCGEvent(type: type, event: cgEvent)
         },
-        userInfo: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        userInfo: context
       )
     else {
+      Context.release(context)
       log.error("Failed to start CGEvent tap; using NSEvent fallback")
       return false
     }
 
     guard let source = CFMachPortCreateRunLoopSource(nil, tap, 0) else {
       CGEvent.tapEnable(tap: tap, enable: false)
+      CFMachPortInvalidate(tap)
+      Context.release(context)
       log.error("Failed to create the CGEvent tap run-loop source; using NSEvent fallback")
       return false
     }
 
+    eventTapContext = context
     eventTap = tap
     eventTapRunLoopSource = source
     CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
@@ -143,15 +157,25 @@ final class FnKeyBackend {
     return true
   }
 
+  /// Cuts the tap off from this backend, invalidates it so it can never call
+  /// back again, then gives back its retained context.
   private func stopEventTap() {
+    if let eventTapContext {
+      Context.context(from: eventTapContext).invalidate()
+    }
     if let source = eventTapRunLoopSource {
       CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
     }
     eventTapRunLoopSource = nil
     if let tap = eventTap {
       CGEvent.tapEnable(tap: tap, enable: false)
+      CFMachPortInvalidate(tap)
     }
     eventTap = nil
+    if let eventTapContext {
+      Context.release(eventTapContext)
+    }
+    eventTapContext = nil
   }
 
   /// Terminal and other secure-input clients can temporarily starve event-tap

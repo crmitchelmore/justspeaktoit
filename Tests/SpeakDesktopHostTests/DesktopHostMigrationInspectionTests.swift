@@ -34,7 +34,7 @@ final class DesktopHostMigrationInspectionTests: XCTestCase {
             presented.fulfill()
         })
         await fixture.controller.beginMigrationInspection(fixture.destination, using: inspector)
-        let task = await fixture.controller.migrationInspectionTask
+        let task = await fixture.controller.migrationWork.inspectionTask
         await task?.value
         await fulfillment(of: [presented], timeout: 10)
         let restored = try await fixture.controller.store.record(id: record.id)
@@ -64,7 +64,7 @@ final class DesktopHostMigrationInspectionTests: XCTestCase {
             await fixture.controller.beginMigrationInspection(fixture.destination, using: inspector)
         }.value
         await gate.waitUntilHeld()
-        let task = await fixture.controller.migrationInspectionTask
+        let task = await fixture.controller.migrationWork.inspectionTask
         let statuses = FakeLog.shared.allStatuses
         let report = await queue.read { await fixture.controller.close() }.value
         XCTAssertEqual(report.unfinishedOperations, 1)
@@ -86,7 +86,7 @@ final class DesktopHostMigrationInspectionTests: XCTestCase {
         let inspector = heldInspector(fixture, gate: gate)
         await fixture.controller.beginMigrationInspection(fixture.destination, using: inspector)
         await gate.waitUntilHeld()
-        let task = await fixture.controller.migrationInspectionTask
+        let task = await fixture.controller.migrationWork.inspectionTask
         await fixture.controller.beginMigrationInspection(fixture.destination, using: inspector)
         let operations = await fixture.controller.activeOperations
         XCTAssertEqual(operations, 1)
@@ -106,7 +106,7 @@ final class DesktopHostMigrationInspectionTests: XCTestCase {
             try Self.emptySnapshot(fixture.root)
         }, present: { _ in throw DesktopHostError(message: "Synthetic native presentation failure.") })
         await fixture.controller.beginMigrationInspection(fixture.destination, using: inspector)
-        let task = await fixture.controller.migrationInspectionTask
+        let task = await fixture.controller.migrationWork.inspectionTask
         await task?.value
         XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("Could not show backup inspection") == true)
         let busy = await fixture.controller.busy

@@ -2,12 +2,12 @@
 """Check the resolved Flatpak build contract before an expensive native build."""
 import argparse
 import json
-from itertools import islice
 import re
 import stat
 import subprocess
 import tempfile
 import time
+from itertools import islice
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +19,7 @@ def verify(manifest):
     assert set(manifest['finish-args']) == {
         '--share=network', '--share=ipc', '--socket=wayland', '--socket=fallback-x11',
         '--socket=pulseaudio', '--device=dri', '--talk-name=org.kde.StatusNotifierWatcher',
+        '--system-talk-name=org.freedesktop.Avahi',
         '--env=JSTI_WHISPER_RUNTIME_DIRECTORY=/app/lib/justspeaktoit',
         '--env=GGML_NO_BACKTRACE=1',
     }, 'sandbox permissions changed: owner review required'

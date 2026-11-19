@@ -8,8 +8,7 @@
 # Tooling/Package.resolved regardless of app/test dependency changes.
 #
 # All arguments are forwarded to the swiftlint binary, and swiftlint runs from
-# the repository root so relative paths in .swiftlint.yml and the path-keyed
-# .swiftlint-baseline.json keep working.
+# the repository root so relative paths in .swiftlint.yml keep working.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,6 +17,12 @@ cd "$ROOT"
 # Resolve the tooling graph; this also downloads the SwiftLint binary
 # artifact bundle into Tooling/.build/artifacts.
 swift package --package-path Tooling resolve
+
+# The Linux SwiftLint binary loads SourceKit from the Swift toolchain.
+if [ "$(uname -s)" = Linux ] && [ -z "${LINUX_SOURCEKIT_LIB_PATH:-}" ]; then
+    LINUX_SOURCEKIT_LIB_PATH="$(dirname "$(dirname "$(readlink -f "$(command -v swift)")")")/lib"
+    export LINUX_SOURCEKIT_LIB_PATH
+fi
 
 case "$(uname -s)" in
     Darwin) platform_dir="macos" ;;

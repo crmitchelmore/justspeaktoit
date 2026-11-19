@@ -5,7 +5,7 @@ import XCTest
 @testable import SpeakDesktopHost
 
 final class DesktopHostMigrationRestoreTests: XCTestCase {
-    func testRealZIP_RestoresHistoryTextWithoutAudioSettingsOrSourceMutation() async throws {
+    func testRealZIP_RestoresHistoryAndAudioWithoutSettingsOrSourceMutation() async throws {
         FakeLog.shared.reset()
         let source = try BackupHostFixture()
         let target = try BackupHostFixture()
@@ -29,7 +29,7 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         })
         await target.controller.beginMigrationRestore(source.destination, using: restorer)
         await finish(target)
-        let pending = await target.controller.migrationRestoreConfirmation
+        let pending = await target.controller.migrationWork.restoreConfirmation
         let token = try XCTUnwrap(pending?.id).uuidString
         let prior = try await target.controller.store.records()
         XCTAssertTrue(prior.isEmpty)
@@ -38,7 +38,12 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         let records = try await target.controller.store.records()
         XCTAssertEqual(records.count, 1)
         XCTAssertEqual(records.first?.processedText, original.processedText)
-        XCTAssertEqual(records.first?.audioFilename, "")
+        let restoredAudio = try XCTUnwrap(records.first?.audioFilename)
+        XCTAssertFalse(restoredAudio.isEmpty)
+        let targetDirectory = await target.controller.store.directory
+        XCTAssertEqual(
+            try Data(contentsOf: targetDirectory.appendingPathComponent(restoredAudio)), Data([1, 2, 3])
+        )
         XCTAssertNil(records.first?.originPlatform)
         let after = await target.controller.settings
         XCTAssertEqual(after.model, before.model)
@@ -65,11 +70,11 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         await finish(fixture)
         let store = await fixture.controller.profileStore
         XCTAssertTrue(try store.load().isEmpty)
-        let pending = await fixture.controller.migrationRestoreConfirmation
+        let pending = await fixture.controller.migrationWork.restoreConfirmation
         let token = try XCTUnwrap(pending?.id).uuidString
         await fixture.controller.answerMigrationRestore(UUID().uuidString, choice: 1, using: restorer)
         XCTAssertTrue(try store.load().isEmpty)
-        let stillPending = await fixture.controller.migrationRestoreConfirmation
+        let stillPending = await fixture.controller.migrationWork.restoreConfirmation
         XCTAssertEqual(stillPending?.id.uuidString, token)
         await fixture.controller.answerMigrationRestore(token, choice: 1, using: restorer)
         await finish(fixture)
@@ -78,7 +83,8 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         XCTAssertEqual(after.model, before.model)
         XCTAssertEqual(after.configuration, before.configuration)
         let status = FakeLog.shared.allStatuses.last
-        XCTAssertTrue(status?.contains("Settings, audio and credentials were not applied") == true)
+        XCTAssertTrue(status?.contains("app profiles updated") == true)
+        XCTAssertFalse(status?.contains("settings updated") == true)
         await fixture.controller.answerMigrationRestore(token, choice: 1, using: restorer)
         XCTAssertEqual(try store.load().count, 1)
         XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("no longer current") == true)
@@ -94,12 +100,12 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         let restorer = try restorer(fixture)
         await fixture.controller.beginMigrationRestore(fixture.destination, using: restorer)
         await finish(fixture)
-        let pending = await fixture.controller.migrationRestoreConfirmation
+        let pending = await fixture.controller.migrationWork.restoreConfirmation
         let token = try XCTUnwrap(pending?.id).uuidString
         await fixture.controller.answerMigrationRestore(token, choice: 0, using: restorer)
         let store = await fixture.controller.profileStore
         XCTAssertTrue(try store.load().isEmpty)
-        let remaining = await fixture.controller.migrationRestoreConfirmation
+        let remaining = await fixture.controller.migrationWork.restoreConfirmation
         XCTAssertNil(remaining)
         XCTAssertTrue(FakeLog.shared.allStatuses.last?.contains("Restore cancelled. Nothing was changed.") == true)
         await fixture.controller.close()
@@ -112,7 +118,7 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         let restorer = try restorer(fixture, confirm: { _, _, offers in XCTAssertFalse(offers) })
         await fixture.controller.beginMigrationRestore(fixture.destination, using: restorer)
         await finish(fixture)
-        let pending = await fixture.controller.migrationRestoreConfirmation
+        let pending = await fixture.controller.migrationWork.restoreConfirmation
         let token = try XCTUnwrap(pending?.id).uuidString
         await fixture.controller.answerMigrationRestore(token, choice: 2, using: restorer)
         let store = await fixture.controller.profileStore
@@ -131,7 +137,7 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         await fixture.controller.beginMigrationRestore(fixture.destination, using: restorer)
         await finish(fixture)
         XCTAssertEqual(try store.load().map(\.name), ["Existing"])
-        let pending = await fixture.controller.migrationRestoreConfirmation
+        let pending = await fixture.controller.migrationWork.restoreConfirmation
         let token = try XCTUnwrap(pending?.id).uuidString
         await fixture.controller.answerMigrationRestore(token, choice: 2, using: restorer)
         await finish(fixture)
@@ -156,7 +162,7 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
             await fixture.controller.beginMigrationRestore(fixture.destination, using: restorer)
         }.value
         await fulfillment(of: [entered], timeout: 10)
-        let task = await fixture.controller.migrationRestoreTask
+        let task = await fixture.controller.migrationWork.restoreTask
         let report = await queue.read { await fixture.controller.close() }.value
         XCTAssertEqual(report.unfinishedOperations, 1)
         gate.release()
@@ -176,7 +182,7 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
         })
         await fixture.controller.beginMigrationRestore(fixture.destination, using: restorer)
         await finish(fixture)
-        let pending = await fixture.controller.migrationRestoreConfirmation
+        let pending = await fixture.controller.migrationWork.restoreConfirmation
         let busy = await fixture.controller.busy
         let operations = await fixture.controller.activeOperations
         XCTAssertNil(pending)
@@ -189,7 +195,7 @@ final class DesktopHostMigrationRestoreTests: XCTestCase {
     }
 
     private func finish(_ fixture: BackupHostFixture) async {
-        let task = await fixture.controller.migrationRestoreTask
+        let task = await fixture.controller.migrationWork.restoreTask
         await task?.value
     }
 

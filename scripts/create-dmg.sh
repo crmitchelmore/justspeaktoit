@@ -6,7 +6,7 @@ set -e
 
 APP_PATH="$1"
 OUTPUT_DMG="$2"
-VERSION="$3"
+# $3 (version) is accepted for existing callers but not used.
 VOLUME_NAME="Just Speak to It"
 DMG_TEMP="$RUNNER_TEMP/dmg_temp"
 DMG_TEMP_RW="$RUNNER_TEMP/dmg_temp_rw.dmg"

@@ -1,3 +1,4 @@
+import SpeakWatchCore
 import SwiftUI
 
 @main
@@ -23,6 +24,14 @@ struct JustSpeakWatchApp: App {
                     // any durable active capture before draining watch-face taps.
                     await recorder.recoverInterruptedCapture()
                     await WatchRecordingCoordinator.shared.performPendingWatchFaceRequest()
+                }
+                .onOpenURL { url in
+                    // A watch-face complication tap only launches the app;
+                    // its widgetURL asks for the recording toggle here.
+                    guard WatchRecordingRequest.isWatchFaceLaunch(url) else { return }
+                    Task {
+                        await WatchRecordingCoordinator.shared.toggleRecording()
+                    }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     // The watchOS 10 fallback can leave a request while opening

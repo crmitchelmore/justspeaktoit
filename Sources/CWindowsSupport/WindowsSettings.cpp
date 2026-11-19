@@ -5,11 +5,12 @@
 #include <vector>
 
 void jsti_show_local_cleanup(HWND owner);
+bool jsti_show_openrouter_browser(HWND owner, int32_t purpose, int32_t selected, int32_t &chosen);
 
 namespace {
 enum SettingControl {
     enabledID = 300, modelID, promptID, keyID, warningID, modelLabelID, promptLabelID, keyLabelID,
-    locationLabelID, locationID, directivesID, tagsID, manageID, modeLabelID
+    locationLabelID, locationID, directivesID, tagsID, manageID, modeLabelID, browseID
 };
 struct Configuration {
     std::vector<std::wstring> models;
@@ -36,7 +37,7 @@ struct SettingsDialog {
     int localSelected = -1;
 };
 
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 
 size_t remoteBoundary(const Configuration &config) {
     return std::min(config.remoteCount == SIZE_MAX
@@ -57,7 +58,9 @@ void layout(HWND window) {
     move(warningID, scale(window, 154), scale(window, 48));
     move(modelLabelID, scale(window, 210), scale(window, 22));
     move(modelID, scale(window, 236), scale(window, 260));
+    // Manage (Local) and Browse OpenRouter models (Remote) share a row; one is shown.
     move(manageID, scale(window, 274), row);
+    move(browseID, scale(window, 274), row);
     move(directivesID, scale(window, 316), row);
     move(tagsID, scale(window, 356), row);
     move(promptLabelID, scale(window, 398), scale(window, 22));
@@ -102,6 +105,7 @@ void updateModelControls(HWND window, const SettingsDialog &dialog) {
     ShowWindow(GetDlgItem(window, keyID), location == 1 ? SW_SHOW : SW_HIDE);
     ShowWindow(GetDlgItem(window, keyLabelID), location == 1 ? SW_SHOW : SW_HIDE);
     ShowWindow(GetDlgItem(window, manageID), local ? SW_SHOW : SW_HIDE);
+    ShowWindow(GetDlgItem(window, browseID), location == 1 ? SW_SHOW : SW_HIDE);
     if (location != 1) SetDlgItemTextW(window, keyID, L"");
 }
 
@@ -130,15 +134,7 @@ bool selectLocation(HWND window, SettingsDialog &dialog, int selected, bool choo
     return true;
 }
 
-void refreshFont(HWND window, SettingsDialog &dialog) {
-    HFONT font = CreateFontW(-MulDiv(10, static_cast<int>(GetDpiForWindow(window)), 72), 0, 0, 0, FW_NORMAL,
-        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    if (!font) return;
-    for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    if (dialog.font) DeleteObject(dialog.font);
-    dialog.font = font;
-}
+void refreshFont(HWND window, SettingsDialog &dialog) { jsti::chrome::refreshDialogFont(window, dialog.controls, dialog.font); }
 
 bool createControls(HWND window, SettingsDialog &dialog) {
     auto add = [&](const wchar_t *kind, const wchar_t *text, DWORD style, int id) {
@@ -156,11 +152,12 @@ bool createControls(HWND window, SettingsDialog &dialog) {
         add(L"STATIC", L"Post-processing &model", 0, modelLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, modelID) &&
         add(L"BUTTON", L"&Manage downloaded GGUF models...", BS_PUSHBUTTON | WS_TABSTOP, manageID) &&
+        add(L"BUTTON", L"&Browse OpenRouter models…", BS_PUSHBUTTON | WS_TABSTOP, browseID) &&
         add(L"BUTTON", L"Include personal lexicon &directives", BS_AUTOCHECKBOX | WS_TABSTOP, directivesID) &&
         add(L"BUTTON", L"Include lexicon context &tags", BS_AUTOCHECKBOX | WS_TABSTOP, tagsID) &&
         add(L"STATIC", L"&Instructions for the model", 0, promptLabelID) &&
         add(L"EDIT", dialog.config.prompt.c_str(), ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | WS_TABSTOP, promptID) &&
-        add(L"STATIC", L"New OpenRouter API &key (leave blank to keep the saved key)", 0, keyLabelID) &&
+        add(L"STATIC", L"New API &key for the selected model's provider (leave blank to keep the saved key)", 0, keyLabelID) &&
         add(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP, keyID) &&
         add(L"BUTTON", L"&Apply", BS_DEFPUSHBUTTON | WS_TABSTOP, IDOK) &&
         add(L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, IDCANCEL);
@@ -227,11 +224,7 @@ void apply(HWND window, SettingsDialog &dialog) {
 }
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = reinterpret_cast<SettingsDialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<SettingsDialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
+    auto dialog = jsti::chrome::dialogInstance<SettingsDialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
     LRESULT themed = 0;
     if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
@@ -242,9 +235,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case WM_SIZE: layout(window); return 0;
     case WM_DPICHANGED: {
-        const RECT *bounds = reinterpret_cast<RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        jsti::chrome::applySuggestedBounds(window, lparam);
         refreshFont(window, *dialog); layout(window); return 0;
     }
     case WM_COMMAND:
@@ -282,6 +273,25 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 SetDlgItemTextW(window, warningID, L"Models could not be displayed. Close and reopen these settings.");
                 EnableWindow(GetDlgItem(window, IDOK), FALSE);
             }
+            return 0;
+        }
+        if (LOWORD(wparam) == browseID && HIWORD(wparam) == BN_CLICKED) {
+            int32_t chosen = -1;
+            if (!jsti_show_openrouter_browser(window, JSTI_OPENROUTER_BROWSER_CLEANUP, dialog->remoteSelected, chosen))
+                return 0;
+            if (static_cast<size_t>(chosen) >= remoteBoundary(dialog->config)) {
+                SetDlgItemTextW(window, warningID, L"That OpenRouter model is no longer listed. Choose another.");
+                return 0;
+            }
+            SendDlgItemMessageW(window, locationID, CB_SETCURSEL, 1, 0);
+            dialog->remoteSelected = chosen;
+            if (!selectLocation(window, *dialog, chosen, false)) {
+                SetDlgItemTextW(window, warningID, L"Models could not be displayed. Close and reopen these settings.");
+                EnableWindow(GetDlgItem(window, IDOK), FALSE);
+                return 0;
+            }
+            // The picker now shows "OpenRouter › name"; Apply saves it with the other settings.
+            SetFocus(GetDlgItem(window, modelID));
             return 0;
         }
         if (LOWORD(wparam) == IDOK) { apply(window, *dialog); return 0; }
@@ -410,7 +420,8 @@ static bool localCleanupSourcesSelfTest(HWND owner, std::string &error) {
         && IsWindowEnabled(GetDlgItem(window, promptID)) && IsWindowEnabled(GetDlgItem(window, directivesID))
         && controlText(window, modeLabelID) == L"Mode: Finished transcript (local, completed-only)"
         && !(GetWindowLongPtrW(GetDlgItem(window, keyID), GWL_STYLE) & WS_VISIBLE)
-        && (GetWindowLongPtrW(GetDlgItem(window, manageID), GWL_STYLE) & WS_VISIBLE);
+        && (GetWindowLongPtrW(GetDlgItem(window, manageID), GWL_STYLE) & WS_VISIBLE)
+        && !(GetWindowLongPtrW(GetDlgItem(window, browseID), GWL_STYLE) & WS_VISIBLE);
     SendDlgItemMessageW(window, modelID, CB_SETCURSEL, 0, 0);
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(modelID, CBN_SELCHANGE), 0);
     okay = okay && !IsWindowEnabled(GetDlgItem(window, promptID)) &&
@@ -424,7 +435,9 @@ static bool localCleanupSourcesSelfTest(HWND owner, std::string &error) {
     okay = okay && SendDlgItemMessageW(window, modelID, CB_GETCOUNT, 0, 0) == 2
         && SendDlgItemMessageW(window, modelID, CB_GETCURSEL, 0, 0) == 1
         && controlText(window, modeLabelID) == L"Mode: Finished transcript (remote, optional streaming previews)"
-        && SendDlgItemMessageW(window, modelID, CB_GETITEMDATA, 1, 0) == 1;
+        && SendDlgItemMessageW(window, modelID, CB_GETITEMDATA, 1, 0) == 1
+        && (GetWindowLongPtrW(GetDlgItem(window, browseID), GWL_STYLE) & WS_VISIBLE)
+        && !(GetWindowLongPtrW(GetDlgItem(window, manageID), GWL_STYLE) & WS_VISIBLE);
     SetDlgItemTextW(window, keyID, L"must-not-reach-local-callback");
     SendDlgItemMessageW(window, locationID, CB_SETCURSEL, 0, 0);
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(locationID, CBN_SELCHANGE), 0);

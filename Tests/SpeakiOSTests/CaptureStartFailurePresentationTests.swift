@@ -71,7 +71,7 @@ final class CaptureStartFailurePresentationTests: XCTestCase {
         XCTAssertEqual(unavailable.recovery, nil)
         XCTAssertEqual(
             unavailable.message,
-            "Secure storage is temporarily unavailable. Unlock this iPhone and try again."
+            "Secure storage is temporarily unavailable. Unlock your device and try again."
         )
         XCTAssertEqual(missing.code, "start_missing_api_key")
         XCTAssertEqual(missing.recovery, .credentials)

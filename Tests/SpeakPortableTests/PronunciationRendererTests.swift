@@ -46,6 +46,18 @@ final class PronunciationRendererTests: XCTestCase {
         }
     }
 
+    func testLiteralWord_ReplacementIsLiteralNotATemplate() {
+        let renderer = PronunciationRenderer()
+        let entries = [
+            PronunciationEntry(word: "usd", pronunciation: "x", replacement: "US $1 and $0 \\n"),
+            PronunciationEntry(word: "(\\d+)k", pronunciation: "x", replacement: "$1 thousand", isRegex: true)
+        ]
+        XCTAssertEqual(
+            renderer.applyReplacements(to: "Pay USD for 5k", entries: entries),
+            "Pay US $1 and $0 \\n for 5 thousand"
+        )
+    }
+
     /// 700 expressions, past any small fixed cache: 600 case-insensitive words
     /// and 100 regular expressions, in stable dictionary order.
     private static func largeDictionary(prefix: String = "w", count: Int = 600) -> [PronunciationEntry] {

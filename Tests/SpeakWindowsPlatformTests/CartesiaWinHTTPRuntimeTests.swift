@@ -7,7 +7,7 @@ import SpeakCore
 import SpeakWindowsPlatform
 
 /// Drives the shared Cartesia client over the production WinHTTP adapter against
-/// the Ink-2 scenario of `scripts/websocket-loopback-probe.py`. The client's own
+/// the Ink-2 scenario of `scripts/loopback/websocket-loopback-probe.py`. The client's own
 /// path, query and headers reach the peer; only the origin is redirected to
 /// loopback. No credential, microphone, provider account or external network.
 final class CartesiaWinHTTPRuntimeTests: XCTestCase {

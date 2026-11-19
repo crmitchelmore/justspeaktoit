@@ -1,0 +1,619 @@
+package com.justspeaktoit.android.dictation
+
+import android.net.Uri
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.justspeaktoit.android.cloud.AudioInput
+import com.justspeaktoit.android.cloud.AudioInputSource
+import com.justspeaktoit.android.cloud.AudioRecorder
+import com.justspeaktoit.android.cloud.CallHandle
+import com.justspeaktoit.android.cloud.CleanupModel
+import com.justspeaktoit.android.cloud.CloudModel
+import com.justspeaktoit.android.cloud.CloudProvider
+import com.justspeaktoit.android.cloud.CloudSharedDataKind
+import com.justspeaktoit.android.cloud.CloudSharingConsent
+import com.justspeaktoit.android.cloud.CloudService
+import com.justspeaktoit.android.cloud.InputRoute
+import com.justspeaktoit.android.cloud.CaptureLevel
+import com.justspeaktoit.android.cloud.RecorderFactory
+import com.justspeaktoit.android.cloud.SharedAudio
+import com.justspeaktoit.android.cloud.WavFormat
+import com.justspeaktoit.android.cloud.live.LiveTranscriber
+import com.justspeaktoit.android.cloud.live.LiveTranscriptListener
+import com.justspeaktoit.android.corrections.AutoCorrectionCandidate
+import com.justspeaktoit.android.corrections.CorrectionRule
+import com.justspeaktoit.android.history.HistoryFile
+import com.justspeaktoit.android.history.HistoryStore
+import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.local.LocalCleaner
+import com.justspeaktoit.android.local.LocalModelSetup
+import com.justspeaktoit.android.local.LocalTranscriber
+import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.ondevice.GeminiNanoDownload
+import com.justspeaktoit.android.ondevice.GeminiNanoModel
+import com.justspeaktoit.android.ondevice.GeminiNanoReply
+import com.justspeaktoit.android.ondevice.GeminiNanoRequest
+import com.justspeaktoit.android.ondevice.GeminiNanoStatus
+import com.justspeaktoit.android.resources.SystemResourceRegistry
+import com.justspeaktoit.android.security.SecretStore
+import com.justspeaktoit.android.settings.AppAppearance
+import com.justspeaktoit.android.settings.DictationPreferences
+import com.justspeaktoit.android.settings.DictationProfile
+import com.justspeaktoit.android.settings.RecordingSoundSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import java.io.File
+import java.io.InputStream
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+
+/** A speech engine driven by the test. Callbacks arrive on the ViewModel's main thread. */
+internal class FakeEngine : SpeechEngine {
+    var caps = RecognizerCapabilities(sdkInt = 36, speechServiceAvailable = true, onDeviceAvailable = false)
+
+    /** When false, availability checks wait until [answerCheck]. */
+    var answerChecks = true
+    private var pendingCheck: Pair<String, (LanguageResolution) -> Unit>? = null
+    val started = CopyOnWriteArrayList<RecognitionMode>()
+    val startedLanguages = CopyOnWriteArrayList<String>()
+    var onEvent: ((DictationEvent) -> Unit)? = null
+    @Volatile var stops = 0
+    @Volatile var cancels = 0
+    @Volatile var closed = false
+
+    override fun capabilities() = caps
+
+    override fun checkOnDeviceLanguage(languageTag: String, onResult: (LanguageResolution) -> Unit) {
+        if (answerChecks) {
+            onResult(LanguageResolution(LanguageSupport.Unknown, languageTag))
+        } else {
+            pendingCheck = languageTag to onResult
+        }
+    }
+
+    /** Like the real engine, a closed engine never answers an outstanding check. */
+    fun answerCheck() {
+        val (tag, onResult) = pendingCheck ?: return
+        pendingCheck = null
+        if (!closed) onResult(LanguageResolution(LanguageSupport.Unknown, tag))
+    }
+
+    override fun requestOnDeviceModel(languageTag: String) = Unit
+
+    override fun start(
+        mode: RecognitionMode,
+        languageTag: String,
+        onEvent: (DictationEvent) -> Unit,
+        onLevel: (Float) -> Unit,
+    ) {
+        started += mode
+        startedLanguages += languageTag
+        this.onEvent = onEvent
+    }
+
+    override fun stop() {
+        stops++
+    }
+
+    override fun cancel() {
+        cancels++
+        onEvent = null
+    }
+
+    override fun close() {
+        closed = true
+        cancel()
+    }
+}
+
+/** Records what the session asked for; [signal] delivers an interruption as the platform would. */
+internal class FakeInterruptions : AudioInterruptions {
+    /** The requestFocus argument of each start. */
+    val starts = CopyOnWriteArrayList<Boolean>()
+    @Volatile var stops = 0
+    private var onSignal: ((InterruptionSignal) -> Unit)? = null
+
+    val watching: Boolean get() = onSignal != null
+
+    override fun start(requestFocus: Boolean, onSignal: (InterruptionSignal) -> Unit) {
+        starts += requestFocus
+        this.onSignal = onSignal
+    }
+
+    override fun stop() {
+        stops++
+        onSignal = null
+    }
+
+    /** Call on the ViewModel's main thread. */
+    fun signal(signal: InterruptionSignal) {
+        onSignal?.invoke(signal)
+    }
+}
+
+/** Records every phase shown; [refuses] makes Android refuse to start the service. */
+internal class FakeForeground : ForegroundSession {
+    val shown = CopyOnWriteArrayList<ForegroundPhase>()
+    @Volatile var refuses = false
+    @Volatile var visible = false
+
+    override fun show(phase: ForegroundPhase): Boolean {
+        if (refuses) return false
+        shown += phase
+        visible = true
+        return true
+    }
+
+    override fun hide() {
+        visible = false
+    }
+}
+
+/** A hands-free microphone the test feeds, from its own thread as the capture thread would. */
+internal class FakeHandsFreeMicrophone : HandsFreeMicrophone {
+    @Volatile var opens = true
+    @Volatile var starts = 0
+    @Volatile var stops = 0
+    @Volatile private var onAudio: ((ShortArray, Int) -> Unit)? = null
+    @Volatile private var onFailed: (() -> Unit)? = null
+
+    val open: Boolean get() = onAudio != null
+
+    override fun start(onAudio: (ShortArray, Int) -> Unit, onFailed: () -> Unit): Boolean {
+        if (!opens) return false
+        starts++
+        this.onAudio = onAudio
+        this.onFailed = onFailed
+        return true
+    }
+
+    override fun stop() {
+        stops++
+        onAudio = null
+        onFailed = null
+    }
+
+    fun feed(chunks: List<ShortArray>) = chunks.forEach { onAudio?.invoke(it, it.size) }
+
+    fun fail() {
+        onFailed?.invoke()
+    }
+}
+
+/** Writes a WAV-sized file on start and reports [bytes] on stop. */
+internal class FakeRecorder(
+    val file: File,
+    val onLimitReached: () -> Unit,
+    val onCaptureFailed: () -> Unit,
+    private val bytes: Long,
+    private val opens: Boolean,
+    /** When set, stop blocks until it opens, like a recorder whose capture thread is stuck. */
+    private val stopGate: CountDownLatch? = null,
+) : AudioRecorder {
+    val stopEntered = CountDownLatch(1)
+    val stopped = CountDownLatch(1)
+    @Volatile var stops = 0
+    @Volatile var startedCapture = false
+    @Volatile var writing = true
+    @Volatile var mutedFor = 0L
+
+    /** Reports a capture level as the recorder's thread would. */
+    @Volatile var onLevel: (CaptureLevel) -> Unit = {}
+
+    override fun setPaused(paused: Boolean) {
+        writing = !paused
+    }
+
+    /** Where captured PCM would go; tests call it to play the capture thread. */
+    @Volatile var sink: ((ByteArray) -> Unit)? = null
+
+    override fun tap(sink: (ByteArray) -> Unit) {
+        this.sink = sink
+    }
+
+    override fun start(): Boolean {
+        if (!opens) return false
+        file.writeBytes(ByteArray(WavFormat.HEADER_BYTES + bytes.coerceAtLeast(0).toInt()))
+        startedCapture = true
+        return true
+    }
+
+    override fun mute(millis: Long) {
+        mutedFor = millis
+    }
+
+    override fun stop(): Long {
+        stops++
+        stopEntered.countDown()
+        stopGate?.await()
+        stopped.countDown()
+        return bytes
+    }
+}
+
+internal class FakeRecorders : RecorderFactory {
+    /** One second of audio: long enough to transcribe. */
+    var bytes: Long = WavFormat.BYTES_PER_SECOND.toLong()
+    var opens = true
+    var stopGate: CountDownLatch? = null
+    val created = CopyOnWriteArrayList<FakeRecorder>()
+
+    override fun create(
+        file: File,
+        onLevel: (CaptureLevel) -> Unit,
+        onLimitReached: () -> Unit,
+        onCaptureFailed: () -> Unit,
+    ): AudioRecorder = FakeRecorder(file, onLimitReached, onCaptureFailed, bytes, opens, stopGate).also {
+        it.onLevel = onLevel
+        created += it
+    }
+
+    val last: FakeRecorder get() = created.last()
+}
+
+/** Live sessions whose provider side the test plays through each client's listener. */
+internal class FakeLiveSessions : LiveSessions {
+    val created = CopyOnWriteArrayList<FakeLiveClient>()
+    val last: FakeLiveClient get() = created.last()
+
+    override fun create(
+        model: CloudModel,
+        languageTag: String,
+        words: List<String>,
+        listener: LiveTranscriptListener,
+    ): LiveTranscriber = FakeLiveClient(model, words, listener).also { created += it }
+}
+
+internal class FakeLiveClient(
+    val model: CloudModel,
+    val words: List<String>,
+    val listener: LiveTranscriptListener,
+) : LiveTranscriber {
+    val connected = CountDownLatch(1)
+    val finished = CountDownLatch(1)
+    val appended = CopyOnWriteArrayList<ByteArray>()
+    @Volatile var key: String? = null
+    @Volatile var cancelled = false
+
+    override fun connect(apiKey: String) {
+        key = apiKey
+        connected.countDown()
+    }
+
+    override fun append(pcm: ByteArray) {
+        appended += pcm
+    }
+
+    override fun finish() = finished.countDown()
+
+    override fun cancel() {
+        cancelled = true
+    }
+}
+
+/** A downloaded-model runtime that records each request instead of loading whisper.cpp. */
+internal class FakeLocalTranscriber : LocalTranscriber {
+    data class Call(val model: File, val audio: File, val languageTag: String?)
+
+    @Volatile override var available = true
+    val calls = CopyOnWriteArrayList<Call>()
+
+    /** May throw `LocalTranscriptionException`, as a model that fails to load does. */
+    @Volatile var onTranscribe: (Call) -> String = { "local words" }
+
+    override suspend fun transcribe(model: File, audio: File, languageTag: String?): String {
+        val call = Call(model, audio, languageTag)
+        calls += call
+        return onTranscribe(call)
+    }
+}
+
+internal class FakeCloud : CloudService {
+    data class Transcription(
+        val model: String,
+        val languageTag: String?,
+        val call: CallHandle,
+        val vocabulary: List<String> = emptyList(),
+    )
+
+    val transcriptions = CopyOnWriteArrayList<Transcription>()
+
+    /** Each transcribed file's bytes, read as it was sent. */
+    val sentAudio = CopyOnWriteArrayList<ByteArray>()
+    val cleanups = CopyOnWriteArrayList<String>()
+    val cleanupPrompts = CopyOnWriteArrayList<String>()
+
+    data class Rewrite(val model: CleanupModel, val apiKey: String, val systemPrompt: String, val userMessage: String)
+
+    val rewrites = CopyOnWriteArrayList<Rewrite>()
+
+    /** Runs on an IO thread; may block until the call is cancelled. */
+    @Volatile var onTranscribe: (CallHandle) -> String = { "hello world" }
+    @Volatile var onCleanup: (String) -> String = { "Hello, world." }
+    @Volatile var onRewrite: (CallHandle) -> String = { "Rewritten." }
+
+    override fun transcribe(
+        model: CloudModel,
+        apiKey: String,
+        audio: File,
+        languageTag: String?,
+        call: CallHandle,
+        format: SharedAudio.Format,
+        vocabulary: List<String>,
+    ): String {
+        transcriptions += Transcription(model.catalogId, languageTag, call, vocabulary)
+        sentAudio += audio.readBytes()
+        return onTranscribe(call)
+    }
+
+    override fun cleanup(
+        model: CleanupModel,
+        apiKey: String,
+        transcript: String,
+        systemPrompt: String,
+        call: CallHandle,
+    ): String {
+        cleanups += transcript
+        cleanupPrompts += systemPrompt
+        return onCleanup(transcript)
+    }
+
+    override fun rewriteSelection(
+        model: CleanupModel,
+        apiKey: String,
+        systemPrompt: String,
+        userMessage: String,
+        call: CallHandle,
+    ): String {
+        rewrites += Rewrite(model, apiKey, systemPrompt, userMessage)
+        return onRewrite(call)
+    }
+}
+
+internal class MemorySecrets(vararg initial: Pair<String, String>) : SecretStore {
+    private val values = ConcurrentHashMap(initial.toMap())
+
+    override fun read(name: String): String? = values[name]
+
+    override fun write(name: String, value: String) {
+        values[name] = value
+    }
+
+    override fun remove(name: String) {
+        values.remove(name)
+    }
+
+    override fun names(): Set<String> = values.keys.toSet()
+}
+
+internal class MemoryPrefs(
+    override var chosenMode: RecognitionMode? = RecognitionMode.Cloud,
+    override var cloudModelId: String? = null,
+    override var cleanupModelId: String? = null,
+    override var cleanupEnabled: Boolean = false,
+    override var cleanupModelDiscoveryEnabled: Boolean = false,
+    override var retention: Retention = Retention.Month,
+    override var keepAudioOnCancel: Boolean = true,
+    override var keepRecordings: Boolean = false,
+    override var languageId: String? = null,
+    override var corrections: List<CorrectionRule> = emptyList(),
+    override var pronunciations: List<PronunciationEntry>? = null,
+    override var readAloudVoice: String? = null,
+    override var learnCorrections: Boolean = true,
+    override var correctionPromotionThreshold: Int = 2,
+    override var correctionCandidates: List<AutoCorrectionCandidate> = emptyList(),
+    override var cleanupPrompt: String? = null,
+    override var profiles: List<DictationProfile> = emptyList(),
+    override var activeProfileId: String? = null,
+    override var recordingSounds: RecordingSoundSettings = RecordingSoundSettings(),
+    override var audioInputId: String? = null,
+    override var silence: SilenceSettings = SilenceSettings(),
+    override var handsFreeEnabled: Boolean = false,
+    override var keyboardLiveCloudEnabled: Boolean = false,
+    override var appearance: AppAppearance = AppAppearance.System,
+    override var dynamicColor: Boolean = false,
+    override var downloadedTranscriptionModel: String? = null,
+    override var downloadedModelsOnMobileData: Boolean = false,
+    override var localCleanupModelId: String? = null,
+    // Tests written before consent (#1805) start with every provider allowed; consent tests pass none.
+    override var cloudSharingConsent: CloudSharingConsent = everyProviderAllowed,
+) : DictationPreferences
+
+internal val everyProviderAllowed = CloudSharingConsent(
+    CloudProvider.entries.associate { it.id to CloudSharedDataKind.entries.toSet() },
+)
+
+internal class MemoryHistoryFile : HistoryFile {
+    @Volatile var text: String? = null
+
+    override fun read(): String? = text
+
+    override fun write(text: String) {
+        this.text = text
+    }
+
+    override fun delete() {
+        text = null
+    }
+}
+
+/** Microphones a test connects and disconnects; changes reach the ViewModel through its watch. */
+internal class FakeAudioInputs : AudioInputSource {
+    @Volatile var connected: List<AudioInput> = emptyList()
+
+    @Volatile private var onChange: (() -> Unit)? = null
+
+    @Volatile var watching = false
+        private set
+
+    override fun inputs(): List<AudioInput> = connected
+
+    override fun route(id: String): InputRoute? = null
+
+    override fun watch(onChange: () -> Unit): AutoCloseable {
+        this.onChange = onChange
+        watching = true
+        return AutoCloseable { watching = false }
+    }
+
+    /** Call on the ViewModel's main thread, as Android's device callback is. */
+    fun change(inputs: List<AudioInput>) {
+        connected = inputs
+        onChange?.invoke()
+    }
+}
+
+internal object NoSharedAudio : SharedAudioSource {
+    override fun accepts(uri: Uri): Boolean = false
+
+    override fun type(uri: Uri): String? = null
+
+    override fun open(uri: Uri): InputStream? = null
+}
+
+internal class FakeGeminiNano : GeminiNanoModel {
+    var reply = GeminiNanoReply("", truncated = false)
+
+    @Volatile var generated = 0
+
+    @Volatile var closes = 0
+
+    override suspend fun status() = GeminiNanoStatus.Available
+
+    override suspend fun supportsSystemInstruction() = true
+
+    override suspend fun countTokens(request: GeminiNanoRequest) = 1
+
+    override suspend fun generate(request: GeminiNanoRequest): GeminiNanoReply {
+        generated++
+        return reply
+    }
+
+    override fun download(): Flow<GeminiNanoDownload> = emptyFlow()
+
+    override fun close() {
+        closes++
+    }
+}
+
+/**
+ * Builds a real [DictationViewModel] with fakes. Its main thread is a single test thread; the
+ * ViewModel is owned by a [ViewModelStore] so [clear] runs the production `onCleared` path.
+ */
+internal class ViewModelHarness(
+    root: File,
+    /** Each harness gets its own lane, so a stalled stop in one test never refuses another's recording. */
+    val retirement: RecorderRetirement = RecorderRetirement(Dispatchers.IO),
+    val historyFile: MemoryHistoryFile = MemoryHistoryFile(),
+) {
+    val engine = FakeEngine()
+    val recorders = FakeRecorders()
+    val cloud = FakeCloud()
+    val secrets = MemorySecrets("openai.apiKey" to "sk-test")
+    val prefs = MemoryPrefs()
+    val cacheDir = File(root, "cache").apply { mkdirs() }
+    val recordingsDir = File(root, "recordings")
+    var timings = DictationTimings()
+    /** Each harness lists its own holds, so tests never see another's microphone or request. */
+    val resources = SystemResourceRegistry()
+    val interruptions = FakeInterruptions()
+    val foreground = FakeForeground()
+    val audioInputs = FakeAudioInputs()
+    val handsFreeMicrophone = FakeHandsFreeMicrophone()
+    /** Downloaded Whisper and cleanup models; set before the ViewModel is first used. */
+    var localModelSetup: LocalModelSetup? = null
+    /** The (mode, model) pairs the ViewModel reported as successful transcriptions. */
+    val successes = CopyOnWriteArrayList<Pair<RecognitionMode, CloudModel>>()
+
+    /** Gemini Nano for on-device cleanup; set before [viewModel] is first read. */
+    var geminiNano: GeminiNanoModel? = null
+
+    private val executor = Executors.newSingleThreadExecutor { Thread(it, "test-main") }
+    private val main = executor.asCoroutineDispatcher()
+    private val store = ViewModelStore()
+
+    val viewModel: DictationViewModel by lazy {
+        val factory = viewModelFactory {
+            initializer {
+                DictationViewModel(
+                    engine = engine,
+                    recorders = recorders,
+                    cloud = cloud,
+                    secrets = secrets,
+                    prefs = prefs,
+                    history = HistoryStore(historyFile, deleteAudio = { File(it).delete() }),
+                    sharedAudioSource = NoSharedAudio,
+                    cacheDir = cacheDir,
+                    recordingsDir = recordingsDir,
+                    scope = CoroutineScope(SupervisorJob() + main),
+                    io = Dispatchers.IO,
+                    timings = timings,
+                    retirement = retirement,
+                    resources = resources,
+                    interruptions = interruptions,
+                    foreground = foreground,
+                    onTranscriptionSucceeded = { mode, model -> successes += mode to model },
+                    audioInputs = audioInputs,
+                    handsFreeMicrophone = handsFreeMicrophone,
+                    geminiNano = geminiNano,
+                    localModelSetup = localModelSetup,
+                )
+            }
+        }
+        ViewModelProvider(store, factory)[DictationViewModel::class.java]
+    }
+
+    /** Runs [block] on the ViewModel's main thread, after everything already queued there. Not re-entrant. */
+    fun <T> onMain(block: () -> T): T = runBlocking { withContext(main) { block() } }
+
+    fun awaitState(predicate: (DictationUiState) -> Boolean): DictationUiState =
+        runBlocking { withTimeout(TIMEOUT_MS) { viewModel.state.first(predicate) } }
+
+    /** Refreshes availability and waits until Start is possible. */
+    fun ready(): DictationViewModel {
+        onMain { viewModel.refreshAvailability() }
+        awaitState { it.canStart }
+        return viewModel
+    }
+
+    fun clear() = onMain { store.clear() }
+
+    fun close() {
+        runCatching { clear() }
+        main.close()
+    }
+
+    companion object {
+        const val TIMEOUT_MS = 5_000L
+
+        fun await(latch: CountDownLatch) {
+            check(latch.await(TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "Timed out waiting" }
+        }
+    }
+}
+
+/** A downloaded cleanup model that answers with [reply], recording each prompt it was given. */
+internal class FakeCleaner(var reply: suspend (String) -> String = { it }) : LocalCleaner {
+    data class Call(val model: File, val system: String, val user: String)
+
+    override var available = true
+    val calls = CopyOnWriteArrayList<Call>()
+
+    override suspend fun complete(model: File, system: String, user: String): String {
+        calls += Call(model, system, user)
+        return reply(user)
+    }
+}

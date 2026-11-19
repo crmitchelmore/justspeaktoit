@@ -1,0 +1,35 @@
+/* ---------- Mobile section ---------- */
+
+.mobile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 20rem);
+  gap: clamp(2rem, 5vw, 4rem);
+  align-items: center;
+}
+
+@media (max-width: 880px) {
+  .mobile-grid { grid-template-columns: minmax(0, 1fr); }
+  .mobile-shot { max-width: 17rem; margin-inline: auto; }
+}
+
+.feature-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1.05rem; }
+
+.feature-list li { display: grid; grid-template-columns: 1.6rem 1fr; gap: .7rem; }
+
+.feature-list svg { width: 1.25rem; height: 1.25rem; color: var(--accent); margin-top: .15rem; }
+
+.feature-list strong { display: block; font-family: var(--display); font-size: 1.06rem; font-weight: 700; letter-spacing: -.015em; }
+
+.feature-list span { color: var(--text-dim); font-size: .95rem; }
+
+.mobile-shot { margin: 0; }
+
+.mobile-shot a {
+  display: block;
+  border-radius: 30px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  box-shadow: 0 40px 80px -50px var(--shadow-deep);
+}
+
+.mobile-shot figcaption { margin-top: .8rem; font-size: .82rem; color: var(--text-faint); text-align: center; }

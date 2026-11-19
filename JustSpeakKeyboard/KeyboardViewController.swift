@@ -58,6 +58,10 @@ final class KeyboardViewController: UIInputViewController {
             handBack: { [weak self] in
                 self?.advanceToNextInputMode()
             },
+            openContainingApp: { [weak self] url in
+                guard let self else { return false }
+                return ContainingAppOpener.open(url, from: self)
+            },
             insertText: { [weak self] text in
                 self?.textDocumentProxy.insertText(text)
             },
@@ -69,6 +73,9 @@ final class KeyboardViewController: UIInputViewController {
             },
             contextAfterInput: { [weak self] in
                 self?.textDocumentProxy.documentContextAfterInput
+            },
+            selectedText: { [weak self] in
+                self?.textDocumentProxy.selectedText
             },
             // Provisional text, as Apple dictation and CJK input use (#1004).
             // The caret is placed at the end of the marked range so the user

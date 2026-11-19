@@ -1,0 +1,320 @@
+# Android Google Play submission readiness
+
+What Google Play checks, what the repo already satisfies, and the answers to
+every Play Console form. Play Console has no API for the listing questionnaires,
+so the owner enters them by hand. The answers below are derived from the code;
+re-check them whenever the Android app gains a network call, SDK or permission.
+
+## What the repo provides
+
+| Requirement | Where it lives |
+| --- | --- |
+| Target API level 36 (required for new apps and updates from 31 August 2026) | `android/app/build.gradle.kts` (`targetSdk = 36`) |
+| Release build with R8 and resource shrinking | `bundleRelease`, run on every Android PR by `scripts/ci-android.sh` |
+| Signed release AAB in CI | `release` job in `.github/workflows/android.yml` (main pushes and manual dispatch, after the build job passes) |
+| Monotonic version code | `JSTI_ANDROID_VERSION_CODE` = seconds since 2026-01-01 UTC at build time, set by the release job |
+| Upload to the internal testing track | Same job, through `r0adkll/upload-google-play`, when the Play service account is configured |
+| Privacy policy inside the app | Settings › Privacy policy opens `https://justspeaktoit.com/privacy` |
+| Privacy policy covering Android | The Android section of `landing-page/privacy.html` |
+| No backup or device transfer of keys and history, except the iCloud sign-in token (see [Restoring sign-in](#restoring-sign-in-on-a-new-device-april-2027)) | `res/xml/data_extraction_rules.xml`, `res/xml/backup_rules.xml` |
+| HTTPS only | No cleartext traffic is permitted (target SDK ≥ 28 default, no network security override) |
+
+### How the release job behaves
+
+The job runs only on `main`, after the `Build & Test (Android)` job (unit tests,
+lint, debug build and R8 release build) has passed, in the `android-release`
+environment. Secrets are read only by that job.
+
+| Configured in `android-release` | Result |
+| --- | --- |
+| Nothing | Unsigned rehearsal AAB uploaded as the `justspeaktoit-android-release` artefact |
+| Upload keystore secrets | Upload-key-signed AAB artefact, signature verified against the upload keystore and alias (refuses a debug or other certificate) |
+| Keystore and `PLAY_SERVICE_ACCOUNT_JSON` | The signed AAB is also published to the **internal** track |
+
+The same upload key signs the sideloadable `JustSpeakToIt-android.apk` that
+every green Alpha attaches and `justspeaktoit.com/alpha/download/android`
+serves (see [the release train doc](alpha-stable-release-trains.md#android-alpha-apk)).
+Play re-signs its builds with the Play App Signing key, so a sideloaded APK and
+a Play install cannot update each other; uninstall one before installing the other.
+
+The track release is created as a `draft` until the repository variable
+`JSTI_PLAY_RELEASE_STATUS` is set to `completed`. Google rejects non-draft
+releases while the app itself is still a draft, so flip the variable only after
+the first manual release has gone through.
+
+Each upload needs a higher version code. Deriving it from build time keeps a
+re-run of an older workflow run above every earlier upload; main runs are
+serialised, so two builds never share a code.
+
+## Store listing
+
+**App name** (30 max): Just Speak to It
+
+**Short description** (80 max):
+
+> Private dictation on your phone, or with your own OpenAI, Groq or OpenRouter key
+
+**Full description** (4,000 max):
+
+> Just Speak to It turns your voice into text, without an account and without a
+> server in the middle.
+>
+> Tap the big button and talk. Words appear as you speak, and the finished
+> transcript is ready to copy or share. On Android 12 and newer, recognition can
+> run entirely on your phone, so audio never leaves it. Or use your phone's
+> speech service, clearly labelled because it may send audio to its provider.
+>
+> Want a specific model? Add your own API key for OpenAI, Groq or OpenRouter and
+> the app sends audio straight to that provider. Optional clean-up tidies
+> spelling, grammar and punctuation with a model you choose. Keys are encrypted with
+> the Android Keystore and never leave the phone except to authenticate with the
+> provider you picked.
+>
+> Dictate anywhere:
+> • A dictation keyboard types into any app (never in password fields)
+> • A Quick Settings tile and launcher shortcut start dictation in one tap
+> • Share a voice note or audio file from another app to transcribe it
+> • History keeps recent transcripts on your phone to copy, share or retry
+>
+> No account, no subscription, no ads. Anonymous analytics and crash reports
+> are optional and off unless you turn them on. Optional tips support
+> development and unlock nothing. History stays on the phone and is excluded
+> from backups. The code is open source under the MIT
+> licence: https://github.com/crmitchelmore/justspeaktoit
+
+**Category:** Productivity. **Tags:** Productivity, Tools.
+**Contact email:** hello@justspeaktoit.com. **Website:** https://justspeaktoit.com.
+**Privacy policy:** https://justspeaktoit.com/privacy.
+
+**Graphics** (owner supplies; none of these are generated in CI):
+
+- App icon 512 × 512 PNG: `landing-page/icon-512.png` (opaque, as Play requires).
+- Feature graphic 1024 × 500 PNG or JPEG, no alpha.
+- At least 2 phone screenshots (2–8; 16:9 or 9:16, each side 320–3,840 px). Use
+  a debug build on a device or emulator with fictional text: the recorder, a
+  transcript, History and the keyboard. Tablet screenshots are optional.
+- AI-generated assets declaration: **Don't label assets**. The feature graphic
+  is composed from the app icon and the site palette, and the screenshots are
+  real captures.
+
+## Data safety form
+
+Answers for the current code. "Collected" in Play's sense means the app sends
+data off the device. The developer receives only the opt-in analytics events
+(PostHog EU) and opt-in crash reports (Sentry EU) below; both are off until the
+user turns them on, at the first-run prompt or in Settings › Privacy.
+
+**Does your app collect or share any of the required user data types?** Yes.
+**Is all of the user data collected by your app encrypted in transit?** Yes.
+**Do you provide a way for users to request that their data is deleted?** Yes.
+Users can email hello@justspeaktoit.com to ask for their analytics events and
+crash reports to be deleted. Turning analytics off deletes the random analytics
+ID and any unsent events; turning crash reports off deletes any queued reports.
+On-device data goes with Settings › History › Clear and app uninstall. Play asks
+for a deletion URL: use https://justspeaktoit.com/privacy, whose **Deleting your
+data** section gives these steps.
+
+| Data type | Collected | Shared | Ephemeral | Required | Purpose | Why |
+| --- | --- | --- | --- | --- | --- | --- |
+| Audio › Voice or sound recordings | Yes | No | No | Optional | App functionality | Cloud mode uploads the recording to the user's chosen provider with the user's key |
+| Audio › Other audio files | Yes | No | No | Optional | App functionality | Audio shared into the app is transcribed with the chosen cloud model |
+| App activity › Other user-generated content | Yes | No | No | Optional | App functionality | Clean-up sends transcript text to OpenRouter |
+| App activity › App interactions | Yes | No | No | Optional | Analytics | Opt-in analytics: `app_active_daily`, `analytics_opt_in` and `first_transcription_succeeded`, with coarse app, OS, locale and provider-type properties |
+| App info and performance › Crash logs | Yes | No | No | Optional | Analytics | Opt-in crash reports to Sentry: stack trace, app version, lifecycle and navigation breadcrumbs |
+| App info and performance › Diagnostics | Yes | No | No | Optional | Analytics | Device model, OS version and memory state attached to each crash report; Google ML Kit's diagnostics when the cleanup picker checks for or runs Gemini Nano |
+| Device or other IDs | Yes | No | No | Optional | Analytics | A random analytics ID generated by the app (not the advertising ID or Android ID), deleted on opt-out; ML Kit's device and per-installation identifiers when Gemini Nano is checked or used |
+
+Answer **No** to every other type, including Personal info, Financial info
+(including Purchase history), Location, Contacts, Messages, Photos and videos,
+Files and docs, Calendar and Web browsing.
+
+Reasoning to keep on record:
+
+- **Crash logs and diagnostics are Analytics.** Play's Analytics purpose
+  covers monitoring app health and diagnosing crashes; the app works the same
+  without these reports, so they are not App functionality.
+
+- **Not shared.** Each transfer is user-initiated, to a provider the user
+  selected and authenticated with their own key, which is Play's user-initiated
+  transfer exception.
+- **Not ephemeral.** The app does not retain the data, but the provider's own
+  retention is outside the app's control, so do not claim ephemeral processing.
+- **Speech service mode.** Audio is handled by the system `RecognitionService`,
+  not transmitted by the app. On-device mode keeps audio on the phone.
+- **Downloaded mode.** whisper.cpp transcribes in the app, so audio stays on
+  the phone. Model downloads are plain HTTPS fetches of public files from
+  Hugging Face and send no user data.
+- **API keys** never leave the phone except as the provider's own
+  authentication header.
+- **Analytics and crash reports are optional.** Both default to off and are
+  asked once, with both switches off, so dismissing the prompt declines. The
+  analytics events carry no transcript, audio, prompt, clipboard, key or screen
+  content (`ProductAnalytics.kt`); crash reports drop the user, IP, request and
+  server name, attach no screenshots or view hierarchy, keep only lifecycle and
+  navigation breadcrumbs, and never run in debug builds
+  (`SentryCrashReporter.kt`). Crash reports carry no installation ID.
+- **Not shared.** PostHog and Sentry process the data as the developer's
+  service providers, which Play does not count as sharing.
+- **Gemini Nano cleanup (ML Kit GenAI).** Inference runs on the phone in
+  AICore and the transcript never leaves it. ML Kit itself sends Google
+  diagnostics and usage analytics once the app calls it (when the cleanup
+  picker checks whether the phone offers Gemini Nano, downloads it or cleans
+  up with it): device and app information, user, device or per-installation
+  identifiers, performance metrics, input and output sizes, feature version,
+  event types and error codes ([ML Kit data disclosure][mlkit-disclosure]). It
+  is not gated by the analytics opt-in, so re-check these rows against that
+  page before each submission (`owner-android-gemini-nano-data-safety`).
+- **Tips are not Purchase history.** Google Play runs the purchase in its own
+  UI; the app only receives a purchase token, which it sends back to Google Play
+  to consume. No order, price or payment detail leaves the device from the
+  app, and nothing is stored by the developer.
+
+## Content rating (IARC questionnaire)
+
+Category: **All other app types**. Expected result: Everyone / PEGI 3 / USK
+all ages / 3+, with the "In-app purchases" interactive element. Brazil's
+ClassInd rates apps with in-app purchases 14+.
+
+- Violence, fear, sexuality, language, controlled substances, gambling: **No**.
+- Users interact or exchange content with each other: **No**. Transcripts never
+  travel between users.
+- Shares the user's current physical location with other users: **No**.
+- Allows users to purchase digital goods: **Yes**. Optional tips are one-time
+  Google Play in-app products that unlock nothing. Random items (loot boxes):
+  **No**. Cash rewards, gift cards or NFTs: **No**.
+- Unrestricted internet access (web browser or search engine): **No**.
+- Generative AI: if asked, the optional clean-up sends the user's own transcript
+  to a language model to tidy punctuation; it does not generate new content.
+
+## App content declarations
+
+- **Ads:** No ads.
+- **Target audience:** 18 and over (do not select children's age groups; the
+  app is a general productivity tool not directed at children).
+- **News app:** No. **Government app:** No. **Financial features:** None.
+- **Health apps:** No. **COVID-19 tracing:** No.
+- **App access:** All functionality is available without special access. Note
+  for reviewers that on-device and speech-service modes need no key, and cloud
+  mode needs the reviewer's own provider key (supply a limited review key in the
+  private App access instructions if Play asks).
+- **Permissions:** `RECORD_AUDIO`, `INTERNET`, `ACCESS_NETWORK_STATE` (to
+  download Whisper models over Wi-Fi only unless mobile data is allowed),
+  `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MICROPHONE`, `POST_NOTIFICATIONS`
+  and `com.android.vending.BILLING` (merged from the Play Billing library for
+  tips). No accessibility service, SMS, call log or location permissions.
+
+## Testing track and production access
+
+1. Internal testing (up to 100 testers, no review) receives every green main
+   build once the release job is configured.
+2. Personal developer accounts created after 13 November 2023 must run a
+   **closed test with at least 12 opted-in testers for 14 continuous days**
+   before applying for production access. Organisation accounts are exempt.
+3. Production is an owner decision; the release job never targets it.
+
+## Owner setup
+
+Exact steps, in order. Never commit the keystore, its passwords or the service
+account JSON, and never paste them into an issue.
+
+1. **Create the app.** Play Console › Create app: name "Just Speak to It",
+   default language English (United Kingdom), App, Free. Accept the
+   declarations. The package name is fixed by the first upload:
+   `com.justspeaktoit.android`.
+Steps 2 and 3 are done: a keytool RSA 4096 PKCS12 upload key (alias `upload`,
+SHA-256 certificate fingerprint
+`BF:2D:AC:AF:10:23:36:23:F2:D8:8A:AA:79:02:83:8E:2B:FA:4B:F2:AC:33:28:FF:19:6B:35:E7:C8:DC:82:49`)
+is in the `android-release` secrets, with a copy in the owner Mac's login
+Keychain under service `justspeaktoit-android-upload` (accounts
+`upload-keystore-base64` and `upload-keystore-password`; the key password is
+the same). Copy both into 1Password. Repeat them only to rotate the key.
+
+2. **Create the upload key** on a trusted machine (Play App Signing keeps the
+   real app signing key):
+   ```bash
+   keytool -genkeypair -v -keystore jsti-upload.jks -alias upload \
+     -keyalg RSA -keysize 4096 -validity 10000 \
+     -dname "CN=Just Speak to It, O=Just Speak to It"
+   ```
+   Store the file and both passwords in 1Password before continuing.
+3. **Create the `android-release` environment** in GitHub › Settings ›
+   Environments. Deployment branches: *Selected branches*, add `main` only.
+   Add these environment secrets:
+   ```bash
+   base64 -i jsti-upload.jks | gh secret set ANDROID_UPLOAD_KEYSTORE_BASE64 --env android-release
+   gh secret set ANDROID_UPLOAD_KEYSTORE_PASSWORD --env android-release
+   gh secret set ANDROID_UPLOAD_KEY_ALIAS --env android-release --body upload
+   gh secret set ANDROID_UPLOAD_KEY_PASSWORD --env android-release
+   ```
+4. **Build the first signed AAB:** `gh workflow run android.yml --ref main`,
+   then download the `justspeaktoit-android-release` artefact from the run.
+5. **First upload by hand** (the Play API cannot create the first release):
+   Testing › Internal testing › Create new release › upload `app-release.aab`.
+   Accept Play App Signing (Google-generated key). Add yourself to a tester
+   list and save the release.
+6. **Service account for CI uploads.** In Google Cloud, create a project (or
+   reuse one), enable the *Google Play Android Developer API*, create a service
+   account and a JSON key. In Play Console › Users and permissions › Invite new
+   user, add the service account email with app access to Just Speak to It and
+   the permissions *Release apps to testing tracks* and *View app information*.
+   Then:
+   ```bash
+   gh secret set PLAY_SERVICE_ACCOUNT_JSON --env android-release < service-account.json
+   ```
+   Delete the local JSON file afterwards.
+7. **Fill in the forms** under Policy › App content using the answers above:
+   Privacy policy, App access, Ads, Content rating, Target audience, Data
+   safety, News, Government and Financial features.
+8. **Store listing:** Grow › Store presence › Main store listing, with the text
+   and graphics above.
+   Then create the tip products: Monetise › Products › In-app products. Play
+   first needs a merchant account: Settings › Payments profile › Create
+   payments profile, with the owner's legal name, address, bank account and
+   tax details. Add three consumable one-time products with exactly the Apple
+   IDs `com.justspeaktoit.tip.small`, `com.justspeaktoit.tip.medium` and
+   `com.justspeaktoit.tip.large` (names "Buy me a coffee", "Buy me lunch" and
+   "Generous support"), default prices GBP 2.99, 4.99 and 9.99 with Play
+   converting other countries, and activate them. `Sources/SpeakCore/TipCatalog.swift` is the canonical list; the app
+   offers only the products Play returns. Analytics needs no setup: release
+   builds read the existing `POSTHOG_PROJECT_KEY` repository secret, and a build
+   without it sends nothing.
+9. **After the first release is reviewed**, set
+   `gh variable set JSTI_PLAY_RELEASE_STATUS --body completed` so each green
+   main build reaches internal testers without a manual rollout.
+10. **Closed testing** (personal accounts): create a closed track, add at least
+    12 testers by email list or Google Group, and keep it running 14 days
+    before applying for production access under Dashboard. Until the closed
+    test's countries, testers and release are set up, Publishing overview
+    keeps **Send changes for review** locked, so store listing and App content
+    changes wait there.
+
+[mlkit-disclosure]: https://developers.google.com/ml-kit/android-data-disclosure
+
+## Restoring sign-in on a new device (April 2027)
+
+From April 2027 Play requires apps with sign-in to restore the signed-in state after a device transfer or
+cloud restore. The only sign-in is the optional iCloud History sync (#1630, #1815). Block Store does not
+qualify (it had to be in production by 30 September 2026).
+
+**Credential Manager Restore Credentials was not used.** Its `CreateRestoreCredentialRequest` takes a
+WebAuthn `PublicKeyCredentialCreationOptions` JSON from a relying-party server, and the resulting
+registration response must be verified and stored by that server, which later checks the assertion from
+`GetRestoreCredentialOption`. The key is a passkey, not a place to stash an arbitrary token. We run no
+account server (CloudKit authenticates through Apple), and standing one up only to carry a token would add
+infrastructure, a data store and a privacy surface for an optional feature.
+
+**What is done instead:** Android Auto Backup and device-to-device transfer of one file,
+`files/restore/cloudkit-web-auth-token`.
+
+- The Keystore-encrypted copy of the token cannot move (its key never leaves the device), so
+  `BackupMirroringTokenStore` also writes each rotated token to that file. Everything else stays excluded.
+- `data_extraction_rules.xml` includes the file in `cloud-backup` only with `requireFlags="clientSideEncryption"`
+  (end-to-end encrypted, which needs a screen lock) and in `device-transfer`. `backup_rules.xml` does the
+  same for Android 11 and older. `allowBackup` is therefore `true`, with every other path excluded.
+  Without end-to-end encryption the token is not backed up and the user signs in again.
+- On launch `HistorySyncService.prepare()` finds no live session but a backed-up token, saves it, validates it
+  with a CloudKit `users/caller` call and resumes sync. If CloudKit rejects it, the token is deleted and the
+  normal sign-in prompt applies. Offline, the token is kept and the first sync decides.
+- Sign-out, or CloudKit rejecting the token at any time, deletes the file.
+
+If Play later insists on the Restore Credentials API itself, this needs a WebAuthn relying party; revisit then.

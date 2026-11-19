@@ -42,7 +42,7 @@ final class DesktopHostRemoteArrivalTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("arrival-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         effects = ArrivalEffects()
-        controller = try DesktopHostController(
+        controller = try DesktopHostController.consented(
             directory: directory, effects: effects, shutdownGrace: .milliseconds(10)
         )
     }

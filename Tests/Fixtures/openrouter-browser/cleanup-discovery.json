@@ -1,0 +1,126 @@
+{
+  "about": "GET https://openrouter.ai/api/v1/models entries and the cleanup models discovery must keep. Read by Tests/SpeakDesktopTests/OpenRouterModelBrowserCatalogTests.swift; a future Android or desktop discovery port must pass it too.",
+  "response": {
+    "data": [
+      {
+        "id": "openai/gpt-future",
+        "name": "GPT Future",
+        "description": "Untrusted prose",
+        "private_field": "not kept",
+        "architecture": { "input_modalities": ["text", "image"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"],
+        "context_length": 1050000,
+        "pricing": { "prompt": "0.0000001", "completion": "0.0000005", "overrides": [{ "prompt": "0.1" }] }
+      },
+      {
+        "id": "openai/free-model",
+        "name": "Free Model",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"],
+        "context_length": 0,
+        "pricing": { "prompt": "0", "completion": "0" }
+      },
+      {
+        "id": "anthropic/claude-future",
+        "name": "Not OpenAI",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"]
+      },
+      {
+        "id": "openai/Upper-Case",
+        "name": "Uppercase slug",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"]
+      },
+      {
+        "id": "openai/../evil",
+        "name": "Path traversal",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"]
+      },
+      {
+        "id": "openai/audio-out",
+        "name": "Audio output",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["audio", "text"] },
+        "endpoints": ["/api/v1/chat/completions"]
+      },
+      {
+        "id": "openai/image-in",
+        "name": "Image input only",
+        "architecture": { "input_modalities": ["image"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"]
+      },
+      {
+        "id": "openai/instruct",
+        "name": "Completions only",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/completions"]
+      },
+      {
+        "id": "openai/no-endpoints",
+        "name": "No endpoints",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] }
+      },
+      {
+        "id": "openai/retired",
+        "name": "Retired",
+        "expiration_date": "2026-01-01",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"]
+      },
+      {
+        "id": "openai/no-pricing",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"]
+      },
+      {
+        "id": "openai/bad-price",
+        "name": "Bad Price",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"],
+        "context_length": 128000,
+        "pricing": { "prompt": "-1", "completion": "NaN" }
+      },
+      {
+        "id": "openai/expensive",
+        "name": "Expensive",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"],
+        "context_length": 400000,
+        "pricing": { "prompt": "2", "completion": "0.00001" }
+      },
+      {
+        "id": "openai/empty-name",
+        "name": "",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"]
+      },
+      {
+        "id": "openai/control-name",
+        "name": "Bell\u0007",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"]
+      },
+      {
+        "id": "openai/huge-context",
+        "name": "Huge context",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"],
+        "context_length": 200000000
+      },
+      {
+        "id": "openai/gpt-future",
+        "name": "Duplicate, dropped",
+        "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+        "endpoints": ["/api/v1/chat/completions"]
+      }
+    ]
+  },
+  "expected": [
+    { "id": "openai/bad-price", "name": "Bad Price", "inputPrice": null, "outputPrice": null, "contextLength": 128000 },
+    { "id": "openai/expensive", "name": "Expensive", "inputPrice": null, "outputPrice": 10, "contextLength": 400000 },
+    { "id": "openai/free-model", "name": "Free Model", "inputPrice": 0, "outputPrice": 0, "contextLength": null },
+    { "id": "openai/gpt-future", "name": "GPT Future", "inputPrice": 0.1, "outputPrice": 0.5, "contextLength": 1050000 },
+    { "id": "openai/no-pricing", "name": "openai/no-pricing", "inputPrice": null, "outputPrice": null, "contextLength": null }
+  ]
+}

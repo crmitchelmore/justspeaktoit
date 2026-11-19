@@ -3,9 +3,10 @@ import Foundation
 import SpeakCore
 
 // Capture watchdogs (issue #993): the wiring between a live capture and
-// `CaptureWatchdogMonitor`. Every rule about *when* a bound has been exceeded
-// lives in SpeakCore and is proved on the host; this file only ticks, forwards
-// the boundaries the run already reports, and routes each trip into the
+// `CaptureWatchdogHandle`. Every rule about *when* a bound has been exceeded,
+// and the run-owned tick that checks it, lives in SpeakCore and is proved on
+// the host; this file only arms and retires the handle, forwards the
+// boundaries the run already reports, and routes each trip into the
 // controlled path that already exists for that outcome.
 //
 // Nothing here is a new way to end a recording. A trip during startup retires
@@ -16,40 +17,30 @@ import SpeakCore
 // issues #1032 and #1036 established.
 
 extension TranscriptionRecordingService {
-    /// How often the bounds are checked. The shortest of them is ten seconds,
-    /// so a one-second tick is accurate enough to be indistinguishable from a
-    /// precise timer and cheap enough to be free.
-    private static let watchdogTickSeconds: TimeInterval = 1
-
-    /// Arms the bounds for `run`.
+    /// Arms the bounds for `run`, retiring any previous run's watchdog work.
     ///
     /// The clock starts at the same instant the startup diagnostics' clock does
     /// — the earliest app-code entry the caller observed (issue #972) — so the
     /// start deadline measures what the user actually waited through, not just
     /// the part of it the service saw.
     func armWatchdogs(run: UUID, entry: StartupEntry?) {
-        disarmWatchdogs()
-        watchdog = CaptureWatchdogMonitor()
-        watchdogRunID = run
-        watchdogStartedAt = entry?.observedAt ?? Date()
-        startWatchdogTick(run: run)
+        watchdog.arm(run: run, startedAt: entry?.observedAt ?? Date()) { [weak self] in
+            self?.state == .starting || self?.state == .recording
+        } onTrip: { [weak self] trip, run in
+            await self?.act(on: trip, run: run)
+        }
     }
 
-    /// Cancels the armed bounds. Called from every teardown path, so a
-    /// watchdog can never outlive the run it belongs to and can never act on a
-    /// run that has already ended.
+    /// Retires the armed run's watchdog work. Called from every teardown path,
+    /// so a watchdog can never outlive the run it belongs to and can never act
+    /// on a run that has already ended.
     func disarmWatchdogs() {
-        watchdogTask?.cancel()
-        watchdogTask = nil
-        watchdogRunID = nil
-        watchdogStartedAt = nil
         watchdog.retire()
     }
 
     /// Forwards a startup boundary from the existing observation seam.
     func noteWatchdogStage(_ stage: StartupStage, run: UUID) {
-        guard watchdogRunID == run, let elapsed = watchdogElapsedSeconds else { return }
-        watchdog.note(stage, atSeconds: elapsed)
+        watchdog.note(stage, run: run)
     }
 
     /// Forwards issue #983's first-input signal. A positive frame count proves
@@ -57,8 +48,7 @@ extension TranscriptionRecordingService {
     /// is exactly why the no-audio detector can use it without ever firing on
     /// somebody who simply had not started talking yet.
     func noteWatchdogInputObserved(run: UUID) {
-        guard watchdogRunID == run else { return }
-        watchdog.noteInputObserved()
+        watchdog.noteInputObserved(run: run)
     }
 
     /// Whether `run` is still the run these bounds belong to *and* is still in
@@ -66,16 +56,7 @@ extension TranscriptionRecordingService {
     /// newer run (issue #943), the second makes it a no-op once the run ended
     /// by any other route.
     private func ownsWatchdogRun(_ run: UUID) -> Bool {
-        watchdogRunID == run && (state == .starting || state == .recording)
-    }
-
-    private var watchdogElapsedSeconds: TimeInterval? {
-        watchdogStartedAt.map { Date().timeIntervalSince($0) }
-    }
-
-    private func evaluateWatchdogs(run: UUID) -> CaptureWatchdogTrip? {
-        guard ownsWatchdogRun(run), let elapsed = watchdogElapsedSeconds else { return nil }
-        return watchdog.evaluate(atSeconds: elapsed)
+        watchdog.owns(run) && (state == .starting || state == .recording)
     }
 
     private func act(on trip: CaptureWatchdogTrip, run: UUID) async {
@@ -90,37 +71,13 @@ extension TranscriptionRecordingService {
             SpeakLogger.transcription.error("Capture watchdog: the input tap delivered no buffer")
             await handleSilentMicrophone(run: run)
         case .maximumDurationWarning:
-            publishMaximumDurationWarning()
-            // The warning is not terminal, so the tick has to keep running.
-            rearmWatchdogTick(run: run)
+            // Not terminal: the handle keeps this run's tick running.
+            publishMaximumDurationWarning(run: run)
         case .maximumDuration:
             SpeakLogger.transcription.info("Capture watchdog: capture reached its maximum duration")
             await finishCaptureAfterDisruption(
                 stoppedMessage: "Recording stopped at its one-hour limit."
             )
-        }
-    }
-
-    /// Continues ticking after a non-terminal trip, keeping the monitor and its
-    /// run identity exactly as they were.
-    private func rearmWatchdogTick(run: UUID) {
-        guard ownsWatchdogRun(run) else { return }
-        startWatchdogTick(run: run)
-    }
-
-    /// One tick loop. It ends on the first terminal trip, because the outcome
-    /// of a terminal trip is that the run ends and a run cannot end twice.
-    private func startWatchdogTick(run: UUID) {
-        watchdogTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(
-                    nanoseconds: UInt64(Self.watchdogTickSeconds * 1_000_000_000)
-                )
-                guard !Task.isCancelled, let self else { return }
-                guard let trip = self.evaluateWatchdogs(run: run) else { continue }
-                await self.act(on: trip, run: run)
-                return
-            }
         }
     }
 
@@ -164,8 +121,8 @@ extension TranscriptionRecordingService {
     /// being cut off without warning. If they are not talking — the pocket case
     /// this cap exists for — nothing overwrites the message and it is the last
     /// thing the card says before the capture finishes itself.
-    private func publishMaximumDurationWarning() {
-        guard state == .recording, let elapsed = watchdogElapsedSeconds else { return }
+    private func publishMaximumDurationWarning(run: UUID) {
+        guard state == .recording, let elapsed = watchdog.elapsedSeconds(for: run) else { return }
         let minutes = Int(
             (CaptureWatchdogPolicy.maximumCaptureWarningLeadSeconds / 60).rounded()
         )

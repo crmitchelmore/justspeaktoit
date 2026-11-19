@@ -26,7 +26,7 @@ function currentDesktopRuns(manifest, runs, command) {
             (stored.run_attempt !== undefined && stored.run_attempt !== observed.run_attempt)) {
             throw Error(`Desktop qualification run changed: ${workflow}`);
         }
-        current[workflow] = projectDesktopRun(observed);
+        current[workflow] = projectDesktopRun(observed, stored.equivalentTo);
     }
     return validateDesktopReceipt(manifest, receiptFor(manifest, current), repo).runs;
 }
@@ -48,10 +48,11 @@ export function publishDesktopDownloads(manifest, runs, command = run) {
             const target = join(directory, spec.artifact);
             gh('run', 'download', String(runID), '--repo', repo, '--name', spec.artifact, '--dir', target);
             const evidence = json(join(target, spec.kind === 'windows' ? 'bundle-evidence.json' : 'build-provenance.json'));
-            const fileName = desktopDownloadFile(spec, manifest, evidence);
+            const built = current[spec.workflow].head_sha;
+            const fileName = desktopDownloadFile(spec, manifest, evidence, built);
             const bytes = readFileSync(join(target, fileName));
             const sha256 = createHash('sha256').update(bytes).digest('hex');
-            verifyDesktopDownload(spec, manifest, evidence, sha256);
+            verifyDesktopDownload(spec, manifest, evidence, sha256, built);
             const published = join(directory, spec.asset);
             copyFileSync(join(target, fileName), published);
             downloads[spec.asset] = {workflow: spec.workflow, run: runID, architecture: spec.architecture,

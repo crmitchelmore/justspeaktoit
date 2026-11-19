@@ -1,6 +1,7 @@
-import test from 'node:test';
+import test, {mock} from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './_worker.js';
+import {desktopDownloads} from '../scripts/desktop-release-lib.mjs';
 
 const release = 'https://github.com/crmitchelmore/justspeaktoit/releases/download';
 const serve = async (path, published) => {
@@ -12,13 +13,15 @@ const serve = async (path, published) => {
   return worker.fetch(new Request(`https://justspeaktoit.com${path}`), {ASSETS: {fetch: () => new Response('static')}});
 };
 
+// The desktop download goldens come from the assets the release train
+// publishes, so a renamed or added asset fails here instead of on the site.
+const desktopRoutes = Object.fromEntries(desktopDownloads.map(({kind, architecture, asset}) =>
+  [`/alpha/download/${kind === 'flatpak' ? 'linux' : 'windows'}-${architecture}`, asset]));
+
 test('desktop Alpha routes redirect to the pointed Alpha only when the asset was published', async () => {
-  const routes = {
-    '/alpha/download/windows-x64': 'JustSpeakToIt-windows-x64-developer.zip',
-    '/alpha/download/windows-arm64': 'JustSpeakToIt-windows-arm64-developer.zip',
-    '/alpha/download/linux-x86_64': 'JustSpeakToIt-linux-x86_64.flatpak',
-  };
-  for (const [path, asset] of Object.entries(routes)) {
+  assert.deepEqual(Object.keys(desktopRoutes).sort(),
+    ['/alpha/download/linux-x86_64', '/alpha/download/windows-arm64', '/alpha/download/windows-x64']);
+  for (const [path, asset] of Object.entries(desktopRoutes)) {
     const found = await serve(path, [asset]);
     assert.equal(found.status, 302);
     assert.equal(found.headers.get('Location'), `${release}/alpha-build-7/${asset}`);
@@ -41,11 +44,45 @@ test('desktop Alpha routes return unavailable when the asset HEAD request reject
       assert.equal(init.method, 'HEAD');
       throw new TypeError('Network unavailable');
     };
-    for (const platform of ['windows-x64', 'windows-arm64', 'linux-x86_64']) {
-      const response = await worker.fetch(new Request(`https://justspeaktoit.com/alpha/download/${platform}`), {});
+    for (const path of Object.keys(desktopRoutes)) {
+      const response = await worker.fetch(new Request(`https://justspeaktoit.com${path}`), {});
       assert.equal(response.status, 503);
       assert.equal(response.headers.get('Location'), null);
       assert.equal(await response.text(), 'Desktop Alpha build not yet available');
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Alpha routes return unavailable when the Alpha pointer fetch rejects', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => { throw new TypeError('synthetic pointer network failure'); };
+    for (const path of ['/alpha/download/arm64', '/alpha/appcast.xml', '/alpha/download/windows-x64']) {
+      const response = await worker.fetch(new Request(`https://justspeaktoit.com${path}`), {});
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get('Location'), null);
+      assert.equal(await response.text(), 'Alpha build not yet available');
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Alpha routes distinguish a missing pointer from an invalid one', async () => {
+  const originalFetch = globalThis.fetch;
+  const cases = [
+    [new Response('nope', {status: 404}), 'Alpha build not yet available'],
+    [new Response('not json'), 'Invalid Alpha pointer'],
+    [Response.json({tag: 'alpha-build-0'}), 'Invalid Alpha pointer'],
+  ];
+  try {
+    for (const [pointer, message] of cases) {
+      globalThis.fetch = async () => pointer;
+      const response = await worker.fetch(new Request('https://justspeaktoit.com/alpha/download/arm64'), {});
+      assert.equal(response.status, 503);
+      assert.equal(await response.text(), message);
     }
   } finally {
     globalThis.fetch = originalFetch;
@@ -146,5 +183,256 @@ test('Linux Flatpak descriptors fall back to the Alpha bundle until a repository
     }
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+// A fetch that never answers on its own; it rejects only when its signal aborts.
+const stalledFetch = aborted => (url, init = {}) => new Promise((_, reject) => {
+  init.signal?.addEventListener('abort', () => {
+    aborted.push(url);
+    reject(new DOMException('aborted', 'AbortError'));
+  });
+});
+
+// Runs one request against stalled upstreams, advancing past the deadline.
+const serveStalled = async (path, fetchImpl) => {
+  const originalFetch = globalThis.fetch;
+  mock.timers.enable({apis: ['setTimeout']});
+  try {
+    globalThis.fetch = fetchImpl;
+    const pending = worker.fetch(new Request(`https://justspeaktoit.com${path}`), {});
+    for (let step = 0; step < 4; step += 1) {
+      await new Promise(resolve => setImmediate(resolve));
+      mock.timers.tick(5000);
+    }
+    return await pending;
+  } finally {
+    mock.timers.reset();
+    globalThis.fetch = originalFetch;
+  }
+};
+
+test('a stalled Alpha pointer is aborted at the deadline and answers unavailable', async () => {
+  const aborted = [];
+  const response = await serveStalled('/alpha/download/arm64', stalledFetch(aborted));
+  assert.equal(response.status, 503);
+  assert.equal(await response.text(), 'Alpha build not yet available');
+  assert.deepEqual(aborted, [`${release}/alpha-latest/alpha-pointer.json`]);
+});
+
+test('stalled installer, probe and Flatpak fetches end in their controlled fallbacks', async () => {
+  const installer = await serveStalled('/alpha/windows/installer.json', stalledFetch([]));
+  assert.deepEqual(await installer.json(), {available: false, channel: 'beta'});
+
+  const probe = await serveStalled('/alpha/download/windows-x64', (url, init) =>
+    url.endsWith('/alpha-pointer.json') ? Promise.resolve(Response.json({tag: 'alpha-build-7'}))
+      : stalledFetch([])(url, init));
+  assert.equal(probe.status, 503);
+  assert.equal(await probe.text(), 'Desktop Alpha build not yet available');
+
+  const file = await serveStalled('/alpha/windows/JustSpeakToIt.appinstaller', (url, init) =>
+    url.endsWith('/windows-installer-pointer.json') ? Promise.resolve(Response.json(installerPointer))
+      : stalledFetch([])(url, init));
+  assert.equal(file.status, 503);
+  assert.equal(await file.text(), 'Windows installer not yet available');
+
+  const flatpak = await serveStalled('/linux/flatpak', stalledFetch([]));
+  assert.equal(flatpak.status, 302);
+  assert.equal(flatpak.headers.get('Location'), '/alpha/download/linux-x86_64');
+});
+
+test('pointer schemas are checked separately for the Alpha and installer pointers', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    // The Alpha pointer needs only its tag; installer fields are never imposed on it.
+    globalThis.fetch = async () => Response.json({tag: 'alpha-build-7'});
+    assert.equal((await worker.fetch(new Request('https://justspeaktoit.com/alpha/download/arm64'), {})).status, 302);
+    for (const pointer of [JSON.stringify({tag: 'alpha-build-7', padding: 'x'.repeat(5000)}), 'null', '"alpha-build-7"']) {
+      globalThis.fetch = async () => new Response(pointer);
+      const response = await worker.fetch(new Request('https://justspeaktoit.com/alpha/download/arm64'), {});
+      assert.equal(response.status, 503);
+      assert.equal(await response.text(), 'Invalid Alpha pointer');
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const {build: _build, ...withoutBuild} = installerPointer;
+  for (const pointer of [withoutBuild, {...installerPointer, build: 7}, {...installerPointer, publisher: ''}]) {
+    const status = await (await serveInstaller('/alpha/windows/installer.json', {pointer})).response.json();
+    assert.deepEqual(status, {available: false, channel: 'beta'});
+  }
+});
+
+// An upstream body served in chunks on demand, recording how much was read and
+// whether the reader cancelled it. `endless` keeps producing chunks forever.
+const streamedBody = ({chunks, endless = false}) => {
+  const state = {pulledBytes: 0, cancelled: false};
+  let index = 0;
+  const stream = new ReadableStream({
+    pull(controller) {
+      const chunk = endless ? new Uint8Array(1024).fill(0x20) : chunks[index++];
+      if (chunk === undefined) return controller.close();
+      state.pulledBytes += chunk.byteLength;
+      controller.enqueue(chunk);
+    },
+    cancel() { state.cancelled = true; },
+  }, {highWaterMark: 0});
+  return {stream, state};
+};
+
+test('oversized upstream bodies are cancelled at their byte cap instead of buffered', async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies = [];
+  const respond = () => {
+    const body = streamedBody({endless: true});
+    bodies.push(body.state);
+    return new Response(body.stream);
+  };
+  try {
+    globalThis.fetch = async () => respond();
+    const pointer = await worker.fetch(new Request('https://justspeaktoit.com/alpha/download/arm64'), {});
+    assert.equal(pointer.status, 503);
+    assert.equal(await pointer.text(), 'Invalid Alpha pointer');
+
+    const flatpak = await worker.fetch(new Request('https://justspeaktoit.com/linux/flatpak'), {});
+    assert.equal(flatpak.headers.get('Location'), '/alpha/download/linux-x86_64');
+
+    globalThis.fetch = async url => url.endsWith('/windows-installer-pointer.json')
+      ? Response.json(installerPointer) : respond();
+    const installer = await worker.fetch(
+      new Request('https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller'), {});
+    assert.equal(installer.status, 503);
+    assert.equal(await installer.text(), 'Invalid Windows installer');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const caps = [4096, 16384, 65536];
+  assert.equal(bodies.length, caps.length);
+  bodies.forEach((body, index) => {
+    assert.ok(body.cancelled, `body ${index} was not cancelled`);
+    assert.ok(body.pulledBytes <= caps[index] + 1024, `body ${index} read ${body.pulledBytes} bytes`);
+  });
+});
+
+test('a declared oversized length is refused before the body is read', async () => {
+  const originalFetch = globalThis.fetch;
+  const body = streamedBody({endless: true});
+  try {
+    globalThis.fetch = async () => new Response(body.stream, {headers: {'Content-Length': '5000'}});
+    const response = await worker.fetch(new Request('https://justspeaktoit.com/alpha/download/arm64'), {});
+    assert.equal(await response.text(), 'Invalid Alpha pointer');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.ok(body.state.cancelled);
+  assert.equal(body.state.pulledBytes, 0);
+});
+
+test('a body at its cap is accepted and multibyte text split across chunks survives', async () => {
+  const encoded = new TextEncoder().encode(appInstaller.replace('<AppInstaller', '<!-- café --><AppInstaller'));
+  const split = encoded.indexOf(0xc3) + 1;
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async url => url.endsWith('/windows-installer-pointer.json')
+      ? Response.json(installerPointer)
+      : new Response(streamedBody({chunks: [encoded.slice(0, split), encoded.slice(split)]}).stream);
+    const response = await worker.fetch(
+      new Request('https://justspeaktoit.com/alpha/windows/JustSpeakToIt.appinstaller'), {});
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), new TextDecoder().decode(encoded));
+
+    const pointer = new TextEncoder().encode(JSON.stringify({tag: 'alpha-build-7'}).padEnd(4096, ' '));
+    globalThis.fetch = async () => new Response(streamedBody({chunks: [pointer]}).stream);
+    const download = await worker.fetch(new Request('https://justspeaktoit.com/alpha/download/arm64'), {});
+    assert.equal(download.status, 302);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a body that stalls after its headers ends at the deadline as unavailable', async () => {
+  const response = await serveStalled('/alpha/download/arm64', async () =>
+    new Response(new ReadableStream({pull() { return new Promise(() => {}); }})));
+  assert.equal(response.status, 503);
+  assert.equal(await response.text(), 'Alpha build not yet available');
+});
+
+test('Android route follows its own pointer and refuses a missing or malformed one', async () => {
+  const originalFetch = globalThis.fetch;
+  const serveAndroid = async pointer => {
+    globalThis.fetch = async url => {
+      assert.ok(url.endsWith('/alpha-latest/android-pointer.json'), `unexpected fetch ${url}`);
+      return pointer ? Response.json(pointer) : new Response('Not Found', {status: 404});
+    };
+    return worker.fetch(new Request('https://justspeaktoit.com/alpha/download/android'), {});
+  };
+  try {
+    const valid = {schemaVersion: 1, tag: 'alpha-build-12', asset: 'JustSpeakToIt-android.apk', versionCode: 1};
+    const found = await serveAndroid(valid);
+    assert.equal(found.status, 302);
+    assert.equal(found.headers.get('Location'), `${release}/alpha-build-12/JustSpeakToIt-android.apk`);
+    for (const pointer of [null, {...valid, tag: 'mac-v3.2.0'}, {...valid, asset: 'other.apk'}, {...valid, schemaVersion: 2}]) {
+      const response = await serveAndroid(pointer);
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get('Location'), null);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+const signIn = (target, init) => worker.fetch(new Request(`https://justspeaktoit.com${target}`, init),
+  {ASSETS: {fetch: () => new Response('static')}});
+const loopback = 'http://127.0.0.1:47823/cloudkit-sign-in';
+const assertPrivate = response => {
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  assert.equal(response.headers.get('Referrer-Policy'), 'no-referrer');
+  assert.equal(response.headers.get('X-Robots-Tag'), 'noindex');
+};
+
+test('the CloudKit sign-in callback forwards only the token to the loopback listener', async () => {
+  for (const method of ['GET', 'HEAD']) {
+    const response = await signIn('/cloudkit-sign-in?ckWebAuthToken=158__54__abc&utm_source=x&other=1', {method});
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get('Location'), `${loopback}?ckWebAuthToken=158__54__abc`);
+    assertPrivate(response);
+    assert.equal(await response.text(), '');
+  }
+});
+
+test('the CloudKit sign-in callback keeps +, / and = in the token through the redirect', async () => {
+  for (const query of ['ckWebAuthToken=a+b/c=d==', 'ckWebAuthToken=a%2Bb%2Fc%3Dd%3D%3D']) {
+    const response = await signIn(`/cloudkit-sign-in?${query}`);
+    const location = response.headers.get('Location');
+    assert.equal(location, `${loopback}?ckWebAuthToken=a%2Bb%2Fc%3Dd%3D%3D`);
+    // The apps percent-decode the value and keep a literal + as +.
+    assert.equal(decodeURIComponent(new URL(location).search.slice('?ckWebAuthToken='.length)), 'a+b/c=d==');
+  }
+});
+
+test('the CloudKit sign-in callback refuses a missing, empty, repeated, odd or oversized token', async () => {
+  for (const query of ['', '?', '?other=1', '?ckWebAuthToken', '?ckWebAuthToken=', '?ckWebAuthToken=a&ckWebAuthToken=b',
+    '?ckWebAuthToken=a&ckWebAuthToken=a', '?ckWebAuthToken=a%20b', '?ckWebAuthToken=%3Cscript%3E', '?ckWebAuthToken=%zz',
+    `?ckWebAuthToken=${'a'.repeat(4097)}`]) {
+    const response = await signIn(`/cloudkit-sign-in${query}`);
+    assert.equal(response.status, 400, query);
+    assert.equal(response.headers.get('Location'), null);
+    assertPrivate(response);
+    const body = await response.text();
+    assert.match(body, /Start iCloud sign-in again from Just Speak to It/);
+    assert.doesNotMatch(body, /script|zz|aaaa/);
+  }
+  assert.equal((await signIn(`/cloudkit-sign-in?ckWebAuthToken=${'a'.repeat(4096)}`)).status, 302);
+});
+
+test('the CloudKit sign-in callback refuses other methods and leaves other paths alone', async () => {
+  const post = await signIn('/cloudkit-sign-in?ckWebAuthToken=abc', {method: 'POST', body: 'x'});
+  assert.equal(post.status, 405);
+  assert.equal(post.headers.get('Location'), null);
+  assert.equal(post.headers.get('Allow'), 'GET, HEAD');
+  assertPrivate(post);
+  for (const path of ['/cloudkit-sign-in/?ckWebAuthToken=abc', '/cloudkit-sign-in.html?ckWebAuthToken=abc',
+    '/alpha/cloudkit-sign-in?ckWebAuthToken=abc', '/privacy?ckWebAuthToken=abc']) {
+    assert.equal(await (await signIn(path)).text(), 'static', path);
   }
 });

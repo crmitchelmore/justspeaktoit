@@ -56,4 +56,24 @@ final class RecordingFeedbackCatalogueTests: XCTestCase {
             Set(RecordingFeedbackDefaults.filenames)
         )
     }
+
+    /// Android ships copies in `res/raw`, which cannot read SwiftPM bundles; they must stay identical.
+    func testAndroidRawSounds_AreByteIdenticalToTheCanonicalM4As() throws {
+        let raw = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("android/app/src/main/res/raw")
+        // The Mac-built Windows run executes this bundle without the source checkout.
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: raw.path), "The Android sources are not shipped here.")
+        let shipped = try FileManager.default.contentsOfDirectory(atPath: raw.path).filter { $0.hasSuffix(".m4a") }
+        XCTAssertEqual(Set(shipped), Set(RecordingFeedbackDefaults.filenames))
+        for profile in RecordingFeedbackProfile.allCases {
+            for sound in RecordingFeedbackSound.allCases {
+                let canonical = try RecordingFeedbackResources.url(for: sound, profile: profile)
+                let android = raw.appendingPathComponent(profile.filename(for: sound))
+                XCTAssertEqual(
+                    try Data(contentsOf: android), try Data(contentsOf: canonical), android.lastPathComponent
+                )
+            }
+        }
+    }
 }

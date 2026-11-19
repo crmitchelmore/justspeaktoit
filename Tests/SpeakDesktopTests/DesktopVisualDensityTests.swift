@@ -96,31 +96,30 @@ final class DesktopVisualDensityTests: XCTestCase {
 
     func testShellFields_UseMacValuesAndKeepAppleOnlyShellValuesOpaque() throws {
         let fields = DesktopConfiguration.fields.filter { ShellPreference.keys.contains($0.key) }
-        XCTAssertEqual(fields.map(\.key), ["appVisibility", "compactStatusBarIcon", "analyticsEnabled"])
+        XCTAssertEqual(fields.map(\.key), ["appVisibility", "compactStatusBarIcon"])
         XCTAssertTrue(fields.allSatisfy { $0.group == "General" })
         guard case .choice(let choices) = fields[0].kind else { return XCTFail("App visibility is not a choice") }
         XCTAssertEqual(choices.map(\.value), ["dockAndMenuBar", "menuBarOnly", "dockOnly"])
         let defaults = try DesktopConfiguration()
         // swiftlint:disable:next line_length
         XCTAssertEqual(defaults.shellPreferences, DesktopShellPreferences(visibility: .dockAndMenuBar, compactIcon: false))
-        XCTAssertFalse(defaults.enabled("analyticsEnabled"))
+        XCTAssertTrue(ShellPreference.appleOnlyKeys.contains("analyticsEnabled"))
         XCTAssertTrue(ShellPreference.appleOnlyKeys.isDisjoint(with: DesktopConfiguration.supportedKeys))
 
         let opaque: [String: AnyCodable] = [
             "showStatusBarIconInDockOnly": AnyCodable(.bool(false)),
             "paidAccessRoutingEnabled": AnyCodable(.bool(true)),
-            "recordingsDirectory": AnyCodable(.string("/Users/someone/Recordings"))
+            "recordingsDirectory": AnyCodable(.string("/Users/someone/Recordings")),
+            "analyticsEnabled": AnyCodable(.bool(true))
         ]
         let imported = try DesktopConfiguration(values: opaque.merging([
-            "appVisibility": AnyCodable(.string("menuBarOnly")), "compactStatusBarIcon": AnyCodable(.bool(true)),
-            "analyticsEnabled": AnyCodable(.bool(true))
+            "appVisibility": AnyCodable(.string("menuBarOnly")), "compactStatusBarIcon": AnyCodable(.bool(true))
         ]) { $1 })
         XCTAssertEqual(imported.shellPreferences, DesktopShellPreferences(visibility: .menuBarOnly, compactIcon: true))
         let restored = try JSONDecoder().decode(
             DesktopConfiguration.self, from: JSONEncoder().encode(imported.applying(imported.entries))
         )
         XCTAssertEqual(restored.shellPreferences, imported.shellPreferences)
-        XCTAssertTrue(restored.enabled("analyticsEnabled"))
         for (key, value) in opaque { XCTAssertEqual(restored.values[key], value, key) }
 
         XCTAssertThrowsError(try DesktopConfiguration(values: ["appVisibility": AnyCodable(.string("taskbar"))]))
@@ -172,5 +171,42 @@ final class DesktopVisualDensityTests: XCTestCase {
         XCTAssertEqual(APIKeyListQuery.apply(
             to: entries, searchText: "", status: .stored, sortOrder: .category
         ).map(\.id), ["a"])
+    }
+
+    func testAPIKeyStatusFilter_ShowsOnlyMatchingKeys() {
+        let entries = [
+            APIKeyListEntry(id: "unset", title: "Alpha", category: "Speech", isStored: false),
+            APIKeyListEntry(id: "set", title: "Bravo", category: "Speech", isStored: true),
+            APIKeyListEntry(id: "broken", title: "Charlie", category: "Voice", isStored: true, hasError: true),
+            APIKeyListEntry(id: "unreadable", title: "Delta", category: "Voice", isStored: false, hasError: true)
+        ]
+        func ids(_ status: APIKeyStatusFilter, _ search: String = "") -> [String] {
+            APIKeyListQuery.apply(to: entries, searchText: search, status: status, sortOrder: .name).map(\.id)
+        }
+        XCTAssertEqual(APIKeyStatusFilter.allCases.map(\.displayName), ["All", "Errors", "Set", "Unset"])
+        XCTAssertEqual(ids(.all), ["unset", "set", "broken", "unreadable"])
+        XCTAssertEqual(ids(.errors), ["broken", "unreadable"])
+        XCTAssertEqual(ids(.stored), ["set", "broken"])
+        XCTAssertEqual(ids(.missing), ["unset", "unreadable"])
+        XCTAssertEqual(ids(.errors, "voice"), ["broken", "unreadable"])
+        XCTAssertEqual(ids(.stored, "voice"), ["broken"])
+        XCTAssertEqual(
+            APIKeyListQuery.apply(to: entries, searchText: "", status: .all, sortOrder: .status).map(\.id),
+            ["broken", "unreadable", "set", "unset"]
+        )
+    }
+
+    func testAPIKeyStatusFilter_MatchMaskFollowsCaseOrder() {
+        let broken = APIKeyListEntry(id: "x", title: "X", category: "Y", isStored: true, hasError: true)
+        let unset = APIKeyListEntry(id: "z", title: "Z", category: "Y", isStored: false)
+        XCTAssertEqual(APIKeyStatusFilter.matchMask(for: broken), 0b0111)
+        XCTAssertEqual(APIKeyStatusFilter.matchMask(for: unset), 0b1001)
+    }
+
+    func testAPIKeyListEmptyState_DescribesEachFilter() {
+        let titles = APIKeyStatusFilter.allCases.map { APIKeyListQuery.emptyState(status: $0, searchText: "").title }
+        XCTAssertEqual(titles, ["No API Keys", "No Key Errors", "No Keys Set", "No Unset Keys"])
+        XCTAssertTrue(APIKeyListQuery.emptyState(status: .errors, searchText: "x").message.hasSuffix("search."))
+        XCTAssertFalse(APIKeyListQuery.emptyState(status: .errors, searchText: " ").message.contains("search"))
     }
 }

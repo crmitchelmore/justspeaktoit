@@ -6,32 +6,37 @@ This project maintains **separate version tracks** for macOS and iOS:
 
 ### Version Discovery
 
-**CRITICAL: Always check the ACTUAL latest release before creating a new version.**
+Stable versions are explicit inputs to **Prepare Stable** (`mac_version`,
+`ios_version`), so look up the latest published release before choosing one;
+the `VERSION` file lags behind and is not a release source.
 
 ```bash
-# Find the latest macOS release version:
+# Latest Stable macOS release (the next Mac version must be higher;
+# scripts/release-train.mjs rejects one that does not advance):
 gh release list --repo crmitchelmore/justspeaktoit | grep "mac-v" | head -1
 
-# Or check GitHub releases page for mac-v* tags
-# Example: if latest is mac-v0.9.1 → next should be mac-v0.9.2
-
-# The VERSION file is NOT authoritative for releases - always check GitHub tags
+# Example: if latest is mac-v3.2.0 → next could be mac-v3.2.1 or mac-v3.3.0
+# iOS has no version tag: check the latest version in App Store Connect.
 ```
 
 ### Tag Conventions
 
-| Platform | Tag Format | Example | Workflow Triggered |
-|----------|------------|---------|-------------------|
-| macOS | `mac-v*` | `mac-v0.7.7` | `.github/workflows/release-mac.yml` |
-| iOS | `ios-v*` | `ios-v0.9.1` | `.github/workflows/release-ios.yml` (manual) |
-| Legacy | `v*` | `v0.7.5` | None (deprecated) |
+| Tag Format | Example | Created by |
+|------------|---------|------------|
+| `alpha-build-N` | `alpha-build-106` | `.github/workflows/alpha-release.yml` (Alpha manifest after a green main CI) |
+| `stable-candidate-N` | `stable-candidate-3` | `.github/workflows/prepare-stable.yml` (frozen Stable candidate manifest) |
+| `mac-v*` | `mac-v3.2.0` | `.github/workflows/publish-stable.yml` (published Stable direct macOS release) |
+| `v*` | `v0.9.0` | None (legacy) |
+
+`release-mac.yml` and `release-ios.yml` are reusable workers called with a
+manifest tag; a tag push does not trigger them.
 
 ### Alpha and Stable Release Process
 
 See [Docs/alpha-stable-release-trains.md](Docs/alpha-stable-release-trains.md).
-The previous conventional-commit Stable auto-publisher is retired. After the
-commissioning gate is enabled, every successful main CI creates an isolated
-Alpha build through `alpha-release.yml`. Alpha tags are `alpha-build-N` and are
+Commit types and tag pushes never trigger a release. Every successful main CI creates an
+isolated Alpha build through `alpha-release.yml` (enabled in
+`Config/ReleasePipeline.json`). Alpha tags are `alpha-build-N` and are
 never GitHub Latest. Website downloads, Homebrew and existing updates stay Stable.
 
 The owner selects a tested Alpha source through `prepare-stable.yml`, reviews
@@ -42,9 +47,12 @@ The three release workers are reusable workflows accepting a manifest tag only.
 
 Before an App Store submission, read [`Docs/ios-app-store-submission.md`](Docs/ios-app-store-submission.md): it records which review requirements the repo already satisfies, and which ones (export compliance answers, nutrition label, review notes) still have to be answered by hand in App Store Connect.
 
+For Google Play, [`Docs/android-play-store-submission.md`](Docs/android-play-store-submission.md) holds the
+release job behaviour, data safety and content rating answers, and the owner setup steps.
+
 ### VERSION File
 
-The `VERSION` file is a **hint** used as fallback when no macOS tag is present. It does NOT control an iOS TestFlight release. Keep it updated, but verify macOS against actual tags and iOS against App Store Connect.
+The `VERSION` file is a **hint**: `Project.swift` reads it as the marketing version for local Tuist builds, and the release workers overwrite it with the manifest's version (`scripts/release-train.mjs`). It does not choose or control any release version; verify macOS against `mac-v*` releases and iOS against App Store Connect.
 
 ### Post-Release Support
 
@@ -55,12 +63,15 @@ When a user reports that a freshly shipped macOS release won't install or launch
 4. Verify launch locally (e.g. `open -n /Applications/JustSpeakToIt.app`) before asking the user to retry.
 5. If local install verification is requested, confirm `/Applications/JustSpeakToIt.app` exists, read `CFBundleShortVersionString`, and verify the process is running.
 
-## Owner Manual Checks
+## Human Checks Run on Alpha, After Merge
 
-When an issue is blocked only on an owner device check or decision, add it to
-`Docs/manual-checks.yml` (served at `justspeaktoit.com/qa`) instead of asking in
-the issue; results come back through the `manual-qa-results` workflow. See
-[Docs/manual-qa.md](Docs/manual-qa.md).
+Human or device validation never blocks a pull request or merge: do not ask the
+owner to check anything before merging, and do not leave a PR open waiting for
+one. Add the check to `Docs/manual-checks.yml` in the same PR as the change; it
+appears in the **Please test** section of the first Alpha's notes that contains
+it, and on `justspeaktoit.com/qa`. Use an `owner-` id prefix for owner-only setup
+tasks, which Alpha testers never see. Results come back through the
+`manual-qa-results` workflow. See [Docs/manual-qa.md](Docs/manual-qa.md).
 
 ## Project Structure & Module Organization
 
@@ -92,6 +103,24 @@ of hand-maintained structure documentation.
   the current parity matrix and performance/device acceptance gates. Preserve
   `Package.resolved` when the dependency-free portable graph removes it.
 
+## Cross-Platform Features
+
+- Build every user-facing feature for all platforms (macOS, iOS, Windows, Linux,
+  Android) in the same change where possible. Put the logic in `SpeakCore` (or
+  export it for Android, as `cloud_catalog.json` does) so each platform adds
+  only UI and native adapters.
+- When a platform can't get it in the same change, file **one** GitHub issue
+  covering every remaining platform (not one per platform) and link it from the
+  PR. Something the OS cannot support is N/A with a reason, not a gap.
+- [Docs/feature-map.md](Docs/feature-map.md) is the feature map: which platforms
+  have each feature, which are excluded and why (OS limit or owner decision),
+  how it should work, what is scheduled for removal and known gotchas. Check it
+  before building, changing or removing a feature. When you add, remove or
+  change a feature on any platform, update its summary row and entry in the same
+  PR, then run `python3 scripts/check-feature-map.py` (CI Lint runs it too).
+- Never build a feature for a platform the map marks N/A by owner decision (for
+  example Compare models on iOS and Android) without a new owner decision.
+
 ## Accessibility and Computer Use
 
 Every control needs an accessible name, role, state and a stable automation ID,
@@ -116,14 +145,20 @@ guards that enforce them.
 - Select device/simulator and build (Cmd+B)
 - Or use xcodebuild MCP for automation (see below)
 
-### Linting
+### Linting and autofix
 ```bash
-make lint                                          # strict SwiftLint against the baseline
+make fix                                           # autofix files changed vs origin/main (pre-pr runs this first)
+make format                                        # autofix the whole repository
+make quality                                       # zero-violation SwiftFormat, Ruff, ShellCheck, actionlint
+make lint                                          # strict SwiftLint: zero violations, no baseline
 ./scripts/swiftlint.sh lint --strict Sources/SpeakApp  # lint a subset
 ./scripts/swiftformat.sh Sources/SpeakApp          # format a subset (isolated Tooling graph)
 ```
 - SwiftLint and SwiftFormat resolve through the isolated `Tooling/` graph (pinned in `Tooling/Package.resolved`) so app/test dependency changes cannot downgrade the linter; upgrade it intentionally with `make update-tooling`.
-- CI SwiftLint also runs with `.swiftlint-baseline.json`; the baseline is line-number-sensitive, so prefer exact-line inline suppressions when unblocking lint to avoid baseline drift.
+- `scripts/quality` owns the non-SwiftLint linters: SwiftFormat and SwiftLint `--fix` (Swift), Ruff (`ruff.toml`; every `*.py` and Python-shebang script), ShellCheck at every severity (every `*.sh` and shell-shebang script), actionlint (workflows, with `.github/actionlint.yaml`) and ESLint `--fix` for `workers/paid-access` when its `node_modules` exist. `fix` autofixes; `check` fails on anything left. CI's Lint job runs `make quality` (`check --all`), so the bar is zero everywhere.
+- Install the local tools once: `brew install shellcheck actionlint`. Ruff installs itself into `.build/quality-tools` from `Tooling/quality-requirements.txt` with pip's configured index (on Microsoft devices that is the CFS proxy). With `CI=true`, pinned ShellCheck and actionlint releases are downloaded and SHA-256 verified.
+- Suppress only where a rule is wrong for that line, with a reason: `# noqa: RULE`, `# shellcheck disable=SCxxxx # reason`.
+- SwiftLint has no baseline: every violation fails. Fix it; where a rule is genuinely wrong for one line (for example a public API name), use a scoped `// swiftlint:disable:this <rule>` or `:next` with a reason. File-wide `swiftlint:disable` is legacy debt that `scripts/ci/lint-suppression-ratchet.py` stops from growing.
 
 ## MCP Tools
 
@@ -169,6 +204,20 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 #endif
 ```
 
+### Settings Search Registry
+
+- Every setting, settings card/section and settings page must be indexed in
+  `SettingsSearchCatalog` (`Sources/SpeakCore/SettingsSearch/`). The entry
+  `title` must equal the on-screen heading, `settingKeys` must list the
+  persisted property names, and `keywords` should hold the words people search
+  for. On iOS, use `SearchableSettingsSection` for top-level Settings sections.
+- `SettingsSearchCoverageTests` fails when a card, section or `@Published`
+  setting is missing. Exempt a setting only with a reason in that test. Desktop
+  (`DesktopSettingsSearchTests`) and Android (`SettingsSearchCoverageTest`) have
+  equivalent guards. After changing Android entries, regenerate
+  `android/app/src/main/assets/settings_search.json` (see
+  [Docs/settings-search.md](Docs/settings-search.md)).
+
 ### Shared Evolving Catalogues
 
 - Any capability list that can grow over time (models, providers, voices,
@@ -181,29 +230,125 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - If platform behaviour differs deliberately, document the capability rule next
   to the shared catalogue rather than encoding a second platform-owned list.
 
+## Apple documentation (Sosumi)
+
+Apple Developer documentation needs JavaScript, so agents can't read
+`developer.apple.com` directly. Use [Sosumi](https://sosumi.ai) instead, and
+check Apple APIs against it rather than relying on memory. That covers Swift,
+SwiftUI, UIKit, AppKit and Foundation, along with API availability, the Human
+Interface Guidelines and WWDC sessions.
+
+- **MCP:** `https://sosumi.ai/mcp` (Streamable HTTP). Tools:
+  `searchAppleDocumentation`, `fetchAppleDocumentation`,
+  `fetchAppleVideoTranscript` and `fetchExternalDocumentation`.
+- **HTTP:** swap the host, so `https://developer.apple.com/documentation/swiftui/view`
+  becomes `https://sosumi.ai/documentation/swiftui/view`. Use
+  `https://sosumi.ai/external/<url>` for other Swift-DocC sites.
+- **CLI:** `npx @nshipster/sosumi search "SwiftData"`, or
+  `npx @nshipster/sosumi fetch /documentation/swift/array`.
+- **Skill:** `https://sosumi.ai/SKILL.md`, installed in `~/.agents/skills/sosumi`
+  and `~/.claude/skills/sosumi`.
+
 ## Coding Style & Naming Conventions
-- Swift files use 4-space indentation and LF line endings (configured via `.swiftformat`)
+- New Swift files use 4-space indentation and LF line endings. `.swiftformat` sets these options but runs only the `braces`, `redundantRawValues` and `redundantReturn` rules, so existing 2-space files (for example `Sources/SpeakApp/Settings/AppSettings.swift`) are not reindented; match the indentation of the file you edit
 - Prefer expressive type names (`ContentView`, `SpeakApp`)
 - Keep new API surface `internal` unless exposure is required for cross-module use
 - Use `public` for types that need to be accessed from Xcode project or other modules
-- Enforce linting via `.swiftlint.yml`; rules include `explicit_self`, `implicit_return`, line-length 120/160
-- Apple UI controls need accessible names and stable identifiers; follow [Docs/accessibility.md](Docs/accessibility.md). `make lint` runs `scripts/check-apple-accessibility.py`
+- Enforce linting via `.swiftlint.yml`; rules include `implicit_return`, line-length 120/160
+- Apple UI controls need accessible names and stable identifiers; follow [Docs/accessibility.md](Docs/accessibility.md). `make lint` runs `scripts/accessibility/check-apple-accessibility.py`
+- The iOS app also runs on iPad: name the device through `DeviceCopy` (`Sources/SpeakiOS/Views/DeviceCopy.swift`), never a hard-coded "iPhone" or "Dynamic Island". `make lint` runs `scripts/ios/check-device-copy.py`; genuinely iPhone-only copy goes in its `ALLOWLIST`
 
 ## Testing Guidelines
-- Tests live under `Tests/SpeakAppTests` and rely on XCTest
+- Tests live in per-module XCTest targets under `Tests/` (for example `Tests/SpeakAppTests`, `Tests/SpeakCoreTests`, `Tests/SpeakDesktopTests`, `Tests/SpeakiOSTests`)
 - Name specs `test<Behaviour>_<Expectation>()` to mirror scenarios
-- Run `make test` locally before PRs
+- Run `scripts/pre-pr` locally before PRs (see Pre-PR Checks); `make test` runs the whole suite
 - iOS testing requires device/simulator via Xcode
+
+## Pre-PR Checks (mandatory for agents)
+
+Before opening a PR or pushing to one, run `scripts/pre-pr` (or `make pre-pr`)
+and fix every failure first. It compares your branch, including uncommitted
+files, with `origin/main` and runs what the CI Gate's pull-request jobs would
+run for those files, with the same commands, so a pass predicts a green gate.
+Use `--plan` to see the selection, `--fetch` to refresh `origin/main` and
+`--full` to run every macOS unit-test target.
+
+- **Autofix first:** pre-pr starts with `scripts/quality fix` over the changed
+  files and lists every file it edited; commit those edits (the record's tree
+  includes them). `--no-fix` skips it. The pre-push hook passes
+  `--fail-on-fix`, so a push whose commit still needed fixes is blocked.
+- **Code quality:** `scripts/quality check` over the changed Swift, Python,
+  shell and workflow files (SwiftFormat, Ruff, ShellCheck, actionlint). It is
+  required, not advisory, and fails closed when a tool is missing.
+
+- **Lint:** `make ci-lint`, the target ci.yml's Lint job runs. That is
+  whole-repo strict SwiftLint with zero violations and no baseline,
+  accessibility, a ratchet that fails when file-wide `swiftlint:disable`
+  suppressions grow against `origin/main`
+  (`scripts/ci/lint-suppression-ratchet.py`),
+  `Tooling/Package.resolved` drift and `make test-tooling`. It runs unless
+  every changed file is docs, website, Android or Workers.
+- **Portable Swift (Linux):** `scripts/ci-portable-linux.sh` in the CI image
+  (`swift:6.2.3-jammy`), via `scripts/linux-precheck`. That uses a local
+  Docker, Podman or Apple `container` if one runs, otherwise a throwaway `precheck/**` branch run
+  on GitHub's Ubuntu runners (`.github/workflows/precheck.yml`, never macOS).
+  It starts first and runs alongside the local checks. A container run builds
+  in a persistent volume (`jsti-portable-build`), so it is incremental rather than cold
+  (about 1–2 minutes warm, against about 6.5 on GitHub), and runs the tests in
+  parallel, rerunning only failures serially. Set up Apple's runtime once with
+  `brew install container && container system start --enable-kernel-install`;
+  `JSTI_CONTAINER_CPUS`/`JSTI_CONTAINER_MEMORY` size its VM (default all cores, 12g). Force a mode with
+  `--remote-linux` or `--container-linux`. `--no-linux` makes the result
+  `incomplete`, which the evidence check rejects.
+- **macOS job:** the SwiftPM build, then the unit-test targets that
+  `scripts/ci/affected-swift-tests.py` selects, minus the targets Linux runs,
+  exactly as CI selects them. `--quick` narrows this to type-level matches,
+  which is faster but no longer CI's selection. A build that changes
+  `Package.resolved` fails, as in CI.
+- **Public API compatibility:** `scripts/ci-api-compatibility.sh <merge-base>`, the
+  CI job's command, whenever the exported library products' sources
+  (SpeakCore, SpeakSync, SpeakiOS, SpeakHotKeys, SpeakAutomationKit,
+  SpeakWatchCore), `Package.*` or the gate's own files change. The open PR's
+  title (`gh pr view`, or `PR_TITLE`) declares a break with `!`; without a PR,
+  a `type!:` commit subject does. macOS only; elsewhere the result is
+  `incomplete`.
+- **Android:** `scripts/ci-android.sh`, the Android job's command (android.yml runs it too).
+  pre-pr runs it locally only with a working JDK and an approved Maven feed
+  (`JSTI_MAVEN_MIRROR`), and otherwise on a remote `precheck/**` branch run,
+  as for Linux. It never skips or passes as advisory. `JSTI_ANDROID_LOCAL=1`
+  or `=0` forces the choice.
+- It fails closed. A required check whose tool is missing fails, and so does a
+  Swift change that runs no unit tests or a changed module that no test
+  target covers. Path routing lives once in `scripts/ci/routing.json`:
+  pre-pr reads it, and ci.yml's and android.yml's path filters are generated
+  from it (`python3 scripts/ci/routing.py --write`); the tooling tests fail
+  when they drift.
+- It never runs UI tests, xcodebuild, the core-journey harness or app launches,
+  and Swift tests use a private file Keychain in `.build/pre-pr/`, so it is safe
+  on the owner's Mac. CI still runs UI and release gates.
+- Paste `scripts/pre-pr --markdown` output (also in `.build/pre-pr/summary.md`)
+  into the PR body's **Pre-PR checks** section. Keep the hidden
+  `pre-pr-summary` marker. It records `head` and `tree`, the tree of the
+  checked working copy, so a run before committing still matches the pushed
+  commit if you commit exactly what was checked. CI's `Pre-PR evidence
+  (blocking)` job fails CI Gate, before any macOS job starts, unless the newest
+  record passed for the exact PR head commit or its identical tree. Re-run it
+  after every push. Only Dependabot is exempt.
+- `scripts/ci-metrics` reports the escape rate: the share of PR and batch CI
+  failures whose head had a passing record. The target is under 1%.
+- The machine-readable result is `.build/pre-pr/summary.json`; per-check logs
+  are in `.build/pre-pr/logs/`.
+- The heavy local checks (SwiftPM build and tests, API compatibility, `make ci-lint`, local Android or container Linux runs) take a machine-wide per-user lock (`~/.cache/jsti-pre-pr.lock`) so parallel agents don't overload the Mac into timing flakes; `JSTI_PRE_PR_SLOTS` runs (default 2) hold it at once, each with its own build mirror and Linux container volume, and a waiting run says who holds it. Autofix, quick checks and the remote GitHub Linux/Android runs never wait for it. `JSTI_PRE_PR_LOCK=off` disables it. Each of those checks is killed (with its children) after `JSTI_PRE_PR_CHECK_TIMEOUT` seconds (default 1800; `0` disables), so a hung test fails its run instead of holding the lock for everyone. Inside the lock, independent checks run side by side in lanes (the SwiftPM build and tests share one lane; `JSTI_PRE_PR_LANES=off` runs them one at a time), and a failure stops the rest unless `--keep-going`. The SwiftPM checks build in a persistent per-repository build mirror (`~/.cache/jsti-pre-pr/mirror-*`, a git worktree of the exact snapshot under test), so a new worktree's build is incremental, not cold; logs still name your worktree's files. `JSTI_PRE_PR_MIRROR=off` builds in place. Because other agents load the Mac, the local `make ci-lint` reruns a Python tooling test that fails once, serially (`JSTI_TEST_RETRY=1`), and passes only if the rerun does; the remote Ubuntu Lint run and CI stay strict. API compatibility skips its own tooling selftest when `make ci-lint` already runs it (`JSTI_API_SELFTEST=0`). `scripts/swiftformat.sh` shares one built SwiftFormat per user (`~/.cache/jsti-tooling`), so new worktrees don't recompile it; `JSTI_TOOLING_CACHE=off` builds in place.
+- Opt in to running it on every push with `scripts/install-pre-pr-hook`
+  (`make install-hooks`). Bypass once with `JSTI_SKIP_PRE_PR=1`.
 
 ## Commit & Pull Request Guidelines
 - **Never use `git add -A` or `git add .`** — always stage specific files (`git add <path>`) to avoid committing other agents' work
-- **Use Conventional Commits** — this is mandatory as commit types drive automated releases
-- Commit types that **trigger a release**: `feat:` (minor bump), `fix:` / `perf:` (patch bump), breaking changes via `!` suffix or `BREAKING CHANGE` footer (major bump)
-- Commit types that **do not release**: `chore:`, `docs:`, `ci:`, `style:`, `test:`, `refactor:`, `build:`
+- **Use Conventional Commits** — the type sorts each change into a release-notes section (`scripts/release-notes-lib.mjs`): `feat:` → New and improved, `fix:` → Fixes, `perf:` → Performance; `refactor:`, `build:`, `ci:`, `test:` and `chore:` → Under the hood; `docs:` → Documentation. Commit types do not trigger releases or choose version numbers (see Working with Release Trains)
 - Keep commits scoped to a single concern
 - Use platform tags in scope: `feat(mac):`, `fix(ios):` — these feed Sparkle release notes
 - Pull requests should describe motivation, note user-visible changes, and reference related issues
-- Include `make test` output or screenshots when UI shifts
+- Fill the PR template's **Pre-PR checks** section with the `scripts/pre-pr --markdown` output (see Pre-PR Checks); add screenshots when UI shifts
 - Direct pushes to `main` are blocked by branch protection; create a branch and PR even for small fixes, then merge through the normal repo gate.
 
 ### Working with Release Trains
@@ -214,8 +359,16 @@ Keep candidate source, versions and note hashes frozen while Alpha continues.
 Use the manifest and actual GitHub/App Store Connect publication receipts as
 version/baseline authority. `VERSION` is a build hint only.
 
+### Batch merging
+- To land several ready PRs on one CI run, use `scripts/merge-batch` (create → status → land, or split to bisect a failure); see [Docs/merge-batch.md](Docs/merge-batch.md). Batches land only through their own PR and required checks.
+- Score CI changes with `scripts/ci-metrics --days 7`: its scorecard reports PR open-to-merge, required-gate p50/p90, main failure rate and zombie runs, and it also lists the per-job critical path. Run lists and job data are cached locally, and `--since`/`--until` compare windows.
+
 ### PR merge unblock checklist
-- If `gh pr merge` says “required status checks are expected” while checks look green, inspect `mergeStateStatus`; if `BEHIND`, rebase on `origin/main` and force-push with lease.
+- The `main` ruleset does not require branches to be up to date. A PR that is only `BEHIND` can merge as-is: do not rebase or merge `main` into it, because every push restarts all of its CI and takes a scarce hosted macOS slot. Update a branch from `main` only on a real conflict (`mergeStateStatus` `DIRTY`) or when a fix it needs has landed on `main`.
+- Main CI runs every gate after the merge and opens a `ci-main-failure` issue if one fails, so it catches the rare semantic conflict a stale branch misses.
+- Merge first, verify on main. On a same-repository pull request every other CI job is skipped and the `CI Gate` job itself checks the passing `scripts/pre-pr` record for its exact head (one hosted-runner wait); auxiliary workflows (Linux, Windows, Android, Flatpak, CodeQL, site media) no longer run on pull requests; Lint, Workers, Linux, macOS, iOS, journeys and API run on main after the merge (and on Dependabot or fork PRs, which carry no trusted record). Add `ci:full` to run every gate on a PR.
+- A red main is handled by `.github/workflows/auto-revert.yml`: flake-prone failures are re-run once; then the suspects and failure log go on the `CI failing on main` issue (labels `ci-main-failure`, `agent-fix`) for an agent to fix forward with a normal PR. If main is still red 2 hours after turning red, or 3 more commits merge first, the suspects are reverted by a bot PR whose `CI Gate` admits only an exact revert; each culprit PR gets the `auto-reverted` label and a draft `reland/<pr>` PR. Kill switch: repository variable `JSTI_AUTO_REVERT=off`.
+- If `gh pr merge` says “required status checks are expected” while checks look green, a required job is still queued or the run was cancelled; wait for it or re-run it rather than pushing.
 - After each push, re-check unresolved review threads (especially CodeRabbit), as new threads can be created on updated diffs and still block merge.
 - If admin merge fails with `All comments must be resolved.`, resolve the remaining review threads before retrying.
 
@@ -257,17 +410,19 @@ version/baseline authority. `VERSION` is a build hint only.
 - Compare with existing cleanup paths in the same function to ensure consistency
 - Install taps with `installTapSafely` (SpeakCore), never `installTap`: AVFAudio rejects a tap by raising an Objective-C exception that aborts the app. Keep the call inside the block whose failure path removes the tap and stops the engine. SwiftLint `unsafe_audio_tap` enforces this.
 
-## AssemblyAI Universal-3.5 Pro Streaming
+## AssemblyAI Universal-3.6 Pro Streaming
+
+Live streaming uses Universal-3.6 Pro (`universal-3-6-pro`); saved Universal-3.5 Pro streaming selections migrate to it (`AssemblyAIModels.legacyUniversal3StreamingIDs`). Universal-3.5 Pro remains the batch model.
 
 ### Turn message semantics
-- Do not send `format_turns`; Universal-3.5 Pro always formats its single end-of-turn message.
+- Do not send `format_turns`; Universal-3.6 Pro always formats its single end-of-turn message.
 - Commit a turn only when both `end_of_turn=true` and `turn_is_formatted=true`.
 - Partial `transcript` values are complete replacements for the current turn, not deltas.
 - Track `turn_order` to replace (not append) segments for the same turn.
 - Interim text uses replacement semantics — AssemblyAI sends the full turn text each time, not deltas.
 
 ### Pre-processing prompt
-- Universal-3.5 Pro supports contextual `prompt` plus `keyterms_prompt`; neither is a transcript formatting control.
+- The streaming API accepts a contextual `prompt` plus `keyterms_prompt`; neither is a transcript formatting control.
 - `keyterms_prompt` entries are sourced from `assemblyAIKeyterms` (comma-separated, max 50 chars each, max 100 items).
 - The app currently sends keyterms only. `postProcessingSystemPrompt` remains post-transcription in `PostProcessingManager`.
 - When a pre-processing prompt is active, LLM post-processing is automatically skipped.
@@ -277,20 +432,22 @@ version/baseline authority. `VERSION` is a build hint only.
 - Keep style control in post-processing (`postProcessingSystemPrompt`); native `prompt` is for audio context.
 
 ### Connection reliability
-- Use EU host first (`streaming.eu.assemblyai.com`) and retry once on global host (`streaming.assemblyai.com`) only when failure occurs before `Begin`.
-- Guard shared live-stream state (`webSocketTask`, `isStopping`, callbacks, `sessionDidBegin`) with synchronisation when accessed from receive/send completions and lifecycle methods.
-- During delayed stop cleanup, clear `webSocketTask` only when it is the same task instance being terminated (`===`) to avoid wiping a newly-started session.
+- Use EU host first (`streaming.eu.assemblyai.com`) and retry once on global host (`streaming.assemblyai.com`) only when the attempt fails before `Begin` (`!attempt.didBegin`), no fallback has been tried, and the run is not finishing. A `Begin` that takes more than 8 seconds counts as a failure.
+- Keep shared live-stream state on the client's `LiveClientStateQueue`; receive/send completions and lifecycle methods must not touch it directly.
+- Every callback checks `isCurrent(active, attempt)` before acting, so a late completion from a stopped run or a superseded attempt cannot affect a newly started session.
 - Do not establish fallback/reconnect sockets after stopping has begun.
 - On failure cleanup, capture the active session before async cancellation so failed runs still persist to History.
 
 ### Live audio framing + shutdown guarantees
-- Live PCM chunk duration must be 50-1000ms (100ms preferred); sub-50ms frames can trigger close code 3007 (`Input Duration Violation`).
-- Stop sequencing must be: flush pending PCM, await pending WebSocket send completions (bounded timeout), send `ForceEndpoint`, then `Terminate`.
+- Live PCM chunk duration must be 50-1000ms (100ms preferred); sub-50ms frames can trigger close code 3007 (`Input Duration Violation`). `AssemblyAIPCMFramer` sends 100ms frames and pads a final short tail to 50ms.
+- Stop sequencing must be: drain every admitted audio frame, send `ForceEndpoint`, wait up to `postStopFinalizeBudget` for the trailing formatted turn, hold for the caller's stop grace, then send `Terminate`. The whole finish is bounded by `finishDeadline` (8 seconds) plus the grace.
 - If users report “batch-like” live behaviour (no live text), run a direct WebSocket probe first and capture close code/reason before changing app logic.
 
 ### Key files
-- `AssemblyAITranscriptionProvider.swift` — WebSocket client, response models
-- `TranscriptionManager.swift` (`AssemblyAILiveController`) — turn handling, audio processing
+- `Sources/SpeakCore/Live/Providers/AssemblyAI/` — shared streaming client (`AssemblyAILiveClient` plus its connection, run, sending, framer, transcript and keyterm files)
+- `Sources/SpeakCore/Transcription/Providers/AssemblyAIModels.swift` — model IDs, hosts and the streaming URL/keyterms query
+- `Sources/SpeakApp/Live/SharedClientLiveController.swift` — macOS adapter that drives the shared client
+- `Sources/SpeakApp/Transcription/AssemblyAITranscriptionProvider.swift` — batch (file) transcription
 
 ## OpenAI Realtime Transcription
 
@@ -311,8 +468,8 @@ version/baseline authority. `VERSION` is a build hint only.
 - Treat the OpenAI transcription `prompt` as vocabulary/keyterm biasing, not a custom formatting or tone prompt. Keep tone/style changes in post-processing.
 
 ### Key files
-- `Sources/SpeakCore/OpenAIRealtimeLiveClient.swift` (+ `…LiveConnection`, `…LiveSending`, `…LiveRun`, `…Protocol`, `…TranscriptAssembler`) — the shared portable client: endpoint, GA `session.update`, readiness gating on `session.updated`, bounded PCM admission, ordered single-in-flight sends, commit/finalisation and per-run identity. Transport is injected (`URLSessionStreamingConnection` on Apple, WinHTTP on Windows).
-- `Sources/SpeakApp/OpenAIRealtimeTranscriptionProvider.swift` and `Sources/SpeakiOS/Services/OpenAIRealtimeWebSocketClient.swift` — thin platform adapters; keep behaviour changes in the shared client, not here.
+- `Sources/SpeakCore/Live/Providers/OpenAIRealtime/OpenAIRealtimeLiveClient.swift` (+ `…LiveConnection`, `…LiveSending`, `…LiveRun`, `…Protocol`, `…TranscriptAssembler`) — the shared portable client: endpoint, GA `session.update`, readiness gating on `session.updated`, bounded PCM admission, ordered single-in-flight sends, commit/finalisation and per-run identity. Transport is injected (`URLSessionStreamingConnection` on Apple, WinHTTP on Windows).
+- `Sources/SpeakApp/Transcription/OpenAIRealtimeTranscriptionProvider.swift` and `Sources/SpeakiOS/Services/OpenAIRealtimeWebSocketClient.swift` — thin platform adapters; keep behaviour changes in the shared client, not here.
 - Portable lifecycle tests live in `Tests/SpeakDesktopTests/OpenAIRealtime*Tests.swift` and drive the real client through a fake `StreamingWebSocketConnection`.
 
 ## xAI Dedicated Speech-to-Text Streaming
@@ -323,7 +480,7 @@ version/baseline authority. `VERSION` is a build hint only.
 - Only `transcript.done` completes a session: the server closes the socket after it, so a closure before it (even after `audio.done` left) or a finish budget that elapses without it is published as an error (`sessionNotReady`, `missingCompletion` or `transportStalled`) before the finish returns the locked spans received so far. Hosts keep that text as recovery material, not as a completed transcript.
 
 ### Key files
-- `Sources/SpeakCore/XAISpeechToTextLiveClient.swift` (+ `…LiveRun`, `…LiveConnection`, `…LiveSending`, `…LiveProtocol`, `XAISpeechToTextEvent.swift`) — the shared portable client: injected transport, readiness gating on `transcript.created`, bounded single-in-flight sends, one bounded finish and per-run identity. `LiveTranscriptionClientFactory` (Apple) and `DesktopLiveTranscription` (Windows) construct it; the desktop factory admits only `XAISpeechToText.liveCatalogID`, never the Grok Voice route.
+- `Sources/SpeakCore/Live/Providers/XAISpeechToText/XAISpeechToTextLiveClient.swift` (+ `…LiveRun`, `…LiveConnection`, `…LiveSending`, `…LiveProtocol`, `XAISpeechToTextEvent.swift`) — the shared portable client: injected transport, readiness gating on `transcript.created`, bounded single-in-flight sends, one bounded finish and per-run identity. `LiveTranscriptionClientFactory` (Apple) and `DesktopLiveTranscription` (Windows) construct it; the desktop factory admits only `XAISpeechToText.liveCatalogID`, never the Grok Voice route.
 - Portable lifecycle tests: `Tests/SpeakDesktopTests/XAISpeechToText*Tests.swift`; established protocol expectations: `Tests/SpeakCoreTests/XAISpeechToTextLiveClientTests.swift`.
 
 ## Accessibility Text Insertion
@@ -382,7 +539,7 @@ Use Sentry below for production crashes and exceptions; PostHog does not capture
 - **Org slug:** `tally-lz`
 - **Project slug:** `justspeaktoit`
 - **Auth token:** stored in `.env` as `SENTRY_AUTH_TOKEN` (do not commit)
-- **DSN:** configured in `Sources/SpeakApp/SentryManager.swift`
+- **DSN:** configured in `Sources/SpeakApp/Analytics/SentryManager.swift`
 - **GitHub CI secret:** `SENTRY_AUTH_TOKEN` lives only in the `sentry` environment, whose deployment branch policy admits only `main`. Only the `sentry-upload` job in `release-mac.yml` reads it; the build job, which holds the signing secrets, hands dSYMs over as an artefact. Rotate with `gh secret set SENTRY_AUTH_TOKEN --env sentry`; never add it as a repository secret.
 
 ### Querying Sentry from CLI
@@ -407,7 +564,7 @@ curl -s -X PUT -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" -H "Content-Type: a
 ```
 
 ## GitHub Actions Security
-- New secrets belong in an environment with a `main`-only deployment branch policy (as `sentry` and `windows-signing` do), read only by the job that needs them. The Apple signing, notarisation, App Store and Sparkle secrets used by the release workflows are still repository secrets pending migration; do not add more.
+- New secrets belong in an environment with a `main`-only deployment branch policy (as `sentry`, `windows-signing` and `microsoft-store` do), read only by the job that needs them. The Apple signing, notarisation, App Store and Sparkle secrets used by the release workflows are still repository secrets pending migration; do not add more.
 - `issue_comment` / `pull_request_review_comment` / `workflow_run` jobs that hold secrets must gate on `author_association` or `head_repository.full_name == github.repository` before running.
 - Pin third-party actions to a full commit SHA with a version comment, and pin every action in a job that holds an environment secret; self-hosted runners are only for `main` pushes and schedules (routed automatically and re-checked by each runner's admission hook) and owner-approved same-repo PR head SHAs; they never run secret-bearing, release or publication jobs. See [Docs/native-runner-pool.md](Docs/native-runner-pool.md).
 

@@ -50,7 +50,7 @@ Configuration snapshot() {
     return configuration;
 }
 
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 
 void layout(HWND window) {
     RECT bounds{};
@@ -84,15 +84,7 @@ void layout(HWND window) {
     move(IDCANCEL, static_cast<int>(bounds.right) - margin - at(100), bottom - button, at(100), button);
 }
 
-void refreshFont(HWND window, Dialog &dialog) {
-    HFONT font = CreateFontW(-MulDiv(10, static_cast<int>(GetDpiForWindow(window)), 72), 0, 0, 0, FW_NORMAL,
-        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    if (!font) return;
-    for (HWND control : dialog.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
-    if (dialog.font) DeleteObject(dialog.font);
-    dialog.font = font;
-}
+void refreshFont(HWND window, Dialog &dialog) { jsti::chrome::refreshDialogFont(window, dialog.controls, dialog.font); }
 
 // Buttons follow the selected row's state; nothing acts on a stale row.
 void updateActions(HWND window, Dialog &dialog) {
@@ -189,90 +181,55 @@ void importModel(HWND window, Dialog &dialog, bool cancel) {
     dialog.config.importCallback(repo.c_str(), file.c_str(), cancel ? 1 : 0, dialog.config.context);
 }
 
-LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
-    if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT themed = 0;
-    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
+constexpr jsti::chrome::DialogFrame dialogFrame{
+    minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, listID, IDCANCEL};
+
+bool handle(HWND window, Dialog &dialog, UINT message, WPARAM wparam, LPARAM, LRESULT &) {
     switch (message) {
-    case WM_CREATE: return createControls(window, *dialog) ? 0 : -1;
-    case WM_GETMINMAXINFO: {
-        RECT frame{0, 0, scale(window, minimumClientWidth), scale(window, minimumClientHeight)};
-        AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(window));
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {frame.right - frame.left, frame.bottom - frame.top};
-        return 0;
-    }
-    case WM_SIZE: layout(window); return 0;
-    case WM_DPICHANGED: {
-        const RECT *bounds = reinterpret_cast<RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
-        refreshFont(window, *dialog); layout(window); return 0;
-    }
-    case WM_ACTIVATE:
-        if (LOWORD(wparam) == WA_INACTIVE) { dialog->focus = GetFocus(); return 0; }
-        SetFocus(dialog->focus && IsChild(window, dialog->focus) ? dialog->focus : GetDlgItem(window, listID));
-        return 0;
-    case DM_GETDEFID: return MAKELRESULT(IDCANCEL, DC_HASDEFID);
     case refreshMessage: {
         Configuration latest = snapshot();
-        if (latest.revision != dialog->config.revision) {
-            dialog->config = std::move(latest);
-            populate(window, *dialog);
+        if (latest.revision != dialog.config.revision) {
+            dialog.config = std::move(latest);
+            populate(window, dialog);
         }
-        return 0;
+        return true;
     }
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
         case listID:
             if (HIWORD(wparam) == LBN_SELCHANGE) {
                 const LRESULT chosen = SendDlgItemMessageW(window, listID, LB_GETCURSEL, 0, 0);
-                dialog->selected = chosen == LB_ERR ? -1 : static_cast<int>(chosen);
-                updateActions(window, *dialog);
+                dialog.selected = chosen == LB_ERR ? -1 : static_cast<int>(chosen);
+                updateActions(window, dialog);
             }
-            return 0;
-        case downloadID: if (HIWORD(wparam) == BN_CLICKED) act(*dialog, JSTI_LOCAL_MODEL_DOWNLOAD); return 0;
-        case cancelDownloadID: if (HIWORD(wparam) == BN_CLICKED) act(*dialog, JSTI_LOCAL_MODEL_CANCEL); return 0;
-        case removeID: if (HIWORD(wparam) == BN_CLICKED) act(*dialog, JSTI_LOCAL_MODEL_REMOVE); return 0;
-        case importID: if (HIWORD(wparam) == BN_CLICKED) importModel(window, *dialog, false); return 0;
-        case cancelImportID: if (HIWORD(wparam) == BN_CLICKED) importModel(window, *dialog, true); return 0;
+            return true;
+        case downloadID: if (HIWORD(wparam) == BN_CLICKED) act(dialog, JSTI_LOCAL_MODEL_DOWNLOAD); return true;
+        case cancelDownloadID: if (HIWORD(wparam) == BN_CLICKED) act(dialog, JSTI_LOCAL_MODEL_CANCEL); return true;
+        case removeID: if (HIWORD(wparam) == BN_CLICKED) act(dialog, JSTI_LOCAL_MODEL_REMOVE); return true;
+        case importID: if (HIWORD(wparam) == BN_CLICKED) importModel(window, dialog, false); return true;
+        case cancelImportID: if (HIWORD(wparam) == BN_CLICKED) importModel(window, dialog, true); return true;
         case gpuID:
             if (HIWORD(wparam) == BN_CLICKED) {
-                act(*dialog, IsDlgButtonChecked(window, gpuID) == BST_CHECKED ? JSTI_LOCAL_MODEL_GPU_ON
+                act(dialog, IsDlgButtonChecked(window, gpuID) == BST_CHECKED ? JSTI_LOCAL_MODEL_GPU_ON
                                                                                 : JSTI_LOCAL_MODEL_GPU_OFF);
             }
-            return 0;
-        case IDCANCEL: if (HIWORD(wparam) == BN_CLICKED) close(window); return 0;
+            return true;
+        case IDCANCEL: if (HIWORD(wparam) == BN_CLICKED) close(window); return true;
         }
-        break;
-    case WM_CLOSE: close(window); return 0;
-    case WM_DESTROY:
-        if (dialog->font) { DeleteObject(dialog->font); dialog->font = nullptr; }
-        return 0;
+        return false;
     }
-    return DefWindowProcW(window, message, wparam, lparam);
+    return false;
+}
+
+const jsti::chrome::DialogProcedure<Dialog> dialogParts{dialogFrame, layout, refreshFont, createControls, close, handle};
+
+LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    return jsti::chrome::dialogProcedure(dialogParts, window, message, wparam, lparam);
 }
 
 HWND createDialog(HWND owner, Dialog &dialog) {
-    const HINSTANCE instance = GetModuleHandleW(nullptr);
-    WNDCLASSW type{};
-    type.lpfnWndProc = procedure;
-    type.hInstance = instance;
-    type.lpszClassName = L"JustSpeakToItLocalModels";
-    type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
-    RECT frame{0, 0, scale(owner, 640), scale(owner, 700)};
-    AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(owner));
-    RECT bounds{};
-    GetWindowRect(owner, &bounds);
-    HWND window = CreateWindowExW(windowExStyle, type.lpszClassName, L"Local models — Just Speak to It", windowStyle,
-        bounds.left + scale(owner, 40), bounds.top + scale(owner, 40), frame.right - frame.left,
-        frame.bottom - frame.top, owner, nullptr, instance, &dialog);
+    HWND window = jsti::chrome::createOwnedDialog(owner, L"JustSpeakToItLocalModels", procedure, L"Local models — Just Speak to It",
+        640, 700, windowStyle, windowExStyle, &dialog);
     if (window) {
         std::lock_guard<std::mutex> lock(configurationMutex);
         openDialog = window;
@@ -300,18 +257,7 @@ void jsti_show_local_models(HWND owner) {
         jsti_window_update(jsti::systemError("Opening local models").c_str(), nullptr, -1);
         return;
     }
-    EnableWindow(owner, FALSE);
-    ShowWindow(window, SW_SHOW);
-    SetFocus(GetDlgItem(window, listID));
-    MSG message{};
-    BOOL result = 1;
-    while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-        if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
-    }
-    if (IsWindow(window)) close(window);
-    if (IsWindow(owner)) { EnableWindow(owner, TRUE); SetActiveWindow(owner); }
-    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
-    else if (result < 0) jsti_window_update(jsti::systemError("Reading local model messages").c_str(), nullptr, -1);
+    jsti::chrome::runModalDialog(owner, window, listID, close, "local model");
 }
 
 int jsti_window_set_local_models(const JSTILocalModelRow *rows, size_t count, const char *runtimeStatus, int useGPU,

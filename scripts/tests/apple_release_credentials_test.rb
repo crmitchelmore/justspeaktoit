@@ -233,14 +233,15 @@ class AppleReleaseCredentialsTest < Minitest::Test
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       out, err = capture_io do
         error = assert_raises(AppleRelease::CredentialError) do
-          AppleRelease::OpReader.new(spawn: spawn, timeout: 2).read(@refs.first)
+          # A generous timeout: the overflow, not the clock, must end the read, even on a loaded machine.
+          AppleRelease::OpReader.new(spawn: spawn, timeout: 10).read(@refs.first)
         end
         assert_equal :output_limit, error.reason
         refute_includes error.full_message, 'secret-overflow'
         refute_includes error.full_message, 'op://'
         assert_nil error.cause
       end
-      assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 2
+      assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 10
       assert_raises(Errno::ESRCH) { Process.kill(0, owned_pid) }
       assert_raises(Errno::ECHILD) { Process.waitpid(owned_pid, Process::WNOHANG) }
       assert_empty out

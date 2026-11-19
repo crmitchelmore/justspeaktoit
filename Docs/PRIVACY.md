@@ -7,8 +7,8 @@ Speak is designed with privacy in mind. This document explains what data is coll
 ## Audio Data
 
 ### What is captured?
-- **Microphone audio** is captured only while actively transcribing (when you tap the record button)
-- Audio is processed in real-time and is **not stored** on your device after transcription
+- **Microphone audio** is captured while recording or live transcription is active, including recordings started by shortcuts
+- Recordings may be retained locally for History, retry and export; cancellation retention depends on your settings
 - Apple Speech processes microphone audio on-device when the device and selected language support it. Its fallback can
   use Apple's speech-recognition servers. If you separately enable cloud post-processing or voice output, transcript or
   assistant-response text is also sent to that feature's selected provider — see
@@ -96,7 +96,7 @@ down the screen are reference material describing what the app *can* use, not wh
 ### When does Speak connect to the internet?
 - **Apple Speech**: For language-model download when needed, and for recognition when on-device processing is unavailable
 - **Cloud transcription providers**: When actively transcribing with a cloud model
-- **Send to Mac**: Only on your local network (no internet required)
+- **Send to Mac**: On iOS, only when you pair with a Mac or send it a transcript, over your local network to that Mac
 - **iCloud History**: History, including raw and cleaned-up transcript text, syncs to your private CloudKit database
   automatically when the device is signed in to iCloud (macOS builds without iCloud support do not sync). It is on by
   default and can be turned off per device: on iOS in Settings → Sync → iCloud History Sync, and on Mac in Settings →
@@ -136,16 +136,14 @@ When using Alibaba Model Studio:
 
 ## Local Network (Send to Mac)
 
-### How it works
-- Uses Bonjour for device discovery (local network only)
-- Connection authenticated with pairing code
-- Transcript text sent directly to your Mac
-- **No data leaves your local network**
-
-### Permissions
-- iOS will prompt for Local Network access on first use
-- Required only for "Send to Mac" feature
-- Can be disabled in Settings → Privacy & Security → Local Network
+The iOS app asks for Local Network access when you open Settings → Sync & Transfer →
+Send to Mac, to find Macs running the Send to Mac receiver. Pairing uses the six-digit
+code the Mac shows; the Mac then issues a device credential, which the iOS app
+keeps in its Keychain in an item that neither iCloud key sync nor the
+configuration QR code carries. A transcript you send goes, end-to-end encrypted,
+over your local network to that Mac only, and is pasted at its cursor; nothing
+is sent through a server. QR configuration transfer does not require Bonjour
+discovery.
 
 ## Data You Can Delete
 
@@ -153,23 +151,39 @@ When using Alibaba Model Studio:
 Settings → API Keys → Clear each key individually
 
 ### Clear pairing data
-Settings → Send to Mac → (macOS: regenerate pairing code)
+- iOS: Settings → Sync & Transfer → Send to Mac → Forget This Mac (deletes the stored credential)
+- macOS: Settings → Send to Mac → regenerate the pairing code (revokes every device credential)
 
 ### Clear all app data
-Uninstall and reinstall the app, or use iOS Settings → Speak → Reset
+Delete local History and recordings in the app and remove provider keys from
+Settings. Uninstalling removes sandbox files, but Keychain credentials and
+previously synced iCloud History may remain. Disabling iCloud sync does not
+delete data already stored in iCloud.
 
 ## Analytics & Telemetry
 
-### macOS diagnostics
+### macOS and iOS diagnostics
 
-Production macOS builds use Sentry's EU service for reliability monitoring. The
-Sentry SDK sends:
+Crash reporting is **off until you agree**. On first launch (and in onboarding)
+the macOS and iOS apps ask whether to **Send crash reports and diagnostics**;
+the same switch is in Settings › About › Privacy on Mac and Settings › Privacy &
+Diagnostics › Privacy Information on iPhone. Until you turn it on, the Sentry SDK is not
+started and nothing is collected, queued or sent. Declining does not affect any
+feature, and the question is asked once per device; the answer is not synced.
+
+With your consent, production macOS and iOS builds use separate projects in
+Sentry's EU service for reliability monitoring. The Sentry SDK sends:
 
 - Crash and error reports
 - Performance traces (sampled at 20%)
 - Automatic app sessions, associated with a persistent random installation ID
 - Automatic diagnostic breadcrumbs, and failed HTTP-request metadata for the
   app's own update domain only
+
+Turning the switch off withdraws consent immediately: the app stops the SDK,
+drops anything captured from then on, and deletes crash reports, queued events,
+session state and the installation ID still on the device. Reports already
+delivered are kept by Sentry for at most 90 days and are then deleted.
 
 Sentry is disabled in debug builds and test runs. `sendDefaultPii` is disabled,
 and the data is not used to track users across other companies' apps or websites.
@@ -183,7 +197,7 @@ they are not product-analytics events sent to the developer.
 
 ### Optional product analytics (direct-download macOS only)
 
-The direct-download/Sparkle build offers an explicit opt-in to anonymous product
+The direct-download/Sparkle build offers an explicit opt-in to pseudonymous product
 analytics hosted in PostHog EU Cloud (Frankfurt). Declining does not affect any
 feature. Until you opt in, the app creates no analytics installation identifier,
 queues no events and makes no PostHog request. You can withdraw consent at any
@@ -198,20 +212,50 @@ Each Mac uses a separate random identifier that is not synced through iCloud and
 is not linked to Sentry. Raw product events are retained for no more than 12
 months and are not used for advertising or cross-company tracking.
 
+PostHog receives your IP address with each event and discards it rather than
+storing it. Before discarding it, PostHog's location lookup (GeoIP) can add an
+approximate location, such as country, region and city, to the event. The Mac
+app asks PostHog to skip this lookup for its events (`$geoip_disable`).
+
 The Mac App Store build and all iOS/keyboard targets compile this transport out.
 
-### iOS diagnostics
+Apple may separately provide aggregated App Store and crash diagnostics under
+Apple's own privacy terms. That is distinct from the app's Sentry collection.
 
-The iOS app does not currently initialise Sentry or another
-developer-operated analytics SDK. Apple may provide the developer with
-aggregated App Store and crash diagnostics under Apple's own privacy terms.
+### Windows and Linux
+
+The Windows and Linux apps have two switches in Settings › General, both off
+until you turn them on: **Share anonymous usage analytics** and **Send crash
+reports and diagnostics**. The choices are kept on that computer in the app's
+`telemetry.json`; they are never part of exported or imported settings, so a
+Mac or phone preference never opts a desktop in, and automation (`speak config`,
+MCP) cannot change them. No SDK is used: the apps send small HTTPS requests over
+the same native networking they use for cloud sync.
+
+- **Crash reports** go to Sentry's EU service from release builds only, when the
+  app stops on an error it cannot recover from or finds on launch that the
+  previous session did not shut down cleanly. A report holds the error type and
+  a message with quoted text, web addresses, credentials, long tokens, email
+  addresses, identifiers and home-folder names removed (capped at 300
+  characters), plus the app version, OS version and processor type. It has no
+  installation ID, user, device name, transcript, audio, prompt, API key or file
+  path. A report that cannot be sent is dropped, never stored or retried.
+- **Product analytics** use the same PostHog EU project, envelope, catalogue and
+  `$geoip_disable` request as the Mac, with `platform` set to `windows` or
+  `linux`. Opting in creates one random ID in `telemetry.json`; opting out
+  deletes it and drops queued events. Events wait in memory only (at most 50),
+  and a failed request drops its event. Release packages do not include the
+  PostHog project key yet, so they send no analytics even after opting in.
 
 ### Identifiability
 
-The Sentry installation ID is random and is not an account identifier. Just
-Speak to It does not set a Sentry user name or email address. Diagnostic data is
-not linked to a known identity and is not used for advertising or cross-app
-tracking.
+When you have agreed to send diagnostics, the Sentry installation ID is random
+and is not an account identifier. The SDK
+adds it to events and release-health sessions even with `sendDefaultPii` disabled;
+the app's credential scrubber does not remove it. Diagnostics are therefore
+linked to an installation, which must be disclosed as linked data under Apple's
+privacy-label rules. Just Speak to It does not set a Sentry user name or email
+address. Diagnostic data is not used for advertising or cross-app tracking.
 
 ## Configuration transfer captures
 
@@ -239,4 +283,4 @@ For privacy questions, contact: [hello@justspeaktoit.com](mailto:hello@justspeak
 
 ---
 
-*Last updated: September 2026*
+*Last updated: November 2026*

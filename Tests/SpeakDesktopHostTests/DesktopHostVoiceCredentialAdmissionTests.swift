@@ -20,7 +20,7 @@ final class DesktopHostVoiceKeyAdmissionTests: XCTestCase {
         gate = VoiceKeyAdmissionGate()
         accesses = VoiceKeyAccesses()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-key-admission-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: SyntheticEffects(), shutdownGrace: .milliseconds(40))
         await controller.markReadyForSelfTest()
         await controller.selectVoiceOutput(.cartesia(CartesiaTTSCatalog.voices[0]))
@@ -83,12 +83,13 @@ final class DesktopHostVoiceKeyAdmissionTests: XCTestCase {
         defer { session.invalidateAndCancel(); StubURLProtocol.reset() }
         StubURLProtocol.handler = {
             .respond(try XCTUnwrap(HTTPURLResponse(
-                url: try XCTUnwrap($0.url), statusCode: 200, httpVersion: nil, headerFields: nil)),
+                url: try XCTUnwrap($0.url), statusCode: $0.url?.path == "/v1/custom-voices" ? 404 : 200,
+                httpVersion: nil, headerFields: nil)),
                 Data(#"{"voices":[{"voice_id":"Account-A","name":"Synthetic account voice"}]}"#.utf8))
         }
         let inventory = try await XAIAccountVoiceInventory.fetch(session: session) { "synthetic-list-key" }
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: VoiceKeyLookupEffects(accesses: accesses))
         await controller.markReadyForSelfTest()
         for voice in [

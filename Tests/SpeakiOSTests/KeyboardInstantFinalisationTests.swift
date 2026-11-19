@@ -15,17 +15,17 @@ final class KeyboardInstantFinalisationTests: XCTestCase {
         let disruption = Task { @MainActor in
             // Queue the keyboard Finish, then enter the disruption callback before that task runs.
             harness.coordinator.handleRequestChange()
-            await harness.coordinator.finishRecording(for: request.requestID)
+            await harness.coordinator.handoff.finishRecording(for: request.requestID)
         }
         await fulfillment(of: [draining], timeout: 2)
         await harness.coordinator.requestTask?.value
         XCTAssertFalse(harness.running)
         XCTAssertEqual(harness.app.activeRecord()?.phase, .transcribing)
         XCTAssertNil(harness.app.activeRecord()?.failureCode)
-        await harness.coordinator.finishRecording(for: request.requestID)
+        await harness.coordinator.handoff.finishRecording(for: request.requestID)
         harness.drain.release()
         await disruption.value
-        await harness.coordinator.finishRecording(for: request.requestID)
+        await harness.coordinator.handoff.finishRecording(for: request.requestID)
         harness.assertCompleted(request.requestID, text: "Captured words")
     }
 
@@ -41,10 +41,10 @@ final class KeyboardInstantFinalisationTests: XCTestCase {
         harness.coordinator.handleRequestChange()
         let keyboardFinish = harness.coordinator.requestTask
         await fulfillment(of: [draining], timeout: 2)
-        await harness.coordinator.finishRecording(for: request.requestID)
+        await harness.coordinator.handoff.finishRecording(for: request.requestID)
         harness.drain.release()
         await fulfillment(of: [polishing], timeout: 2)
-        await harness.coordinator.finishRecording(for: request.requestID)
+        await harness.coordinator.handoff.finishRecording(for: request.requestID)
         XCTAssertEqual(harness.app.activeRecord()?.phase, .transcribing)
         XCTAssertTrue(harness.history.items.isEmpty)
         harness.polish.release()
@@ -61,9 +61,9 @@ final class KeyboardInstantFinalisationTests: XCTestCase {
         let polishing = expectation(description: "Polish started")
         harness.polish.onWait = { polishing.fulfill() }
         harness.drain.release()
-        let finish = Task { await harness.coordinator.finishRecording(for: request.requestID) }
+        let finish = Task { await harness.coordinator.handoff.finishRecording(for: request.requestID) }
         await fulfillment(of: [polishing], timeout: 2)
-        await harness.coordinator.finishRecording(for: request.requestID)
+        await harness.coordinator.handoff.finishRecording(for: request.requestID)
         harness.polish.release()
         await finish.value
         XCTAssertEqual(harness.app.activeRecord()?.phase, .failed)
@@ -81,9 +81,9 @@ final class KeyboardInstantFinalisationTests: XCTestCase {
         harness.resultText = ""
         let draining = expectation(description: "Drain started")
         harness.drain.onWait = { draining.fulfill() }
-        let finish = Task { await harness.coordinator.finishRecording(for: request.requestID) }
+        let finish = Task { await harness.coordinator.handoff.finishRecording(for: request.requestID) }
         await fulfillment(of: [draining], timeout: 2)
-        await harness.coordinator.finishRecording(for: request.requestID)
+        await harness.coordinator.handoff.finishRecording(for: request.requestID)
         harness.drain.release()
         await finish.value
         XCTAssertEqual(harness.app.activeRecord()?.failureCode, .noSpeech)
@@ -98,11 +98,11 @@ final class KeyboardInstantFinalisationTests: XCTestCase {
         let request = try harness.startRequest()
         let draining = expectation(description: "Drain started")
         harness.drain.onWait = { draining.fulfill() }
-        let finish = Task { await harness.coordinator.finishRecording(for: request.requestID) }
+        let finish = Task { await harness.coordinator.handoff.finishRecording(for: request.requestID) }
         await fulfillment(of: [draining], timeout: 2)
         try harness.keyboard.cancel(requestID: request.requestID)
-        harness.coordinator.cancelRecording(for: request.requestID)
-        await harness.coordinator.finishRecording(for: request.requestID)
+        harness.coordinator.handoff.cancelRecording(for: request.requestID)
+        await harness.coordinator.handoff.finishRecording(for: request.requestID)
         harness.drain.release()
         await finish.value
         await Task { @MainActor in }.value
@@ -119,7 +119,7 @@ final class KeyboardInstantFinalisationTests: XCTestCase {
         let polishing = expectation(description: "Polish started")
         harness.polish.onWait = { polishing.fulfill() }
         harness.drain.release()
-        let finish = Task { await harness.coordinator.finishRecording(for: request.requestID) }
+        let finish = Task { await harness.coordinator.handoff.finishRecording(for: request.requestID) }
         await fulfillment(of: [polishing], timeout: 2)
         try harness.keyboard.cancel(requestID: request.requestID)
         harness.polish.release()
@@ -136,22 +136,22 @@ final class KeyboardInstantFinalisationTests: XCTestCase {
         let oldDrain = harness.drain
         let oldStarted = expectation(description: "Old drain started")
         oldDrain.onWait = { oldStarted.fulfill() }
-        let oldFinish = Task { await harness.coordinator.finishRecording(for: first.requestID) }
+        let oldFinish = Task { await harness.coordinator.handoff.finishRecording(for: first.requestID) }
         await fulfillment(of: [oldStarted], timeout: 2)
         try harness.keyboard.cancel(requestID: first.requestID)
-        harness.coordinator.cancelRecording(for: first.requestID)
+        harness.coordinator.handoff.cancelRecording(for: first.requestID)
         await Task { @MainActor in }.value
         harness.drain = Gate()
         harness.resultText = "Replacement words"
         let second = try harness.startRequest()
         let newStarted = expectation(description: "New drain started")
         harness.drain.onWait = { newStarted.fulfill() }
-        let newFinish = Task { await harness.coordinator.finishRecording(for: second.requestID) }
+        let newFinish = Task { await harness.coordinator.handoff.finishRecording(for: second.requestID) }
         await fulfillment(of: [newStarted], timeout: 2)
         oldDrain.release()
         await oldFinish.value
-        await harness.coordinator.finishRecording(for: first.requestID)
-        await harness.coordinator.finishRecording(for: second.requestID)
+        await harness.coordinator.handoff.finishRecording(for: first.requestID)
+        await harness.coordinator.handoff.finishRecording(for: second.requestID)
         XCTAssertEqual(harness.app.activeRecord()?.requestID, second.requestID)
         XCTAssertEqual(harness.app.activeRecord()?.phase, .transcribing)
         XCTAssertTrue(harness.history.items.isEmpty)
@@ -218,7 +218,7 @@ private final class Harness {
         coordinator = KeyboardInstantDictationCoordinator(sessionStore: sessions, handoffStore: app)
         // Weak captures: `cleanUp()` releases the gates, so a drain or polish
         // can resume after the test has released this harness.
-        coordinator.finalisation = .init(
+        coordinator.handoff.finalisation = .init(
             isRunning: { [weak self] in self?.running ?? false },
             partialText: { "Captured partial" },
             stop: { [weak self] in
@@ -262,7 +262,7 @@ private final class Harness {
         )
         let request = try keyboard.createRequest(profile: profile)
         try app.markRecording(requestID: request.requestID)
-        coordinator.claimRecording(for: request)
+        coordinator.handoff.claimRecording(for: request)
         running = true
         return request
     }

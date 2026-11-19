@@ -156,6 +156,7 @@ private final class PostProcessingBench: @unchecked Sendable {
         try WindowsNative.createSyntheticDirectory(directory)
         let effects = SyntheticEffects()
         let controller = try WindowsAppController(directory: directory, effects: effects)
+        await controller.allowCloudSharingForSelfTest()
         let bench = PostProcessingBench(directory: directory, effects: effects, controller: controller)
         await controller.installCloudSync(bench.hook.hooks)
         return bench
@@ -192,7 +193,7 @@ private final class PostProcessingBench: @unchecked Sendable {
         "".withCString { prompt in
             key.withCString { key in
                 postProcessingEvent(
-                    enabled ? 1 : 0, Int32(index), 0, 1, prompt, key, Unmanaged.passUnretained(holder).toOpaque()
+                    enabled ? 1 : 0, Int32(index), 0, 1, prompt, key, holder.callbackContext
                 )
             }
         }
@@ -216,11 +217,13 @@ private final class PostProcessingBench: @unchecked Sendable {
         await holder.finishSettings()
         await controller.stopProviderCredentialEdits()
         await controller.close()
+        holder.callbacks.unregister()
     }
 
     /// The choices on disk, as a relaunch reads them.
     func reopen() async throws -> Stored {
         let reopened = try WindowsAppController(directory: directory, effects: SyntheticEffects())
+        await reopened.allowCloudSharingForSelfTest()
         let postProcessing = await reopened.postProcessingOptions()
         let textOutput = await reopened.textOutputOptions()
         await reopened.close()

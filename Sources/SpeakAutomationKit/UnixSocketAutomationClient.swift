@@ -13,6 +13,17 @@ public protocol AutomationRequesting {
 /// still encode and write its structured timeout reply. Shared by every client.
 enum AutomationClientTiming {
     static let responseGracePeriod: TimeInterval = 1
+
+    /// The IO budget for one request: its command deadline plus the grace.
+    static func transportTimeout(for request: AutomationRequest) -> TimeInterval {
+        request.resolvedTimeout + responseGracePeriod
+    }
+
+    /// The same budget in milliseconds for native transports, rounded up so it
+    /// never undercuts the deadline.
+    static func transportTimeoutMilliseconds(for request: AutomationRequest) -> UInt32 {
+        UInt32(clamping: Int((transportTimeout(for: request) * 1_000).rounded(.up)))
+    }
 }
 
 #if canImport(Darwin)
@@ -21,10 +32,6 @@ enum AutomationClientTiming {
 /// Each send blocks its worker, while an owned cancellation token can shut down
 /// only that connection. MCP await workers never block the framing reader.
 public struct UnixSocketAutomationClient: CancellableAutomationRequesting {
-    /// Socket IO must outlive the app-side command deadline long enough for the
-    /// server to encode and write its structured timeout response.
-    static let responseGracePeriod: TimeInterval = AutomationClientTiming.responseGracePeriod
-
     public let socketPath: String
     private let onConnectWait: (@Sendable () -> Void)?
     private let connectAttempt: (@Sendable (Int32) -> Int32)?
@@ -64,7 +71,7 @@ public struct UnixSocketAutomationClient: CancellableAutomationRequesting {
         // a round trip; framing and decoding are shared with every transport.
         let frame = try AutomationWireExchange.requestFrame(for: request)
 
-        let descriptor = try self.connect(timeout: request.resolvedTimeout + Self.responseGracePeriod,
+        let descriptor = try self.connect(timeout: AutomationClientTiming.transportTimeout(for: request),
             cancellation: cancellation)
         defer {
             cancellation.uninstall()

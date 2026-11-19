@@ -3,7 +3,15 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { test } from 'node:test';
+import { test as nodeTest } from 'node:test';
+
+// verify-launch.sh qualifies macOS app launches (ps birth times, DiagnosticReports
+// delivery); on the Linux Lint runner its timing races are not meaningful.
+// Merge batches and main run this file on macOS through make test-tooling.
+const macOnly = process.platform !== 'darwin' && 'macOS launch verifier';
+const test = (name, options, fn) => (typeof options === 'function'
+  ? nodeTest(name, { skip: macOnly }, options)
+  : nodeTest(name, { ...options, skip: options.skip || macOnly }, fn));
 import { fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('../verify-launch.sh', import.meta.url));
@@ -71,7 +79,7 @@ exit ${options.logExit ?? 0}
 `, { mode: 0o755 });
   const lookupLog = join(directory, 'unscoped-lookup');
   // A same-name process exists; a return to name-based discovery would select it.
-  const unrelated = spawn('sleep', ['30'], { stdio: 'ignore' });
+  const unrelated = spawn('sleep', ['300'], { stdio: 'ignore' }); // outlives the fixture budget
   t.after(() => unrelated.kill());
   for (const command of ['open', 'pgrep']) {
     writeFileSync(join(directory, command), `#!/usr/bin/env bash
@@ -80,10 +88,13 @@ echo "${unrelated.pid}"
 `, { mode: 0o755 });
   }
   const result = spawnSync('bash', [script, app], {
-    encoding: 'utf8', timeout: 15000,
+    encoding: 'utf8', timeout: 60000,
     env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, HOME: home,
       TMPDIR: scratch, REPORT_WRITER: writer,
       VERIFY_LAUNCH_TIMEOUT: options.timeout ?? '0',
+      // Candidates expected to die get a wide launch window: the fixture's own startup (python, ps)
+      // can take seconds on a loaded machine, and the window ends early once the candidate exits.
+      VERIFY_LAUNCH_STARTUP: options.startup ?? '20',
       VERIFY_LAUNCH_DIAGNOSTICS_WAIT: options.wait ?? '0',
       VERIFY_LAUNCH_DIAGNOSTICS_DIR: diagnostics },
   });
@@ -95,13 +106,13 @@ echo "${unrelated.pid}"
 }
 
 test('verifies the candidate executable at a bundle path with spaces', t => {
-  const result = fixture(t, 'exec sleep 30');
+  const result = fixture(t, 'exec sleep 30', { startup: '2' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Launch verification passed/);
 });
 
 test('fails closed when the capture worker dies rather than accepting a blocked candidate', t => {
-  const result = fixture(t, 'exec sleep 30', { captureFailure: true });
+  const result = fixture(t, 'exec sleep 30', { captureFailure: true, startup: '2' });
   assert.equal(result.status, 1);
   assert.match(result.stdout, /Output capture failed/);
   assert.ok(existsSync(join(result.diagnostics, 'launch.txt')));
@@ -153,13 +164,14 @@ path="$0"
 export FIXTURE_CAPTURE_TIME="$(python3 -c 'from datetime import datetime; print(datetime.now().astimezone().isoformat())')"
 (sleep 2.25; python3 "$REPORT_WRITER" "$pid" "$path" "$HOME/Library/Logs/DiagnosticReports/JustSpeakToIt-delayed.ips") &
 exit 42
-`, { wait: '1' });
+`, { wait: '5' }); // polling starts at the death, so it must outlast the 2.25 s delivery
   assert.equal(result.status, 1);
   assert.ok(existsSync(join(result.diagnostics, 'crash-report-1.json')));
 });
 
 test('collects the same diagnostics for death during stability monitoring', t => {
-  const result = fixture(t, 'echo "monitoring evidence"; sleep 2.25; exit 43', { timeout: '3' });
+  const result = fixture(t, 'echo "monitoring evidence"; sleep 2.25; exit 43', { timeout: '30', startup: '2' });
+  // The monitor returns at the death, so a long window costs nothing but survives a loaded Mac.
   assert.equal(result.status, 1);
   assert.match(result.stdout, /Process died after/);
   assert.match(result.stdout, /exit status: 43/);
@@ -239,7 +251,7 @@ while time.monotonic()<end: os.write(1,b"x"*32768); time.sleep(0.01)'`,
     const started = Date.now();
     const result = fixture(t, 'exit 42', { logScript });
     assert.equal(result.status, 1);
-    assert.ok(Date.now() - started < 12000);
+    assert.ok(Date.now() - started < 25000, 'the 30 s log source must be cut short');
     assert.equal(JSON.parse(readFileSync(join(result.diagnostics, 'collection.json'))).systemLog.timedOut, true);
   }
 });
@@ -322,7 +334,7 @@ test('bounds report discovery and total reads before parsing a directory flood',
     '--executable', join(directory, 'JustSpeakToIt'), '--marker', marker,
     '--stdout', stdout, '--output', diagnostics,
     '--start-ns', '0', '--end-ns', '1000000000', '--wait', '1'], {
-    encoding: 'utf8', timeout: 15000,
+    encoding: 'utf8', timeout: 60000,
     env: { ...process.env, HOME: home, PATH: `${directory}:${process.env.PATH}` },
   });
   assert.equal(result.error, undefined, result.error?.message);

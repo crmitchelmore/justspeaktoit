@@ -11,7 +11,7 @@ final class RecordingLibraryListingTests: XCTestCase {
         let partialFile = Data([0x00, 0x01, 0x02])
         try partialFile.write(to: recording)
 
-        let recordings = AudioFileManager.listRecordings(in: directory)
+        let recordings = RecordingFiles.listRecordings(in: directory)
 
         XCTAssertEqual(recordings.count, 1)
         let listed = try XCTUnwrap(recordings.first)
@@ -37,7 +37,7 @@ final class RecordingLibraryListingTests: XCTestCase {
             try Data([0x01]).write(to: file)
         }
 
-        let recordings = AudioFileManager.listRecordings(in: directory)
+        let recordings = RecordingFiles.listRecordings(in: directory)
 
         XCTAssertEqual(try recordings.map { try fileIdentity(of: $0.url) }, [try fileIdentity(of: recording)])
     }
@@ -52,7 +52,7 @@ final class RecordingLibraryListingTests: XCTestCase {
 
         let alias = try directoryAlias(to: directory)
         let activeAlias = alias.appendingPathComponent(activeRecording.lastPathComponent)
-        let snapshot = AudioFileManager.listRecordings(in: directory, excluding: activeAlias)
+        let snapshot = RecordingFiles.listRecordings(in: directory, excluding: activeAlias)
         // Even if capture finishes now, deletion must only consider the saved files
         // that were eligible when the snapshot was made.
         for recording in snapshot {
@@ -75,7 +75,7 @@ final class RecordingLibraryListingTests: XCTestCase {
         XCTAssertEqual(try fileIdentity(of: activeAlias), try fileIdentity(of: active))
 
         for (listedDirectory, excludedRecording) in [(directory, activeAlias), (alias, active)] {
-            let snapshot = AudioFileManager.listRecordings(in: listedDirectory, excluding: excludedRecording)
+            let snapshot = RecordingFiles.listRecordings(in: listedDirectory, excluding: excludedRecording)
             XCTAssertEqual(try snapshot.map { try fileIdentity(of: $0.url) }, [try fileIdentity(of: saved)])
         }
     }
@@ -87,18 +87,18 @@ final class RecordingLibraryListingTests: XCTestCase {
         let activeAlias = alias.appendingPathComponent(active.lastPathComponent)
         try Data([0x01]).write(to: active)
 
-        AudioFileManager.removeRecording(at: active, excluding: activeAlias)
+        RecordingFiles.removeRecording(at: active, excluding: activeAlias)
         XCTAssertTrue(FileManager.default.fileExists(atPath: active.path))
-        AudioFileManager.removeRecording(at: activeAlias, excluding: active)
+        RecordingFiles.removeRecording(at: activeAlias, excluding: active)
         XCTAssertTrue(FileManager.default.fileExists(atPath: active.path))
 
         let saved = directory.appendingPathComponent("Recording-saved.m4a")
         try Data([0x01]).write(to: saved)
-        AudioFileManager.removeRecording(at: saved, excluding: activeAlias)
+        RecordingFiles.removeRecording(at: saved, excluding: activeAlias)
         XCTAssertFalse(FileManager.default.fileExists(atPath: saved.path))
 
         // Completed recordings remain removable through the same directory alias.
-        AudioFileManager.removeRecording(at: activeAlias, excluding: nil)
+        RecordingFiles.removeRecording(at: activeAlias, excluding: nil)
         XCTAssertFalse(FileManager.default.fileExists(atPath: active.path))
     }
 

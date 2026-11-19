@@ -11,7 +11,7 @@ final class DesktopHostVoiceSelectionOwnershipTests: XCTestCase {
     override func setUp() async throws {
         FakeLog.shared.reset(); FakeSpeech.shared.reset(); VoiceFormatProbe.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-selection-owned-\(UUID())")
-        controller = try DesktopHostController(directory: directory, effects: VoiceFormatEffects())
+        controller = try DesktopHostController.consented(directory: directory, effects: VoiceFormatEffects())
         await controller.markReadyForSelfTest()
     }
 
@@ -33,7 +33,7 @@ final class DesktopHostVoiceSelectionOwnershipTests: XCTestCase {
         try await importValues(initial.configurationProjection(over: [:]))
         let original = await controller.voiceOutputSettings()
         let revision = await controller.voiceSettingsRevision
-        let epoch = await controller.voiceCredentialEpoch
+        let epoch = await controller.voiceCredentials.selectionEpoch
         let gate = VoiceFormatGate()
         VoiceFormatProbe.shared.holdAvailability(gate)
         let host = try XCTUnwrap(controller)
@@ -43,7 +43,7 @@ final class DesktopHostVoiceSelectionOwnershipTests: XCTestCase {
         try await importValues(original.configurationProjection(over: [:]))
         let restored = await controller.voiceOutputSettings()
         let changedRevision = await controller.voiceSettingsRevision
-        let changedEpoch = await controller.voiceCredentialEpoch
+        let changedEpoch = await controller.voiceCredentials.selectionEpoch
         XCTAssertEqual(restored, original)
         XCTAssertGreaterThan(changedRevision, revision)
         XCTAssertNotEqual(changedEpoch, epoch)

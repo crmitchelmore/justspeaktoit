@@ -8,12 +8,12 @@
     "dev": "bun run serve.ts",
     "build": "node build.mjs",
     "preview": "bun run serve.ts",
-    "test": "node --test download-architecture.test.js build.test.js worker.test.js qa.test.js color-scheme.test.js accessibility.test.js"
+    "test": "node --test chrome.test.js download-architecture.test.js build.test.js worker.test.js qa.test.js color-scheme.test.js accessibility.test.js"
   },
   "devDependencies": {
     "@types/bun": "latest"
   },
   "peerDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "^6.0.3"
   }
 }

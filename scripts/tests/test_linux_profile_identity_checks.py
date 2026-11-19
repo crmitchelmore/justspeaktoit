@@ -2,17 +2,16 @@
 import importlib.util
 import json
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location('profile_checks', ROOT / 'scripts/linux-profile-identity-checks.py')
+SPEC = importlib.util.spec_from_file_location('profile_checks', ROOT / 'scripts/linux/linux-profile-identity-checks.py')
 CHECKS = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CHECKS)
 

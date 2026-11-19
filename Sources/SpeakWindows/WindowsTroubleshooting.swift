@@ -88,7 +88,7 @@ extension WindowsAppController {
 
 private enum WindowsTroubleshooting {
     static func refreshSettings(_ holder: WindowsEventContext, command: Int32) async throws {
-        let context = Unmanaged.passUnretained(holder).toOpaque()
+        let context = holder.callbackContext
         if command == Int32(JSTI_TROUBLESHOOTING_KEEP_CLIPBOARD.rawValue) {
             let output = await holder.controller.textOutputOptions()
             try WindowsNative.configureTextOutput(output, context: context)
@@ -145,8 +145,7 @@ private enum WindowsTroubleshooting {
 }
 
 private func troubleshootingEvent(_ command: Int32, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     let revision = jsti_troubleshooting_revision()
     let previous = WindowsTroubleshootingState.shared.snapshot()
     holder.enqueueSettings {
@@ -183,7 +182,7 @@ private func troubleshootingEvent(_ command: Int32, _ context: UnsafeMutableRawP
 extension WindowsEventContext {
     func configureTroubleshooting() throws {
         guard jsti_troubleshooting_configure(
-            troubleshootingEvent, Unmanaged.passUnretained(self).toOpaque()
+            troubleshootingEvent, callbackContext
         ) == 0 else { throw WindowsNativeError(message: "Could not configure Troubleshooting.") }
     }
 }
@@ -199,6 +198,7 @@ enum WindowsTroubleshootingSelfTest {
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = SyntheticEffects()
         let controller = try WindowsAppController(directory: root, effects: effects)
+        await controller.allowCloudSharingForSelfTest()
         do {
             await controller.markReadyForSelfTest()
             try await checkClipboard(controller, effects: effects)
@@ -207,6 +207,7 @@ enum WindowsTroubleshootingSelfTest {
             await controller.close()
             try await reject { try await controller.applyTroubleshootingFix(keepClipboard, snapshot: snapshot) }
             let reopened = try WindowsAppController(directory: root, effects: effects)
+            await reopened.allowCloudSharingForSelfTest()
             let output = await reopened.textOutputOptions()
             let processing = await reopened.postProcessingOptions()
             await reopened.close()

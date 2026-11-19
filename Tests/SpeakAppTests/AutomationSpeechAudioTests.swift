@@ -56,13 +56,20 @@ final class AutomationSpeechAudioTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: mp3.path))
     }
 
+    /// Opt in with JSTI_SYSTEM_SPEECH_TEST=1. Real synthesis depends on the
+    /// host's speech services, which hosted CI runners do not reliably provide.
     func testSystemVoice_WritesCompleteWAVWithoutAnAPIKey() async throws {
-        guard !AVSpeechSynthesisVoice.speechVoices().isEmpty else { throw XCTSkip("No system voices installed") }
+        guard ProcessInfo.processInfo.environment["JSTI_SYSTEM_SPEECH_TEST"] == "1" else {
+            throw XCTSkip("Set JSTI_SYSTEM_SPEECH_TEST=1 to verify real system speech synthesis.")
+        }
+        guard AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode()) != nil else {
+            throw XCTSkip("No system voice for the current language")
+        }
         let client = SystemTTSClient()
         let result = try await withThrowingTaskGroup(of: TTSResult.self) { group in
             group.addTask {
                 try await client.synthesize(
-                    text: "Just Speak To It.", voice: TextToSpeechManager.onDeviceVoiceID,
+                    text: Self.multiSentenceText, voice: TextToSpeechManager.onDeviceVoiceID,
                     settings: TTSSettings(format: .wav)
                 )
             }
@@ -79,8 +86,14 @@ final class AutomationSpeechAudioTests: XCTestCase {
         let data = try Data(contentsOf: result.audioURL)
         XCTAssertEqual(String(data: data.prefix(4), encoding: .ascii), "RIFF")
         XCTAssertGreaterThan(try AVAudioFile(forReading: result.audioURL).length, 0)
-        XCTAssertGreaterThan(result.duration, 0)
+        // Each sentence takes about a second, so a first-sentence prefix fails (#1464).
+        XCTAssertGreaterThan(result.duration, 4)
     }
+
+    private static let multiSentenceText = """
+        Just Speak To It. This second sentence must reach the file. \
+        So must this third one. And the fourth, which ends the text.
+        """
 }
 
 /// The Mac's `speak voices` list comes from the app's own settings and keys.

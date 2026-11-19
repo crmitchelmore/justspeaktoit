@@ -74,14 +74,8 @@ extension DesktopHostModels {
     }
 
     static func publishLocalPreferences(batch: String?, live: String?) throws {
-        let entries = snapshot.entries
-        func index(_ identifier: String?, live: Bool) -> Int32 {
-            guard let identifier, let index = entries.firstIndex(where: {
-                $0.option.id == identifier && $0.isLocal && $0.isLive == live
-            }) else { return -1 }
-            return Int32(index)
-        }
-        let result = jsti_window_set_local_model_preferences(index(batch, live: false), index(live, live: true))
+        let slots = localPreferenceSlots(batch: batch, live: live)
+        let result = jsti_window_set_local_model_preferences(slots.batch, slots.live)
         guard result == 0 else { throw WindowsNativeError(message: "Could not display the saved Local model choices.") }
     }
 }

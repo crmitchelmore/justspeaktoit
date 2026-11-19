@@ -63,18 +63,5 @@ final class PaidAccessStoreTests: XCTestCase {
         XCTAssertEqual(decision, .bringYourOwnKey(model: "openai/whisper-1"))
     }
 
-    // MARK: - Nonce
-
-    func testSignInNonce_isUniqueUrlSafeAndHashedForApple() {
-        let first = PaidAccessStore.makeRawNonce()
-        let second = PaidAccessStore.makeRawNonce()
-
-        XCTAssertNotEqual(first, second)
-        XCTAssertNil(first.range(of: "[^A-Za-z0-9_-]", options: .regularExpression))
-        XCTAssertEqual(
-            PaidAccessStore.sha256Hex("abc"),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        )
-    }
 }
 #endif

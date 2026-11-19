@@ -334,4 +334,18 @@ final class CaptureDeepLinkTests: XCTestCase {
         XCTAssertTrue(router.handle(URL(string: "justspeaktoit://Transcribe")!))
     }
 }
+
+final class KeyboardConnectDeepLinkTests: XCTestCase {
+    @MainActor
+    func testRouterQueuesTheKeyboardConnectRequestOnceAndShowsItsSheet() throws {
+        let router = DeepLinkRouter()
+        let link = try XCTUnwrap(KeyboardConnectLink.url())
+
+        XCTAssertTrue(router.handle(link))
+        XCTAssertNil(router.pendingCaptureAction)
+        XCTAssertTrue(router.showsKeyboardConnect)
+        XCTAssertTrue(router.consumePendingKeyboardConnect())
+        XCTAssertFalse(router.consumePendingKeyboardConnect())
+    }
+}
 #endif

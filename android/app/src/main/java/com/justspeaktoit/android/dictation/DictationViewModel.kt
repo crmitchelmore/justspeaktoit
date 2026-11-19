@@ -1,169 +1,493 @@
 package com.justspeaktoit.android.dictation
 
 import android.app.Application
-import android.content.ContentResolver
 import android.net.Uri
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
-import com.justspeaktoit.android.cloud.CallHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.justspeaktoit.android.JustSpeakApplication
+import com.justspeaktoit.android.cloud.AndroidAudioInputs
+import com.justspeaktoit.android.cloud.AzureSpeechCredential
+import com.justspeaktoit.android.cloud.AudioInputSource
+import com.justspeaktoit.android.cloud.BalanceDirectory
+import com.justspeaktoit.android.cloud.CleanupModel
 import com.justspeaktoit.android.cloud.CloudCatalog
 import com.justspeaktoit.android.cloud.CloudClient
-import com.justspeaktoit.android.cloud.CloudException
 import com.justspeaktoit.android.cloud.CloudModel
+import com.justspeaktoit.android.cloud.CloudSharedDataKind
+import com.justspeaktoit.android.cloud.CloudSharingConsent
+import com.justspeaktoit.android.cloud.CloudSharingRequest
 import com.justspeaktoit.android.cloud.CloudProvider
-import com.justspeaktoit.android.cloud.SharedAudio
-import com.justspeaktoit.android.cloud.WavFormat
+import com.justspeaktoit.android.cloud.CloudService
+import com.justspeaktoit.android.cloud.NoAudioInputs
+import com.justspeaktoit.android.cloud.OpenRouterDiscovery
+import com.justspeaktoit.android.cloud.OpenRouterDiscoveryStore
+import com.justspeaktoit.android.cloud.ProviderBalanceClient
+import com.justspeaktoit.android.cloud.ProviderBalanceClients
+import com.justspeaktoit.android.cloud.ProviderBalanceStore
+import com.justspeaktoit.android.cloud.RecorderFactory
 import com.justspeaktoit.android.cloud.WavRecorder
+import com.justspeaktoit.android.corrections.AutoCorrectionLearner
+import com.justspeaktoit.android.corrections.CorrectionRule
 import com.justspeaktoit.android.history.AtomicHistoryFile
 import com.justspeaktoit.android.history.HistoryEntry
-import com.justspeaktoit.android.history.HistoryStatus
 import com.justspeaktoit.android.history.HistoryStore
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.ondevice.GeminiNanoAvailability
+import com.justspeaktoit.android.ondevice.GeminiNanoCleanup
+import com.justspeaktoit.android.ondevice.GeminiNanoException
+import com.justspeaktoit.android.ondevice.GeminiNanoFailure
+import com.justspeaktoit.android.ondevice.GeminiNanoModel
+import com.justspeaktoit.android.ondevice.MlKitGeminiNano
+import com.justspeaktoit.android.local.AndroidLocalModels
+import com.justspeaktoit.android.local.CleanupModelsState
+import com.justspeaktoit.android.local.LocalModelSetup
+import com.justspeaktoit.android.local.LocalModelsState
+import com.justspeaktoit.android.local.ModelInstallState
+import com.justspeaktoit.android.readaloud.PronunciationDictionary
+import com.justspeaktoit.android.readaloud.PronunciationEntry
+import com.justspeaktoit.android.readaloud.VoiceSelection
+import com.justspeaktoit.android.readaloud.readVoiceCatalog
+import com.justspeaktoit.android.resources.SystemResourceRegistry
 import com.justspeaktoit.android.security.KeystoreSecretStore
 import com.justspeaktoit.android.security.SecretStore
+import com.justspeaktoit.android.settings.AppAppearance
 import com.justspeaktoit.android.settings.AppPreferences
+import com.justspeaktoit.android.settings.DictationPreferences
+import com.justspeaktoit.android.settings.DictationProfile
+import com.justspeaktoit.android.settings.RawConfigurationValues
+import com.justspeaktoit.android.settings.RecordingCue
+import com.justspeaktoit.android.settings.RecordingSoundProfile
+import com.justspeaktoit.android.settings.RecordingSoundSettings
+import com.justspeaktoit.android.sync.AndroidHistorySync
+import com.justspeaktoit.android.sync.HistorySyncAvailability
+import com.justspeaktoit.android.sync.HistorySyncService
+import com.justspeaktoit.android.sync.HistorySyncStatus
+import com.justspeaktoit.android.sync.SyncHistoryEntries
+import com.justspeaktoit.android.transfer.ConfigArchiveException
+import com.justspeaktoit.android.transfer.ConfigExporter
+import com.justspeaktoit.android.transfer.ConfigImportApplier
+import com.justspeaktoit.android.transfer.ConfigImporter
+import com.justspeaktoit.android.transfer.ConfigTransferFiles
+import com.justspeaktoit.android.transfer.ConfigTransferState
+import com.justspeaktoit.android.transfer.ImportPlan
+import com.justspeaktoit.android.transfer.TransferOutcome
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
-import java.util.concurrent.atomic.AtomicReference
-import java.util.UUID
+import java.io.OutputStream
 import java.security.GeneralSecurityException
 import java.security.ProviderException
-import java.util.Locale
 
-data class SharedAudioOffer(val uri: Uri, val mimeType: String?)
+/**
+ * The dictation screen's state. It projects its owners into one [DictationUiState] and routes the
+ * screen's actions to them: [DictationEngineSelector] chooses the mode and checks availability,
+ * [DictationSessionController] runs sessions and holds the microphone, [DictationHistory] writes
+ * History, [HistoryRetry] transcribes kept audio and [SharedAudioImporter] copies shared audio. Every
+ * collaborator is injected ([Factory] wires the production ones), and all calls run on the main thread
+ * of [scope]; blocking work moves to [io] through [CloudCapture].
+ *
+ * While a session captures or saves its audio, [foreground] runs a microphone foreground service so
+ * the session keeps going with the screen off or another app in front, and [interruptions] reports
+ * calls, audio focus changes and microphone route changes.
+ */
+class DictationViewModel internal constructor(
+    private val engine: SpeechEngine,
+    recorders: RecorderFactory,
+    cloud: CloudService,
+    private val secrets: SecretStore,
+    private val prefs: DictationPreferences,
+    history: HistoryStore,
+    private val sharedAudioSource: SharedAudioSource,
+    cacheDir: File,
+    recordingsDir: File,
+    // The same context viewModelScope uses; closed with the ViewModel.
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+    private val io: CoroutineDispatcher = Dispatchers.IO,
+    timings: DictationTimings = DictationTimings(),
+    // Process-wide, so a recreated ViewModel shares the lane that releases its predecessor's microphone.
+    retirement: RecorderRetirement = RecorderRetirement.shared,
+    // Process-wide, so Settings and the keyboard list every hold the app has.
+    private val resources: SystemResourceRegistry = SystemResourceRegistry.shared,
+    private val interruptions: AudioInterruptions = NoAudioInterruptions,
+    private val foreground: ForegroundSession = NoForegroundSession,
+    // Told when a dictation produces a transcript; only its mode and model are passed, never the text.
+    private val onTranscriptionSucceeded: (RecognitionMode, CloudModel) -> Unit = { _, _ -> },
+    private val sounds: RecordingSoundOutput? = null,
+    // The microphones Settings offers; the recorder factory routes to the chosen one itself.
+    private val audioInputs: AudioInputSource = NoAudioInputs,
+    // provider_balances.json and Android's billing transports; empty shows no balance lines.
+    balanceDirectory: BalanceDirectory = BalanceDirectory.EMPTY,
+    balanceClients: List<ProviderBalanceClient> = emptyList(),
+    handsFreeMicrophone: HandsFreeMicrophone = NoHandsFreeMicrophone,
+    // Builds opt-in History sync over this ViewModel's History; null leaves sync out of the app.
+    historySync: (SyncHistoryEntries) -> HistorySyncService? = { null },
+    // Downloads OpenRouter's public model list for the browsers; tests pass a fake.
+    openRouterFetch: (String) -> String = OpenRouterDiscovery::download,
+    // SpeakCore's shared pronunciation defaults, from voice_catalog.json.
+    private val pronunciationDefaults: List<PronunciationEntry> = emptyList(),
+    // Gemini Nano through ML Kit for on-device cleanup; null leaves it unavailable (tests pass a fake).
+    private val geminiNano: GeminiNanoModel? = null,
+    // Downloaded Whisper (#1658) and cleanup (#1660) models; null leaves both out of the app.
+    localModelSetup: LocalModelSetup? = null,
+) : ViewModel(AutoCloseable { scope.cancel() }) {
+    /** Hands-free dictation (#1632): its recordings take their audio from its microphone, pre-roll first. */
+    private val handsFree = HandsFreeDictation(
+        microphone = handsFreeMicrophone,
+        resources = resources,
+        scope = scope,
+        onSpeech = ::onHandsFreeSpeech,
+        onChanged = ::onHandsFreeChanged,
+    )
 
-/** Optional OpenRouter cleanup of a final transcript. A failure keeps the original text. */
-enum class CleanupStatus { None, Running, Applied, Failed }
+    private val capture = CloudCapture(
+        { file, onLevel, onLimitReached, onCaptureFailed ->
+            handsFree.recorder(file, onLevel, onLimitReached, onCaptureFailed)
+                ?: recorders.create(file, onLevel, onLimitReached, onCaptureFailed)
+        },
+        cacheDir,
+        io,
+        retirement,
+        resources,
+    )
+    private val sharedAudioImporter = SharedAudioImporter(capture, timings.importMs)
+    private val localModels = localModelSetup?.manager(scope, io)
 
-data class DictationUiState(
-    val dictation: DictationState = DictationState.Idle,
-    val options: List<ModeAvailability> = emptyList(),
-    /** The user's explicit choice; null means "use the best available on-device or device mode". */
-    val chosenMode: RecognitionMode? = null,
-    val languageTag: String = Locale.getDefault().toLanguageTag(),
-    val onDeviceLanguageTag: String = languageTag,
-    val checkingAvailability: Boolean = true,
-    val cloudModel: CloudModel = CloudCatalog.defaultTranscriptionModel,
-    val savedKeys: Set<CloudProvider> = emptySet(),
-    val cleanupEnabled: Boolean = false,
-    val cleanup: CleanupStatus = CleanupStatus.None,
-    val originalTranscript: String? = null,
-    /** Set when a key could not be saved or removed securely. */
-    val keyStoreError: Boolean = false,
-    /** True until a discarded recording has released the microphone. */
-    val releasingMicrophone: Boolean = false,
-    /** Newest first. */
-    val history: List<HistoryEntry> = emptyList(),
-    val retention: Retention = Retention.Month,
-    /** The last history change could not be written; it is retried with the next change. */
-    val historyError: Boolean = false,
-    /** Audio another app shared, waiting for the user to confirm the upload. */
-    val sharedAudio: SharedAudioOffer? = null,
-) {
-    /** The mode a new session would use. */
-    val activeMode: RecognitionMode?
-        get() = chosenMode ?: RecognizerAvailability.defaultMode(options)
+    /** Transcribes with a downloaded model; never substitutes another engine. */
+    private val downloaded = localModelSetup?.let { setup ->
+        DownloadedTranscription({ id -> localModels?.installedFile(id) }, setup.transcriber)
+    } ?: DownloadedTranscription.Unavailable
+    private val localTranscriber = localModelSetup?.transcriber
 
-    /** While a session runs, its own mode, so a refresh can never relabel its privacy. */
-    val displayedMode: RecognitionMode?
-        get() = when (dictation) {
-            is DictationState.Starting -> dictation.mode
-            is DictationState.Listening -> dictation.mode
-            is DictationState.Finishing -> dictation.mode
-            else -> activeMode
-        }
+    /** Downloaded cleanup models (#1660), stored apart from the Whisper models. */
+    private val cleanupSetup = localModelSetup?.cleanup
+    private val cleanupModels = localModelSetup?.cleanupManager(scope, io)
 
-    val activeAvailability: ModeAvailability?
-        get() = options.firstOrNull { it.mode == displayedMode }
+    /** Cleans up with a downloaded model; a failure keeps the transcript and nothing else is tried. */
+    private val downloadedCleanup = cleanupSetup?.let { setup ->
+        DownloadedCleanup(
+            installed = { id -> cleanupModels?.installedModel(id) },
+            verify = setup.verifier::verify,
+            cleaner = setup.cleaner,
+            io = io,
+            timeoutMs = timings.localCleanupMs,
+        )
+    } ?: DownloadedCleanup.Unavailable
+    private val historyRetry = HistoryRetry(cloud, secrets, capture, io, timings.transcribeMs, downloaded)
 
-    /** Starting waits for a coherent availability result for the current language. */
-    val canStart: Boolean
-        get() = !dictation.isActive && !checkingAvailability && !releasingMicrophone &&
-            cleanup != CleanupStatus.Running && options.firstOrNull { it.mode == activeMode }?.usable == true
+    /** Shares the keyboard's preferences, so edits it learned appear on [refreshLearnedCorrections]. */
+    private val learner = AutoCorrectionLearner(prefs)
 
-    /** Cleanup runs only when switched on and an OpenRouter key exists. */
-    val cleanupReady: Boolean
-        get() = cleanupEnabled && CloudProvider.OpenRouter in savedKeys
-}
+    private val selector: DictationEngineSelector = DictationEngineSelector(
+        engine,
+        secrets,
+        prefs,
+        scope,
+        timings,
+        sessionActive = { session.state.dictation.isActive },
+        downloadedStatus = { id ->
+            localModels?.let {
+                val local = _state.value.localModels
+                RecognizerAvailability.downloadedStatus(
+                    local.runtimeAvailable,
+                    local.models.any { item -> item.model.catalogId == id && item.state == ModelInstallState.Installed },
+                )
+            }
+        },
+        publish = ::onSelection,
+    )
 
-class DictationViewModel(application: Application) : AndroidViewModel(application) {
-    private val engine = AndroidSpeechEngine(application)
-    private val secrets: SecretStore = KeystoreSecretStore.create(application)
-    private val prefs = AppPreferences(application)
-    private val cloud = CloudClient()
-    private val cacheDir = application.cacheDir
-    private val history = HistoryStore(AtomicHistoryFile(File(application.filesDir, "history.json")))
-
-    // One thread owns the history file, so writes are ordered without locks.
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val historyDispatcher = Dispatchers.IO.limitedParallelism(1)
-
-    private val _state = MutableStateFlow(
+    private val _state: MutableStateFlow<DictationUiState> = MutableStateFlow(
         DictationUiState(
-            chosenMode = prefs.chosenMode,
-            cloudModel = CloudCatalog.transcriptionModel(prefs.cloudModelId),
             cleanupEnabled = prefs.cleanupEnabled,
+            cleanupModel = CloudCatalog.cleanupModel(prefs.cleanupModelId),
+            cleanupModelDiscoveryEnabled = prefs.cleanupModelDiscoveryEnabled,
             retention = prefs.retention,
-        ),
+            keepAudioOnCancel = prefs.keepAudioOnCancel,
+            silence = prefs.silence,
+            handsFreeEnabled = prefs.handsFreeEnabled,
+            keyboardLiveCloudEnabled = prefs.keyboardLiveCloudEnabled,
+            keepRecordings = prefs.keepRecordings,
+            corrections = prefs.corrections,
+            pronunciations = prefs.pronunciations ?: pronunciationDefaults,
+            readAloudVoice = VoiceSelection.parse(prefs.readAloudVoice).encoded,
+            learnCorrections = prefs.learnCorrections,
+            correctionPromotionThreshold = prefs.correctionPromotionThreshold,
+            correctionCandidates = learner.pending(),
+            cleanupPrompt = prefs.cleanupPrompt,
+            profiles = prefs.profiles,
+            recordingSounds = prefs.recordingSounds,
+            audioInputId = prefs.audioInputId,
+            audioInputs = audioInputs.inputs(),
+            appearance = prefs.appearance,
+            dynamicColor = prefs.dynamicColor,
+            azureEndpoint = readAzureEndpoint(),
+            localModels = LocalModelsState(
+                downloadOnMobileData = prefs.downloadedModelsOnMobileData,
+                names = localModelSetup?.names.orEmpty(),
+            ),
+            localCleanup = CleanupModelsState(
+                selectedId = prefs.localCleanupModelId,
+                names = localModelSetup?.cleanup?.names.orEmpty(),
+            ),
+            cloudSharingAllowed = prefs.cloudSharingConsent.allowed,
+        ).withSelection(selector.selection),
+    )
+    val state: StateFlow<DictationUiState> = _state.asStateFlow()
+
+    private val balances = ProviderBalanceStore(
+        directory = balanceDirectory,
+        clients = balanceClients,
+        readKey = secrets::read,
+        scope = scope,
+        io = io,
+        publish = { entries -> _state.update { it.copy(balances = entries) } },
+    )
+
+    /** Live OpenRouter models, cached on the device; a saved discovered model resolves once it is read. */
+    private val discovery = OpenRouterDiscoveryStore(
+        cacheDir = File(cacheDir, "openrouter"),
+        scope = scope,
+        io = io,
+        fetch = openRouterFetch,
+        publish = { found ->
+            _state.update {
+                it.copy(
+                    openRouterDiscovery = found,
+                    cleanupModel = CloudCatalog.findCleanupModel(it.cleanupModel.selectionId) ?: it.cleanupModel,
+                )
+            }
+        },
     )
 
     init {
-        val retention = prefs.retention
-        updateHistory { history.load(retention) }
+        discovery.restore()
+        discovery.setCleanupEnabled(prefs.cleanupModelDiscoveryEnabled)
     }
-    val state: StateFlow<DictationUiState> = _state.asStateFlow()
 
-    // Kept separate so microphone level updates only recompose the level indicator.
-    private val _level = MutableStateFlow(0f)
-    val level: StateFlow<Float> = _level.asStateFlow()
-
-    private var recorder: WavRecorder? = null
-    private var recording: File? = null
-    private var work: Job? = null
-
-    /** Called whenever the screen starts, so newly installed models, services or keys are noticed. */
-    fun refreshAvailability() {
-        if (_state.value.dictation.isActive) return
-        // Presence only: names are listed without decrypting any secret.
-        val names = secrets.names()
-        val saved = CloudCatalog.providers.filterTo(mutableSetOf()) { it.credentialId in names }
-        val caps = engine.capabilities()
-        val tag = Locale.getDefault().toLanguageTag()
-        _state.update { it.copy(languageTag = tag, savedKeys = saved, checkingAvailability = true) }
-        engine.checkOnDeviceLanguage(tag) { resolution ->
-            _state.update {
-                it.copy(
-                    options = RecognizerAvailability.evaluate(
-                        caps,
-                        resolution.support,
-                        cloudKeySaved = it.cloudModel.provider in it.savedKeys,
-                    ),
-                    onDeviceLanguageTag = resolution.languageTag,
-                    checkingAvailability = false,
-                )
-            }
-            maybeAutoStart()
+    init {
+        _state.update {
+            it.copy(
+                balanceAccounts = balanceDirectory.accounts.associateBy { account -> account.primaryCredentialId },
+                checkableBalances = balanceDirectory.accounts.filter(balances::canCheck).map { account -> account.id }
+                    .toSet(),
+            )
         }
     }
 
+    private val historyOwner = DictationHistory(
+        history,
+        recordingsDir,
+        scope,
+        io,
+        onLocalChange = { requestHistorySync() },
+    ) { entries, failed ->
+        _state.update { it.copy(history = entries, historyError = failed) }
+    }
+
+    // One thread owns the transfer files, so dismissing an import never deletes a newer one's files.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val transferIo = io.limitedParallelism(1)
+    private val transferFiles = ConfigTransferFiles(File(cacheDir, "config-transfer"))
+    private val importApplier = ConfigImportApplier(prefs, secrets, recordingsDir, transferIo) { retention, change ->
+        historyOwner.importEntries(retention, change)
+    }
+
+    /** The import the preview describes, applied only when the user confirms it. */
+    private var pendingImport: ImportPlan? = null
+    private var pronunciationEdits = 0
+
+    private val sync: HistorySyncService? = historySync(
+        object : SyncHistoryEntries {
+            override suspend fun snapshot(): List<HistoryEntry> = historyOwner.syncSnapshot(_state.value.retention)
+
+            override suspend fun <T> update(transform: (List<HistoryEntry>) -> Pair<List<HistoryEntry>, T>): T =
+                historyOwner.syncUpdate(_state.value.retention, transform)
+        },
+    )
+
+    /** History sync's sign-in and progress, for Settings. */
+    val historySyncStatus: StateFlow<HistorySyncStatus> =
+        sync?.status ?: MutableStateFlow(HistorySyncStatus(HistorySyncAvailability.MissingToken)).asStateFlow()
+
+    private var historySignIn: Job? = null
+    private var pendingHistorySync: Job? = null
+
+    private val interruptionWatch = SessionInterruptionWatch(interruptions) { session }
+
+    private val session: DictationSessionController = DictationSessionController(
+        engine = engine,
+        capture = capture,
+        requests = SessionRequests(
+            cloud,
+            secrets,
+            capture,
+            io,
+            timings,
+            onDevice = geminiNano?.let { GeminiNanoCleanup(it, isTopApp = { appInFront }) },
+            onKeyFailure = { provider, failure ->
+                _state.update {
+                    it.copy(
+                        keyErrors = it.keyErrors + provider,
+                        rejectedKeys = if (failure == DictationFailure.InvalidKey) {
+                            it.rejectedKeys + provider
+                        } else {
+                            it.rejectedKeys
+                        },
+                    )
+                }
+            },
+        ),
+        history = historyOwner,
+        resources = resources,
+        scope = scope,
+        cacheDir = cacheDir,
+        settings = object : SessionSettings {
+            override val retention: Retention get() = _state.value.retention
+            override val keepAudioOnCancel: Boolean get() = _state.value.keepAudioOnCancel
+            override val keepRecordings: Boolean get() = _state.value.keepRecordings
+            override val cleanupModel: CleanupModel?
+                get() = _state.value.let {
+                    if (it.cleanupReady && it.sessionLocalCleanupModelId == null) it.sessionCleanupModel else null
+                }
+            override val localCleanupModelId: String? get() = _state.value.sessionDownloadedCleanupModelId
+            override val cleanupPrompt: String? get() = _state.value.sessionCleanupPrompt
+            override val corrections: List<CorrectionRule> get() = _state.value.corrections
+            // A hands-free recording always ends on silence, after the user's silence duration.
+            override val silence: SilenceSettings
+                get() = _state.value.silence.let { if (handsFree.startingUtterance) it.copy(enabled = true) else it }
+        },
+        downloaded = downloaded,
+        downloadedCleanup = downloadedCleanup,
+        cues = { cue ->
+            val choice = _state.value.recordingSounds
+            // Hands-free plays no cues, as on the desktop: they would be heard by the listening microphone.
+            if (choice.enabled && !handsFree.armed) sounds?.play(cue, choice.profile, choice.gain) ?: 0L else 0L
+        },
+        publish = { s ->
+            // Before the screen sees the change, so the service and watching are in step with it.
+            onSessionChanged(s)
+            val finished = s.dictation as? DictationState.Done
+            if (finished != null && _state.value.dictation !is DictationState.Done) {
+                // The session's own model: a profile can override the Settings one for a single session.
+                onTranscriptionSucceeded(finished.mode, CloudCatalog.transcriptionModel(session.sessionModelId))
+            }
+            _state.update {
+                it.copy(
+                    dictation = s.dictation,
+                    cleanup = s.cleanup,
+                    cleanupOnDevice = s.cleanupOnDevice,
+                    cleanupFailure = s.cleanupFailure,
+                    originalTranscript = s.originalTranscript,
+                    releasingMicrophone = s.releasingMicrophone,
+                    paused = s.paused,
+                )
+            }
+        },
+    )
+
+    /** Kept separate so microphone level updates only recompose the level indicator. */
+    val level: StateFlow<Float> = session.level
+
     private var autoStartPending = false
+
+    private val inputWatch = audioInputs.watch { _state.update { it.copy(audioInputs = audioInputs.inputs()) } }
+    /** Speech started while availability was being checked; the recording starts once it settles. */
+    private var handsFreeStartPending = false
+
+    private var appVisible = true
+
+    /** Resumed: the top foreground app, which AICore requires before it runs Gemini Nano. */
+    private var appInFront = false
+    private var geminiNanoDownload: Job? = null
+    private var foregroundPhase: ForegroundPhase? = null
+
+    /** True while Android lets the foreground service keep the session running off screen. */
+    private var foregroundActive = false
+
+    private val foregroundListener = object : ForegroundDictation.Listener {
+        // Stop ends a hands-free recording and keeps listening; while only listening, it turns hands-free off.
+        override fun onStopRequested() = if (session.isCapturing || !handsFree.armed) stop() else turnOffHandsFree()
+
+        override fun onForegroundRefused() {
+            foregroundActive = false
+            foreground.hide()
+            if (!appVisible) {
+                session.leaveApp()
+                if (handsFree.armed) handsFree.disarm(failed = true)
+            }
+        }
+    }
+
+    init {
+        scope.launch {
+            resources.holds.collect { holds -> _state.update { it.copy(resourcesInUse = holds) } }
+        }
+        historyOwner.load(prefs.retention, capture::recoverable)
+        watchLocalModels()
+        watchCleanupModels()
+        sync?.let { service ->
+            scope.launch {
+                service.prepare()
+                service.sync()
+            }
+        }
+    }
+
+    /**
+     * Publishes the downloaded models and, when one is installed or removed or the runtime loads,
+     * rechecks availability so Downloaded mode's status follows.
+     */
+    private fun watchLocalModels() {
+        val manager = localModels ?: return
+        val transcriber = localTranscriber ?: return
+        scope.launch {
+            // Loading the native library reads the APK, so it happens off the main thread.
+            val runtime = withContext(io) { transcriber.available }
+            _state.update { it.copy(localModels = it.localModels.copy(runtimeAvailable = runtime)) }
+            // An availability check that ran before the runtime loaded reported Downloaded as not provided.
+            selector.refresh()
+            manager.refresh()
+            manager.models.collect { items ->
+                val before = _state.value.localModels.installedIds
+                _state.update { it.copy(localModels = it.localModels.copy(models = items)) }
+                if (_state.value.localModels.installedIds != before) selector.refresh()
+            }
+        }
+    }
+
+    /** Publishes the downloaded cleanup models and whether the llama.cpp runtime loaded. */
+    private fun watchCleanupModels() {
+        val manager = cleanupModels ?: return
+        val cleaner = cleanupSetup?.cleaner ?: return
+        scope.launch {
+            // Loading the native library reads the APK, so it happens off the main thread.
+            val runtime = withContext(io) { cleaner.available }
+            _state.update { it.copy(localCleanup = it.localCleanup.copy(runtimeAvailable = runtime)) }
+            manager.refresh()
+            manager.models.collect { items ->
+                _state.update { it.copy(localCleanup = it.localCleanup.copy(models = items)) }
+            }
+        }
+    }
+
+    /** Called whenever the screen starts, so newly installed models, services or keys are noticed. */
+    fun refreshAvailability() = selector.refresh()
 
     /**
      * Starts dictation as soon as availability is known, for the Quick Settings tile, shortcut and
@@ -181,29 +505,29 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         start()
     }
 
+    private fun onSelection(selection: EngineSelection) {
+        _state.update { it.withSelection(selection) }
+        if (!selection.checking && handsFree.armed && _state.value.activeMode != RecognitionMode.Cloud) {
+            // Only Cloud recordings can keep the pre-roll.
+            handsFree.disarm()
+        } else if (!selection.checking && handsFreeStartPending) {
+            startHandsFreeUtterance()
+        }
+        // An auto-start waits only for an availability check, so any settled selection may start it.
+        maybeAutoStart()
+    }
+
     /**
      * Audio shared by another app is only uploaded after the user confirms, so no app can spend
      * the user's cloud credit by sending audio here.
      */
     fun offerSharedAudio(uri: Uri, mimeType: String?) {
         if (_state.value.dictation.isActive) return
-        // Only content shared through a provider is accepted. A file:// URI or one of this app's own
-        // providers would be read with this app's privileges, which could upload its private data.
-        if (uri.scheme != ContentResolver.SCHEME_CONTENT || isOwnProvider(uri)) {
-            sessionModelId = _state.value.cloudModel.catalogId
-            dispatch(DictationEvent.Start(RecognitionMode.Cloud))
-            dispatch(DictationEvent.Error(DictationFailure.UnsupportedAudio))
+        if (!sharedAudioSource.accepts(uri)) {
+            session.rejectSharedAudio(_state.value.sessionCloudModel)
             return
         }
         _state.update { it.copy(sharedAudio = SharedAudioOffer(uri, mimeType)) }
-    }
-
-    private fun isOwnProvider(uri: Uri): Boolean {
-        val app = getApplication<Application>()
-        val authority = uri.authority ?: return true
-        @Suppress("DEPRECATION")
-        val provider = app.packageManager.resolveContentProvider(authority, 0)
-        return provider?.packageName == app.packageName
     }
 
     fun dismissSharedAudio() {
@@ -213,104 +537,144 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
     fun confirmSharedAudio() {
         val offer = _state.value.sharedAudio ?: return
         _state.update { it.copy(sharedAudio = null) }
+        val requests = _state.value.cloudSharingRequests(audioToCloud = true)
+        if (asksCloudSharing(requests, PendingCloudSend.SharedAudio(offer))) return
         // Confirming takes priority over an optional cleanup; the transcript is already in History.
-        if (_state.value.cleanup == CleanupStatus.Running) {
-            work?.cancel()
-            _state.update { it.copy(cleanup = CleanupStatus.None) }
+        session.cancelCleanup()
+        val current = _state.value
+        session.transcribeSharedAudio(current.sessionCloudModel, current.languageTag) { file ->
+            sharedAudioImporter.import(
+                offer.mimeType,
+                file,
+                providerType = { sharedAudioSource.type(offer.uri) },
+                open = { sharedAudioSource.open(offer.uri) },
+            )
         }
-        transcribeSharedAudio(offer.uri, offer.mimeType)
     }
 
-    private fun transcribeSharedAudio(uri: Uri, mimeType: String?) {
-        val current = _state.value
-        if (current.dictation.isActive || current.cleanup == CleanupStatus.Running) return
-        val model = current.cloudModel
-        val language = current.languageTag
-        val resolver = getApplication<Application>().contentResolver
-        _state.update { it.copy(cleanup = CleanupStatus.None, originalTranscript = null) }
-        sessionModelId = model.catalogId
-        dispatch(DictationEvent.Start(RecognitionMode.Cloud))
-        dispatch(DictationEvent.StopRequested)
-        work = viewModelScope.launch {
-            val file = File(cacheDir, "shared-${System.nanoTime()}")
-            val event = try {
-                val key = withContext(Dispatchers.IO) { secrets.read(model.provider.credentialId) }
-                    ?: throw CloudException(DictationFailure.MissingKey, "No key")
-                val format = importSharedAudio(resolver, uri, mimeType, file)
-                DictationEvent.Final(
-                    cloudCall(TRANSCRIBE_DEADLINE_MS) { call ->
-                        cloud.transcribe(model, key, file, language, call, format)
-                    },
-                )
-            } catch (e: CloudException) {
-                DictationEvent.Error(e.failure)
-            } catch (e: GeneralSecurityException) {
-                DictationEvent.Error(DictationFailure.KeyUnavailable)
-            } catch (e: ProviderException) {
-                DictationEvent.Error(DictationFailure.KeyUnavailable)
-            } catch (e: IOException) {
-                DictationEvent.Error(DictationFailure.Audio)
-            } catch (e: SecurityException) {
-                DictationEvent.Error(DictationFailure.Audio)
-            } finally {
-                withContext(NonCancellable + Dispatchers.IO) { file.delete() }
-            }
-            ensureActive()
-            onEngineEvent(event)
-        }
+    fun chooseMode(mode: RecognitionMode) = selector.chooseMode(mode)
+
+    fun chooseCloudModel(model: CloudModel) = selector.chooseCloudModel(model)
+
+    fun chooseLanguage(id: String) = selector.chooseLanguage(id)
+
+    /** Saves [rules] in order; they apply from the next final transcript. */
+    fun setCorrections(rules: List<CorrectionRule>) {
+        prefs.corrections = rules
+        _state.update { it.copy(corrections = rules) }
+    }
+
+    /** Saves the whole pronunciation dictionary; read aloud uses it from the next reading. */
+    fun setPronunciations(entries: List<PronunciationEntry>) {
+        if (PronunciationDictionary.validate(entries) != null) return
+        // A previewed import was planned against the old dictionary; applying it would undo this edit.
+        pronunciationEdits++
+        if (pendingImport != null) dismissConfigurationImport()
+        prefs.pronunciations = entries
+        _state.update { it.copy(pronunciations = entries) }
+    }
+
+    /** Saves the read-aloud voice; a cloud voice uses the provider key already saved for it. */
+    fun setReadAloudVoice(selection: VoiceSelection) {
+        prefs.readAloudVoice = selection.encoded
+        _state.update { it.copy(readAloudVoice = selection.encoded) }
+    }
+
+    /** Saves the shared start/stop sound settings; they apply from the next cue. */
+    fun setRecordingSounds(choice: RecordingSoundSettings) {
+        prefs.recordingSounds = choice
+        _state.update { it.copy(recordingSounds = choice) }
+    }
+
+    /** Plays the chosen profile's start cue so the user can hear the profile and volume. */
+    fun previewRecordingSound() {
+        val choice = _state.value.recordingSounds
+        sounds?.play(RecordingCue.Start, choice.profile, choice.gain)
+    }
+
+    fun setLearnCorrections(enabled: Boolean) {
+        prefs.learnCorrections = enabled
+        _state.update { it.copy(learnCorrections = enabled) }
+    }
+
+    fun setCorrectionPromotionThreshold(threshold: Int) {
+        prefs.correctionPromotionThreshold = threshold
+        _state.update { it.copy(correctionPromotionThreshold = prefs.correctionPromotionThreshold) }
+    }
+
+    /** Adds a learned edit to the personal corrections now. */
+    fun acceptCorrectionCandidate(id: String) {
+        learner.accept(id)
+        refreshLearnedCorrections()
+    }
+
+    /** Hides a learned edit; the same edit is not suggested again. */
+    fun dismissCorrectionCandidate(id: String) {
+        learner.dismiss(id)
+        refreshLearnedCorrections()
+    }
+
+    fun clearCorrectionCandidates() {
+        learner.clear()
+        refreshLearnedCorrections()
     }
 
     /**
-     * Resolves the format and copies at most [SharedAudio.MAX_BYTES] off the main thread, within a
-     * deadline. Cancelling closes the provider stream, so a stalled sender cannot hold a worker.
+     * Re-reads what the keyboard may have learned while the app was elsewhere: new candidates and
+     * corrections promoted from them.
      */
-    private suspend fun importSharedAudio(
-        resolver: ContentResolver,
-        uri: Uri,
-        declaredType: String?,
-        target: File,
-    ): SharedAudio.Format {
-        val stream = AtomicReference<InputStream?>(null)
-        return bounded(IMPORT_DEADLINE_MS, DictationFailure.Audio, abort = { runCatching { stream.get()?.close() } }) {
-            // Senders often declare a generic type such as audio/*; the provider's type is more precise.
-            val format = SharedAudio.format(declaredType) ?: SharedAudio.format(resolver.getType(uri))
-                ?: throw CloudException(DictationFailure.UnsupportedAudio, "Unsupported audio")
-            val input = resolver.openInputStream(uri) ?: throw IOException("Unreadable audio")
-            stream.set(input)
-            copyLimited(input, target)
-            format
+    fun refreshLearnedCorrections() {
+        _state.update { it.copy(corrections = prefs.corrections, correctionCandidates = learner.pending()) }
+    }
+
+    fun chooseCleanupModel(model: CleanupModel) {
+        prefs.cleanupModelId = model.selectionId
+        _state.update { it.copy(cleanupModel = model) }
+    }
+
+    /**
+     * Checks whether this phone offers Gemini Nano, when Settings or a cleanup picker opens; never at app
+     * start, so a phone that never looks at it never binds to AICore. A model AICore is already
+     * downloading reports its progress.
+     */
+    fun checkGeminiNano() {
+        val model = geminiNano
+        if (model == null) {
+            _state.update { it.copy(geminiNano = GeminiNanoAvailability.Unavailable(GeminiNanoFailure.Unavailable)) }
+            return
+        }
+        when (_state.value.geminiNano) {
+            GeminiNanoAvailability.Checking, GeminiNanoAvailability.Available, is GeminiNanoAvailability.Downloading ->
+                return
+            else -> Unit
+        }
+        _state.update { it.copy(geminiNano = GeminiNanoAvailability.Checking) }
+        scope.launch {
+            val checked = try {
+                GeminiNanoAvailability.of(model.status())
+            } catch (e: GeminiNanoException) {
+                GeminiNanoAvailability.Unavailable(e.failure)
+            }
+            _state.update { it.copy(geminiNano = checked) }
+            if (checked is GeminiNanoAvailability.Downloading) downloadGeminiNano()
         }
     }
 
-    /** Fails early rather than uploading a file the provider would reject. */
-    private fun copyLimited(input: InputStream, target: File) {
-        input.use { source ->
-            target.outputStream().use { out ->
-                val buffer = ByteArray(64 * 1024)
-                var total = 0L
-                while (true) {
-                    val read = source.read(buffer)
-                    if (read < 0) break
-                    total += read
-                    if (total > SharedAudio.MAX_BYTES) {
-                        throw CloudException(DictationFailure.AudioTooLarge, "Audio too large")
-                    }
-                    out.write(buffer, 0, read)
-                }
+    /** Downloads Gemini Nano through AICore, showing progress beside it; a failed download can be retried. */
+    fun downloadGeminiNano() {
+        val model = geminiNano ?: return
+        if (geminiNanoDownload?.isActive == true) return
+        _state.update { it.copy(geminiNano = GeminiNanoAvailability.Downloading(0, 0)) }
+        geminiNanoDownload = scope.launch {
+            model.download().collect { update ->
+                _state.update { it.copy(geminiNano = GeminiNanoAvailability.after(update, it.geminiNano)) }
+            }
+            // A download that ended without a final status is checked again rather than left showing progress.
+            if (_state.value.geminiNano is GeminiNanoAvailability.Downloading) {
+                _state.update { it.copy(geminiNano = GeminiNanoAvailability.Unchecked) }
+                checkGeminiNano()
             }
         }
-    }
-
-    fun chooseMode(mode: RecognitionMode) {
-        if (_state.value.dictation.isActive) return
-        prefs.chosenMode = mode
-        _state.update { it.copy(chosenMode = mode) }
-    }
-
-    fun chooseCloudModel(model: CloudModel) {
-        prefs.cloudModelId = model.catalogId
-        _state.update { it.copy(cloudModel = model) }
-        refreshAvailability()
     }
 
     fun setCleanupEnabled(enabled: Boolean) {
@@ -318,12 +682,183 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         _state.update { it.copy(cleanupEnabled = enabled) }
     }
 
-    fun saveKey(provider: CloudProvider, key: String) =
-        updateKeys { secrets.write(provider.credentialId, key.trim()) }
+    /** Chooses a transcription model by ID, including a live OpenRouter one from the browser. */
+    fun chooseTranscriptionModel(id: String) {
+        CloudCatalog.findTranscriptionModel(id)?.let(::chooseCloudModel)
+    }
 
-    fun removeKey(provider: CloudProvider) = updateKeys { secrets.remove(provider.credentialId) }
+    /** Opt-in live discovery of OpenAI cleanup models; a saved discovered model stays selected when off. */
+    fun setCleanupModelDiscovery(enabled: Boolean) {
+        prefs.cleanupModelDiscoveryEnabled = enabled
+        _state.update { it.copy(cleanupModelDiscoveryEnabled = enabled) }
+        discovery.setCleanupEnabled(enabled)
+    }
 
-    private fun updateKeys(change: () -> Unit) {
+    /** [force] is a Refresh press, which skips the fresh-cache check but not the one-minute floor. */
+    fun refreshTranscriptionModels(force: Boolean) = discovery.refreshTranscription(force)
+
+    fun refreshCleanupModels(force: Boolean) = discovery.refreshCleanup(force)
+
+    /** A blank prompt restores the built-in one. Applies from the next cleanup. */
+    fun setCleanupPrompt(prompt: String) {
+        val saved = prompt.takeIf { it.isNotBlank() }
+        prefs.cleanupPrompt = saved
+        _state.update { it.copy(cleanupPrompt = saved) }
+    }
+
+    /** Adds [profile], or replaces the saved one with its id. Applies from the next session. */
+    fun saveProfile(profile: DictationProfile) {
+        val current = prefs.profiles
+        val updated = if (current.any { it.id == profile.id }) {
+            current.map { if (it.id == profile.id) profile else it }
+        } else {
+            current + profile
+        }
+        storeProfiles(updated)
+    }
+
+    /** Deleting the active profile leaves no profile chosen. */
+    fun deleteProfile(id: String) {
+        if (prefs.activeProfileId == id) prefs.activeProfileId = null
+        storeProfiles(prefs.profiles.filterNot { it.id == id })
+    }
+
+    /** Ignored while dictating, so a running session keeps the settings it started with. */
+    fun chooseProfile(id: String?) = selector.chooseProfile(id)
+
+    private fun storeProfiles(profiles: List<DictationProfile>) {
+        prefs.profiles = profiles
+        _state.update { it.copy(profiles = profiles) }
+        selector.refresh()
+    }
+
+    fun setKeepAudioOnCancel(enabled: Boolean) {
+        prefs.keepAudioOnCancel = enabled
+        _state.update { it.copy(keepAudioOnCancel = enabled) }
+    }
+
+    /**
+     * Applies validated raw-configuration changes (see [RawConfiguration]) through the same paths as the
+     * Settings controls, all of them or, while a dictation is running, none: returns false then.
+     */
+    fun applyConfiguration(changes: Map<String, Any?>): Boolean {
+        if (_state.value.dictation.isActive) return false
+        changes.forEach { (key, value) ->
+            when (key) {
+                "chosen_mode" -> selector.chooseMode((value as String?)?.let(RecognitionMode::valueOf))
+                "downloadedTranscriptionModel" -> selector.chooseDownloadedModel(value as String?)
+                "downloadedModelsOnMobileData" -> setDownloadModelsOnMobileData(value as Boolean)
+                "localCleanupModel" -> chooseLocalCleanupModel(value as String?)
+                "cloud_model" -> chooseCloudModel(CloudCatalog.transcriptionModel(value as String))
+                "preferredLocale" -> chooseLanguage(value as String)
+                "personal_corrections" ->
+                    setCorrections(RawConfigurationValues.corrections(value as Map<*, *>, _state.value.corrections))
+                "cleanup_enabled" -> setCleanupEnabled(value as Boolean)
+                "cleanup_model" -> chooseCleanupModel(CloudCatalog.cleanupModel(value as String))
+                "cleanupModelDiscoveryEnabled" -> setCleanupModelDiscovery(value as Boolean)
+                "keepAudioOnCancel" -> setKeepAudioOnCancel(value as Boolean)
+                "handsFreeDictationEnabled" -> setHandsFree(value as Boolean)
+                "keyboardLiveCloudEnabled" -> setKeyboardLiveCloud(value as Boolean)
+                "history_retention" -> setRetention(Retention.valueOf(value as String))
+                "keepRecordingsInHistory" -> setKeepRecordings(value as Boolean)
+                "silenceDetectionEnabled" -> setSilence(_state.value.silence.copy(enabled = value as Boolean))
+                "silenceThreshold" -> setSilence(_state.value.silence.copy(threshold = value as Double))
+                "silenceDuration" -> setSilence(_state.value.silence.copy(durationSeconds = value as Double))
+                "autoCorrectionsEnabled" -> setLearnCorrections(value as Boolean)
+                "autoCorrectionsPromotionThreshold" -> setCorrectionPromotionThreshold((value as Long).toInt())
+                "recordingSoundsEnabled" ->
+                    setRecordingSounds(_state.value.recordingSounds.copy(enabled = value as Boolean))
+                "recordingSoundProfile" -> setRecordingSounds(
+                    _state.value.recordingSounds.copy(profile = RecordingSoundProfile.fromId(value as String)),
+                )
+                "recordingSoundVolume" ->
+                    setRecordingSounds(_state.value.recordingSounds.copy(volume = (value as Double).toFloat()))
+                "appearance" -> setAppearance(AppAppearance.fromRawValue(value as String), _state.value.dynamicColor)
+                "dynamicColor" -> setAppearance(_state.value.appearance, value as Boolean)
+                else -> error("No raw-configuration binding for $key")
+            }
+        }
+        return true
+    }
+
+    /** Applies from the next Cloud recording; one under way keeps the settings it started with. */
+    fun setSilence(settings: SilenceSettings) {
+        val clamped = SilenceSettings.of(settings.enabled, settings.threshold, settings.durationSeconds)
+        prefs.silence = clamped
+        _state.update { it.copy(silence = clamped) }
+    }
+
+    /** The `AudioInput.id` the next Cloud recording uses, or null for the system default. */
+    fun setAudioInput(id: String?) {
+        prefs.audioInputId = id
+        _state.update { it.copy(audioInputId = id, audioInputs = audioInputs.inputs()) }
+    }
+
+    /** Turning hands-free off also stops it listening; turning it on takes effect from the next tap. */
+    fun setHandsFree(enabled: Boolean) {
+        prefs.handsFreeEnabled = enabled
+        _state.update { it.copy(handsFreeEnabled = enabled) }
+        if (!enabled) handsFree.disarm()
+    }
+
+    /** Lets the dictation keyboard stream to the live Cloud model; it reads this when a session starts. */
+    fun setKeyboardLiveCloud(enabled: Boolean) {
+        prefs.keyboardLiveCloudEnabled = enabled
+        _state.update { it.copy(keyboardLiveCloudEnabled = enabled) }
+    }
+
+    fun setAppearance(appearance: AppAppearance, dynamicColor: Boolean) {
+        prefs.appearance = appearance
+        prefs.dynamicColor = dynamicColor
+        _state.update { it.copy(appearance = appearance, dynamicColor = dynamicColor) }
+    }
+
+    /** Applies from the next Cloud recording; recordings already in History stay until removed. */
+    fun setKeepRecordings(enabled: Boolean) {
+        prefs.keepRecordings = enabled
+        _state.update { it.copy(keepRecordings = enabled) }
+    }
+
+    fun saveKey(provider: CloudProvider, key: String) {
+        if (updateKeys(provider) { secrets.write(provider.credentialId, key.trim()) }) {
+            balances.refresh(provider.credentialId)
+        }
+    }
+
+    fun removeKey(provider: CloudProvider) {
+        updateKeys(provider) { secrets.remove(provider.credentialId) }
+    }
+
+    /** Saves an Azure Speech resource endpoint; one that is not a Speech resource origin is ignored. */
+    fun saveAzureEndpoint(endpoint: String) {
+        val value = endpoint.trim()
+        if (AzureSpeechCredential.resourceOrigin(value) == null) return
+        if (updateKeys(CloudProvider.Azure) { secrets.write(AzureSpeechCredential.ENDPOINT_SECRET, value) }) {
+            _state.update { it.copy(azureEndpoint = value) }
+        }
+    }
+
+    fun clearAzureEndpoint() {
+        if (updateKeys(CloudProvider.Azure) { secrets.remove(AzureSpeechCredential.ENDPOINT_SECRET) }) {
+            _state.update { it.copy(azureEndpoint = "") }
+        }
+    }
+
+    private fun readAzureEndpoint(): String = try {
+        secrets.read(AzureSpeechCredential.ENDPOINT_SECRET).orEmpty()
+    } catch (e: GeneralSecurityException) {
+        ""
+    } catch (e: ProviderException) {
+        ""
+    }
+
+    /** Checks every saved key's balance, as the Apple key pages do when they open. */
+    fun refreshBalances() = balances.refreshSaved(_state.value.savedKeys.map { it.credentialId }.toSet())
+
+    fun checkBalance(provider: CloudProvider) = balances.refresh(provider.credentialId)
+
+    private fun updateKeys(provider: CloudProvider, change: () -> Unit): Boolean {
+        balances.credentialChanged(provider.credentialId)
         val ok = try {
             change()
             true
@@ -332,370 +867,633 @@ class DictationViewModel(application: Application) : AndroidViewModel(applicatio
         } catch (e: ProviderException) {
             false
         }
-        _state.update { it.copy(keyStoreError = !ok) }
+        _state.update {
+            it.copy(
+                keyStoreError = !ok,
+                keyErrors = if (ok) it.keyErrors - provider else it.keyErrors + provider,
+                rejectedKeys = if (ok) it.rejectedKeys - provider else it.rejectedKeys,
+            )
+        }
         refreshAvailability()
+        return ok
     }
 
-    private var downloadWatch: Job? = null
+    fun downloadOnDeviceModel() = selector.downloadOnDeviceModel()
+
+    /** Chooses the downloaded model Downloaded mode uses; a running session keeps its own. */
+    fun chooseDownloadedModel(id: String?) {
+        if (id != null && localModels?.find(id) == null) return
+        selector.chooseDownloadedModel(id)
+    }
+
+    /** Starts or resumes a model download; on mobile data only when the user allows it. */
+    fun downloadLocalModel(id: String) {
+        localModels?.download(id, _state.value.localModels.downloadOnMobileData)
+    }
+
+    /** Stops a model download; what has arrived is kept so the next attempt resumes. */
+    fun cancelLocalModelDownload(id: String) {
+        localModels?.cancel(id)
+    }
+
+    /** Deletes a downloaded model; Downloaded mode then needs a model again if it was the chosen one. */
+    fun removeLocalModel(id: String) {
+        localModels?.remove(id)
+    }
 
     /**
-     * Requests the model, then rechecks support until it is installed or the wait ends, so Start
-     * becomes available without leaving the app (the platform reports progress only via rechecks).
+     * Cleans up with a downloaded model instead of the cloud one, from the next cleanup; null goes back to
+     * the cloud model. A profile's own cloud cleanup model still wins for its sessions.
      */
-    fun downloadOnDeviceModel() {
-        engine.requestOnDeviceModel(_state.value.onDeviceLanguageTag)
-        downloadWatch?.cancel()
-        downloadWatch = viewModelScope.launch {
-            repeat(DOWNLOAD_CHECKS) {
-                delay(DOWNLOAD_CHECK_INTERVAL_MS)
-                refreshAvailability()
-                val status = _state.value.options.firstOrNull { it.mode == RecognitionMode.OnDevice }?.status
-                if (status != ModeStatus.NeedsDownload && status != ModeStatus.Downloading) return@launch
-            }
-        }
+    fun chooseLocalCleanupModel(id: String?) {
+        if (id != null && cleanupModels?.find(id) == null) return
+        prefs.localCleanupModelId = id
+        _state.update { it.copy(localCleanup = it.localCleanup.copy(selectedId = id)) }
     }
 
+    /** Starts or resumes a cleanup model download; on mobile data only when the user allows it. */
+    fun downloadCleanupModel(id: String) {
+        cleanupModels?.download(id, _state.value.localModels.downloadOnMobileData)
+    }
+
+    fun cancelCleanupModelDownload(id: String) {
+        cleanupModels?.cancel(id)
+    }
+
+    /** Deletes a downloaded cleanup model; it stays chosen, and cleanup is skipped until it is back. */
+    fun removeCleanupModel(id: String) {
+        cleanupModels?.remove(id)
+    }
+
+    fun setDownloadModelsOnMobileData(allowed: Boolean) {
+        prefs.downloadedModelsOnMobileData = allowed
+        _state.update { it.copy(localModels = it.localModels.copy(downloadOnMobileData = allowed)) }
+    }
+
+    /** Records now or, with hands-free on in Cloud mode, starts listening for speech. */
     fun start() {
         val current = _state.value
         val mode = current.activeMode ?: return
-        if (!current.canStart) return
-        _state.update { it.copy(cleanup = CleanupStatus.None, originalTranscript = null) }
-        sessionModelId = if (mode == RecognitionMode.Cloud) current.cloudModel.catalogId else null
-        dispatch(DictationEvent.Start(mode))
-        when (mode) {
-            RecognitionMode.Cloud -> startCloud()
-            RecognitionMode.OnDevice ->
-                engine.start(mode, current.onDeviceLanguageTag, onEvent = ::onEngineEvent, onLevel = ::setLevel)
-            RecognitionMode.SpeechService ->
-                engine.start(mode, current.languageTag, onEvent = ::onEngineEvent, onLevel = ::setLevel)
+        if (!current.canStart || handsFree.armed) return
+        // Asked before the microphone opens, so no recording waits on the answer.
+        val requests = current.cloudSharingRequests(audioToCloud = mode == RecognitionMode.Cloud)
+        if (asksCloudSharing(requests, PendingCloudSend.Recording)) return
+        if (current.armsHandsFree) {
+            session.clearResult()
+            handsFree.arm()
+        } else {
+            session.start(selector.plan(mode))
         }
     }
 
-    fun stop() {
-        val dictation = _state.value.dictation
-        if (dictation !is DictationState.Starting && dictation !is DictationState.Listening) return
-        dispatch(DictationEvent.StopRequested)
-        if (dictation.modeOrNull() == RecognitionMode.Cloud) finishCloud() else engine.stop()
+    /** Stops listening; a hands-free recording under way stops and is transcribed. */
+    fun turnOffHandsFree() = handsFree.disarm()
+
+    private fun onHandsFreeSpeech() {
+        if (_state.value.checkingAvailability) handsFreeStartPending = true else startHandsFreeUtterance()
     }
 
-    fun cancel() {
-        engine.cancel()
-        work?.cancel()
-        discardRecording()
+    private fun startHandsFreeUtterance() {
+        handsFreeStartPending = false
+        if (!handsFree.startingUtterance) return
+        val current = _state.value
+        if (!current.canStart || current.activeMode != RecognitionMode.Cloud) {
+            handsFree.disarm(failed = true)
+            return
+        }
+        // Consent withdrawn while listening: stop rather than send.
+        if (asksCloudSharing(current.cloudSharingRequests(audioToCloud = true), PendingCloudSend.Recording)) {
+            handsFree.disarm(failed = true)
+            return
+        }
+        session.start(selector.plan(RecognitionMode.Cloud))
+        // A recording that could not start leaves the session failed, which turns hands-free off.
+        if (handsFree.recordingUtterance) handsFree.utteranceStarted() else handsFree.disarm(failed = true)
+    }
+
+    private fun onHandsFreeChanged(status: HandsFreeStatus) {
+        val wasRecording = _state.value.handsFree == HandsFreeStatus.Recording
+        _state.update { it.copy(handsFree = status) }
+        if (!handsFree.armed) {
+            handsFreeStartPending = false
+            // Its audio stopped with the microphone, so transcribe what it has.
+            if (wasRecording && session.isCapturing) session.stop()
+        }
+        syncForeground(session.state)
+    }
+
+    /** After a hands-free recording settles, listens again; a failure or cancel turns hands-free off. */
+    private fun followHandsFreeSession(s: SessionState) {
+        if (handsFree.status != HandsFreeStatus.Recording) return
+        when (val dictation = s.dictation) {
+            is DictationState.Done ->
+                if (s.cleanup != CleanupStatus.Running && !s.releasingMicrophone) handsFree.resumeListening()
+            // A recording too short to send is not an error: listen for the next one.
+            is DictationState.Failed -> when {
+                dictation.failure != DictationFailure.NoSpeech -> handsFree.disarm(failed = true)
+                !s.releasingMicrophone -> handsFree.resumeListening()
+            }
+            DictationState.Idle -> handsFree.disarm()
+            else -> Unit
+        }
+    }
+
+    /**
+     * Shows the consent prompt when [requests] include a provider or kind the user has not allowed (#1805),
+     * holding [pending] to run once allowed. True when it asked, so the caller sends nothing.
+     */
+    private fun asksCloudSharing(requests: List<CloudSharingRequest>, pending: PendingCloudSend): Boolean {
+        val missing = prefs.cloudSharingConsent.missing(requests)
+        if (missing.isEmpty()) return false
+        _state.update { it.copy(cloudSharingPrompt = CloudSharingPrompt(missing, pending)) }
+        return true
+    }
+
+    /** Allows the prompt's providers and runs the send that waited for them. */
+    fun allowCloudSharing() {
+        val prompt = _state.value.cloudSharingPrompt ?: return
+        val consent = prefs.cloudSharingConsent.granting(prompt.requests)
+        prefs.cloudSharingConsent = consent
+        _state.update { it.copy(cloudSharingPrompt = null, cloudSharingAllowed = consent.allowed) }
+        when (val pending = prompt.pending) {
+            PendingCloudSend.Recording -> start()
+            is PendingCloudSend.SharedAudio -> {
+                _state.update { it.copy(sharedAudio = pending.offer) }
+                confirmSharedAudio()
+            }
+            is PendingCloudSend.HistoryEntry -> transcribeHistoryEntry(pending.id)
+        }
+    }
+
+    /**
+     * Keeps the content on the phone instead: an on-device recogniser for audio, and no cloud cleanup.
+     * Nothing starts; the next tap records with the new choice.
+     */
+    fun useOnDeviceInsteadOfCloud() {
+        val prompt = _state.value.cloudSharingPrompt ?: return
+        _state.update { it.copy(cloudSharingPrompt = null) }
+        val kinds = prompt.requests.flatMap { it.kinds }.toSet()
+        if (CloudSharedDataKind.TranscriptText in kinds) setCleanupEnabled(false)
+        if (CloudSharedDataKind.Audio in kinds) {
+            val options = _state.value.options
+            val onDevice = listOf(RecognitionMode.OnDevice, RecognitionMode.Downloaded)
+                .firstOrNull { mode -> options.any { it.mode == mode && it.usable } } ?: RecognitionMode.OnDevice
+            chooseMode(onDevice)
+        }
+    }
+
+    /** Not now: nothing is sent; shared audio is offered again and History keeps its recording for a retry. */
+    fun dismissCloudSharing() {
+        val pending = _state.value.cloudSharingPrompt?.pending
         _state.update {
-            it.copy(cleanup = if (it.cleanup == CleanupStatus.Running) CleanupStatus.None else it.cleanup)
+            it.copy(
+                cloudSharingPrompt = null,
+                sharedAudio = (pending as? PendingCloudSend.SharedAudio)?.offer ?: it.sharedAudio,
+            )
         }
-        dispatch(DictationEvent.Cancelled)
+    }
+
+    /** Rereads the providers allowed, which read aloud may have changed outside this model. */
+    fun refreshCloudSharing() {
+        _state.update { it.copy(cloudSharingAllowed = prefs.cloudSharingConsent.allowed) }
+    }
+
+    /** Stops sending [providerId] anything until the user allows it again. */
+    fun withdrawCloudSharing(providerId: String) {
+        val consent = prefs.cloudSharingConsent.withdrawing(providerId)
+        prefs.cloudSharingConsent = consent
+        _state.update { it.copy(cloudSharingAllowed = consent.allowed) }
+    }
+
+    fun stop() = session.stop()
+
+    fun cancel() = session.cancel()
+
+    /** Asks the owner of a hold shown in Settings to let it go. */
+    fun releaseResource(id: String) {
+        resources.release(id)
+    }
+
+    /** Stops recordings and requests; nothing standing is held on Android, so this frees everything. */
+    fun releaseEverything() {
+        resources.releaseAll()
     }
 
     fun setRetention(retention: Retention) {
         prefs.retention = retention
         _state.update { it.copy(retention = retention) }
-        updateHistory { history.load(retention) }
+        historyOwner.refresh(retention, capture::recoverable)
     }
 
     fun deleteHistoryEntry(id: String) {
         val retention = _state.value.retention
-        updateHistory { history.remove(id, retention) }
+        val service = sync
+        if (service == null) {
+            historyOwner.remove(id, retention)
+            return
+        }
+        // Recorded first, so iCloud deletes the entry even if the app stops straight after.
+        scope.launch {
+            service.recordDeletions(listOf(id))
+            historyOwner.remove(id, retention)
+        }
     }
 
-    fun clearHistory() = updateHistory { history.clear() }
+    /** Clears History; [keepRecordings] keeps the entries that hold a recording. */
+    fun clearHistory(keepRecordings: Boolean = false) {
+        val retention = _state.value.retention
+        val service = sync
+        if (service == null) {
+            historyOwner.clear(keepRecordings, retention)
+            return
+        }
+        // Only the entries this clears are deleted from iCloud.
+        val ids = _state.value.history.filter { !keepRecordings || it.audioPath == null }.map { it.id }
+        scope.launch {
+            service.recordDeletions(ids)
+            historyOwner.clear(keepRecordings, retention)
+        }
+    }
+
+    /** Opens Apple's sign-in page with [openBrowser], then syncs History with iCloud. */
+    fun signInToHistorySync(openBrowser: (String) -> Boolean) {
+        val service = sync ?: return
+        if (historySignIn?.isActive == true) return
+        historySignIn = scope.launch { service.signIn(openBrowser) }
+    }
+
+    fun signOutOfHistorySync() {
+        val service = sync ?: return
+        historySignIn?.cancel()
+        historySignIn = null
+        pendingHistorySync?.cancel()
+        scope.launch { service.signOut() }
+    }
+
+    /** Syncs now, for Sync now and when the app comes to the foreground. */
+    fun syncHistory() {
+        val service = sync ?: return
+        pendingHistorySync?.cancel()
+        pendingHistorySync = null
+        scope.launch { service.sync() }
+    }
+
+    /** A local History change; waits briefly so a burst of changes is sent in one pass. */
+    private fun requestHistorySync() {
+        val service = sync ?: return
+        if (!service.status.value.signedIn) return
+        pendingHistorySync?.cancel()
+        pendingHistorySync = scope.launch {
+            delay(HISTORY_SYNC_DELAY_MS)
+            service.sync()
+        }
+    }
 
     /** Re-reads and prunes history so the retention cutoff holds while the app stays open. */
     fun refreshHistory() {
-        val retention = _state.value.retention
-        updateHistory { history.load(retention) }
+        historyOwner.refresh(_state.value.retention, capture::recoverable)
     }
 
-    private fun updateHistory(change: () -> List<HistoryEntry>) {
-        viewModelScope.launch {
-            val (entries, failed) = withContext(historyDispatcher) {
-                try {
-                    change() to false
-                } catch (e: IOException) {
-                    history.cached to true
-                }
-            }
-            _state.update { it.copy(history = entries, historyError = failed) }
-        }
+    fun onEnteredApp() {
+        appVisible = true
     }
 
-    /** The latest session's history entry, so a later cleanup updates it rather than adding another. */
-    private var lastEntry: HistoryEntry? = null
-
-    // The model is fixed when the session starts, so later Settings changes cannot relabel it.
-    private var sessionModelId: String? = null
-
-    private fun record(state: DictationState) {
-        val entry = when (state) {
-            is DictationState.Done -> entry(state.mode, HistoryStatus.Completed, state.transcript, null)
-            is DictationState.Failed -> entry(state.mode, HistoryStatus.Failed, state.unfinishedText, state.failure)
-            else -> return
-        }
-        lastEntry = entry
-        val retention = _state.value.retention
-        updateHistory { history.add(entry, retention) }
+    /** MainActivity's onResume: the app is the top foreground app, so Gemini Nano may run. */
+    fun onAppResumed() {
+        appInFront = true
     }
 
-    private fun recordCleanup(cleaned: String) {
-        val entry = lastEntry?.copy(text = cleaned, cleanedUp = true) ?: return
-        lastEntry = entry
-        val retention = _state.value.retention
-        updateHistory { history.replace(entry, retention) }
+    /** MainActivity's onPause: AICore refuses Gemini Nano requests from an app that is not on top. */
+    fun onAppPaused() {
+        appInFront = false
     }
-
-    private fun entry(mode: RecognitionMode, status: HistoryStatus, text: String, failure: DictationFailure?) =
-        HistoryEntry(
-            id = UUID.randomUUID().toString(),
-            createdAtMs = System.currentTimeMillis(),
-            mode = mode.name,
-            model = if (mode == RecognitionMode.Cloud) sessionModelId else null,
-            status = status,
-            text = text,
-            failure = failure?.name,
-        )
 
     /**
-     * Android does not let a foreground-only app keep the microphone once it leaves the screen, so
-     * capture ends as a failure. Work that no longer needs the microphone (an upload) continues.
+     * A session protected by the foreground service carries on; without it, capture cannot continue
+     * once the app is hidden (see [DictationSessionController.leaveApp]).
      */
     fun onLeftApp() {
+        appVisible = false
         // A tile or shortcut start that has not happened yet must not start once the app is hidden.
         autoStartPending = false
-        val dictation = _state.value.dictation
-        if (dictation !is DictationState.Starting && dictation !is DictationState.Listening) return
-        engine.cancel()
-        discardRecording()
-        dispatch(DictationEvent.Error(DictationFailure.LeftApp))
+        if (foregroundActive) return
+        session.leaveApp()
+        if (handsFree.armed) handsFree.disarm(failed = true)
     }
 
-    fun clearResult() {
-        if (_state.value.dictation.isActive || _state.value.cleanup == CleanupStatus.Running) return
-        _state.update {
-            it.copy(dictation = DictationState.Idle, cleanup = CleanupStatus.None, originalTranscript = null)
-        }
-    }
+    fun clearResult() = session.clearResult()
 
-    fun showOriginal() {
-        val original = _state.value.originalTranscript ?: return
-        val done = _state.value.dictation as? DictationState.Done ?: return
-        lastEntry?.copy(text = original, cleanedUp = false)?.let { entry ->
-            lastEntry = entry
+    fun showOriginal() = session.showOriginal()
+
+    /**
+     * Transcribes a recording kept in History with the current cloud model and saved key or, for a
+     * Downloaded recording, with the chosen downloaded model; that audio is never uploaded instead.
+     * Success replaces the entry with the transcript and deletes the audio; a failure keeps both.
+     */
+    fun transcribeHistoryEntry(id: String) {
+        val current = _state.value
+        if (current.dictation.isActive || current.transcribingEntryId != null) return
+        val entry = current.history.firstOrNull { it.id == id } ?: return
+        if (entry.audioPath == null) return
+        val model = current.sessionCloudModel
+        val language = current.languageTag
+        val local = HistoryRetry.usesDownloadedModel(entry, current.activeMode)
+        val upload = if (local) emptyList() else listOf(CloudSharingConsent.request(model.provider, CloudSharedDataKind.Audio))
+        if (asksCloudSharing(upload, PendingCloudSend.HistoryEntry(id))) return
+        _state.update { it.copy(transcribingEntryId = id) }
+        scope.launch {
+            val updated = if (local) {
+                historyRetry.transcribeLocal(
+                    entry,
+                    current.localModels.selectedId,
+                    language,
+                    current.corrections,
+                    current.keepRecordings,
+                )
+            } else {
+                historyRetry.transcribe(entry, model, language, current.corrections, current.keepRecordings)
+            }
             val retention = _state.value.retention
-            updateHistory { history.replace(entry, retention) }
+            // Cleared with the updated entry, so Transcribe never reappears on the stale one.
+            try {
+                historyOwner.replace(updated, retention)
+            } finally {
+                _state.update { it.copy(transcribingEntryId = null) }
+            }
         }
+    }
+
+    fun setExportCredentials(enabled: Boolean) = updateTransfer { it.copy(exportCredentials = enabled) }
+
+    fun setImportCredentials(enabled: Boolean) = updateTransfer { it.copy(importCredentials = enabled) }
+
+    /**
+     * Writes the configuration archive to the stream [open] returns. If the export does not finish,
+     * [discard] removes the partly written file so it is never mistaken for a backup.
+     */
+    fun exportConfiguration(open: () -> OutputStream?, discard: () -> Unit) {
+        val transfer = _state.value.transfer
+        if (transfer.busy) return
+        updateTransfer { it.copy(busy = true, outcome = null, detail = null) }
+        scope.launch {
+            val history = historyOwner.snapshot(_state.value.retention)
+            val ok = withContext(transferIo) {
+                val written = try {
+                    val output = open() ?: throw IOException("The file could not be created.")
+                    output.use {
+                        ConfigExporter.export(it, prefs, history, secrets, transfer.exportCredentials, System.currentTimeMillis())
+                    }
+                    true
+                } catch (_: IOException) {
+                    false
+                } catch (_: SecurityException) {
+                    false
+                } catch (_: GeneralSecurityException) {
+                    false
+                } catch (_: ProviderException) {
+                    false
+                }
+                if (!written) discard()
+                written
+            }
+            updateTransfer {
+                it.copy(busy = false, outcome = if (ok) TransferOutcome.Exported else TransferOutcome.ExportFailed)
+            }
+        }
+    }
+
+    /** Reads the archive [open] returns and shows what importing it would change; nothing changes yet. */
+    fun inspectConfiguration(open: () -> InputStream?) {
+        val current = _state.value
+        if (current.transfer.busy || current.dictation.isActive) return
+        pendingImport = null
+        updateTransfer { it.copy(busy = true, preview = null, importCredentials = false, outcome = null, detail = null) }
+        val edits = pronunciationEdits
+        scope.launch {
+            val history = historyOwner.snapshot(_state.value.retention)
+            var detail: String? = null
+            val plan = withContext(transferIo) {
+                try {
+                    val contents = transferFiles.read(open)
+                    ConfigImporter.plan(
+                        contents,
+                        prefs,
+                        history,
+                        secrets.names(),
+                        System.currentTimeMillis(),
+                        pronunciationDefaults,
+                        localCleanupIds = cleanupSetup?.names?.keys.orEmpty(),
+                    )
+                } catch (e: ConfigArchiveException) {
+                    detail = e.message
+                    null
+                } catch (_: IOException) {
+                    null
+                } catch (_: SecurityException) {
+                    null
+                }
+            }
+            if (plan != null && edits != pronunciationEdits) {
+                // The dictionary changed while the archive was read, so this plan is already stale.
+                updateTransfer { it.copy(busy = false) }
+                withContext(transferIo) { transferFiles.clear() }
+                return@launch
+            }
+            pendingImport = plan
+            updateTransfer {
+                it.copy(
+                    busy = false,
+                    preview = plan?.preview,
+                    outcome = if (plan == null) TransferOutcome.Unreadable else null,
+                    detail = detail,
+                )
+            }
+        }
+    }
+
+    /** Applies the previewed import all or nothing. Refused while dictating, so a session keeps its settings. */
+    fun applyConfigurationImport() {
+        val plan = pendingImport ?: return
+        val current = _state.value
+        if (current.transfer.busy || current.dictation.isActive) return
+        pendingImport = null
+        val includeCredentials = current.transfer.importCredentials
+        val previousRetention = prefs.retention
+        updateTransfer { it.copy(busy = true) }
+        scope.launch {
+            val ok = importApplier.applyPlan(plan, includeCredentials)
+            withContext(transferIo) { transferFiles.clear() }
+            if (ok) reloadAfterImport(previousRetention)
+            updateTransfer {
+                it.copy(
+                    busy = false,
+                    preview = null,
+                    importCredentials = false,
+                    outcome = if (ok) TransferOutcome.Imported else TransferOutcome.ImportFailed,
+                    generation = if (ok) it.generation + 1 else it.generation,
+                )
+            }
+        }
+    }
+
+    fun dismissConfigurationImport() {
+        if (_state.value.transfer.busy) return
+        pendingImport = null
+        updateTransfer { it.copy(preview = null, importCredentials = false) }
+        scope.launch { withContext(transferIo) { transferFiles.clear() } }
+    }
+
+    private fun reloadAfterImport(previousRetention: Retention) {
         _state.update {
             it.copy(
-                dictation = done.copy(transcript = original),
-                cleanup = CleanupStatus.None,
-                originalTranscript = null,
+                cleanupEnabled = prefs.cleanupEnabled,
+                cleanupModel = CloudCatalog.cleanupModel(prefs.cleanupModelId),
+                retention = prefs.retention,
+                keepAudioOnCancel = prefs.keepAudioOnCancel,
+                corrections = prefs.corrections,
+                pronunciations = prefs.pronunciations ?: pronunciationDefaults,
+                cleanupPrompt = prefs.cleanupPrompt,
+                profiles = prefs.profiles,
+                localModels = it.localModels.copy(downloadOnMobileData = prefs.downloadedModelsOnMobileData),
+                localCleanup = it.localCleanup.copy(selectedId = prefs.localCleanupModelId),
             )
         }
+        selector.reload()
+        if (prefs.retention != previousRetention) historyOwner.refresh(prefs.retention, capture::recoverable)
     }
 
-    private fun startCloud() {
-        val file = File(cacheDir, "dictation-${System.nanoTime()}.wav")
-        lateinit var rec: WavRecorder
-        rec = WavRecorder(
-            file = file,
-            onLevel = { _level.value = it },
-            onLimitReached = { viewModelScope.launch { if (recorder === rec) stop() } },
-            onCaptureFailed = { viewModelScope.launch { if (recorder === rec) failCapture() } },
-        )
-        if (!rec.start()) {
-            file.delete()
-            dispatch(DictationEvent.Error(DictationFailure.Audio))
-            return
+    private fun updateTransfer(change: (ConfigTransferState) -> ConfigTransferState) {
+        _state.update { it.copy(transfer = change(it.transfer)) }
+    }
+
+    /** Keeps the foreground service and interruption watching in step with the session. */
+    private fun onSessionChanged(s: SessionState) {
+        interruptionWatch.onSessionChanged(s)
+        followHandsFreeSession(s)
+        syncForeground(s)
+        if (!s.dictation.isActive) selector.sessionEnded()
+    }
+
+    /** Shows the service while a session needs it and, between hands-free recordings, while listening. */
+    private fun syncForeground(s: SessionState) {
+        val phase = foregroundPhase(s) ?: ForegroundPhase.Listening.takeIf { handsFree.armed }
+        if (phase == foregroundPhase) return
+        foregroundPhase = phase
+        if (phase == null) {
+            foregroundActive = false
+            foreground.hide()
+            if (ForegroundDictation.listener === foregroundListener) ForegroundDictation.listener = null
+        } else {
+            ForegroundDictation.listener = foregroundListener
+            foregroundActive = foreground.show(phase)
         }
-        recorder = rec
-        recording = file
-        dispatch(DictationEvent.Ready)
-    }
-
-    private fun failCapture() {
-        discardRecording()
-        dispatch(DictationEvent.Error(DictationFailure.Audio))
-    }
-
-    private fun finishCloud() {
-        val rec = recorder ?: return
-        val file = recording ?: return
-        val model = _state.value.cloudModel
-        val language = _state.value.languageTag
-        work = viewModelScope.launch {
-            val event = try {
-                // The recorder stays owned (and releasable by onCleared) until stop() has finished.
-                val bytes = withContext(NonCancellable + Dispatchers.IO) { rec.stop() }
-                releaseOwnership(rec)
-                when {
-                    bytes < 0 -> DictationEvent.Error(DictationFailure.Audio)
-                    bytes < MIN_AUDIO_BYTES -> DictationEvent.Error(DictationFailure.NoSpeech)
-                    else -> {
-                        val key = withContext(Dispatchers.IO) { secrets.read(model.provider.credentialId) }
-                        if (key == null) {
-                            DictationEvent.Error(DictationFailure.InvalidKey)
-                        } else {
-                            DictationEvent.Final(
-                                cloudCall(TRANSCRIBE_DEADLINE_MS) { call ->
-                                    cloud.transcribe(model, key, file, language, call)
-                                },
-                            )
-                        }
-                    }
-                }
-            } catch (e: CloudException) {
-                DictationEvent.Error(e.failure)
-            } catch (e: GeneralSecurityException) {
-                DictationEvent.Error(DictationFailure.KeyUnavailable)
-            } catch (e: ProviderException) {
-                DictationEvent.Error(DictationFailure.KeyUnavailable)
-            } finally {
-                releaseOwnership(rec)
-                withContext(NonCancellable + Dispatchers.IO) { file.delete() }
-            }
-            // A cancelled upload must not deliver a late result into a newer session.
-            ensureActive()
-            onEngineEvent(event)
-        }
-    }
-
-    /** Stops capture without a result. Ownership is kept until the recorder has really stopped. */
-    private fun discardRecording() {
-        val rec = recorder ?: return
-        val file = recording
-        _state.update { it.copy(releasingMicrophone = true) }
-        viewModelScope.launch {
-            withContext(NonCancellable + Dispatchers.IO) {
-                rec.stop()
-                file?.delete()
-            }
-            releaseOwnership(rec)
-            _state.update { it.copy(releasingMicrophone = false) }
-        }
-    }
-
-    private fun releaseOwnership(rec: WavRecorder) {
-        if (recorder === rec) {
-            recorder = null
-            recording = null
-        }
-    }
-
-    /**
-     * Runs a blocking request with an overall [deadlineMs]. Cancelling the coroutine or reaching the
-     * deadline disconnects the request, so no upload or response read outlives the session.
-     */
-    private suspend fun <T> cloudCall(deadlineMs: Long, block: (CallHandle) -> T): T {
-        val call = CallHandle()
-        return bounded(deadlineMs, DictationFailure.NetworkTimeout, abort = call::cancel) { block(call) }
-    }
-
-    /**
-     * Runs blocking IO with an overall deadline. On cancellation or timeout [abort] runs from another
-     * coroutine (closing a socket or stream), so the blocked thread is released instead of leaking.
-     */
-    private suspend fun <T> bounded(
-        deadlineMs: Long,
-        timeoutFailure: DictationFailure,
-        abort: () -> Unit,
-        block: () -> T,
-    ): T = try {
-        withTimeout(deadlineMs) {
-            coroutineScope {
-                val watchdog = launch {
-                    try {
-                        awaitCancellation()
-                    } finally {
-                        abort()
-                    }
-                }
-                try {
-                    withContext(Dispatchers.IO) { block() }
-                } finally {
-                    watchdog.cancel()
-                }
-            }
-        }
-    } catch (e: TimeoutCancellationException) {
-        throw CloudException(timeoutFailure, "Deadline reached", e)
-    }
-
-    private fun onEngineEvent(event: DictationEvent) {
-        dispatch(event)
-        val done = _state.value.dictation as? DictationState.Done ?: return
-        if (event is DictationEvent.Final && _state.value.cleanupReady) runCleanup(done)
-    }
-
-    private fun runCleanup(done: DictationState.Done) {
-        _state.update { it.copy(cleanup = CleanupStatus.Running) }
-        work = viewModelScope.launch {
-            val cleaned = try {
-                val key = withContext(Dispatchers.IO) { secrets.read(CloudProvider.OpenRouter.credentialId) }
-                key?.let { cloudCall(CLEANUP_DEADLINE_MS) { call -> cloud.cleanup(it, done.transcript, call) } }
-            } catch (e: CloudException) {
-                null
-            } catch (e: GeneralSecurityException) {
-                null
-            } catch (e: ProviderException) {
-                null
-            }
-            if (_state.value.dictation != done) return@launch
-            _state.update {
-                if (cleaned.isNullOrBlank()) {
-                    it.copy(cleanup = CleanupStatus.Failed)
-                } else {
-                    it.copy(
-                        dictation = done.copy(transcript = cleaned),
-                        cleanup = CleanupStatus.Applied,
-                        originalTranscript = done.transcript,
-                    )
-                }
-            }
-            if (!cleaned.isNullOrBlank()) recordCleanup(cleaned)
-        }
-    }
-
-    private fun setLevel(value: Float) {
-        _level.value = value
-    }
-
-    private fun dispatch(event: DictationEvent) {
-        val before = _state.value.dictation
-        _state.update { it.copy(dictation = DictationReducer.reduce(it.dictation, event)) }
-        val after = _state.value.dictation
-        if (!after.isActive) _level.value = 0f
-        if (!before.isActive || after.isActive) return
-        // A session just ended: record it now, so it survives even if optional cleanup never finishes.
-        record(after)
     }
 
     override fun onCleared() {
+        handsFree.disarm()
+        interruptionWatch.stop()
+        if (foregroundPhase != null) foreground.hide()
+        if (ForegroundDictation.listener === foregroundListener) ForegroundDictation.listener = null
         engine.close()
-        val rec = recorder ?: return
-        val file = recording
-        // Stop before delete, off the main thread: joining the capture thread here could cause an ANR.
-        Thread({
-            rec.stop()
-            file?.delete()
-        }, "jsti-recorder-teardown").start()
+        session.close()
+        sounds?.close()
+        inputWatch.close()
+        geminiNano?.close()
     }
 
-    private companion object {
-        /** About a quarter of a second; shorter recordings cannot contain a word. */
-        const val MIN_AUDIO_BYTES = WavFormat.BYTES_PER_SECOND / 4
-        const val TRANSCRIBE_DEADLINE_MS = 180_000L
-        const val CLEANUP_DEADLINE_MS = 60_000L
-        const val IMPORT_DEADLINE_MS = 60_000L
-        const val DOWNLOAD_CHECK_INTERVAL_MS = 5_000L
-        const val DOWNLOAD_CHECKS = 60
+    companion object {
+        private const val HISTORY_SYNC_DELAY_MS = 2_000L
+
+        /** Wires the production collaborators. */
+        val Factory: ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val application = checkNotNull(this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY])
+                create(application)
+            }
+        }
+
+        private fun create(application: Application): DictationViewModel {
+            val prefs = AppPreferences(application)
+            val balanceDirectory = loadBalanceDirectory(application)
+            val inputs = AndroidAudioInputs(application)
+            val secrets = KeystoreSecretStore.create(application)
+            return DictationViewModel(
+                engine = AndroidSpeechEngine(application),
+                recorders = { file, onLevel, onLimitReached, onCaptureFailed ->
+                    // A saved microphone that is not connected records from the system default, as Settings says.
+                    val input = prefs.audioInputId?.let(inputs::route)
+                    WavRecorder(file, onLevel, onLimitReached, onCaptureFailed, input = input)
+                },
+                cloud = CloudClient(
+                    azureEndpoint = { secrets.read(AzureSpeechCredential.ENDPOINT_SECRET).orEmpty() },
+                ),
+                secrets = secrets,
+                prefs = prefs,
+                history = HistoryStore(
+                    AtomicHistoryFile(File(application.filesDir, "history.json")),
+                    deleteAudio = { File(it).delete() },
+                ),
+                sharedAudioSource = ContentSharedAudioSource(application),
+                cacheDir = application.cacheDir,
+                recordingsDir = File(application.filesDir, "recordings"),
+                interruptions = AndroidAudioInterruptions(application),
+                foreground = AndroidForegroundSession(application),
+                onTranscriptionSucceeded = { mode, model ->
+                    (application as? JustSpeakApplication)?.telemetry?.transcriptionSucceeded(mode, model)
+                },
+                sounds = RecordingSoundPlayer(application),
+                audioInputs = inputs,
+                balanceDirectory = balanceDirectory,
+                balanceClients = ProviderBalanceClients.defaults(balanceDirectory),
+                handsFreeMicrophone = AudioRecordMicrophone(),
+                historySync = { entries ->
+                    AndroidHistorySync.create(application, KeystoreSecretStore.create(application), entries, Dispatchers.IO)
+                },
+                pronunciationDefaults = loadPronunciationDefaults(application),
+                geminiNano = MlKitGeminiNano(),
+                localModelSetup = AndroidLocalModels.setup(
+                    application,
+                    Dispatchers.IO,
+                    cleanupTimeoutMs = DictationTimings().localCleanupMs,
+                ),
+            )
+        }
+
+        /** A missing or unreadable asset leaves the dictionary empty rather than stopping the app. */
+        private fun loadPronunciationDefaults(application: Application): List<PronunciationEntry> = try {
+            readVoiceCatalog(application).pronunciationDefaults
+        } catch (e: java.io.IOException) {
+            emptyList()
+        } catch (e: org.json.JSONException) {
+            emptyList()
+        } catch (e: IllegalStateException) {
+            emptyList()
+        }
+
+        /** A missing or unreadable asset hides balances rather than stopping the app. */
+        private fun loadBalanceDirectory(application: Application): BalanceDirectory = try {
+            application.assets.open(BalanceDirectory.ASSET).bufferedReader().use {
+                BalanceDirectory.parse(it.readText())
+            }
+        } catch (e: java.io.IOException) {
+            BalanceDirectory.EMPTY
+        } catch (e: org.json.JSONException) {
+            BalanceDirectory.EMPTY
+        } catch (e: IllegalArgumentException) {
+            BalanceDirectory.EMPTY
+        }
     }
 }
 
-private fun DictationState.modeOrNull(): RecognitionMode? = when (this) {
-    is DictationState.Starting -> mode
-    is DictationState.Listening -> mode
-    is DictationState.Finishing -> mode
-    is DictationState.Done -> mode
-    is DictationState.Failed -> mode
-    DictationState.Idle -> null
-}
+private fun DictationUiState.withSelection(selection: EngineSelection) = copy(
+    chosenMode = selection.chosenMode,
+    cloudModel = selection.cloudModel,
+    languageId = selection.languageId,
+    languageTag = selection.languageTag,
+    onDeviceLanguageTag = selection.onDeviceLanguageTag,
+    savedKeys = selection.savedKeys,
+    options = selection.options,
+    checkingAvailability = selection.checking,
+    profile = selection.profile,
+    localModels = localModels.copy(selectedId = selection.downloadedModelId),
+)

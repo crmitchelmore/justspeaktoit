@@ -7,7 +7,10 @@ import SwiftUI
 extension SettingsView {
   var aboutSettings: some View {
     SpeakDensitySettingsSection(density: settings.visualDensity) {
-      SettingsCard(title: ReleaseTrain.current.displayName, systemImage: "info.circle", tint: Color.blue) {
+      SettingsCard(
+        title: ReleaseTrain.current.displayName, systemImage: "info.circle", tint: Color.blue,
+        searchEntryID: "about.version"
+      ) {
         VStack(alignment: .leading, spacing: 16) {
           HStack(alignment: .top, spacing: 16) {
             Image(nsImage: AppIconProvider.applicationIcon())
@@ -106,14 +109,17 @@ extension SettingsView {
         }
       }
 
-      if environment.analyticsAvailable {
-        SettingsCard(title: "Privacy", systemImage: "hand.raised", tint: Color.indigo) {
-          VStack(alignment: .leading, spacing: 12) {
+      SettingsCard(title: "Privacy", systemImage: "hand.raised", tint: Color.indigo) {
+        VStack(alignment: .leading, spacing: 12) {
+          DiagnosticsConsentToggle()
+          if environment.analyticsAvailable {
+            Divider()
             Toggle("Share anonymous analytics", isOn: $settings.analyticsEnabled)
             Text(
               "Helps improve the app using typed usage and reliability events. "
                 + "Transcripts, audio, prompts, clipboard text, keystrokes, API keys, "
-                + "screen content and personal identity are never collected."
+                + "screen content and personal identity are never collected. "
+                + "Data goes to PostHog in the EU, which discards your IP address."
             )
               .font(.callout)
               .foregroundStyle(.secondary)
@@ -122,9 +128,14 @@ extension SettingsView {
               AnalyticsInspectorButton(controls: controls)
             }
             #endif
-            Link("Privacy policy", destination: PrivacyPolicy.url)
-              .font(.callout)
           }
+          Divider()
+          Text(CloudSharingConsent.withdrawalTitle)
+            .font(.headline)
+            .accessibilityAddTraits(.isHeader)
+          CloudSharingConsentList(store: environment.main.cloudSharingConsent)
+          Link("Privacy policy", destination: PrivacyPolicy.url)
+            .font(.callout)
         }
       }
 
@@ -161,15 +172,12 @@ extension SettingsView {
           // links are only shown where cross-channel messaging is permitted.
           if DistributionChannel.current.allowsCrossChannelMessaging {
             HStack(spacing: 12) {
-              Link(destination: URL(string: "https://github.com/sponsors/crmitchelmore")!) {
-                Label("GitHub Sponsors", systemImage: "heart")
+              ForEach(TipWebLink.allCases, id: \.self) { link in
+                Link(destination: link.url) {
+                  Label(link.title, systemImage: link == .koFi ? "cup.and.saucer" : "heart")
+                }
+                .buttonStyle(.bordered)
               }
-              .buttonStyle(.bordered)
-
-              Link(destination: URL(string: "https://ko-fi.com/crmitchelmore")!) {
-                Label("Ko-fi", systemImage: "cup.and.saucer")
-              }
-              .buttonStyle(.bordered)
             }
           }
         }

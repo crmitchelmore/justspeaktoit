@@ -2,7 +2,7 @@
 
 This is a settings slice, **not full Windows/Linux feature parity**. Baseline:
 macOS `AppSettings.DefaultsKey` aliases the shared 92-key
-`ApplicationPreferenceKey` (`Sources/SpeakCore/ApplicationPreferenceKey.swift`),
+`ApplicationPreferenceKey` (`Sources/SpeakCore/App/ApplicationPreferenceKey.swift`),
 plus preferences and collections
 outside that enum. Track remaining product acceptance in #1157.
 
@@ -59,8 +59,9 @@ X11/GTK, keyboard lock/repeat/layout, failure and shutdown qualification remain
 outstanding. Physical keys held across re-registration and Xlib server-loss
 behavior also need native acceptance; no stronger guarantee is inferred from
 the synthetic fixture. See [Linux desktop support](linux-development.md#desktop-support).
-This is not full feature parity: Linux voice editing, Wayland automatic global
-actions and system-wide Escape remain open.
+This is not full feature parity: Wayland automatic global actions and
+system-wide Escape remain open, and Linux voice editing is limited to external
+editable AT-SPI fields.
 
 ## Core Journey qualification cache (source only)
 
@@ -133,6 +134,21 @@ Six additional queue/owner regressions cover blocked Transcription and
 Post-processing drains, keyless ordering, ordered live completion, later Apply,
 bounded overflow and permanent shutdown refusal. These native wiring and test changes remain
 NOT_RUN locally; this is not yet automatic qualification of the drain contract.
+
+## Cloud sharing consent (Windows and Linux, #1814)
+
+Before the first upload to each cloud AI provider the host asks once, per provider
+and kind of content, with a modal window (Windows: Win32 dialog; Linux: GTK tool
+window). It names every provider, what it receives and links its https privacy
+policy; the buttons are Allow and Not now, and closing it answers Not now. About's
+**Privacy settings** button opens a second window listing the providers allowed,
+each with a Withdraw button; withdrawing is saved before the list refreshes. The
+host (`DesktopHostCloudSharing`) gates recording, History retry, imported audio,
+remote cleanup, live Auto-Clean, read-aloud, voice export, Compare and Voice Edit,
+and automation sends nothing and says why. The answer is kept in
+`cloud-sharing-consent.json` beside the settings, which is never exported or
+synced. The native ABI is `CloudSharing.h` (events 190 and 191); both windows are
+NOT_RUN locally until the Windows and Linux workflows build them.
 
 ## Linux Permissions destination (native CI qualified; physical acceptance open)
 
@@ -243,8 +259,9 @@ X11/Wayland target guarantees or change ordinary Copy or recording output. Porta
 burst/expiry/concurrent-admission tests and Host queued-expiry/cancellation tests
 are authored but NOT_RUN locally, pending automatic native/portable qualification.
 
-Linux now has **26 of 27 source-wired action destinations**; voice editing and
-Wayland automatic global action registration remain open. X11 has the
+Linux now has **27 of 27 source-wired action destinations**; Wayland automatic
+global action registration remains open. Voice editing shares selected-text
+speech's session access and external AT-SPI field requirement. X11 has the
 source-only action group described above. Selected-text speech needs
 separate session access and an external focused control, not this app's window.
 Its saved window-local binding remains disabled with desktop-command guidance;
@@ -254,7 +271,8 @@ validation and busy/recording/parent/page-independent dispatch fixtures are
 authored but NOT_RUN locally. They need automatic qualification. Clipboard
 delivery alone is not evidence of external-field paste or global-shortcut parity.
 
-Linux also exposes `--speak-clipboard`, `--speak-selected-text`, `--paste-last-history`, `--stop-speech`,
+Linux also exposes `--speak-clipboard`, `--speak-selected-text`, `--edit-selection-by-voice`,
+`--paste-last-history`, `--stop-speech`,
 `--pause-resume-speech` and `--quick-voice-1` / `--quick-voice-2` /
 `--quick-voice-3` through the existing GApplication command-forwarding path.
 Quick Voice selects a saved favorite without reading text or starting speech.
@@ -460,7 +478,7 @@ Windows About and the Open Troubleshooting action now open a distinct modeless
 report, not an alias for Permissions. It checks the saved recording shortcut,
 clipboard restoration, missing remote post-processing credentials and observed
 Windows permission states. The configuration check inventory, wording, severity,
-destinations and explicit fixes live in `SpeakCore/DesktopTroubleshooting.swift`;
+destinations and explicit fixes live in `SpeakCore/Desktop/DesktopTroubleshooting.swift`;
 macOS consumes that inventory while retaining its own permission and Fn guidance.
 Linux About now opens a native GTK Troubleshooting report using the same
 configuration policy. It retains the current shortcut listener's actual hint,
@@ -611,6 +629,9 @@ privacy, releases, feature requests and the MIT licence. GTK links reflow at
 narrow widths; Win32 uses its existing themed keyboard-accessible buttons.
 Browser-launch failures are surfaced. Building or opening About never fetches
 release data, installs an updater, downloads code or changes an app.
+About also has Support development: the shared `TipWebLink` pages (GitHub
+Sponsors and Ko-fi, as on the direct-download Mac build) open in the browser.
+Tips are optional and unlock nothing (#1625).
 
 Automatic native Linux job `118172561007` failed to compile source `2bbc95b5`
 (synthetic merge `f7ef4c5558ff083f456d44d2aae12999f1c6e2bf`) because the
@@ -1185,15 +1206,15 @@ does not establish runtime, multi-DPI or installed-product acceptance.
 
 ## App shell, recordings folder and analytics (source only)
 
-`ShellPreference.fields` (`Sources/SpeakCore/DesktopShellPreference.swift`)
-adds `appVisibility`, `compactStatusBarIcon` and `analyticsEnabled` to General
+`ShellPreference.fields` (`Sources/SpeakCore/Desktop/DesktopShellPreference.swift`)
+adds `appVisibility` and `compactStatusBarIcon` to General
 with the Mac keys, defaults and strict values, so save, restart and portable
 JSON import/export round-trip them. `appVisibility` reuses the Mac's stored
 cases with native labels: `both` is **Taskbar and notification area**,
 `menuBarOnly` **Notification area only** and `dockOnly` **Taskbar only**.
-`showStatusBarIconInDockOnly`, `paidAccessRoutingEnabled` and
-`recordingsDirectory` stay opaque Apple-only keys: imports retain them for the
-Mac and never execute them.
+`showStatusBarIconInDockOnly`, `paidAccessRoutingEnabled`,
+`recordingsDirectory` and `analyticsEnabled` stay opaque Apple-only keys:
+imports retain them for the Mac and never execute them.
 
 - **Windows app visibility** applies before the window opens and live on save
   or import. Notification area only gives the window a hidden tool-window owner
@@ -1208,9 +1229,15 @@ Mac and never execute them.
 - **Linux** stores, shows and transfers both shell choices but does not apply
   them: GTK 4 has no portable tray or taskbar-hiding API, so the capability rule
   is persistence only until a StatusNotifier host exists.
-- **Analytics**: Windows and Linux send no analytics or crash reports, so the
-  switch has nothing to gate. It is stored and transferred so a Mac import keeps
-  its choice; absent is never treated as consent.
+- **Analytics and crash reports** (#1624): General shows two separate switches,
+  **Share anonymous usage analytics** and **Send crash reports and
+  diagnostics**, both off. They are native editor projections
+  (`DesktopTelemetryConsent`, keys `desktopAnalyticsConsent` and
+  `desktopDiagnosticsConsent`) of the device-local `telemetry.json`: only an
+  explicit Apply in Settings changes them, and they are never persisted in
+  settings, exported, imported or exposed to `speak config`/MCP. The Mac's
+  `analyticsEnabled` is retained opaque, so a Mac import keeps its choice but
+  never opts a desktop in.
 - **Paid-access routing and Dock-only icon** have no desktop journey (desktop
   providers are bring-your-own-key and there is no Dock); both are preserved
   only.
@@ -1414,7 +1441,7 @@ proof of complete backup**. The isolated codec below is an opt-in transport seam
 parent aggregation and a safe target retention route remain separate. No schema format,
 settings keys, controls, ABI, runtime behavior, profiles or credentials change.
 
-`SpeakCore/DesktopNativeConfigurationField.swift` is the single noncredential
+`SpeakCore/Desktop/DesktopNativeConfigurationField.swift` is the single noncredential
 source-path/owner/type definition. Opt-in paths cover `postProcessing.customPrompt`,
 separately `configuration.postProcessingSystemPrompt`, `microphoneDeviceID`,
 `localUseGPU`, `azureSpeechResourceEndpoint`, `voiceOutput.modelID`,
@@ -1622,7 +1649,7 @@ For that prior source only, the cached WSL Swift toolchain ran these commands th
   **135 passed / 0 failures**.
 - `SPEAK_PORTABLE_CORE=1 swift test --scratch-path /tmp/jsti-settings-eacacdaf --jobs 4`:
   **1924 tests / 30 skipped / 0 failures**.
-- `bash scripts/typecheck-windows-swift.sh --jobs 4` (CRLF-normalized script,
+- `bash scripts/ci/typecheck-windows-swift.sh --jobs 4` (CRLF-normalized script,
   `SPEAK_WINDOWS_TYPECHECK_DIR=/tmp/jsti-feedback-windows-typecheck-eacacdaf`):
   all four Windows Swift projections passed; these are compile-only stub graphs.
 - `swiftlint lint --strict --config .swiftlint.yml --baseline .swiftlint-baseline.json`
@@ -1711,7 +1738,7 @@ re-run on the integration head.
 
 After freezing reader commit `3c88f274`, `NativeConfigurationJSONScan` delegates
 to the separately selected `JSONMemberPreflight` rather than owning a second
-state machine. Only `Sources/SpeakCore/JSONMemberPreflight.swift` (blob
+state machine. Only `Sources/SpeakCore/Desktop/JSONMemberPreflight.swift` (blob
 `dd5603ef399859c946b647909da85f40e448fc55`) and its seven-case test corpus (blob
 `674c22469281a51c57ad6e2ed2044b01326cccd8`) are imported from qualified peer
 `75a81b5f188a7ea89c1e907c53e7201a6470e0fe`; its native-source codec, metadata
@@ -1826,10 +1853,12 @@ quiet and uses the existing recording buffer, provider finalization,
 post-processing and insertion pipeline; manual Record stays manual even when
 the hands-free preference is enabled.
 
-Windows/Linux hands-free is explicitly **sound activation, not Apple's ML speech
-classifier**. Noise can trigger it. The existing pure `HandsFreeDictationMachine`
-and activity tracker now compile portably; unchanged Apple classification,
-sensitivity and model admission live in `HandsFreeDictationApple.swift`.
+Windows/Linux hands-free is explicitly **fixed-threshold sound activation**.
+Noise can trigger it. Mac and iPhone use the adaptive
+`HandsFreeEnergyVoiceActivityDetector` instead (#1553), which tracks a noise
+floor and needs sustained speech. The pure `HandsFreeDictationMachine`, activity
+tracker and that detector compile portably; Apple error classification and model
+admission live in `HandsFreeDictationApple.swift`.
 The native hotkey arms/disarms, sound starts an utterance, configured silence
 finishes it, and successful transcription rearms the same native capture only
 after record-bound output confirms field insertion or an explicitly requested
@@ -1924,7 +1953,7 @@ IDs, events, C headers, clipboard ownership algorithm or icon assets changed.
 
 ## Capture warm-up, remote paste and Mac-only delivery settings (source only)
 
-`SpeakCore/CaptureDeliveryPreference.swift` registers five canonical Mac keys
+`SpeakCore/Capture/CaptureDeliveryPreference.swift` registers five canonical Mac keys
 in the shared generic editor, strict validation and JSON transfer. Mac defaults
 apply: capture preparation and key-press warm-up on, streaming insertion and
 remote paste off, History interval 5 s. The interval accepts 0...30 so stored
@@ -1971,9 +2000,8 @@ Swift/native build, test or device check has run for this source.
   arrivals stay in History, and there is no notification with Paste and Copy
   actions. Two limits make it rarely active. Desktop sync polls every 300 s with
   no push, so a capture is pasted only if a pass lands within 60 s of it. Desktop
-  sync also joins only the Mac container, so iPhone History in
-  `iCloud.com.justspeaktoit.ios` never arrives; only phone or watch records in
-  the Mac container, the ones the Mac would act on, qualify.
+  sync joins the shared container, which iPhones write since #1119; only phone
+  or watch records there, the ones the Mac would act on, qualify.
 - **`historyFlushInterval`.** Stored and transferred only. The Mac batches
   History writes on this interval. Windows and Linux save each History record
   durably as its operation completes, so a timed flush would only delay
@@ -1981,7 +2009,7 @@ Swift/native build, test or device check has run for this source.
 
 ## Recording feedback (native qualified; package acceptance pending)
 
-`SpeakCore/RecordingFeedback.swift` now owns the four existing profiles, eight
+`SpeakCore/Recording/RecordingFeedback.swift` now owns the four existing profiles, eight
 M4A names, enabled/classic/0.7 defaults and the Mac player's volume-squared curve.
 The Apple player keeps its nested API names as aliases to this catalogue and
 still reads its established main-bundle resources. `SpeakFeedbackResources`
@@ -1992,7 +2020,7 @@ Resource tests assert all eight names and M4A headers in the actual SwiftPM
 bundle; a Windows production-collector test asserts all eight byte-exact files.
 Linux production staging also needs the sibling-resource collector in #1212.
 
-`SpeakDesktop/DesktopRecordingFeedback.swift` provides isolated feedback output
+`SpeakDesktop/Recording/DesktopRecordingFeedback.swift` provides isolated feedback output
 ownership, cancellable preparation, reserved recording IDs, capture-ready/normal
 finish cues, duplicate/stale rejection, explicit disabled previews, volume-only
 reuse and awaited cleanup. Fake-output lifecycle tests do **not** prove native
@@ -2121,7 +2149,7 @@ fixture has run.
 Windows uses **Dictation preferences...** from General, Transcription,
 Post-processing and Keyboard. Linux uses native libadwaita preference groups
 in those same destinations. Fields are defined once in
-`Sources/SpeakCore/DesktopConfiguration.swift`; native controls receive that
+`Sources/SpeakCore/Desktop/DesktopConfiguration.swift`; native controls receive that
 schema rather than maintaining copies of defaults. Scalar defaults now use
 `SpeechDefaults` in the shared schema and canonical Mac `AppSettings` initializer;
 an Apple test compares all fourteen preferences to a fresh Mac settings store.
@@ -2258,7 +2286,7 @@ it restores the original output options before subsequent stages.
 
 ### Application-switch delivery
 
-`SpeakCore/AppSwitchDelivery.swift` is the canonical three-policy catalogue.
+`SpeakCore/Recording/AppSwitchDelivery.swift` is the canonical three-policy catalogue.
 Mac keeps its existing raw values, labels, explanations and original-app
 default through the `AppSettings.AppSwitchDelivery` typealias. Native Text output
 controls receive those labels from Swift; the general scalar editor uses the
@@ -2332,7 +2360,7 @@ used when checking.
   text, or the stored key when the field is empty. **Get API key…** opens the
   provider's https key page.
 - Checking reuses the shared provider validators where they exist;
-  `SpeakCore/APIKeyValidation.swift` adds portable probes for OpenRouter,
+  `SpeakCore/Credentials/APIKeyValidation.swift` adds portable probes for OpenRouter,
   Gladia and Azure Speech (resource health or voice list). Alibaba is
   format-checked only and is not executable on Windows.
 - Storage is the same Windows Credential Manager identifier the Transcription,
@@ -2441,7 +2469,7 @@ The preview lists each applied category's counts (new, updated, removed,
 before and after), conflicts, skipped items and every category that is kept in
 the backup but not applied. It never shows transcript text, profile contents,
 identifiers or credential values. Nothing is written until the user picks an
-action in the native dialog (`WindowsMigrationRestore.cpp`, Linux's `LinuxWindow.c`). Cancel is the
+action in the native dialog (`WindowsMigrationRestore.cpp`, Linux's `LinuxWindowHistory.c`). Cancel is the
 default button. Replace needs a second confirmation that defaults to No. Each
 preview has a single-use token, so a stale or repeated answer is refused.
 Linux reuses the owned ZIP picker and its cancellation/parent-identity fence.
@@ -2556,8 +2584,8 @@ The Mac's `OnboardingView`, `PermissionsManager`, `PermissionRecoveryHelp` and
 Windows/Linux surfaces. Earlier baseline notes that called these surfaces
 missing are superseded by the source below; runtime qualification is separate.
 
-- **Shared model** (`SpeakCore/DesktopOnboarding.swift`,
-  `SpeakDesktopHost/DesktopHostOnboarding.swift`): ordered steps (welcome,
+- **Shared model** (`SpeakCore/Desktop/DesktopOnboarding.swift`,
+  `SpeakDesktopHost/Controller/DesktopHostOnboarding.swift`): ordered steps (welcome,
   microphone, text insertion, transcription route, shortcut practice, optional
   post-processing, done), their actions and plain-language guidance; permission
   items with status, guidance and blocking summary. Completion is stored under
@@ -2649,14 +2677,14 @@ parity. Evidence labels refer to executable surfaces:
 
 | Label | Files |
 |---|---|
-| Config | `SpeakCore/DesktopConfiguration.swift`, `SpeakDesktopHost/DesktopHostConfiguration.swift`, `SpeakWindows/WindowsConfiguration.swift`, `SpeakLinux/LinuxConfiguration.swift` (all under `Sources`) |
-| Models | `Sources/SpeakDesktopHost/DesktopHostModels.swift`, `DesktopHostModelDiscovery.swift`, `DesktopHostLocalModels.swift`, `SpeakDesktop/DesktopLiveTranscription.swift` |
+| Config | `SpeakCore/Desktop/DesktopConfiguration.swift`, `SpeakDesktopHost/Settings/DesktopHostConfiguration.swift`, `SpeakWindows/WindowsConfiguration.swift`, `SpeakLinux/LinuxConfiguration.swift` (all under `Sources`) |
+| Models | `Sources/SpeakDesktopHost/Transcription/DesktopHostModels.swift`, `DesktopHostModelDiscovery.swift`, `DesktopHostLocalModels.swift`, `SpeakDesktop/Transcription/DesktopLiveTranscription.swift` |
 | Output | `Sources/SpeakWindows/WindowsTextOutputSettings.swift`, `SpeakLinux/LinuxControllerSettings.swift`, `SpeakLinuxPlatform/LinuxTextOutput.swift` |
-| HUD | `Sources/SpeakDesktopHost/DesktopHostHUD.swift`, `Sources/SpeakDesktop/DesktopHUD.swift` |
-| Keys | `Sources/SpeakDesktopHost/DesktopHostCredentials.swift`, `DesktopHostAPIKeys.swift`, `SpeakCore/APIKeyCatalog.swift`, `SpeakWindows/WindowsNative.swift`, `SpeakWindows/WindowsAPIKeys.swift`, `SpeakLinuxPlatform/LinuxCredentialStore.swift` |
-| Shortcuts | `Sources/SpeakWindows/WindowsHotKey.swift`, `Sources/SpeakLinux/LinuxShortcutGestures.swift`, `SpeakCore/HotKeyGestureMachine.swift` |
-| Voice | `Sources/SpeakDesktopHost/DesktopHostReadAloud.swift`, `SpeakWindows/WindowsReadAloud.swift`, `SpeakLinux/LinuxReadAloud.swift` |
-| General | `Sources/SpeakDesktopHost/DesktopHostSettings.swift`, `DesktopHostLoginItem.swift`, `SpeakWindows/WindowsLoginItemHost.swift`, `SpeakLinux/LinuxLoginItemHost.swift` |
+| HUD | `Sources/SpeakDesktopHost/Output/DesktopHostHUD.swift`, `Sources/SpeakDesktop/Output/DesktopHUD.swift` |
+| Keys | `Sources/SpeakDesktopHost/Credentials/DesktopHostCredentials.swift`, `DesktopHostAPIKeys.swift`, `SpeakCore/APIKeyCatalog.swift`, `SpeakWindows/WindowsNative.swift`, `SpeakWindows/WindowsAPIKeys.swift`, `SpeakLinuxPlatform/LinuxCredentialStore.swift` |
+| Shortcuts | `Sources/SpeakWindows/WindowsHotKey.swift`, `Sources/SpeakLinux/LinuxShortcutGestures.swift`, `SpeakCore/Recording/HotKeyGestureMachine.swift` |
+| Voice | `Sources/SpeakDesktopHost/ReadAloud/DesktopHostReadAloud.swift`, `SpeakWindows/WindowsReadAloud.swift`, `SpeakLinux/LinuxReadAloud.swift` |
+| General | `Sources/SpeakDesktopHost/Settings/DesktopHostSettings.swift`, `DesktopHostLoginItem.swift`, `SpeakWindows/WindowsLoginItemHost.swift`, `SpeakLinux/LinuxLoginItemHost.swift` |
 | Automation | Windows per-user named pipe, `WindowsAutomation.swift`, `WindowsAutomationSetup.swift` and General › CLI and MCP setup (`CWindowsSupport/WindowsAutomationSettings.cpp`, source-only); Linux `LinuxAutomation.swift`, shared Host commands and `SpeakLinuxAutomation` private Unix socket/`speak` journey (source-only, native qualification pending); `--toggle` remains |
 
 Paths named relative to `Sources` in a cell inherit the preceding `Sources/`
@@ -2669,12 +2697,12 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | visualDensity | Wired; native acceptance pending / Wired; native acceptance pending | General Normal/Compact choice; strict shared configuration, JSON transfer and native page/card/sidebar spacing |
 | transcriptionMode | Equivalent / Equivalent | Models; Remote Batch/Live; Local Batch, plus Local Live on Windows and Linux (source only, see local live transcription) |
 | liveTranscriptionModel | Partial / Partial | Models; implemented transport routes only; Apple Speech and unavailable providers are not substitutes |
-| batchTranscriptionModel | Equivalent / Equivalent | Models; independent remembered batch model |
+| batchTranscriptionModel | Equivalent / Equivalent | Models; independent remembered batch model; Remote Batch adds **Browse OpenRouter models…** (shared `DesktopOpenRouterBrowser`, #1618) |
 | localTranscriptionModel | Partial / Partial | Models; pinned whisper.cpp catalogue plus explicit Hugging Face GGML imports (`desktop-huggingface-import.md`); not the Mac WhisperKit/Core ML or sherpa-onnx runtimes |
 | localTranscriptionMode | Source wired, unqualified / Source wired, unqualified | Windows and Linux Local Batch and Live: Live streams a pinned downloaded whisper.cpp model in process with VAD-bounded windows and shares the remembered `localLiveModel` slot; native/runtime acceptance remains open |
 | localStreamingModelSource | Partial / Partial | Both hosts use the canonical Whisper live identity in `localLiveModel`; source-only JSON transfer maps offered inactive choices and preserves unavailable/active-mode changes without activation. Archive projection uses the correct live key; full settings restore and native acceptance remain open. No desktop sherpa-onnx or Parakeet runtime |
 | postProcessingEnabled | Equivalent / Equivalent | `DesktopHostPostProcessing.swift`; desktop default remains disabled. Source proposal adds explicit local rules opt-in without credential access; remote remains opt-in |
-| postProcessingModel | Partial / Partial | Shared remote catalogue, built-in Local Cleanup and downloaded GGUF LLMs through the native llama.cpp runtime (`desktop-local-llm-cleanup.md`, source only); Apple Foundation Models and MLX remain unavailable |
+| postProcessingModel | Partial / Partial | Shared remote catalogue, built-in Local Cleanup and downloaded GGUF LLMs through the native llama.cpp runtime (`desktop-local-llm-cleanup.md`, source only); the Remote source adds **Browse OpenRouter models…** (#1618); Apple Foundation Models and MLX remain unavailable |
 | postProcessingTemperature | Wired / Wired | Config; range 0...1, OpenRouter request |
 | postProcessingOutputLanguage | Wired / Wired | Config; remote cleanup system prompt; built-in rules explicitly ignore it |
 | postProcessingIncludeLexiconDirectives | Source wired / Source wired | Native post-processing switch, Mac default true, options/session snapshot and strict transfer; excludes saved directives from remote requests when false |
@@ -2690,6 +2718,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | recordingsDirectory | Partial: fenced / Partial: source only | Mac path retained, never executed. Device-local chosen folder via verified recording locations: Linux Housekeeping chooser; Windows reports unavailable while `WindowsRecordingRegistry` identity/restart integration is fenced. Existing audio never moves. See recordings folder above |
 | hotKeyActivation | Equivalent / Equivalent | Shortcuts; press/hold/double-tap/combined styles; Linux portal availability caveat |
 | cancelRecordingOnEscape | Applied (source only) / Applied (source only) | Shared default-on Boolean in Keyboard; Windows local/global and Linux main-window Escape honor it, with final Host admission and native epoch guards; explicit Cancel and Windows Voice Edit cancellation remain independent. Compiler/native qualification is NOT_RUN |
+| keepAudioOnCancel | Applied / Applied | Shared default-on Boolean in General. On: an explicitly cancelled recording keeps its audio and History record ("Recording cancelled. Audio retained.") for later retry. Off: the value is captured at Cancel/Escape time and the saved cancelled recording is removed through the History deletion path (audio and record together, cloud-delete ticket when sync is on). Owned, legacy, tail-buffer and hands-free Cancel apply it; app-close stops, startup abandonment/recovery, capture failures, transcription cancel after recording and Voice Edit always keep audio. Portable Host tests on macOS |
 | holdThreshold | Wired / Wired | Config + shared gesture machine; 0.2...1.5 s |
 | doubleTapWindow | Wired / Wired | Config + shared gesture machine; 0.2...1 s |
 | trackedKeyIdentifiers | Equivalent source only; NOT_RUN | Keys; identifiers only, in `trackedKeyIdentifiers.json`. Saving a key from the shared editors registers its identifier and removing it unregisters it. Both desktop API Keys windows reconcile the list against the store; cancellation skips reconciliation. |
@@ -2712,7 +2741,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | ttsPronunciationDictionary | Source wired; qualification pending / Same | Strict word-to-text transfer/restart preserves the raw map; only keys seed AssemblyAI recognition using the shared Mac policy, never phonetic values or TTS replacements. A separate native Legacy word dictionary editor supports stale-safe CRUD without altering the modern store or Voice rendering pipeline. Modern literal-word recognition seeding is separately wired above. |
 | historyFlushInterval | Persisted only / Persisted only | Generic 0...30 s field; History stays durable per operation (see Capture warm-up section) |
 | silenceDetectionEnabled | Executable; qualification pending / Same | Native switch; initial quiet and configured silence stop the existing manual recording/finalization pipeline |
-| handsFreeDictationEnabled | Sound-activation replacement; per-slice qualification / Same | Fresh target and app profile per utterance (Windows/X11; Wayland uses normal settings with a note), immutable provider options, record-bound output evidence; rate changes refuse/rearm; not Apple's classifier |
+| handsFreeDictationEnabled | Sound-activation replacement; per-slice qualification / Same | Fresh target and app profile per utterance (Windows/X11; Wayland uses normal settings with a note), immutable provider options, record-bound output evidence; rate changes refuse/rearm; fixed threshold, not Apple's adaptive gate |
 | silenceThreshold | Executable; qualification pending / Same | Canonical range/default and Mac PCM meter; native editor feeds manual silence and sound activation |
 | silenceDuration | Executable; qualification pending / Same | Canonical hold/range feeds manual auto-stop and hands-free debounce; existing recording tail is retained |
 | connectionPreWarmingEnabled | Partial / Partial (source only; NOT_RUN) | Canonical intent round-trips. Separate native session approval allows a credential-free HEAD on the shared OpenRouter pool with a 5-second cancellation budget, only at idle after acknowledged ordinary capture in the current process/configuration and its real cleanup credential check. No probe before successful capture after restart; approval and capture evidence are transient. Completed-request remote cleanup only; native live WinHTTP/NIO and streaming cleanup's owned delegate sessions cannot reuse this pool. Owned/hands-free capture does not provide this witness. Existing device/absence notifications invalidate readiness; no new network/sleep monitor, idle timer/retry or guaranteed latency improvement. |
@@ -2735,6 +2764,7 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | clipboardInsertionTriggers | Implemented, native acceptance pending / Implemented, native acceptance pending | General trigger entry; bounded native snapshot, canonical matching, no History re-expansion |
 | enableSendToMac | Partial / Partial | iCloud web History sync is not Send-to-Mac transport/pairing |
 | enableAutomationServer | Equivalent / Source wired, unqualified | Automation; Windows per-user named pipe unchanged, still saved as legacy `automationEnabled`; General switch plus source-only CLI and MCP setup dialog (status, pipe name, consent text, copyable `speak`/MCP/Claude Code text). Linux native opt-in starts a bounded same-user Unix socket and `speak`; imported/legacy true preserves intent but never grants device-local approval. False revokes. No native/runtime qualification claimed. |
+| allowAutomationConfigurationChanges | Source wired, unqualified / Source wired, unqualified | General preference (default off) gating `speak config set` and MCP `set_configuration` (#1608); read-only to automation, and an imported value never replaces this computer's choice. Reads need only automation. NOT_RUN |
 | pasteRemoteTranscriptsAtCursor | Source wired, unqualified / Same | Shared arrival rule on synced History; 300 s poll and Mac-container-only limits |
 | autoCorrectionsEnabled | Source wired, unqualified / Separate opt-in observational source, unqualified | Canonical true default is not consent. Windows retains its acknowledged native Edit/UIA Value route and session approval. Linux observation is OFF until its distinct disclosed local in-app session action; generic approval and imports cannot authorize it. Only an admitted ordinary AT-SPI field with a bounded observational span qualifies. Paste/clipboard never do. App-origin changes can also be learned. Manual candidate actions remain available when learning is off. NOT_RUN |
 | autoCorrectionsPromotionThreshold | Source wired, unqualified / Source wired for opt-in observation, unqualified | Canonical Mac default 2 and integral 2...10 validation; captured per observation and passed to the shared domain with its persistence/rollback behavior. Linux preferences are editable but cannot activate sampling or grant consent. NOT_RUN |
@@ -2752,12 +2782,12 @@ replacement/nearest implemented surface; they do not assert hidden support.
 | modulatePIIPhiTagging | Live/batch source wired; unqualified / Same | Native default/on/off choice, strict transfer/restart and captured live/batch provider flags; absent stays off. Native/provider acceptance pending. |
 | accessibilityInsertionMode | Equivalent / Missing | Output; Windows cursor/replace-field; Linux paste cannot claim AX replace-all equivalence |
 | selectedHotKey | Equivalent / Partial | Shortcuts; Windows Ctrl/Alt native key; Linux desktop/portal-owned binding, never Mac Fn key translation |
-| customShortcutBindings | Complete source mapping; unqualified / Partial native source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects 26 action destinations and edits saved bindings with presets/reset; eligible X11 global actions use a separate native group with per-row refusals. Selected-text speech needs session access and an external editable AT-SPI field. Linux voice editing and Wayland automatic action registration remain open. Native/physical acceptance pending. |
+| customShortcutBindings | Complete source mapping; unqualified / Partial native source | Windows Keyboard **Action shortcuts** dialog: all 27 actions source-wired; presets, Reset, duplicate/dictation refusal and RegisterHotKey failure reporting. Voice editing additionally requires an editable UIA selection and a rewrite API key. Linux projects all 27 action destinations and edits saved bindings with presets/reset; eligible X11 global actions use a separate native group with per-row refusals. Selected-text speech and voice editing need session access and an external editable AT-SPI field. Wayland automatic action registration remains open. Native/physical acceptance pending. |
 | paidAccessRoutingEnabled | Apple-specific / Apple-specific | BYOK desktop providers; no paid-access entitlement/routing journey. Retained opaque through import/export |
 | simpleModelChoices | Missing / Missing | Native catalogue picker without simplified paid-model chooser |
 | rememberedLocalTranscriptionSource | Partial / Partial | Models remembers Local selection; no Apple on-device source |
 | rememberedRemoteTranscriptionMode | Equivalent / Equivalent | Models; native source/mode preferences |
-| analyticsEnabled | Wired; nothing to gate / Same | General switch, Mac default and strict transfer. Desktop sends no analytics or crash reports; absent is never consent |
+| analyticsEnabled | Apple-specific / Apple-specific | Retained opaque through import/export. Desktop consent is the device-local `desktopAnalyticsConsent`/`desktopDiagnosticsConsent` editor projection (#1624); an imported value is never consent |
 
 ## Beyond the enum and destinations
 
@@ -2799,6 +2829,13 @@ independent restart and idle cancellation; both native smoke fixtures exercise
 the Escape ownership/state/repeat rules. All are authored but **NOT_RUN** here.
 Compilation, exact-head native/portable qualification and physical keyboard
 acceptance remain required; this does not complete system-wide Escape parity.
+
+With `keepAudioOnCancel` off, the same explicit Cancel (button or Escape)
+deletes the cancelled recording's audio and History record through the shared
+History deletion path once the cancelled record has been saved, and reports
+"Recording cancelled. Audio discarded." A failed deletion leaves the retained
+record in place. Other stops (app close, capture failure, startup recovery) and
+transcription cancellation after recording keep their audio.
 
 ### Windows active-only system-wide Escape (source only)
 
@@ -3140,7 +3177,9 @@ not run local actions. An imported duplicate retains its value and shows a
 conflict note; the first listed action owns that combination. Sidebar
 Ctrl+digit chords retain precedence and corresponding action notes disclose it.
 
-Linux voice editing remains unavailable. Paste Last History now uses its
+Linux voice editing (`--edit-selection-by-voice`) uses the same consented
+external AT-SPI path and replaces only the unchanged captured selection.
+Paste Last History now uses its
 existing bounded admission/target path, and selected-text speech uses the
 consented external AT-SPI path described above. The Permissions action
 opens its own Linux-specific recovery guidance, not an unrelated page.

@@ -87,9 +87,9 @@ runs:
         # The manifest records the protocol this build speaks so the app can
         # refuse a CLI from another era before downloading it.
         SCHEMA_VERSION="$(sed -n 's/^[[:space:]]*public static let currentVersion = \([0-9][0-9]*\).*$/\1/p' \
-          Sources/SpeakCore/AutomationProtocol.swift | head -n 1)"
+          Sources/SpeakCore/Automation/AutomationProtocol.swift | head -n 1)"
         if [ -z "$SCHEMA_VERSION" ]; then
-          echo "::error::AutomationSchema.currentVersion not found in Sources/SpeakCore/AutomationProtocol.swift"
+          echo "::error::AutomationSchema.currentVersion not found in Sources/SpeakCore/Automation/AutomationProtocol.swift"
           exit 1
         fi
         echo "version=$SCHEMA_VERSION" >> "$GITHUB_OUTPUT"

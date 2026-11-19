@@ -9,6 +9,7 @@ struct PrivacyView: View {
     /// Re-render the current workflow when transcription or post-processing settings change.
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var historySync = HistorySyncEngine.shared
+    @AppStorage(DiagnosticsConsent.defaultsKey) private var diagnosticsDecision = DiagnosticsConsentDecision.undecided
 
     /// The user's effective workflow, projected from the live settings.
     private var summary: PrivacyWorkflowSummary {
@@ -30,6 +31,8 @@ struct PrivacyView: View {
     var body: some View {
         Form {
             currentWorkflowSection
+            cloudSharingSection
+            diagnosticsSection
             clipboardSection
             supportedProvidersSection
             apiKeysSection
@@ -54,7 +57,20 @@ struct PrivacyView: View {
         }
     }
 
+    /// Withdraws consent given in the first-send sheet (issue #1805).
+    private var cloudSharingSection: some View {
+        Section(CloudSharingConsent.withdrawalTitle) {
+            CloudSharingConsentList()
+        }
+    }
+
     @ViewBuilder
+    private var diagnosticsSection: some View {
+        Section("Crash Reports") {
+            DiagnosticsConsentToggle()
+        }
+    }
+
     private var clipboardSection: some View {
         Section("Clipboard") {
             Picker("Transcript expiry", selection: $settings.transcriptClipboardLifetime) {
@@ -85,7 +101,7 @@ struct PrivacyView: View {
 
             Text(
                 summary.activeRecipients.isEmpty
-                    ? "With your current settings nothing is sent to a cloud provider."
+                    ? "With your current settings no recording or transcript content is sent to a cloud provider."
                     : "With your current settings your content can be sent to "
                         + PrivacyWorkflowSummary.formattedList(summary.activeRecipients) + "."
             )
@@ -157,6 +173,10 @@ struct PrivacyView: View {
                     value: historySync.isSyncEnabled ? PrivacyStorageDisclosure.historySyncCondition : "Off"
                 )
                 InfoRow(label: "API-Key Sync", value: PrivacyStorageDisclosure.apiKeySyncCondition)
+                InfoRow(
+                    label: "Crash and Performance Diagnostics",
+                    value: diagnosticsDecision == .granted ? "Sentry (EU), in release builds" : "Off"
+                )
                 Text(PrivacyStorageDisclosure.historySync)
                     .foregroundStyle(.secondary)
             }
@@ -168,8 +188,8 @@ struct PrivacyView: View {
     private var notCollectedSection: some View {
         Section("What We Don't Collect") {
             VStack(alignment: .leading, spacing: 8) {
-                CheckRow(text: "No usage analytics")
-                CheckRow(text: "No personal information")
+                CheckRow(text: "No product analytics")
+                CheckRow(text: "No advertising identifiers")
                 CheckRow(text: "No transcription content")
                 CheckRow(text: "No third-party tracking")
             }
@@ -197,7 +217,8 @@ extension AppSettings {
         let universalClipboard = self.transcriptAllowsUniversalClipboard
             ? "Universal Clipboard is on, allowing copying between your Apple devices."
             : "Universal Clipboard is off. Enable it to allow copying between your Apple devices."
-        return "Transcript copies expire on this iPhone after \(self.transcriptClipboardLifetime.displayName). "
+        let lifetime = self.transcriptClipboardLifetime.displayName
+        return "Transcript copies expire on \(DeviceCopy.thisDevice) after \(lifetime). "
             + universalClipboard
             + " Expiry does not delete History or copies already pasted elsewhere. "
             + "Expiry on another device is not guaranteed."

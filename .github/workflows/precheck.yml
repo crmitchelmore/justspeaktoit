@@ -1,0 +1,91 @@
+# Remote half of scripts/pre-pr (scripts/linux-precheck --remote): runs a CI job's
+# own script on a throwaway precheck/** branch, so a developer without Docker, a
+# JDK or an approved Maven feed gets the same result before opening or pushing a
+# pull request. The snapshot commit's message names the job: [precheck:portable]
+# or [precheck:android] or [precheck:lint]. Ubuntu only: it never takes a macOS slot. No secrets.
+name: Pre-PR Linux precheck
+
+on:
+  push:
+    branches: ['precheck/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable-linux:
+    name: Portable Swift (Linux)
+    if: contains(github.event.head_commit.message, '[precheck:portable]') || !contains(github.event.head_commit.message, '[precheck:')
+    runs-on: ubuntu-24.04
+    container:
+      image: swift:6.2.3-jammy@sha256:33c73fc133767cdaafde26f0f9967c96ab25ff77618b7df1eabf46140bf2b6e6
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Normalize container workspace ownership
+        # Same as ci.yml: the owned capture-writer tests check ownership up to the checkout root.
+        run: |
+          owner="$(id -u):$(id -g)"
+          chown "$owner" /__w "$(dirname "$GITHUB_WORKSPACE")"
+          chmod 0755 /__w "$(dirname "$GITHUB_WORKSPACE")"
+          chown -R "$owner" "$GITHUB_WORKSPACE"
+          chmod 0755 "$GITHUB_WORKSPACE"
+      - name: Build and test the portable graph
+        run: scripts/ci-portable-linux.sh
+
+  lint:
+    name: Lint
+    if: contains(github.event.head_commit.message, '[precheck:lint]')
+    # Same host and command as ci.yml's Lint job: tooling tests behave differently off macOS.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cache lint tooling
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # Tooling/.build: SwiftLint and SwiftFormat; .build/quality-tools: scripts/quality's Ruff,
+          # ShellCheck and actionlint (pinned and SHA-256 verified).
+          path: |
+            Tooling/.build
+            .build/quality-tools
+          key: ${{ runner.os }}-${{ runner.arch }}-hosted-${{ github.workspace }}-tooling-${{ hashFiles('Tooling/Package.resolved', 'Tooling/quality-requirements.txt', 'scripts/quality') }}
+      - name: Lint and tooling tests (make ci-lint)
+        run: make ci-lint
+
+  android:
+    name: Build & Test (Android)
+    if: contains(github.event.head_commit.message, '[precheck:android]')
+    # GitHub-hosted, like android.yml: settings.gradle.kts allows public registries only there.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          validate-wrappers: true
+          cache-read-only: true
+      - name: Unit tests, lint and debug build
+        run: scripts/ci-android.sh
+      # Lets device QA install a branch's build: android.yml only uploads one from main.
+      - name: Upload debug APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: justspeaktoit-android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+          if-no-files-found: error

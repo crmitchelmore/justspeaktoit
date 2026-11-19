@@ -30,7 +30,7 @@ func trainPlistPath(_ original: String) -> String {
         if let string = value as? String {
             var result = string
             let keys = ["iosBundleIdentifier", "iosAppGroup", "watchAppGroup", "iosCloudContainer",
-                        "macCloudContainer", "macKVStoreIdentifier", "iosKVStoreIdentifier", "transportServiceType", "feedURL", "arm64FeedURL"]
+                        "cloudContainer", "macKVStoreIdentifier", "iosKVStoreIdentifier", "transportServiceType", "feedURL", "arm64FeedURL"]
             for key in keys.sorted(by: { stableConfiguration[$0]!.count > stableConfiguration[$1]!.count }) {
                 let old = stableConfiguration[key]!
                 // Whole identifiers, including entitlement team-prefix variables.
@@ -72,7 +72,9 @@ let version: String = {
 let appProfileName = ProcessInfo.processInfo.environment["APP_PROFILE_NAME"]
 let widgetProfileName = ProcessInfo.processInfo.environment["WIDGET_PROFILE_NAME"]
 let keyboardProfileName = ProcessInfo.processInfo.environment["KEYBOARD_PROFILE_NAME"]
-let shareProfileName = ProcessInfo.processInfo.environment["SHARE_PROFILE_NAME"]
+// Tuist forwards only `TUIST_`-prefixed variables into manifest evaluation.
+let shareProfileName = ProcessInfo.processInfo.environment["TUIST_SHARE_PROFILE_NAME"]
+    ?? ProcessInfo.processInfo.environment["SHARE_PROFILE_NAME"]
 let watchProfileName = ProcessInfo.processInfo.environment["TUIST_WATCH_PROFILE_NAME"]
 let watchWidgetProfileName = ProcessInfo.processInfo.environment["TUIST_WATCH_WIDGET_PROFILE_NAME"]
 let macAppStoreProfileName = ProcessInfo.processInfo.environment["TUIST_MAC_PROFILE_NAME"]
@@ -116,31 +118,6 @@ let shareExtensionFlag = (
     ProcessInfo.processInfo.environment["TUIST_IOS_SHARE_EXTENSION"] ?? ""
 ).lowercased()
 let isShareExtensionEnabled = ["1", "true", "yes"].contains(shareExtensionFlag)
-// `TUIST_IOS_SHARED_CLOUD_CONTAINER=1 tuist generate` moves iPhone sync into
-// the Mac CloudKit container (#1119): the app gains that container's
-// entitlement and the matching Info.plist flag that SyncConfiguration reads.
-// Off by default because signing fails until the container is assigned to
-// the iOS App ID and its profiles (Docs/cloudkit-shared-container.md).
-let sharedCloudContainerFlag = (
-    ProcessInfo.processInfo.environment["TUIST_IOS_SHARED_CLOUD_CONTAINER"] ?? ""
-).lowercased()
-let isSharedCloudContainerEnabled = ["1", "true", "yes"].contains(sharedCloudContainerFlag)
-// Stable-identifier source for the iOS app entitlements; trainPlistPath then
-// maps both containers to the Alpha pair.
-func iosEntitlementsSource() -> String {
-    let original = "SpeakiOS.entitlements"
-    guard isSharedCloudContainerEnabled else { return original }
-    let data = try! Data(contentsOf: manifestRoot.appendingPathComponent(original))
-    var plist = try! PropertyListSerialization.propertyList(from: data, format: nil) as! [String: Any]
-    let key = "com.apple.developer.icloud-container-identifiers"
-    let containers = plist[key] as? [String] ?? []
-    plist[key] = containers + [stableConfiguration["macCloudContainer"]!]
-    let relative = ".build/shared-cloud-container/" + original
-    let target = manifestRoot.appendingPathComponent(relative)
-    try! FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-    try! PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0).write(to: target)
-    return relative
-}
 var iosActiveCompilationConditions: [String] = []
 var iosTestSettings: [String: SettingValue] = [:]
 var iosTestResourceElements: [ResourceFileElement] = [
@@ -218,12 +195,16 @@ if isPaidAccessBuild {
 }
 
 var iosWidgetSettings: [String: SettingValue] = [
+    "SPEAK_RELEASE_TRAIN": .string(releaseTrain),
+    "SPEAK_GIT_COMMIT_SHA": .string(ProcessInfo.processInfo.environment["TUIST_RELEASE_SOURCE"] ?? "development"),
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)"
 ]
 
 var iosShareSettings: [String: SettingValue] = [
     "APPLICATION_EXTENSION_API_ONLY": "YES",
+    "SPEAK_RELEASE_TRAIN": .string(releaseTrain),
+    "SPEAK_GIT_COMMIT_SHA": .string(ProcessInfo.processInfo.environment["TUIST_RELEASE_SOURCE"] ?? "development"),
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)",
     "SKIP_INSTALL": "YES"
@@ -264,6 +245,8 @@ var watchAppSettings: [String: SettingValue] = [
 // the extension-side branch of `StartWatchRecordingIntent`, which cannot touch
 // the microphone from a widget process.
 var watchWidgetSettings: [String: SettingValue] = [
+    "SPEAK_RELEASE_TRAIN": .string(releaseTrain),
+    "SPEAK_GIT_COMMIT_SHA": .string(ProcessInfo.processInfo.environment["TUIST_RELEASE_SOURCE"] ?? "development"),
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)",
     "SKIP_INSTALL": "YES",
@@ -320,10 +303,10 @@ macAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = .string(
 var projectPackages: [Package] = [
     .remote(url: "https://github.com/weichsel/ZIPFoundation.git", requirement: .exact("0.9.20")),
     .package(path: .relativeToRoot(".")),
-    .remote(url: "https://github.com/jaywcjlove/PermissionFlow.git", requirement: .exact("2.11.2")),
+    .remote(url: "https://github.com/jaywcjlove/PermissionFlow.git", requirement: .exact("2.11.4")),
     .remote(url: "https://github.com/getsentry/sentry-cocoa.git", requirement: .upToNextMajor(from: "9.3.0")),
     .remote(url: "https://github.com/argmaxinc/argmax-oss-swift.git", requirement: .upToNextMajor(from: "1.1.0")),
-    .remote(url: "https://github.com/FluidInference/FluidAudio.git", requirement: .exact("0.17.4"))
+    .remote(url: "https://github.com/FluidInference/FluidAudio.git", requirement: .exact("0.18.3"))
 ]
 if !isAppStoreBuild {
     macAppSettings["INFOPLIST_KEY_PostHogProjectKey"] = "$(POSTHOG_PROJECT_KEY)"
@@ -353,6 +336,11 @@ var iosAppDependencies: [TargetDependency] = [
     .package(product: "SpeakCore"),
     .package(product: "SpeakiOSLib"),
     .package(product: "SpeakSync"),
+    .package(product: "Sentry"),
+    // Downloaded local transcription models (issue #1650); runs Core ML in process.
+    .package(product: "WhisperKit"),
+    // Downloaded local cleanup models (issue #1650); llama.cpp compiled in, never downloaded code.
+    .package(product: "SpeakiOSLlama"),
     .target(name: "JustSpeakToItWidgetExtension")
 ]
 if isIOSKeyboardEnabled {
@@ -377,6 +365,9 @@ let macAppTarget: Target = .target(
     resources: [
         .glob(pattern: .relativeToRoot(isAlphaBuild ? "Resources/AppIconAlpha.icns" : "Resources/AppIcon.icns")),
         .glob(pattern: "Resources/Sounds/**"),
+        .glob(pattern: .relativeToRoot(
+            "Sources/SpeakApp/Resources/\(isAppStoreBuild ? "AppStore" : "Direct")/PrivacyInfo.xcprivacy"
+        )),
         // Pinned Phonon-2 runtime requirements; SwiftPM bundles the same file for `swift build`.
         .glob(pattern: "Sources/SpeakApp/Resources/phonon-requirements.txt")
     ],
@@ -417,8 +408,15 @@ var iosAppInfoPlist: [String: Plist.Value] = [
     // dependency graph contains no third-party cryptographic implementation.
     // Apple's OS-encryption documentation exemption applies (see submission docs).
     "ITSAppUsesNonExemptEncryption": false,
-    "SpeakSharedCloudContainer": .boolean(isSharedCloudContainerEnabled),
     "NSSupportsLiveActivities": true,
+    // Send to Mac (#1640): Settings -> Sync & Transfer browses for the Mac
+    // receiver's Bonjour service, pairs with its code and sends finished
+    // transcripts to it. The service type follows the release train.
+    "NSLocalNetworkUsageDescription": .string(
+        "Just Speak to It looks for your Mac on the local network so you can pair with it and send it "
+            + "transcripts you choose. Transcripts go straight to your Mac, encrypted, and nowhere else."
+    ),
+    "NSBonjourServices": [.string(trainValue("transportServiceType"))],
     // The "Continue on Mac" Handoff pointer (issue #1006). The payload is
     // the History entry id, never the transcript itself.
     "NSUserActivityTypes": ["com.justspeaktoit.transcript"],
@@ -449,13 +447,20 @@ let iosAppTarget: Target = .target(
     bundleId: trainIdentifier("com.justspeaktoit.ios"),
     deploymentTargets: .iOS("17.0"),
     infoPlist: .extendingDefault(with: iosAppInfoPlist),
-    sources: ["SpeakiOSApp/**"],
+    // Crash reporting shares the Mac's collection contract and credential
+    // scrubber by compiling the same two files. Extensions stay without Sentry:
+    // its crash handler and session tracking do not fit their memory limits.
+    sources: [
+        "SpeakiOSApp/**",
+        "Sources/SpeakApp/Analytics/SentryManager.swift",
+        "Sources/SpeakApp/Analytics/SentryEventScrubber.swift"
+    ],
     resources: [
         "SpeakiOSApp/Assets.xcassets",
         "SpeakiOSApp/Resources/LaunchScreen.storyboard",
         "SpeakiOSApp/PrivacyInfo.xcprivacy"
     ],
-    entitlements: .file(path: .relativeToRoot(trainPlistPath(iosEntitlementsSource()))),
+    entitlements: .file(path: .relativeToRoot(trainPlistPath("SpeakiOS.entitlements"))),
     dependencies: iosAppDependencies,
     settings: .settings(base: iosAppSettings)
 )
@@ -498,7 +503,7 @@ let watchAppTarget: Target = .target(
         "JustSpeakWatch/**",
         "JustSpeakWatchShared/**"
     ],
-    resources: ["JustSpeakWatch/Assets.xcassets"],
+    resources: ["JustSpeakWatch/Assets.xcassets", "JustSpeakWatch/PrivacyInfo.xcprivacy"],
     entitlements: .file(path: .relativeToRoot(trainPlistPath("JustSpeakWatch/JustSpeakWatch.entitlements"))),
     dependencies: [
         .target(name: "JustSpeakWatchWidgetExtension"),
@@ -516,13 +521,14 @@ let watchWidgetTarget: Target = .target(
     destinations: [.appleWatch],
     product: .appExtension,
     // Extension bundle ids must be prefixed with the containing watch app's.
-    bundleId: trainIdentifier("com.justspeaktoit.ios.watchkitapp.complication"),
+    bundleId: trainIdentifier("com.justspeaktoit.ios.watchkitapp.widget"),
     deploymentTargets: .watchOS("10.0"),
     infoPlist: .file(path: .relativeToRoot(trainPlistPath("JustSpeakWatchWidget/Info.plist"))),
     sources: [
         "JustSpeakWatchWidget/**",
         "JustSpeakWatchShared/**"
     ],
+    resources: ["JustSpeakWatchWidget/PrivacyInfo.xcprivacy"],
     entitlements: .file(path: .relativeToRoot(trainPlistPath("JustSpeakWatchWidget/JustSpeakWatchWidget.entitlements"))),
     dependencies: [
         .package(product: "SpeakWatchCore")
@@ -553,11 +559,14 @@ let shareTarget: Target = .target(
     name: "JustSpeakShare",
     destinations: .iOS,
     product: .appExtension,
-    bundleId: "com.justspeaktoit.ios.share",
+    // Extension bundle ids must be prefixed with the containing app's, so
+    // Alpha maps it (and its App Group) to the Alpha identity.
+    bundleId: trainIdentifier("com.justspeaktoit.ios.share"),
     deploymentTargets: .iOS("17.0"),
-    infoPlist: .file(path: "JustSpeakShare/Info.plist"),
+    infoPlist: .file(path: .relativeToRoot(trainPlistPath("JustSpeakShare/Info.plist"))),
     sources: ["JustSpeakShare/**/*.swift"],
-    entitlements: .file(path: "JustSpeakShare/JustSpeakShare.entitlements"),
+    resources: ["JustSpeakShare/PrivacyInfo.xcprivacy"],
+    entitlements: .file(path: .relativeToRoot(trainPlistPath("JustSpeakShare/JustSpeakShare.entitlements"))),
     dependencies: [
         .package(product: "SpeakCore")
     ],
@@ -629,9 +638,13 @@ let iosTestsTarget: Target = .target(
     sources: isIOSKeyboardEnabled
         ? [
             "Tests/SpeakiOSTests/**",
+            "JustSpeakKeyboard/KeyboardDeliveryCoordinator.swift",
             "JustSpeakKeyboard/KeyboardDictationEngine.swift",
+            "JustSpeakKeyboard/KeyboardDirectCaptureSession.swift",
             "JustSpeakKeyboard/KeyboardDocumentSession.swift",
             "JustSpeakKeyboard/KeyboardHandoffController.swift",
+            "JustSpeakKeyboard/KeyboardStatusCopy.swift",
+            "JustSpeakKeyboard/KeyboardSurfaceState.swift",
             "JustSpeakKeyboard/KeyboardViewModel.swift"
         ]
         : ["Tests/SpeakiOSTests/**"],
@@ -640,6 +653,7 @@ let iosTestsTarget: Target = .target(
         .target(name: "SpeakiOS"),
         .package(product: "SpeakCore"),
         .package(product: "SpeakiOSLib"),
+        .package(product: "SpeakiOSLlama"),
         // Shared URLProtocol stub (issue #1124).
         .package(product: "SpeakTestSupport")
     ],

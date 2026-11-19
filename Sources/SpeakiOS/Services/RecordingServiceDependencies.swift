@@ -92,6 +92,12 @@ struct RecordingServiceDependencies {
     var focusOverride: @MainActor (CaptureRunParameters) async throws -> FocusCaptureOverride = { _ in .none }
     /// Queues an offline on-device capture for a cloud upgrade (issue #999).
     var tagOfflineCapture: (iOSHistoryItem, UUID, String) -> Void = { _, _, _ in }
+    /// Learned corrections (#1651): loaded during the drain, applied to the final text.
+    var prepareLearnedCorrections: @MainActor () async -> Void = {}
+    var applyLearnedCorrections: @MainActor (String) -> String = { $0 }
+    /// Consent for each cloud AI provider (issue #1805). Nil skips the check,
+    /// which only test harnesses do.
+    var cloudSharingConsent: IOSCloudSharingConsentPrompt?
 
     static func live(settings: AppSettings = .shared) -> Self {
         Self(
@@ -105,7 +111,10 @@ struct RecordingServiceDependencies {
             focusOverride: FocusCaptureReconciliation.live(explicit:),
             tagOfflineCapture: {
                 OfflineTranscriptUpgrader.shared.tag(item: $0, recordingID: $1, intendedModelID: $2)
-            }
+            },
+            prepareLearnedCorrections: { await IOSLearnedCorrections.shared.waitUntilLoaded() },
+            applyLearnedCorrections: { IOSLearnedCorrections.shared.apply(to: $0) },
+            cloudSharingConsent: .shared
         )
     }
 }

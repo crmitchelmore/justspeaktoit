@@ -189,8 +189,7 @@ void refresh(HWND window, Panel &panel) {
 }
 
 void updateFont(HWND window, Panel &panel) {
-    HFONT font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE,
-        FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    HFONT font = jsti::chrome::dialogFont(window);
     if (!font) {
         jsti_window_update("Could not update the local checks window text size.", nullptr, -1);
         return;

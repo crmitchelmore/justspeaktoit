@@ -25,12 +25,19 @@ extension XCUIApplication {
         facts.observe(.finishWaitObserved, finishAppeared)
         if finishAppeared {
             // The sheet can exist before its presentation settles; a one-shot
-            // isHittable read failed ~1s after a cold 51s launch (run 42302311943).
+            // isHittable read failed ~1s after a cold 51s launch (run 42302311943),
+            // and isHittable itself fails the test while the sheet is still
+            // off screen (run 42437254485). Wait for Skip to stop moving on screen.
+            let window = self.windowFrame
+            let settle = FrameSettleTracker()
             let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 facts.reset([.finishLabelMatchesSkip, .finishEnabled, .finishHittable])
                 return facts.observe(.finishLabelMatchesSkip, finish.label == "Skip")
                     && facts.observe(.finishEnabled, finish.isEnabled)
-                    && facts.observe(.finishHittable, finish.isHittable)
+                    && facts.observe(
+                        .finishHittable,
+                        settle.isSettled(finish.snapshotFrame) && finish.isHittable(within: window)
+                    )
             }, object: nil)
             guard XCTWaiter.wait(for: [idle], timeout: 15) == .completed else {
                 facts.emitFailure(.idleSkip)
@@ -38,13 +45,14 @@ extension XCUIApplication {
                 throw AppLaunchTimeout()
             }
             facts.observe(.skipAttempted, true)
-            Self.tapUntilDismissed(finish)
+            Self.tapUntilDismissed(finish, window: window)
         }
+        let window = self.windowFrame
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             facts.reset([.finishExists, .readyExists, .readyHittable])
             return !facts.observe(.finishExists, finish.exists)
                 && facts.observe(.readyExists, element.exists)
-                && facts.observe(.readyHittable, element.isHittable)
+                && facts.observe(.readyHittable, element.isHittable(within: window))
         }, object: nil)
         let readyResult = XCTWaiter.wait(for: [ready], timeout: 15)
         facts.record(readyResult, field: .finalWaitResult)
@@ -59,12 +67,12 @@ extension XCUIApplication {
 extension XCUIApplication {
     // A tap during the sheet's settle can be dropped, leaving Skip on screen
     // (run 42604632491). Re-tap a still-present Skip, at most twice.
-    fileprivate static func tapUntilDismissed(_ finish: XCUIElement) {
+    fileprivate static func tapUntilDismissed(_ finish: XCUIElement, window: CGRect) {
         finish.tap()
         for _ in 0..<2 {
             let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !finish.exists }, object: nil)
             guard XCTWaiter.wait(for: [dismissed], timeout: 5) != .completed,
-                  finish.exists, finish.isHittable else { return }
+                  finish.isHittable(within: window) else { return }
             finish.tap()
         }
     }

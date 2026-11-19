@@ -57,6 +57,14 @@ final class DesktopLocalLLMPostProcessingTests: XCTestCase {
         XCTAssertNil(picker.modelIdentifier(forSelection: 0))
     }
 
+    func testRememberedRemoteChoiceOfRemovedModelMovesToItsSuccessor() {
+        var options = DesktopPostProcessing.Options(mode: .local, modelIdentifier: "local/post-processing/rules")
+        options.lastRemoteModelIdentifier = "native/anthropic/claude-haiku-4-5"
+        let migrated = DesktopPostProcessing.migrated(options)
+        XCTAssertEqual(migrated.modelIdentifier, "local/post-processing/rules")
+        XCTAssertEqual(migrated.lastRemoteModelIdentifier, "native/anthropic/claude-haiku-5-5")
+    }
+
     func testExplicitDownloadedModeCannotMigrateIntoRemotePermission() {
         let options = DesktopPostProcessing.Options(
             mode: .localLLM, modelIdentifier: ModelCatalog.defaultPostProcessingModel

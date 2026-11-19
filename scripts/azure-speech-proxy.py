@@ -3,16 +3,13 @@
 
 import argparse
 import base64
-from email import policy
-from email.parser import BytesParser
 import hashlib
 import hmac
 import http.client
-import io
 import http.server
+import io
 import json
 import os
-from pathlib import Path
 import re
 import secrets
 import select
@@ -28,7 +25,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-
+from email import policy
+from email.parser import BytesParser
+from pathlib import Path
 
 MAX_REQUEST = 64 * 1024
 MAX_TRANSCRIPTION_REQUEST = 32 * 1024 * 1024
@@ -85,10 +84,10 @@ def local_token(path):
             info = os.fstat(stream.fileno())
             if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
                     or info.st_mode & 0o077):
-                raise ValueError("The local token must be an owner-only regular file (chmod 600).")
+                raise ValueError("The local token must be an owner-only regular file (chmod 600).") from None
             token = stream.read(129).strip()
             if not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", token):
-                raise ValueError("The local token file is invalid.")
+                raise ValueError("The local token file is invalid.") from None
             return token
     else:
         token = secrets.token_urlsafe(32)
@@ -364,13 +363,13 @@ class AzureTransport:
                     self.tokens.invalidate(token)
                     continue
                 if error.code in (401, 403):
-                    raise ProxyError(error.code, "Azure denied access. Check sign-in and the Speech User role.")
+                    raise ProxyError(error.code, "Azure denied access. Check sign-in and the Speech User role.") from error
                 if error.code == 429:
-                    raise ProxyError(429, "Azure Speech rate limit or quota reached.")
+                    raise ProxyError(429, "Azure Speech rate limit or quota reached.") from error
                 if 300 <= error.code < 400:
-                    raise ProxyError(502, "Azure redirect refused.")
+                    raise ProxyError(502, "Azure redirect refused.") from error
                 status = error.code if error.code in (400, 404, 413, 415, 422) else 502
-                raise ProxyError(status, "Azure Speech rejected the request (HTTP %d)." % error.code)
+                raise ProxyError(status, "Azure Speech rejected the request (HTTP %d)." % error.code) from error
             except (urllib.error.URLError, TimeoutError, OSError) as error:
                 raise ProxyError(502, "Azure Speech connection failed or timed out.") from error
 
@@ -549,7 +548,7 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                     self.connection.settimeout(min(15, remaining))
                     try:
                         chunk = self.rfile.read(min(64 * 1024, length - len(chunks)))
-                    except socket.timeout as error:
+                    except TimeoutError as error:
                         self.connection.settimeout(5)
                         raise ProxyError(408, "Upload receive timeout reached.") from error
                     if not chunk:
@@ -591,7 +590,7 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             self.respond(status, response_type, data)
         except ProxyError as error:
             self.respond(error.status, "application/json", json.dumps({"error": str(error)}).encode())
-        except (BrokenPipeError, ConnectionResetError, socket.timeout):
+        except (TimeoutError, BrokenPipeError, ConnectionResetError):
             self.close_connection = True
 
     def handle_streaming(self):

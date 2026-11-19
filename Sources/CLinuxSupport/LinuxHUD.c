@@ -349,9 +349,22 @@ static void hud_build(void) {
     gtk_window_set_child(hud.window, hud.root);
 }
 
+static gchar *hud_announcement(const char *headline, const char *subheadline) {
+    const char *title = headline != NULL ? headline : "";
+    return subheadline != NULL && subheadline[0] != '\0' ? g_strdup_printf("%s. %s", title, subheadline)
+                                                          : g_strdup(title);
+}
+
+/* Without an overlay HUD, a finished phase reaches the user as a notification
+ * when the window is in the background, or is spoken through it otherwise. */
 static void hud_notify(int phase, const char *headline, const char *subheadline) {
     if (phase != HUD_SUCCESS && phase != HUD_FAILURE) return;
-    if (jsti_window_is_active()) return;
+    if (jsti_window_is_active()) {
+        gchar *announcement = hud_announcement(headline, subheadline);
+        jsti_window_announce_phase(announcement, phase == HUD_FAILURE);
+        g_free(announcement);
+        return;
+    }
     GNotification *notification = g_notification_new(headline);
     if (subheadline != NULL && subheadline[0] != '\0') g_notification_set_body(notification, subheadline);
     if (phase == HUD_FAILURE) g_notification_set_priority(notification, G_NOTIFICATION_PRIORITY_HIGH);
@@ -415,14 +428,6 @@ void jsti_hud_show_layout(int phase, const char *headline, const char *subheadli
     gtk_widget_set_visible(hud.live, recording && tail[0] != '\0');
     gtk_widget_set_size_request(hud.root, (compact ? 244 : hud.expanded ? 500 : 320) + 36, -1);
     g_free(tail);
-    /* Screen readers announce each new phase. */
-    if (new_phase) {
-        gchar *announcement = subheadline != NULL && subheadline[0] != '\0'
-            ? g_strdup_printf("%s. %s", headline, subheadline) : g_strdup(headline);
-        gtk_accessible_announce(GTK_ACCESSIBLE(hud.card), announcement, finished && phase == HUD_FAILURE
-                                ? GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_HIGH : GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
-        g_free(announcement);
-    }
     hud_stop_timers();
     if (finished) {
         const guint duration = display_milliseconds > 0 ? (guint)display_milliseconds :
@@ -437,6 +442,13 @@ void jsti_hud_show_layout(int phase, const char *headline, const char *subheadli
 #ifdef GDK_WINDOWING_X11
     hud_place();
 #endif
+    /* Screen readers announce each new phase, once the HUD window is shown. */
+    if (new_phase) {
+        gchar *announcement = hud_announcement(headline, subheadline);
+        jsti_accessible_announce(GTK_WIDGET(hud.window), announcement, phase == HUD_FAILURE
+                                 ? GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_HIGH : GTK_ACCESSIBLE_ANNOUNCEMENT_PRIORITY_MEDIUM);
+        g_free(announcement);
+    }
 }
 
 void jsti_hud_destroy(void) {

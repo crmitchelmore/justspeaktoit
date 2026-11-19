@@ -1,5 +1,8 @@
 package com.justspeaktoit.android.ui
 
+import com.justspeaktoit.android.resources.SystemResourceKind
+import java.util.Locale
+
 /**
  * Stable test tags for controls that screen readers and automation agents drive.
  * MainActivity exposes them as resource IDs, so UiAutomator and accessibility
@@ -14,9 +17,305 @@ object AutomationIds {
     const val SHARE = "dictation.share"
     const val CLEAR = "dictation.clear"
     const val SHOW_ORIGINAL = "dictation.showOriginal"
+    const val READ_ALOUD = "dictation.readAloud"
     const val OPEN_HISTORY = "dictation.openHistory"
     const val OPEN_SETTINGS = "dictation.openSettings"
     const val HISTORY_BACK = "history.back"
     const val HISTORY_CLEAR = "history.clear"
+    const val HISTORY_INSIGHTS = "history.insights"
+    const val HISTORY_INSIGHTS_OPEN = "history.insights.open"
+    const val INSIGHTS_SCREEN = "insights.screen"
+    const val INSIGHTS_BACK = "insights.back"
+    const val INSIGHTS_LOADING = "insights.loading"
+    const val INSIGHTS_EMPTY = "insights.empty"
+    const val INSIGHTS_USAGE = "insights.usage"
+    const val INSIGHTS_PHRASES = "insights.phrases"
+    const val INSIGHTS_FILLERS = "insights.fillers"
+    const val INSIGHTS_PACE = "insights.pace"
+    const val INSIGHTS_RECORDS = "insights.records"
+    const val HISTORY_CLEAR_ALL = "history.clear.all"
+    const val HISTORY_CLEAR_KEEP_RECORDINGS = "history.clear.keepRecordings"
+    const val HISTORY_SEARCH = "history.search"
+    const val HISTORY_SEARCH_CLEAR = "history.search.clear"
+    const val HISTORY_FILTER_MODEL = "history.filter.model"
+    const val HISTORY_FILTER_MODEL_ALL = "history.filter.model.all"
+    const val HISTORY_FILTER_ERRORS = "history.filter.errorsOnly"
+    const val HISTORY_FILTER_FROM = "history.filter.from"
+    const val HISTORY_FILTER_THROUGH = "history.filter.through"
+    const val HISTORY_FILTER_CLEAR = "history.filter.clear"
+    const val HISTORY_FILTER_SUMMARY = "history.filter.summary"
+
+    /** One per model in the History filter, keyed by its catalogue ID or recognition mode. */
+    fun historyFilterModel(key: String) = "history.filter.model.option.$key"
+
+    /** One per History entry, keyed by its generated ID, never by its text. */
+    fun historyPlay(entryId: String) = "history.play.$entryId"
+    fun historyReadAloud(entryId: String) = "history.readAloud.$entryId"
     const val SETTINGS_BACK = "settings.back"
+    const val SETTINGS_DOWNLOADED_MOBILE_DATA = "settings.downloadedModels.mobileData"
+    const val SETTINGS_DOWNLOADED_UNAVAILABLE = "settings.downloadedModels.unavailable"
+    const val MODE_CHOOSE_DOWNLOADED_MODEL = "dictation.mode.chooseDownloadedModel"
+    const val SETTINGS_DOWNLOADED_CLEANUP_UNAVAILABLE = "settings.downloadedCleanup.unavailable"
+    const val SETTINGS_DOWNLOADED_CLEANUP_NOT_READY = "settings.downloadedCleanup.notReady"
+    const val SETTINGS_DOWNLOADED_CLEANUP_USE_OTHER = "settings.downloadedCleanup.useOther"
+    const val CLEANUP_PICKER_DOWNLOADED_STATUS = "cleanupPicker.downloaded.status"
+
+    /** One set per downloaded model, keyed by its catalogue ID such as `local/whisperkit/base`. */
+    fun downloadedModelUse(id: String) = "settings.downloadedModels.use.$id"
+    fun downloadedModelState(id: String) = "settings.downloadedModels.state.$id"
+    fun downloadedModelDownload(id: String) = "settings.downloadedModels.download.$id"
+    fun downloadedModelCancel(id: String) = "settings.downloadedModels.cancel.$id"
+    fun downloadedModelRemove(id: String) = "settings.downloadedModels.remove.$id"
+    const val SETTINGS_SEARCH = "settingsSearchField"
+    const val SETTINGS_SEARCH_CLEAR = "settingsSearchClear"
+    const val API_KEYS_FILTER = "settings.apiKeysFilter"
+    const val SETTINGS_PRIVACY_POLICY = "settings.privacyPolicy"
+    const val SETTINGS_ANALYTICS = "settings.analytics"
+    const val SETTINGS_DIAGNOSTICS = "settings.diagnostics"
+    const val SETTINGS_TRANSFER_EXPORT = "settings.configTransfer.export"
+    const val SETTINGS_TRANSFER_IMPORT = "settings.configTransfer.import"
+    const val SETTINGS_TRANSFER_EXPORT_KEYS = "settings.configTransfer.exportKeys"
+    const val SETTINGS_TRANSFER_IMPORT_KEYS = "settings.configTransfer.importKeys"
+    const val SETTINGS_TRANSFER_STATUS = "settings.configTransfer.status"
+    const val SETTINGS_TRANSFER_PREVIEW = "settings.configTransfer.preview"
+    const val SETTINGS_TRANSFER_APPLY = "settings.configTransfer.apply"
+    const val SETTINGS_TRANSFER_CANCEL = "settings.configTransfer.cancel"
+    const val TIP_JAR_STATUS = "settings.tipJar.status"
+    const val CONSENT_ANALYTICS = "consent.analytics"
+    const val CONSENT_DIAGNOSTICS = "consent.diagnostics"
+    const val CONSENT_DONE = "consent.done"
+
+    /** The consent dialog before content first goes to a cloud AI provider (#1805); same names as Apple's. */
+    const val CLOUD_SHARING_DIALOG = "cloudSharingConsentSheet"
+    const val CLOUD_SHARING_ALLOW = "cloudSharingConsentAllowButton"
+    const val CLOUD_SHARING_ON_DEVICE = "cloudSharingConsentOnDeviceButton"
+    const val CLOUD_SHARING_NOT_NOW = "cloudSharingConsentNotNowButton"
+    const val SETTINGS_CLOUD_SHARING = "settings.cloudSharing"
+    const val SETTINGS_CLOUD_SHARING_EMPTY = "cloudSharingConsentEmpty"
+
+    fun cloudSharingProvider(providerId: String) = "cloudSharingProvider-$providerId"
+
+    fun cloudSharingPolicy(providerId: String) = "cloudSharingPrivacyPolicyLink-$providerId"
+
+    fun cloudSharingWithdraw(providerId: String) = "cloudSharingWithdrawButton-$providerId"
+
+    const val AZURE_REGION = "settings.apiKeys.azure.region"
+    const val AZURE_ENDPOINT = "settings.apiKeys.azure.endpoint"
+    const val AZURE_ENDPOINT_SAVE = "settings.apiKeys.azure.endpoint.save"
+    const val AZURE_ENDPOINT_CLEAR = "settings.apiKeys.azure.endpoint.clear"
+    const val ALIBABA_REGION = "settings.apiKeys.alibaba.region"
+    const val ALIBABA_WORKSPACE = "settings.apiKeys.alibaba.workspace"
+    const val STEPFUN_REGION = "settings.apiKeys.stepfun.region"
+
+    /** One per Alibaba region in its picker, keyed by region ID, e.g. `settings.apiKeys.alibaba.region.cn-beijing`. */
+    fun alibabaRegionOption(regionId: String) = "settings.apiKeys.alibaba.region.$regionId"
+
+    /** One per StepFun region button, e.g. `settings.apiKeys.stepfun.region.international`. */
+    fun stepFunRegionOption(regionId: String) = "settings.apiKeys.stepfun.region.$regionId"
+
+    /** The balance line beside an API key, e.g. `settings.apiKeys.balance.openrouter.apiKey`. */
+    fun apiKeyBalance(credentialId: String) = "settings.apiKeys.balance.$credentialId"
+
+    fun apiKeyBalanceCheck(credentialId: String) = "settings.apiKeys.balanceCheck.$credentialId"
+
+    fun apiKeyBilling(credentialId: String) = "settings.apiKeys.billing.$credentialId"
+
+    /** One per tip, keyed by its store product ID, e.g. `settings.tip.com.justspeaktoit.tip.small`. */
+    fun tipProduct(productId: String) = "settings.tip.$productId"
+    const val SETTINGS_REPORT_ISSUE = "settings.reportIssue"
+    const val HISTORY_REPORT_ISSUE = "history.reportIssue"
+    const val ISSUE_REPORT = "issueReport"
+    const val ISSUE_REPORT_INCLUDE = "issueReport.includeDiagnostics"
+    const val ISSUE_REPORT_DRAFT = "issueReport.draft"
+    const val ISSUE_REPORT_COPY = "issueReport.copy"
+    const val ISSUE_REPORT_OPEN = "issueReport.open"
+    const val ISSUE_REPORT_CLOSE = "issueReport.close"
+    const val SETTINGS_SILENCE = "settings.silenceDetection"
+    const val SETTINGS_SILENCE_DURATION = "settings.silenceDuration"
+    const val SETTINGS_SILENCE_THRESHOLD = "settings.silenceThreshold"
+    const val SETTINGS_HANDS_FREE = "settings.handsFreeDictation"
+    const val SETTINGS_KEYBOARD_LIVE_CLOUD = "settings.keyboardLiveCloud"
+    const val HANDS_FREE_STATUS = "dictation.handsFree.status"
+    const val HANDS_FREE_OFF = "dictation.handsFree.turnOff"
+
+    const val SETTINGS_RUN_SETUP = "settings.runSetup"
+    const val TROUBLESHOOTING_SUMMARY = "settings.troubleshooting.summary"
+
+    /** One per finding, keyed by the shared check ID (for example `microphone-permission`). */
+    fun troubleshootingFinding(check: String) = "settings.troubleshooting.$check"
+
+    /** One per fix button, keyed by the shared check and fix IDs, e.g. `settings.troubleshooting.keyboard.openKeyboardSetup`. */
+    fun troubleshootingFix(check: String, fix: String) = "settings.troubleshooting.$check.$fix"
+    const val ONBOARDING_PROGRESS = "onboarding.progress"
+    const val ONBOARDING_NEXT = "onboarding.next"
+    const val ONBOARDING_BACK = "onboarding.back"
+    const val ONBOARDING_SKIP = "onboarding.skip"
+    const val ONBOARDING_ALLOW_MIC = "onboarding.allowMicrophone"
+    const val ONBOARDING_OPEN_APP_SETTINGS = "onboarding.openAppSettings"
+    const val ONBOARDING_KEYBOARD_SETTINGS = "onboarding.keyboardSettings"
+    const val ONBOARDING_ADD_TILE = "onboarding.addTile"
+
+    const val SETTINGS_KEEP_RECORDINGS = "settings.keepRecordings"
+    const val RESOURCES_HEADLINE = "settings.resources.headline"
+    const val RESOURCES_RELEASE_EVERYTHING = "settings.resources.releaseEverything"
+
+    /**
+     * One per hold row, keyed by the shared kind and the owner, so the app's recording and the keyboard's
+     * each get their own, e.g. `settings.resources.release.microphone.DictationViewModel`.
+     */
+    fun resourceRelease(kind: SystemResourceKind, owner: String): String =
+        "settings.resources.release.${kind.rawValue}.$owner"
+
+    /** Shared with the Apple raw configuration editors. */
+    const val RAW_CONFIG_EDITOR = "rawConfigurationEditor"
+    const val RAW_CONFIG_LOAD = "rawConfigurationLoad"
+    const val RAW_CONFIG_VALIDATE = "rawConfigurationValidate"
+    const val RAW_CONFIG_APPLY = "rawConfigurationApply"
+    const val RAW_CONFIG_IMPORT = "rawConfigurationImport"
+    const val RAW_CONFIG_EXPORT = "rawConfigurationExport"
+    const val RAW_CONFIG_RESET = "rawConfigurationReset"
+    const val RAW_CONFIG_RESET_CONFIRM = "rawConfigurationResetConfirm"
+    const val RAW_CONFIG_STATUS = "rawConfigurationStatus"
+
+    const val SETTINGS_HISTORY_SYNC_STATUS = "settings.historySync.status"
+    const val SETTINGS_HISTORY_SYNC_SIGN_IN = "settings.historySync.signIn"
+    const val SETTINGS_HISTORY_SYNC_SIGN_OUT = "settings.historySync.signOut"
+    const val SETTINGS_HISTORY_SYNC_NOW = "settings.historySync.syncNow"
+
+    const val SETTINGS_SEND_TO_MAC_PAIRED_MAC = "settings.sendToMac.pairedMac"
+    const val SETTINGS_SEND_TO_MAC_FORGET = "settings.sendToMac.forget"
+    const val SETTINGS_SEND_TO_MAC_FORGET_CONFIRM = "settings.sendToMac.forget.confirm"
+    const val SETTINGS_SEND_TO_MAC_FORGET_CANCEL = "settings.sendToMac.forget.cancel"
+    const val SETTINGS_SEND_TO_MAC_SEARCHING = "settings.sendToMac.searching"
+    const val SETTINGS_SEND_TO_MAC_DISCOVERY_ERROR = "settings.sendToMac.discoveryError"
+    const val SETTINGS_SEND_TO_MAC_ACTIVITY = "settings.sendToMac.activity"
+    const val SEND_TO_MAC_PAIRING_CODE = "sendToMacPairing.code"
+    const val SEND_TO_MAC_PAIRING_STATUS = "sendToMacPairing.status"
+    const val SEND_TO_MAC_PAIRING_CONFIRM = "sendToMacPairing.confirm"
+    const val SEND_TO_MAC_PAIRING_CANCEL = "sendToMacPairing.cancel"
+
+    /** One per Mac found nearby, keyed by its position in the list, never by the Mac's name. */
+    fun sendToMacPair(index: Int) = "settings.sendToMac.pair.$index"
+    const val HISTORY_SEND_TO_MAC_STATUS = "history.sendToMac.status"
+    const val HISTORY_SEND_TO_MAC_DISMISS = "history.sendToMac.dismiss"
+
+    /** One per History entry, keyed by its generated ID, never by its text. */
+    fun historySendToMac(entryId: String) = "history.sendToMac.$entryId"
+
+    const val SETTINGS_CLEANUP_MODEL = "settings.cleanupModel"
+    const val SETTINGS_CLEANUP_PROMPT = "settings.cleanupPrompt"
+    const val SETTINGS_CLEANUP_PROMPT_RESET = "settings.cleanupPrompt.reset"
+
+    /** Gemini Nano's status under the cleanup model row, its line in the cleanup picker, and the cleanup note. */
+    const val SETTINGS_CLEANUP_GEMINI_NANO_STATUS = "settings.cleanupModel.geminiNano.status"
+    const val CLEANUP_PICKER_GEMINI_NANO_STATUS = "cleanupPicker.geminiNano.status"
+    const val CLEANUP_STATUS = "dictation.cleanup.status"
+    const val SETTINGS_PROFILE_ADD = "settings.profiles.add"
+    const val PROFILE_CHOOSER = "dictation.profile"
+    const val PROFILE_CHOOSER_NONE = "dictation.profile.none"
+    const val PROFILE_EDITOR_NAME = "profileEditor.name"
+    const val PROFILE_EDITOR_CLOUD_MODEL = "profileEditor.cloudModel"
+    const val PROFILE_EDITOR_LANGUAGE = "profileEditor.language"
+    const val PROFILE_EDITOR_CLEANUP = "profileEditor.cleanup"
+    const val PROFILE_EDITOR_CLEANUP_MODEL = "profileEditor.cleanupModel"
+    const val PROFILE_EDITOR_CLEANUP_MODEL_RESET = "profileEditor.cleanupModel.reset"
+    const val PROFILE_EDITOR_PROMPT = "profileEditor.prompt"
+    const val PROFILE_EDITOR_DELETE = "profileEditor.delete"
+    const val PROFILE_EDITOR_SAVE = "profileEditor.save"
+
+    /** One per profile, keyed by its position in the list, never by the user's own name for it. */
+    fun profileOption(index: Int) = "dictation.profile.option.$index"
+
+    /** One per profile row in Settings, keyed by its position. */
+    fun profileEdit(index: Int) = "settings.profiles.edit.$index"
+    const val SETTINGS_SOUNDS_ENABLED = "settings.recordingSounds.enabled"
+    const val SETTINGS_SOUNDS_VOLUME = "settings.recordingSounds.volume"
+    const val SETTINGS_SOUNDS_PREVIEW = "settings.recordingSounds.preview"
+
+    /** One per sound profile, keyed by its shared ID (for example `classic`). */
+    fun soundProfile(id: String) = "settings.recordingSounds.profile.$id"
+    const val SETTINGS_MICROPHONE_UNAVAILABLE = "settings.microphone.unavailable"
+    const val DICTATION_MICROPHONE_FALLBACK = "dictation.microphone.fallback"
+
+    /** One per microphone choice, keyed by its `AudioInput.id`; `default` is the system default. */
+    fun microphone(id: String?) = "settings.microphone.${id ?: "default"}"
+    const val SETTINGS_LANGUAGE = "settings.language"
+    const val SETTINGS_DYNAMIC_COLOR = "settings.appearance.dynamicColor"
+
+    /** One per appearance choice, keyed by its cross-platform raw value (`system`, `light`, `dark`). */
+    fun appearanceOption(rawValue: String) = "settings.appearance.$rawValue"
+    const val CORRECTIONS_WRITE_AS = "settings.corrections.writeAs"
+    const val CORRECTIONS_HEARD_AS = "settings.corrections.heardAs"
+    const val CORRECTIONS_ADD = "settings.corrections.add"
+
+    /** One per language in the picker, keyed by its catalogue ID (for example `en_GB`). */
+    fun languageOption(id: String) = "languagePicker.language.$id"
+
+    /** One per correction, keyed by its position in the list, never by the user's own text. */
+    fun correctionRemove(index: Int) = "settings.corrections.remove.$index"
+    const val READ_ALOUD_VOICE = "settings.readAloudVoice"
+    const val READ_ALOUD_VOICE_CANCEL = "settings.readAloudVoice.cancel"
+
+    /** One per voice in the read aloud picker, keyed by its saved `VoiceSelection` value. */
+    fun readAloudVoiceOption(selection: String) = "settings.readAloudVoice.option.$selection"
+
+    /** The loading, empty or failure note of one provider's account voices, keyed by provider ID. */
+    fun readAloudVoiceAccountStatus(provider: String) = "settings.readAloudVoice.account.$provider"
+    const val PRONUNCIATION_WORD = "settings.pronunciation.word"
+    const val PRONUNCIATION_SAY_AS = "settings.pronunciation.sayAs"
+    const val PRONUNCIATION_CASE_SENSITIVE = "settings.pronunciation.caseSensitive"
+    const val PRONUNCIATION_REGEX = "settings.pronunciation.regex"
+    const val PRONUNCIATION_ADD = "settings.pronunciation.add"
+    const val PRONUNCIATION_PROBLEM = "settings.pronunciation.problem"
+
+    /** One per pronunciation, keyed by its position in the list, never by the user's own text. */
+    fun pronunciationRemove(index: Int) = "settings.pronunciation.remove.$index"
+    const val LEARNED_CORRECTIONS_TOGGLE = "settings.learnedCorrections.toggle"
+    const val LEARNED_CORRECTIONS_FEWER = "settings.learnedCorrections.fewer"
+    const val LEARNED_CORRECTIONS_MORE = "settings.learnedCorrections.more"
+    const val LEARNED_CORRECTIONS_CLEAR = "settings.learnedCorrections.clear"
+
+    /** One per learned suggestion, keyed by its position in the list, never by the user's own text. */
+    fun learnedCorrectionAccept(index: Int) = "settings.learnedCorrections.accept.$index"
+    fun learnedCorrectionDismiss(index: Int) = "settings.learnedCorrections.dismiss.$index"
+    /** The cleanup model picker and its OpenRouter browser (`cleanupPicker.*`). */
+    val CLEANUP_PICKER = ModelPickerIds("cleanupPicker")
+
+    /** The batch transcription model picker and its OpenRouter browser (`transcriptionPicker.*`). */
+    val TRANSCRIPTION_PICKER = ModelPickerIds("transcriptionPicker")
+
+    /** The settings row under the cloud transcription models that opens the OpenRouter browser. */
+    const val SETTINGS_CLOUD_MODEL_OPENROUTER = "settings.cloudModel.openRouter"
+}
+
+/**
+ * One model picker's controls. Both pickers share the OpenRouter browser, so each gets the same set
+ * under its own prefix.
+ */
+class ModelPickerIds(private val prefix: String) {
+    val back = "$prefix.back"
+    val search = "$prefix.search"
+
+    /** The **Browse OpenRouter models…** row under the native models. */
+    val openRouter = "$prefix.openRouter"
+    val provider = "$prefix.provider"
+    val allProviders = "$prefix.provider.all"
+    val zeroPrices = "$prefix.zeroPrices"
+    val modelPage = "$prefix.detail.modelPage"
+    val use = "$prefix.detail.use"
+
+    /** The live discovery switch (cleanup only), Refresh and the discovery status line. */
+    val discovery = "$prefix.discovery"
+    val refresh = "$prefix.refresh"
+    val status = "$prefix.status"
+
+    /** Profiles only: keep the user's own settings instead of a model. */
+    val useSettings = "$prefix.useSettings"
+
+    /** One per OpenRouter vendor in the provider filter, keyed by its name (for example `meta-llama`). */
+    fun provider(name: String) =
+        "$prefix.provider." + name.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]+"), "-").trim('-')
+
+    /** One per model, keyed by its stable selection ID (for example `native/openai/gpt-6-luna`). */
+    fun model(selectionId: String) = "$prefix.model.$selectionId"
 }

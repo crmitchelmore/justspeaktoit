@@ -109,7 +109,11 @@ public struct HotKeyEvent: Sendable {
   public let timestamp: TimeInterval
   public let source: String
 
-  public init(gesture: HotKeyGesture, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime, source: String = "") {
+  public init(
+    gesture: HotKeyGesture,
+    timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime,
+    source: String = ""
+  ) {
     self.gesture = gesture
     self.timestamp = timestamp
     self.source = source

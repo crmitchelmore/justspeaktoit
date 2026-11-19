@@ -69,6 +69,10 @@ static const char *shared_css =
     ".jsti-statusbar { padding: 8px 16px; border-top: 1px solid alpha(currentColor, 0.16); }\n"
     ".jsti-statusbar label { font-size: 13px; }\n"
     ".jsti-empty { padding: 16px; }\n"
+    ".jsti-search-results row { border-radius: 6px; margin: 1px 6px; padding: 6px 10px; }\n"
+    ".jsti-search-title { font-weight: 700; }\n"
+    ".jsti-search-highlight { outline: 2px solid @accent_color; outline-offset: -2px;"
+    " background-color: alpha(@accent_bg_color, 0.14); }\n"
     ".jsti-about-name { font-size: 22px; font-weight: 700; }\n";
 
 void jsti_style_install(void) {
@@ -254,6 +258,18 @@ static GtkWidget *label_with(const char *text, const char *css_class) {
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
     if (css_class != NULL) gtk_widget_add_css_class(label, css_class);
     return label;
+}
+
+void jsti_accessible_set_name(GtkWidget *widget, const char *name) {
+    gtk_accessible_reset_relation(GTK_ACCESSIBLE(widget), GTK_ACCESSIBLE_RELATION_LABELLED_BY);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(widget), GTK_ACCESSIBLE_PROPERTY_LABEL, name, -1);
+}
+
+void jsti_accessible_announce(GtkWidget *widget, const char *text, int priority) {
+    if (widget == NULL || text == NULL || text[0] == '\0') return;
+    GtkRoot *root = gtk_widget_get_root(widget);
+    GtkWidget *speaker = root != NULL && GTK_IS_WINDOW(root) ? GTK_WIDGET(root) : widget;
+    gtk_accessible_announce(GTK_ACCESSIBLE(speaker), text, (GtkAccessibleAnnouncementPriority)priority);
 }
 
 GtkWidget *jsti_page_new(GtkWidget **content) {

@@ -112,6 +112,8 @@ final class VoiceEditController {
   // MARK: - Instruction capture
 
   private func startListening() async throws {
+    // Before the recorder starts, so a refusal captures and sends nothing (issue #1805).
+    try mainManager.requireCloudSharingConsent(mainManager.appSettings.voiceEditCloudSharingRequests)
     _ = try await audioFileManager.startRecording(owner: .voiceEdit)
     guard mainManager.isStreamingTranscriptionMode else { return }
     do {

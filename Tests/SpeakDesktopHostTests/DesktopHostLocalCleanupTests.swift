@@ -10,7 +10,8 @@ final class DesktopHostLocalCleanupTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("cleanup-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         FakeLog.shared.installKeyReadHook { _ in XCTFail("Local cleanup looked up a remote credential") }
         var record = DesktopRecordingStore.Record(
             id: UUID(), audioFilename: "synthetic.wav", modelIdentifier: ModelCatalog.defaultBatchTranscriptionModel
@@ -34,7 +35,8 @@ final class DesktopHostLocalCleanupTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("cleanup-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         FakeLog.shared.installKeyReadHook { _ in XCTFail("Silent input read a key") }
         var record = DesktopRecordingStore.Record(
             id: UUID(), audioFilename: "synthetic.wav", modelIdentifier: ModelCatalog.defaultBatchTranscriptionModel
@@ -59,7 +61,8 @@ final class DesktopHostLocalCleanupTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("cleanup-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         FakeLog.shared.installKeyWriteHook { _, _ in XCTFail("A Local selection wrote a remote key") }
         let localModel = try XCTUnwrap(ModelCatalog.localPostProcessing.first {
             LocalPostProcessingModel.isDownloadedModelID($0.id)

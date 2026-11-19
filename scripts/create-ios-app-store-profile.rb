@@ -135,6 +135,15 @@ module IOSProfileBootstrap
       profile_content(profile)
     end
 
+    # Registers the App ID when missing and enables the requested
+    # capabilities, without creating or touching any profile. The API cannot
+    # associate a specific App Group with an App ID; that stays a portal step.
+    def ensure_registration
+      bundle = ensure_bundle_id
+      ensure_capabilities(bundle.fetch("id"))
+      bundle
+    end
+
     def normalized_serial
       @certificate_serial.delete(":").upcase.sub(/^0+/, "")
     end
@@ -170,9 +179,12 @@ module IOSProfileBootstrap
         created = @client.post("/v1/bundleIds", create_body).fetch("data")
         log "Registered bundle ID #{@bundle_id}"
         validate_bundle!(created)
-      rescue ConflictError
-        log "Bundle ID #{@bundle_id} already exists (created concurrently); re-fetching"
-        validate_bundle!(refetch("Bundle ID #{@bundle_id}") { fetch_bundle })
+      rescue ConflictError => error
+        # App Store Connect also answers 409 for entity errors that are not
+        # duplicates, so keep Apple's reason for the case where none appears.
+        description = "Bundle ID #{@bundle_id} (#{conflict_detail(error)})"
+        log "#{description} conflicted; re-fetching"
+        validate_bundle!(refetch(description) { fetch_bundle })
       end
     end
 
@@ -362,6 +374,14 @@ module IOSProfileBootstrap
       raise ValidationError, "Apple returned a profile without profileContent" unless content
 
       content
+    end
+
+    def conflict_detail(error)
+      errors = JSON.parse(error.body.to_s).fetch("errors", [])
+      details = errors.map { |item| [item["code"], item["detail"]].compact.join(": ") }.reject(&:empty?)
+      details.empty? ? "no detail" : details.join("; ")
+    rescue JSON::ParserError
+      "no detail"
     end
 
     # Bounded, jittered polling for a resource that App Store Connect reported

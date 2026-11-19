@@ -16,7 +16,7 @@ final class DesktopHostControllerTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("host-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         effects = SyntheticEffects()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
+        controller = try DesktopHostController<FakePlatform>.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         batchIndex = try XCTUnwrap(
             DesktopHostModels.all.firstIndex { DesktopTranscription.provider(for: $0.id) != nil }
@@ -92,7 +92,7 @@ final class DesktopHostControllerTests: XCTestCase {
 
     func testCancellingTranscriptionRetainsTheAudio() async throws {
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(
+        controller = try DesktopHostController<FakePlatform>.consented(
             directory: directory, effects: GatedEffects(gate: Gate(open: false))
         )
         await controller.markReadyForSelfTest()
@@ -138,6 +138,15 @@ final class DesktopHostControllerTests: XCTestCase {
         let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
         XCTAssertEqual(FakeLog.shared.key(credential), "new-key")
         XCTAssertEqual(FakeLog.shared.allStatuses.last, "API key saved in the test keyring.")
+    }
+
+    func testSavingAStepFunKeyTagsItInternational() async throws {
+        let index = try XCTUnwrap(DesktopHostModels.all.firstIndex { $0.id == FileSpeechProvider.stepfun.modelID })
+        await controller.saveKey(" step-key ", modelIndex: index)
+        let saved = FakeLog.shared.key(StepFunCredential.credentialIdentifier)
+        XCTAssertEqual(try StepFunCredential(credentials: saved), try StepFunCredential(
+            region: .international, apiKey: "step-key"
+        ))
     }
 
     func testUnqualifiedHostsOfferNoLiveModels() {

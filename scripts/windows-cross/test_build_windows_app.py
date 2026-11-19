@@ -424,7 +424,7 @@ Assert-That ($script:starts -eq 33) 'Actual caller did not start exactly one fak
 '''
         with tempfile.TemporaryDirectory() as directory:
             completed = subprocess.run([str(pathlib.Path(host).resolve()), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", functions + "\n" + script],
-                                       cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20, check=False)
+                                       cwd=directory, capture_output=True, timeout=20, check=False)
         self.assertEqual(completed.returncode, 0, "Actual inline timeout cleanup fakes failed")
         self.assertEqual(completed.stderr, b"")
         self.assertNotIn(b"PRIVATE", completed.stdout)
@@ -548,7 +548,7 @@ foreach ($mode in @('success', 'natural-nonzero', 'missing-marker', 'joined', 'k
         with tempfile.TemporaryDirectory() as directory:
             command = "function Invoke-OwnedFoundationFixture {\n" + actual_step + "\n}\n" + script
             completed = subprocess.run([str(pathlib.Path(host).resolve()), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
-                                       cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20, check=False)
+                                       cwd=directory, capture_output=True, timeout=20, check=False)
         self.assertEqual(completed.returncode, 0, "Actual Foundation step cleanup fakes failed")
         self.assertEqual(completed.stderr, b"")
         self.assertNotIn(b"PRIVATE", completed.stdout)

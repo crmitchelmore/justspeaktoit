@@ -2,39 +2,340 @@ package com.justspeaktoit.android.settings
 
 import android.content.Context
 import androidx.core.content.edit
+import com.justspeaktoit.android.cloud.CloudSharingConsent
+import com.justspeaktoit.android.corrections.AutoCorrectionCandidate
+import com.justspeaktoit.android.corrections.AutoCorrectionLearningPolicy
+import com.justspeaktoit.android.corrections.CorrectionRule
+import com.justspeaktoit.android.corrections.PersonalCorrections
 import com.justspeaktoit.android.dictation.RecognitionMode
+import com.justspeaktoit.android.dictation.SilenceSettings
 import com.justspeaktoit.android.history.Retention
+import com.justspeaktoit.android.readaloud.PronunciationEntry
+import org.json.JSONObject
+
+/** The non-secret choices the dictation screen reads and writes; [AppPreferences] in production. */
+interface DictationPreferences {
+    var chosenMode: RecognitionMode?
+    var cloudModelId: String?
+    var cleanupModelId: String?
+    var cleanupEnabled: Boolean
+
+    /** Whether the cleanup browser also lists OpenAI models OpenRouter offers today; off by default. */
+    var cleanupModelDiscoveryEnabled: Boolean
+    var retention: Retention
+    var keepAudioOnCancel: Boolean
+
+    /** Whether finished Cloud recordings stay in History to play back or transcribe again. */
+    var keepRecordings: Boolean
+
+    /** A `DictationLanguages` identifier; null until chosen, which means Automatic. */
+    var languageId: String?
+    var corrections: List<CorrectionRule>
+
+    /** The read-aloud pronunciation dictionary; null until edited, which means the shared defaults. */
+    var pronunciations: List<PronunciationEntry>?
+
+    /** A `VoiceSelection` encoding; null means the phone's default voice. */
+    var readAloudVoice: String?
+
+    /** Whether the keyboard learns corrections from edits to text it inserted. */
+    var learnCorrections: Boolean
+
+    /** How many times an edit is seen before it becomes a correction, within the shared range. */
+    var correctionPromotionThreshold: Int
+
+    /** Learned edits not yet promoted, dismissed ones included; see `AutoCorrectionLearner`. */
+    var correctionCandidates: List<AutoCorrectionCandidate>
+
+    /** The user's base cleanup prompt; null or blank means the built-in one. */
+    var cleanupPrompt: String?
+
+    /** Named sets of session settings, in the order the user sees them. */
+    var profiles: List<DictationProfile>
+
+    /** The chosen [DictationProfile.id], or null for none. */
+    var activeProfileId: String?
+    var recordingSounds: RecordingSoundSettings
+
+    /** Whether, and after how long, a Cloud recording stops on silence. */
+    var silence: SilenceSettings
+
+    /** The `AudioInput.id` Cloud recordings use; null means the system default. */
+    var audioInputId: String?
+
+    /** Whether the record button arms hands-free dictation for Cloud recordings. */
+    var handsFreeEnabled: Boolean
+
+    /** Whether the dictation keyboard may stream to the app's live Cloud model; off until the user opts in. */
+    var keyboardLiveCloudEnabled: Boolean
+
+    var appearance: AppAppearance
+
+    /** Wallpaper (Material You) colours instead of the brand palette; Android 12 and later only. */
+    var dynamicColor: Boolean
+
+    /** The `local/whisperkit/...` model Downloaded mode uses; null until one is chosen. */
+    var downloadedTranscriptionModel: String?
+
+    /** Whether models may download over a metered connection; off means Wi-Fi (unmetered) only. */
+    var downloadedModelsOnMobileData: Boolean
+
+    /** The `local/post-processing/...` model cleanup uses instead of a cloud one; null uses the cloud model. */
+    var localCleanupModelId: String?
+
+    /** Which cloud AI providers may receive which content (#1805); nothing is sent to one until allowed. */
+    var cloudSharingConsent: CloudSharingConsent
+}
+
+/** The float's shortest decimal as a double, so a stored 0.05f reads back as 0.05, not 0.0500000007. */
+internal fun Float.decimal(): Double = toString().toDouble()
 
 /** Non-secret choices. Secrets live in the Keystore-backed `SecretStore`, never here. */
-class AppPreferences(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences("jsti_prefs", Context.MODE_PRIVATE)
+class AppPreferences(context: Context) : DictationPreferences {
+    private val prefs = context.applicationContext.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
 
-    var chosenMode: RecognitionMode?
+    override var chosenMode: RecognitionMode?
         get() {
             val name = prefs.getString(KEY_MODE, null) ?: return null
             return RecognitionMode.entries.firstOrNull { it.name == name }
         }
         set(value) = prefs.edit { if (value == null) remove(KEY_MODE) else putString(KEY_MODE, value.name) }
 
-    var cloudModelId: String?
+    override var cloudModelId: String?
         get() = prefs.getString(KEY_CLOUD_MODEL, null)
         set(value) = prefs.edit { putString(KEY_CLOUD_MODEL, value) }
 
-    var cleanupEnabled: Boolean
+    /** Null until chosen; existing installs keep the default OpenRouter cleanup route. */
+    override var cleanupModelId: String?
+        get() = prefs.getString(KEY_CLEANUP_MODEL, null)
+        set(value) = prefs.edit { putString(KEY_CLEANUP_MODEL, value) }
+
+    override var cleanupEnabled: Boolean
         get() = prefs.getBoolean(KEY_CLEANUP, false)
         set(value) = prefs.edit { putBoolean(KEY_CLEANUP, value) }
 
-    var retention: Retention
+    override var cleanupModelDiscoveryEnabled: Boolean
+        get() = prefs.getBoolean(KEY_CLEANUP_MODEL_DISCOVERY, false)
+        set(value) = prefs.edit { putBoolean(KEY_CLEANUP_MODEL_DISCOVERY, value) }
+
+    override var retention: Retention
         get() {
             val name = prefs.getString(KEY_RETENTION, null)
             return Retention.entries.firstOrNull { it.name == name } ?: Retention.Month
         }
         set(value) = prefs.edit { putString(KEY_RETENTION, value.name) }
 
-    private companion object {
-        const val KEY_RETENTION = "history_retention"
-        const val KEY_MODE = "chosen_mode"
-        const val KEY_CLOUD_MODEL = "cloud_model"
-        const val KEY_CLEANUP = "cleanup_enabled"
+    /**
+     * Cloud mode only: on-device and speech-service recognition never give the app an audio file,
+     * so there is nothing to keep when they are cancelled.
+     */
+    override var keepAudioOnCancel: Boolean
+        get() = prefs.getBoolean(KEY_KEEP_AUDIO_ON_CANCEL, DEFAULT_KEEP_AUDIO_ON_CANCEL)
+        set(value) = prefs.edit { putBoolean(KEY_KEEP_AUDIO_ON_CANCEL, value) }
+
+    override var keepRecordings: Boolean
+        get() = prefs.getBoolean(KEY_KEEP_RECORDINGS, false)
+        set(value) = prefs.edit { putBoolean(KEY_KEEP_RECORDINGS, value) }
+
+    override var downloadedTranscriptionModel: String?
+        get() = prefs.getString(KEY_DOWNLOADED_MODEL, null)
+        set(value) = prefs.edit { if (value == null) remove(KEY_DOWNLOADED_MODEL) else putString(KEY_DOWNLOADED_MODEL, value) }
+
+    override var downloadedModelsOnMobileData: Boolean
+        get() = prefs.getBoolean(KEY_DOWNLOADED_ON_MOBILE_DATA, false)
+        set(value) = prefs.edit { putBoolean(KEY_DOWNLOADED_ON_MOBILE_DATA, value) }
+
+    override var localCleanupModelId: String?
+        get() = prefs.getString(KEY_LOCAL_CLEANUP_MODEL, null)
+        set(value) = prefs.edit {
+            if (value == null) remove(KEY_LOCAL_CLEANUP_MODEL) else putString(KEY_LOCAL_CLEANUP_MODEL, value)
+        }
+
+    override var cloudSharingConsent: CloudSharingConsent
+        get() = CloudSharingConsent.decode(prefs.getString(KEY_CLOUD_SHARING_CONSENT, null))
+        set(value) = prefs.edit { putString(KEY_CLOUD_SHARING_CONSENT, value.encode()) }
+
+    override var audioInputId: String?
+        get() = prefs.getString(KEY_AUDIO_INPUT, null)
+        set(value) = prefs.edit { putString(KEY_AUDIO_INPUT, value) }
+
+    override var languageId: String?
+        get() = prefs.getString(KEY_LANGUAGE, null)
+        set(value) = prefs.edit { putString(KEY_LANGUAGE, value) }
+
+    override var corrections: List<CorrectionRule>
+        get() = PersonalCorrections.decode(prefs.getString(KEY_CORRECTIONS, null))
+        set(value) = prefs.edit { putString(KEY_CORRECTIONS, PersonalCorrections.encode(value)) }
+
+    override var pronunciations: List<PronunciationEntry>?
+        get() = prefs.getString(KEY_PRONUNCIATIONS, null)?.let(PronunciationEntry::decodeList)
+        set(value) = prefs.edit {
+            if (value == null) remove(KEY_PRONUNCIATIONS) else putString(KEY_PRONUNCIATIONS, PronunciationEntry.encodeList(value))
+        }
+
+    override var readAloudVoice: String?
+        get() = prefs.getString(KEY_READ_ALOUD_VOICE, null)
+        set(value) = prefs.edit { if (value == null) remove(KEY_READ_ALOUD_VOICE) else putString(KEY_READ_ALOUD_VOICE, value) }
+
+    override var learnCorrections: Boolean
+        get() = prefs.getBoolean(KEY_LEARN_CORRECTIONS, AutoCorrectionLearningPolicy.ENABLED_BY_DEFAULT)
+        set(value) = prefs.edit { putBoolean(KEY_LEARN_CORRECTIONS, value) }
+
+    override var correctionPromotionThreshold: Int
+        get() = AutoCorrectionLearningPolicy.clampThreshold(
+            prefs.getInt(KEY_CORRECTION_THRESHOLD, AutoCorrectionLearningPolicy.DEFAULT_PROMOTION_THRESHOLD),
+        )
+        set(value) = prefs.edit {
+            putInt(KEY_CORRECTION_THRESHOLD, AutoCorrectionLearningPolicy.clampThreshold(value))
+        }
+
+    override var correctionCandidates: List<AutoCorrectionCandidate>
+        get() = AutoCorrectionCandidate.decode(prefs.getString(KEY_CORRECTION_CANDIDATES, null))
+        set(value) = prefs.edit {
+            putString(KEY_CORRECTION_CANDIDATES, AutoCorrectionCandidate.encode(value))
+        }
+
+    override var cleanupPrompt: String?
+        get() = prefs.getString(KEY_CLEANUP_PROMPT, null)
+        set(value) = prefs.edit {
+            if (value.isNullOrBlank()) remove(KEY_CLEANUP_PROMPT) else putString(KEY_CLEANUP_PROMPT, value)
+        }
+
+    override var profiles: List<DictationProfile>
+        get() = DictationProfiles.decode(prefs.getString(KEY_PROFILES, null))
+        set(value) = prefs.edit { putString(KEY_PROFILES, DictationProfiles.encode(value)) }
+
+    override var activeProfileId: String?
+        get() = prefs.getString(KEY_ACTIVE_PROFILE, null)
+        set(value) = prefs.edit { if (value == null) remove(KEY_ACTIVE_PROFILE) else putString(KEY_ACTIVE_PROFILE, value) }
+    /**
+     * Settings another platform owns, from an applied raw configuration, as a JSON object. Kept so the
+     * next export still carries them; the app never reads them.
+     */
+    var otherPlatformSettings: Map<String, Any?>
+        get() = prefs.getString(KEY_OTHER_PLATFORM_SETTINGS, null)
+            ?.let { runCatching { RawConfiguration.plain(JSONObject(it)) as? Map<*, *> }.getOrNull() }
+            ?.mapKeys { it.key.toString() }
+            .orEmpty()
+        set(value) = prefs.edit { putString(KEY_OTHER_PLATFORM_SETTINGS, RawConfiguration.encode(value)) }
+
+    override var recordingSounds: RecordingSoundSettings
+        get() = RecordingSoundSettings(
+            enabled = prefs.getBoolean(KEY_SOUNDS_ENABLED, RecordingSoundSettings.DEFAULT_ENABLED),
+            profile = RecordingSoundProfile.fromId(prefs.getString(KEY_SOUND_PROFILE, null)),
+            volume = RecordingSoundSettings.clampVolume(prefs.getFloat(KEY_SOUND_VOLUME, RecordingSoundSettings.DEFAULT_VOLUME)),
+        )
+        set(value) = prefs.edit {
+            putBoolean(KEY_SOUNDS_ENABLED, value.enabled)
+            putString(KEY_SOUND_PROFILE, value.profile.id)
+            putFloat(KEY_SOUND_VOLUME, RecordingSoundSettings.clampVolume(value.volume))
+        }
+
+    override var silence: SilenceSettings
+        get() = SilenceSettings.of(
+            enabled = prefs.getBoolean(KEY_SILENCE_ENABLED, false),
+            threshold = prefs.getFloat(KEY_SILENCE_THRESHOLD, SilenceSettings.DEFAULT_THRESHOLD.toFloat()).decimal(),
+            durationSeconds = prefs.getFloat(KEY_SILENCE_DURATION, SilenceSettings.DEFAULT_DURATION.toFloat()).decimal(),
+        )
+        set(value) = prefs.edit {
+            putBoolean(KEY_SILENCE_ENABLED, value.enabled)
+            putFloat(KEY_SILENCE_THRESHOLD, value.threshold.toFloat())
+            putFloat(KEY_SILENCE_DURATION, value.durationSeconds.toFloat())
+        }
+
+    override var handsFreeEnabled: Boolean
+        get() = prefs.getBoolean(KEY_HANDS_FREE, false)
+        set(value) = prefs.edit { putBoolean(KEY_HANDS_FREE, value) }
+
+    override var keyboardLiveCloudEnabled: Boolean
+        get() = prefs.getBoolean(KEY_KEYBOARD_LIVE_CLOUD, false)
+        set(value) = prefs.edit { putBoolean(KEY_KEYBOARD_LIVE_CLOUD, value) }
+
+    /** Whether the first-run guide was finished or skipped; null on installs that never decided. */
+    var hasCompletedOnboarding: Boolean?
+        get() = if (prefs.contains(KEY_ONBOARDING)) prefs.getBoolean(KEY_ONBOARDING, false) else null
+        set(value) = prefs.edit { if (value == null) remove(KEY_ONBOARDING) else putBoolean(KEY_ONBOARDING, value) }
+
+    override var appearance: AppAppearance
+        get() = AppAppearance.fromRawValue(prefs.getString(KEY_APPEARANCE, null))
+        set(value) = prefs.edit { putString(KEY_APPEARANCE, value.rawValue) }
+
+    override var dynamicColor: Boolean
+        get() = prefs.getBoolean(KEY_DYNAMIC_COLOR, false)
+        set(value) = prefs.edit { putBoolean(KEY_DYNAMIC_COLOR, value) }
+
+    companion object {
+        const val FILE_NAME = "jsti_prefs"
+
+        /** Product analytics consent (`telemetry.AnalyticsConsent`); absent means not asked, so off. */
+        const val KEY_ANALYTICS_CONSENT = "analyticsConsent"
+
+        /** Consent per cloud AI provider, the JSON and key SpeakCore's `CloudSharingConsentStore` uses. */
+        const val KEY_CLOUD_SHARING_CONSENT = "cloudSharingConsent"
+
+        /** Crash-report consent (`telemetry.DiagnosticsConsent`), the key the Mac and iOS apps use. */
+        const val KEY_DIAGNOSTICS_CONSENT = "diagnosticsConsent"
+
+        /** The canonical cross-platform key and values (`system`, `light`, `dark`). */
+        private const val KEY_APPEARANCE = "appearance"
+        private const val KEY_DYNAMIC_COLOR = "dynamicColor"
+
+        /** The canonical cross-platform key, shared with the Mac, iOS, Windows and Linux apps. */
+        const val KEY_KEEP_AUDIO_ON_CANCEL = "keepAudioOnCancel"
+        const val DEFAULT_KEEP_AUDIO_ON_CANCEL = true
+
+        /** Android only: the Mac and iOS always keep recordings, in a folder the user can open. */
+        private const val KEY_KEEP_RECORDINGS = "keepRecordingsInHistory"
+
+        /** The canonical cross-platform key; each platform stores its own kind of device id in it. */
+        const val KEY_AUDIO_INPUT = "preferredAudioInputUID"
+        private const val KEY_RETENTION = "history_retention"
+        private const val KEY_MODE = "chosen_mode"
+        private const val KEY_CLOUD_MODEL = "cloud_model"
+        private const val KEY_DOWNLOADED_MODEL = "downloadedTranscriptionModel"
+        private const val KEY_DOWNLOADED_ON_MOBILE_DATA = "downloadedModelsOnMobileData"
+        private const val KEY_LOCAL_CLEANUP_MODEL = "localCleanupModel"
+        private const val KEY_CLEANUP = "cleanup_enabled"
+        private const val KEY_CLEANUP_MODEL = "cleanup_model"
+        private const val KEY_CLEANUP_MODEL_DISCOVERY = "cleanupModelDiscoveryEnabled"
+
+        /** The canonical cross-platform key; values are SpeakCore `TranscriptionLanguageCatalog` IDs. */
+        private const val KEY_LANGUAGE = "preferredLocale"
+        private const val KEY_CORRECTIONS = "personal_corrections"
+
+        /** The canonical cross-platform key (SpeakCore `DataMigrationVocabularyCatalog`), a JSON array. */
+        const val KEY_PRONUNCIATIONS = "pronunciationDictionary"
+
+        /** Android only: a `VoiceSelection`, since system voices differ from phone to phone. */
+        const val KEY_READ_ALOUD_VOICE = "readAloudVoice"
+
+        /** Canonical cross-platform keys, shared with the Mac and desktop apps' correction learning. */
+        private const val KEY_LEARN_CORRECTIONS = "autoCorrectionsEnabled"
+        private const val KEY_CORRECTION_THRESHOLD = "autoCorrectionsPromotionThreshold"
+        private const val KEY_CORRECTION_CANDIDATES = "autoCorrectionCandidates"
+
+        /** Canonical cross-platform keys, shared with the desktop apps and SpeakCore's profile store. */
+        private const val KEY_CLEANUP_PROMPT = "postProcessingSystemPrompt"
+        const val KEY_PROFILES = "dictationProfiles"
+        private const val KEY_ACTIVE_PROFILE = "activeDictationProfileID"
+        private const val KEY_OTHER_PLATFORM_SETTINGS = "raw_configuration_other_platform_settings"
+        /** The canonical cross-platform recording sound keys, shared with the Mac, Windows and Linux apps. */
+        private const val KEY_SOUNDS_ENABLED = "recordingSoundsEnabled"
+        private const val KEY_SOUND_PROFILE = "recordingSoundProfile"
+        private const val KEY_SOUND_VOLUME = "recordingSoundVolume"
+
+        /** Canonical cross-platform keys (SpeakCore `ApplicationPreferenceKey`). */
+        private const val KEY_SILENCE_ENABLED = "silenceDetectionEnabled"
+        private const val KEY_SILENCE_THRESHOLD = "silenceThreshold"
+        private const val KEY_SILENCE_DURATION = "silenceDuration"
+
+        /** The canonical cross-platform key (SpeakCore `SharedApplicationPreference.handsFreeDictationEnabled`). */
+        private const val KEY_HANDS_FREE = "handsFreeDictationEnabled"
+
+        /** Android only: the other platforms' keyboards have no live Cloud route. */
+        private const val KEY_KEYBOARD_LIVE_CLOUD = "keyboardLiveCloudEnabled"
+
+        /** The Mac's onboarding key, so every platform records completion under one name. */
+        private const val KEY_ONBOARDING = "hasCompletedOnboarding"
     }
 }

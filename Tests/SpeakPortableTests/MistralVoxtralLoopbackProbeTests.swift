@@ -7,7 +7,7 @@ import XCTest
 
 /// The actual shared Mistral Voxtral client over the Apple `URLSession`
 /// adapter, against the same bounded Voxtral peer the WinHTTP runtime probe
-/// uses (`scripts/websocket-loopback-probe.py`). Explicitly enabled only with
+/// uses (`scripts/loopback/websocket-loopback-probe.py`). Explicitly enabled only with
 /// that local peer; the key and audio are synthetic. FoundationNetworking is
 /// not a qualified WebSocket transport for any host, so it is skipped there.
 final class MistralVoxtralLoopbackProbeTests: XCTestCase {

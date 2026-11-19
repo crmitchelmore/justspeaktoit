@@ -111,8 +111,6 @@ final class ProviderCatalogInvariantTests: XCTestCase {
         "openai/gpt-audio",
         "thinkingmachines/inkling",
         "thinkingmachines/inkling-small",
-        "thinkingmachines/inkling:free",
-        "thinkingmachines/inkling-small:free",
         "google/gemini-3.1-pro-preview",
         "mistralai/voxtral-small-24b-2507",
         "google/gemini-3.8-flash",

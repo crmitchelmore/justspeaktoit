@@ -3,7 +3,9 @@
 Native Android app (Kotlin, Jetpack Compose). Scope, supported devices and the feature
 comparison with the Mac app are in the [Android parity matrix](../Docs/android-parity-matrix.md).
 
-This is a developer build: it is not published to Google Play.
+Green `main` builds are signed and published to Google Play's internal testing track once the
+owner has configured the release secrets; see the
+[Play submission guide](../Docs/android-play-store-submission.md).
 
 ## Requirements
 
@@ -11,20 +13,33 @@ This is a developer build: it is not published to Google Play.
 - Android SDK with platform 37 (Android Studio installs it, or set `ANDROID_HOME`)
 - A phone or emulator running Android 10 (API 29) or newer. On-device recognition needs
   Android 12+ and a speech service that provides it.
+- NDK 27.3.13750724 and CMake 3.31.5 from the SDK Manager (`ndk;27.3.13750724`, `cmake;3.31.5`;
+  preinstalled on GitHub's Ubuntu runners) for the whisper.cpp and llama.cpp library behind
+  Downloaded mode and downloaded cleanup models. The build fetches the pinned whisper.cpp and
+  llama.cpp source archives once and checks their SHA-256; offline, pass local copies with
+  `-Pjsti.whisperCppArchive=/path/whisper.cpp-v1.9.5.tar.gz` and
+  `-Pjsti.llamaCppArchive=/path/llama.cpp-b11425.tar.gz` (see
+  [android-on-device-models.md](../Docs/android-on-device-models.md#native-build)).
 
 ## Build and test
 
 ```bash
 cd android
 ./gradlew testDebugUnitTest   # JVM unit tests
-./gradlew lintDebug           # Android lint
+./gradlew lintDebug           # Android lint: zero warnings, no baseline
 ./gradlew assembleDebug       # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew installDebug        # install on a connected device
 ```
 
-CI runs the unit test, lint and debug build tasks (not `installDebug`, so installation is not
-checked) in [`.github/workflows/android.yml`](../.github/workflows/android.yml)
-and uploads the debug APK as the `justspeaktoit-android-debug` artefact.
+Android lint treats every warning as an error and the Kotlin compiler fails on any warning
+(`android/app/build.gradle.kts`). Only the checks that report a newer upstream release are
+disabled, because they would fail an unchanged tree; Dependabot owns dependency currency.
+
+CI runs the unit test, lint, debug build and R8 release bundle tasks (not `installDebug`, so
+installation is not checked) in [`.github/workflows/android.yml`](../.github/workflows/android.yml)
+and uploads the debug APK as the `justspeaktoit-android-debug` artefact. On `main` its `release`
+job then builds the upload-signed AAB (`justspeaktoit-android-release`) and, when configured,
+publishes it to the internal testing track.
 
 Pull requests that change only `android/**`, `.github/workflows/android.yml` or
 `Docs/android-*.md` skip the macOS and iOS jobs in `ci.yml`. The required checks still
@@ -62,6 +77,12 @@ Optional personal feed (owner steps; the CFS proxy does not serve Maven today):
    feed needs nothing else. A private feed's token must live in a `main`-only environment, which
    pull-request builds cannot read, so pull requests would keep using the hosted-runner default.
 
+Without a feed, get a branch's APK from GitHub-hosted runners instead.
+`scripts/linux-precheck --job android --tree . --base origin/main` (which `scripts/pre-pr` runs) pushes
+a throwaway `precheck/**` branch. `precheck.yml` runs `scripts/ci-android.sh` there and uploads the
+debug APK as `justspeaktoit-android-debug`. Install it on an emulator with
+`gh run download <run-id> -n justspeaktoit-android-debug && adb install -r -g app-debug.apk`.
+
 ## Layout
 
 ```
@@ -70,19 +91,51 @@ app/src/main/java/com/justspeaktoit/android/
 ├── dictation/
 │   ├── DictationState.kt    # pure state machine, events and error mapping
 │   ├── RecognizerAvailability.kt  # pure availability and language resolution
-│   ├── AndroidSpeechEngine.kt     # SpeechRecognizer adapter (main thread)
-│   └── DictationViewModel.kt
+│   ├── AndroidSpeechEngine.kt     # SpeechEngine: SpeechRecognizer adapter (main thread)
+│   ├── CloudCapture.kt      # owns the Cloud recording and deadline-bounded, abortable blocking IO
+│   ├── RecorderRetirement.kt      # process-wide bound on recorder stops that outlive their owner
+│   ├── DictationLanguages.kt      # the shared language catalogue and Automatic → phone language
+│   ├── DictationEngineSelector.kt # mode, cloud model, language, availability and the plan a session follows
+│   ├── DictationSessionController.kt  # session lifecycle, microphone hold and cleanup
+│   ├── SessionRequests.kt   # provider requests: key reads, deadlines and failure mapping
+│   ├── LiveDictation.kt     # the live-session factory the controller streams Cloud audio through
+│   ├── SharedAudioSource.kt # reads audio shared by other apps (content:// only)
+│   └── DictationViewModel.kt      # projects its owners into UI state; production wiring in Factory
 ├── cloud/                   # BYOK catalogue, WAV capture, OpenAI-compatible client, cleanup policy
-├── history/                 # transcript history, retention and atomic storage
+│   └── live/                # streaming clients (Deepgram, AssemblyAI, OpenAI Realtime, ElevenLabs) over OkHttp WebSockets
+├── local/                   # downloaded Whisper and GGUF cleanup models: pinned catalogues, verified downloads, JNI
+├── corrections/             # personal corrections and the cloud vocabulary prompt
+├── history/                 # transcript history, retention, atomic storage and usage insights
 ├── settings/                # non-secret preferences
+├── telemetry/               # opt-in PostHog analytics and Sentry crash reports, consent gating
+├── tips/                    # Google Play Billing tip jar
 ├── security/                # Keystore-backed AES-GCM secret store for BYOK keys
 ├── output/                  # copy and share
+├── readaloud/               # read aloud: voices, cloud synthesis, pronunciation, audio focus
 └── ui/                      # Compose screen and brand theme
+app/src/main/cpp/            # whisper.cpp, llama.cpp + shared ggml (pinned source, CMake) and the JNI bridges
 ```
 
 Policy lives in plain Kotlin so it is unit-tested on the JVM; Android classes stay in the
-adapter, ViewModel and UI. `CloudParityTest` reads `Sources/SpeakCore` to keep model IDs,
-credential IDs and the cleanup prompt identical to the Mac app.
+adapters and UI. The ViewModel takes its engine, recorder factory, cloud client, history,
+preferences and secret store as interfaces, so `DictationViewModelTest` drives the real
+ViewModel with fakes; `DictationEngineSelectorTest` and `DictationSessionControllerTest` drive its
+owners directly.
+
+Shared catalogues are generated from `Sources/SpeakCore`, never parsed from Swift:
+`assets/settings_search.json` (settings search), `assets/settings_schema.json` (the raw configuration
+editor's fields), `assets/cloud_catalog.json` (cloud providers,
+credential IDs, the models Android offers with their wire fields, the cleanup model and prompt, the
+dictation languages and the vocabulary prompt limits), `assets/voice_catalog.json` (cloud read-aloud voices
+with their request templates, and the default pronunciations), `assets/tip_catalog.json` (tip product IDs,
+names and emoji), `assets/whisper_models.json` (the pinned downloaded Whisper models from
+`WhisperCppModels`, with Android's memory floor), `assets/cleanup_models.json` (the pinned downloaded
+GGUF cleanup models from `LlamaCppModels`) and `assets/troubleshooting.json` (the phone Troubleshooting findings and fixes for each
+state, from `MobileTroubleshooting`). Regenerate them with `scripts/update-android-assets`; the Swift export tests fail when an asset is
+stale. The build's `generateCloudCatalog` task writes `GeneratedCloudCatalog.kt` from the cloud asset,
+so `CloudCatalog` and `CleanupPolicy` hold no hand-typed copy; only each provider's base URL and
+display name (Android transport) are authored, and `CloudCatalogParityTest` checks the generated
+values against the asset and that every provider has a transport.
 
 ## Privacy
 
@@ -92,11 +145,36 @@ credential IDs and the cleanup prompt identical to the Mac app.
   automatically. Without an explicit choice, a new session uses on-device recognition when it is
   ready and otherwise the speech service, and the screen always shows which mode will be used.
   Choose a mode explicitly to pin it.
-- The app itself does not store audio, except for Cloud mode's temporary upload file below.
+- **Downloaded** mode records the same temporary WAV as Cloud mode and transcribes it on the
+  phone with a downloaded Whisper model; nothing is uploaded. A failed transcription (for
+  example a missing model) keeps the recording in History to transcribe again.
+- A **downloaded cleanup model** (Settings › Clean up transcripts) cleans the transcript on the
+  phone with llama.cpp; nothing is sent. If it fails, the original transcript is kept and no cloud
+  model is used instead.
+- The app itself does not store audio, except for Cloud and Downloaded modes' temporary
+  recording files, failed recordings and cancelled recordings kept in History (below).
 - **Cloud** mode uploads audio to the provider chosen in Settings with your key. The
   recording is a temporary file that is deleted after the request, whether it succeeds or fails.
-- Optional cleanup sends the final transcript text (not audio) to OpenRouter.
+- **Keep audio when a recording is cancelled** (Settings, on by default; shared key
+  `keepAudioOnCancel` with the other apps): cancelling a Cloud recording moves its audio to
+  app-private storage and adds a Cancelled History entry with a **Transcribe** action, which uses
+  the current cloud model and key. A successful transcription replaces the entry and deletes the
+  audio; deleting the entry, clearing History or retention pruning deletes it too. Recordings under
+  a quarter of a second are discarded. Off restores the old behaviour (the audio is deleted and
+  nothing is recorded). On-device and speech-service modes never give the app audio, so the
+  setting does not apply to them. Leaving the app or a capture failure still discards the audio.
+- Optional cleanup sends the final transcript text (not audio) to the chosen model's provider:
+  a native provider (Anthropic, OpenAI, Google Gemini, Groq or Mistral) or OpenRouter.
 - History is stored only in app-private storage (excluded from backup) and follows the
   retention chosen in History; Off saves nothing and deletes existing entries.
 - Secrets are encrypted with a non-exportable Android Keystore key. App data is excluded
   from cloud backup and device transfer.
+- **Share anonymous analytics** and **Send crash reports and diagnostics** (Settings › Privacy,
+  shared keys `analyticsConsent` and `diagnosticsConsent`) are off until the user turns them on;
+  the app asks once on first launch with both switches off. Analytics sends the Mac's three
+  first-rollout events to PostHog EU with coarse context and a random ID that opting out deletes,
+  and only from release builds given `POSTHOG_PROJECT_KEY`. Crash reports go to Sentry EU from
+  release builds only, without user, IP, screenshots or an installation ID. Neither ever includes
+  transcripts, audio, prompts or keys.
+- **Support development** offers optional Google Play tips (consumables that unlock nothing); a
+  sideloaded or debug build shows that tips are available in the Google Play version.

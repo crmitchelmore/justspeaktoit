@@ -254,11 +254,8 @@ final class LocalModelManagerTests: XCTestCase {
     }
 
     func testLocalPostProcessingPrompt_keepsTranscriptSeparateFromSystemInstructions() {
-        let systemPrompt = LocalPostProcessingModelManager.localSystemPrompt("Always output in bullet points.")
-        let userPrompt = LocalPostProcessingModelManager.localUserPrompt(
-            systemPrompt: "Always output in bullet points.",
-            rawText: "hello world"
-        )
+        let systemPrompt = LocalPostProcessingPrompt.systemPrompt("Always output in bullet points.")
+        let userPrompt = LocalPostProcessingPrompt.userPrompt(rawText: "hello world")
 
         XCTAssertTrue(systemPrompt.hasPrefix(TranscriptCleanupPolicy.baseSystemPrompt))
         XCTAssertFalse(systemPrompt.contains("Always output in bullet points."))
@@ -272,7 +269,7 @@ final class LocalModelManagerTests: XCTestCase {
     /// must preserve the caller's prompt verbatim — not swap in the stock
     /// cleanup policy — while still appending the local-engine constraint.
     func testExplicitLocalSystemPrompt_preservesCustomPromptVerbatim() {
-        let systemPrompt = LocalPostProcessingModelManager.explicitLocalSystemPrompt(
+        let systemPrompt = LocalPostProcessingPrompt.explicitSystemPrompt(
             " Summarise this in one sentence. "
         )
 

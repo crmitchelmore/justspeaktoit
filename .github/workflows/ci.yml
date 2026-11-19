@@ -5,334 +5,69 @@ name: CI
 # - GitHub Team/Enterprise plan (paid)
 # - Self-hosted runners
 
+# Merge first, verify on main. A same-repository, non-Dependabot pull
+# request must carry a passing `scripts/pre-pr` record for its exact head;
+# pre-pr already ran Lint, the portable Linux graph, the affected macOS tests
+# and the API check on that tree, so CI checks only the record (seconds, no
+# build). Dependabot and fork pull requests, which carry no trusted record,
+# run Lint, the Workers package, the portable SwiftPM graph and ONE macOS job.
+# `ci:full` pull requests, `merge-batch/*` pull requests and main run every
+# gate. A red main is fixed forward, then auto-reverted (auto-revert.yml).
+# A batch is tested once, through its pull request; pushing its branch does
+# not start a second run.
 on:
   push:
     branches: [main]
   pull_request:
+  # The auto-revert bot (auto-revert.yml) merges with the workflow token,
+  # which starts no push run, so it dispatches the full main run itself.
+  # A dispatch is treated exactly like a main push.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# One run per ref. On a pull request a newer push cancels the superseded
+# run. On main and merge batches an in-progress run always finishes: with
+# steady merges, cancelling meant no main run ever completed. GitHub keeps at
+# most one waiting run per group, so a newer push replaces an older waiting
+# one and main verifies the newest commit next. Only a successful main run
+# starts an Alpha. CI never runs for tags or releases. A main re-run (the
+# auto-revert bot re-runs a flaky failure once) takes its own group: in the
+# shared one it waited behind the newest push and was replaced, so main never
+# learned whether the failure was a flake.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name != 'pull_request' && github.run_attempt != '1' && format('-attempt-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build-macos:
-    # The aggregate required-macos job owns the required branch-protection name.
-    name: Build & Test (macOS Debug)
-    needs: release-paths
-    # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
-    if: needs.release-paths.outputs.apple == 'true'
-    # main (push/schedule/dispatch) and an explicitly approved PR head use the
-    # reviewed native pool; each runner's admission hook re-checks the source.
-    runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
-    timeout-minutes: 45
-    # Compiles the native-CI Keychain redirect into these test builds only;
-    # distribution builds never set it (#1360).
-    env:
-      JSTI_TEST_KEYCHAIN_REDIRECT: "1"
-    steps:
-      - uses: actions/checkout@v7.0.1
-
-      - name: Verify process-scoped Keychain isolation
-        run: python3 -B -m unittest scripts.tests.test_private_test_keychain -v
-
-      - name: Test installed sample contract collector
-        continue-on-error: true
-        run: python3 -B -m unittest discover -s scripts/tests -p test_macos_sample_contract.py -v
-
-      - name: Collect installed sample manual contract evidence (no sampling)
-        id: sample_contract
-        continue-on-error: true
-        run: |
-          status=0
-          python3 scripts/collect-macos-sample-contract.py || status=$?
-          if [ "$status" -eq 0 ] || [ "$status" -eq 3 ]; then
-            echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
-          fi
-          exit "$status"
-
-      - name: Upload installed sample contract evidence (not runtime qualification)
-        if: always() && steps.sample_contract.outputs.artifact_ready == 'true'
-        continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: macos-installed-sample-contract
-          path: ${{ runner.temp }}/jsti-installed-sample-contract-${{ github.run_id }}-${{ github.run_attempt }}
-          if-no-files-found: warn
-          include-hidden-files: false
-          retention-days: 7
-
-      - name: Test XCTest crash-report collector
-        run: python3 -B -m unittest discover -s scripts/tests -p test_macos_xctest_crashes.py -v
-
-      - name: Test CLI debug-symbol packaging contracts
-        run: python3 -B -m unittest discover -s scripts/tests -p test_mac_cli_symbols.py -v
-
-      # Swift build state embeds absolute paths. Scope both exact and fallback
-      # keys to the architecture, stable host identity and checkout workspace.
-      - name: Cache Swift packages
-        uses: actions/cache@v6
-        with:
-          path: .build
-          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-${{ hashFiles('Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-
-
-      # Keep dependency fetches in this workspace: the shared SwiftPM repository
-      # cache can reference a missing directory. Retain the compiled .build cache.
-      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
-      # release assets, which intermittently return 5xx; resolve with retries first.
-      - name: Resolve Swift packages
-        run: scripts/retry-network.sh swift package resolve --disable-dependency-cache
-
-      - name: Build
-        # Match the Test (Debug) step flag. A plain debug build here produces a
-        # cached .build that the coverage-enabled swift test below cannot reuse
-        # (coverage instrumentation changes compiler flags for every target),
-        # forcing a second full rebuild of the whole module graph inside the
-        # 45-minute job budget.
-        run: SWIFT_FLAGS="--enable-code-coverage --disable-dependency-cache" make build
-
-      - name: Verify brand asset sizes and appearance variants
-        run: node --test scripts/tests/brand-assets.test.mjs
-
-      - name: Check Package.resolved drift
-        # Resolving the app/test graph must reproduce the checked-in pins;
-        # tooling pins live separately in Tooling/Package.resolved (issue #677).
-        run: git diff --exit-code Package.resolved
-
-      - name: Record Debug XCTest crash-report boundary
-        id: debug_crash_boundary
-        # Diagnostics must not prevent the original test from running.
-        continue-on-error: true
-        run: python3 scripts/collect-macos-xctest-crashes.py boundary
-
-      - name: Test (Debug)
-        id: debug_tests
-        run: python3 scripts/with-test-keychain.py swift test --enable-code-coverage --disable-dependency-cache
-
-      - name: Collect existing Debug XCTest crash reports
-        id: debug_crash_collection
-        if: failure() && steps.debug_tests.outcome == 'failure'
-        env:
-          JSTI_XCTEST_BOUNDARY_OUTCOME: ${{ steps.debug_crash_boundary.outcome }}
-        run: |
-          status=0
-          python3 scripts/collect-macos-xctest-crashes.py collect || status=$?
-          if [ "$status" -eq 0 ] || [ "$status" -eq 3 ]; then
-            echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
-          fi
-          exit "$status"
-
-      - name: Upload Debug XCTest crash diagnostics
-        if: failure() && steps.debug_tests.outcome == 'failure' && steps.debug_crash_collection.outputs.artifact_ready == 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: macos-debug-xctest-crash-diagnostics
-          path: ${{ runner.temp }}/jsti-xctest-debug-${{ github.run_id }}-${{ github.run_attempt }}
-          if-no-files-found: warn
-          include-hidden-files: false
-          retention-days: 7
-
-      - name: Isolate History fixture after full-suite failure (diagnostic only)
-        id: history_isolated
-        if: failure() && steps.debug_tests.outcome == 'failure'
-        continue-on-error: true
-        timeout-minutes: 2
-        shell: bash
-        run: |
-          directory="$RUNNER_TEMP/jsti-history-isolated-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          mkdir -m 700 "$directory"
-          printf '%s\n' \
-            '{"purpose":"isolated_history_fixture_diagnostic","status":"not_completed",' \
-            '"command":["python3","scripts/with-test-keychain.py","swift","test","--skip-build","--enable-code-coverage","--disable-dependency-cache","--filter","DesktopLivePolishHistoryTests"],' \
-            '"expected_cases":["SpeakDesktopTests.DesktopLivePolishHistoryTests.testControlRecordWithoutSession_RoundTripsRawAndPolishedValues",' \
-            '"SpeakDesktopTests.DesktopLivePolishHistoryTests.testControlResultAfterFinish_RoundTripsSuccessfulPolish",' \
-            '"SpeakDesktopTests.DesktopLivePolishHistoryTests.testNativeAndPortableHistory_RoundTripRawAndSuccessfulPolishWithoutRerunningClient"],' \
-            '"command_exit_code":null,"expected_case_count":3,"observed_case_event_counts":null,' \
-            '"selection_verified":false,"parity_qualification":false}' > "$directory/result.json"
-          echo "artifact_ready=true" >> "$GITHUB_OUTPUT"
-          set +e
-          python3 scripts/with-test-keychain.py swift test --skip-build --enable-code-coverage --disable-dependency-cache --filter DesktopLivePolishHistoryTests 2>&1 |
-            python3 -c '
-          import json, pathlib, sys
-          directory = pathlib.Path(sys.argv[1])
-          limit = 1024 * 1024
-          received = saved = 0
-          with (directory / "output.log").open("xb") as output:
-              while data := sys.stdin.buffer.read1(65536):
-                  received += len(data)
-                  kept = data[:max(0, limit - saved)]
-                  output.write(kept)
-                  output.flush()
-                  saved += len(kept)
-          (directory / "capture.json").write_text(json.dumps({
-              "received_bytes": received, "saved_bytes": saved,
-              "truncated": received > saved
-          }) + "\n", encoding="ascii")
-          ' "$directory"
-          statuses=("${PIPESTATUS[@]}")
-          set -e
-          python3 - "$directory" "${statuses[0]}" "${statuses[1]}" <<'PY'
-          import json
-          from pathlib import Path
-          import re
-          import sys
-
-          directory = Path(sys.argv[1])
-          command_status, capture_status = map(int, sys.argv[2:])
-          command = ["python3", "scripts/with-test-keychain.py", "swift", "test",
-                     "--skip-build", "--enable-code-coverage", "--disable-dependency-cache", "--filter",
-                     "DesktopLivePolishHistoryTests"]
-          methods = [
-              "testControlRecordWithoutSession_RoundTripsRawAndPolishedValues",
-              "testControlResultAfterFinish_RoundTripsSuccessfulPolish",
-              "testNativeAndPortableHistory_RoundTripRawAndSuccessfulPolishWithoutRerunningClient",
-          ]
-          expected = ["SpeakDesktopTests.DesktopLivePolishHistoryTests." + method for method in methods]
-          accepted = {}
-          for method, canonical in zip(methods, expected):
-              for alias in (canonical, "DesktopLivePolishHistoryTests." + method,
-                            "-[SpeakDesktopTests.DesktopLivePolishHistoryTests " + method + "]"):
-                  accepted[alias] = canonical
-          capture_file = directory / "capture.json"
-          capture = (json.loads(capture_file.read_text(encoding="ascii")) if capture_file.exists()
-                     else {"status": "unavailable", "truncated": True})
-          log_file = directory / "output.log"
-          data = log_file.read_bytes() if log_file.exists() else b""
-          pattern = rb"(?m)^Test Case '([^'\r\n]{1,512})' (started|passed|failed|skipped)(?=[ .])"
-          events = [(identity.decode("utf-8", errors="replace"), state.decode("ascii"))
-                    for identity, state in re.findall(pattern, data)]
-          unparsed = data.count(b"Test Case '") - len(events)
-          counts = {state: sum(event == state for _, event in events)
-                    for state in ("started", "passed", "failed", "skipped")}
-          per_case = {identity: [] for identity in expected}
-          unknown = 0
-          for identity, state in events:
-              canonical = accepted.get(identity)
-              if canonical is None:
-                  unknown += 1
-              else:
-                  per_case[canonical].append(state)
-          complete = capture_status == 0 and capture_file.exists() and not capture["truncated"]
-          selection_verified = (
-              complete and unparsed == 0 and unknown == 0
-              and all(len(states) == 2 and states[0] == "started"
-                      and states[1] in ("passed", "failed", "skipped") for states in per_case.values())
-          )
-          passed = (command_status == 0 and selection_verified
-                    and all(states == ["started", "passed"] for states in per_case.values()))
-          result = {
-              "purpose": "isolated_history_fixture_diagnostic",
-              "command": command, "command_exit_code": command_status,
-              "capture_exit_code": capture_status, "capture": capture,
-              "expected_cases": expected, "expected_case_count": len(expected),
-              "observed_case_event_counts": counts,
-              "observed_expected_case_events": {identity: states[:8] for identity, states in per_case.items()},
-              "unknown_case_event_count": unknown,
-              "unparsed_test_case_lines": unparsed,
-              "observed_case_events": events[:16], "case_counts_complete": complete,
-              "selection_verified": selection_verified, "parity_qualification": False,
-              "status": ("isolated_pass" if passed else
-                         "isolated_failure" if command_status else "selection_or_capture_unverified"),
-          }
-          text = json.dumps(result, indent=2, sort_keys=True) + "\n"
-          temporary = directory / ".result.json.tmp"
-          temporary.write_text(text, encoding="ascii")
-          temporary.replace(directory / "result.json")
-          print(text, end="")
-          if not selection_verified:
-              print("Isolated diagnostic: exact-case execution or complete capture NOT established.",
-                    file=sys.stderr)
-          sys.exit(0 if passed else 1)
-          PY
-
-      - name: Upload isolated History fixture diagnostic
-        if: always() && steps.debug_tests.outcome == 'failure' && steps.history_isolated.outputs.artifact_ready == 'true'
-        continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: macos-history-isolated-${{ steps.history_isolated.outcome }}
-          path: ${{ runner.temp }}/jsti-history-isolated-${{ github.run_id }}-${{ github.run_attempt }}
-          if-no-files-found: warn
-          include-hidden-files: false
-          retention-days: 7
-
-      # Snapshot mismatches write the freshly rendered PNG to the process
-      # temporary directory. Publishing it is the only way to inspect a CI-only
-      # rendering difference, since the runner is discarded after the job.
-      - name: Collect snapshot failures
-        if: failure()
-        run: |
-          mkdir -p "$RUNNER_TEMP/snapshot-failures"
-          find "${TMPDIR:-/tmp}" -maxdepth 3 -path '*SnapshotTests*' -name '*.png' \
-            -exec cp {} "$RUNNER_TEMP/snapshot-failures/" \; 2>/dev/null || true
-          ls -la "$RUNNER_TEMP/snapshot-failures" || true
-
-      - name: Upload snapshot failures
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: snapshot-failures
-          path: ${{ runner.temp }}/snapshot-failures
-          if-no-files-found: ignore
-
-      # Release-configuration tests run pre-merge in the release-validation job
-      # below (path-filtered to package-affecting changes to control cost on
-      # 10x-billed macOS runners). They are NOT duplicated inside this job:
-      # running both configurations serially in one job doubled its wall time.
-      # release-mac.yml re-runs them post-tag as defence in depth.
-
-      - name: Build SpeakCore (App Store flavour)
-        # SpeakCore has no package dependencies, so this cheaply compiles the
-        # `#if APP_STORE` branches that only the Mac App Store build exercises.
-        # Runs after the test steps because the extra -Xswiftc flag invalidates
-        # the shared debug build cache for the targets it rebuilds.
-        run: swift build --disable-dependency-cache -Xswiftc -DAPP_STORE --target SpeakCore
-
-      - name: Report Coverage
-        if: always()
-        run: |
-          BIN_PATH=$(swift build --disable-dependency-cache --show-bin-path)
-          XCTEST_PATH=$(find "$BIN_PATH" -name '*.xctest' -type d | head -1)
-          if [ -n "$XCTEST_PATH" ]; then
-            EXEC_PATH="$XCTEST_PATH/Contents/MacOS/$(basename "$XCTEST_PATH" .xctest)"
-            COV_DIR=$(swift test --disable-dependency-cache --show-codecov-path 2>/dev/null || echo "")
-            if [ -n "$COV_DIR" ] && [ -f "$COV_DIR" ]; then
-              echo "### Test Coverage Summary" >> "$GITHUB_STEP_SUMMARY"
-              xcrun llvm-cov report "$EXEC_PATH" \
-                --instr-profile="$(dirname "$COV_DIR")/default.profdata" \
-                --ignore-filename-regex='\.build|Tests/' 2>/dev/null | head -30 >> "$GITHUB_STEP_SUMMARY" || true
-            fi
-          fi
-
-  # Pre-merge Release-configuration gate (#694). A Release-only compile,
-  # optimisation, or test failure must fail the PR that introduces it — the
-  # post-tag run in release-mac.yml is defence in depth, not the first gate.
-  # Cost controls for 10x-billed macOS runners:
-  # - a cheap ubuntu job skips the macOS leg for docs-only changes (a skipped
-  #   job still satisfies a required check, so the gate can be marked required)
-  # - the workflow-level concurrency group cancels superseded runs
-  # - a release-specific .build cache avoids cold dependency builds
-  # - path filtering on pull_request skips the expensive legs for changes that
-  #   cannot affect them.
+  # Change detection for the cheap pull-request gate.
   #
-  # On push to main the filter is skipped and every output is 'true', so the
-  # release, core-journey and fixture-UI gates actually run on main. They used
-  # to be skipped there (the whole job was `if: pull_request`), which meant a
-  # merge queue collision, a direct push, or a merge whose result differs from
-  # the PR head reached the release tag ungated (the superseded-run cancellation
-  # in the concurrency group above can also cancel a PR's last run).
+  # Hosted macOS runs five jobs at once for the whole account, so a pull
+  # request gets exactly one macOS job (build-macos: incremental build plus
+  # the unit tests its changes can affect). Lint, tooling tests and the
+  # portable SwiftPM graph run on Ubuntu. Outputs:
+  # - apple: Lint + tooling tests (anything outside docs, site, Android, Workers)
+  # - swift: portable Linux graph and the macOS fast job (Swift package inputs)
+  # - full:  every macOS gate (full Debug tests, Release build, test
+  #          products, simulator tests, keyboard and watch, core journeys,
+  #          public API). True on merge-batch/* and main pushes, where a failure
+  #          opens an issue (report-ci-failure), and for a `ci:full` label.
   release-paths:
     name: Detect Release-Relevant Changes
+    # Skipped for a trusted pull request (see the gate): every job that needs
+    # it is then skipped at once, so CI Gate starts without queueing behind
+    # other jobs on the shared hosted runner limit.
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !startsWith(github.event.pull_request.user.login, 'dependabot') && !contains(github.event.pull_request.labels.*.name, 'ci:full') && !startsWith(github.head_ref, 'merge-batch/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      package: ${{ steps.select.outputs.package }}
-      core-journey: ${{ steps.select.outputs.core-journey }}
       apple: ${{ steps.select.outputs.apple }}
+      swift: ${{ steps.select.outputs.swift }}
+      ios: ${{ steps.select.outputs.ios }}
+      api: ${{ steps.select.outputs.api }}
+      full: ${{ steps.select.outputs.full }}
+      workers: ${{ steps.select.outputs.workers }}
     steps:
       - name: Filter changed paths
         # No checkout needed: on pull_request events the action lists changed
@@ -342,40 +77,52 @@ jobs:
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
+          # These lists are the swift, api and ios routes in
+          # scripts/ci/routing.json; edit them there and run
+          # `python3 scripts/ci/routing.py --write`.
           filters: |
-            package:
+            # CI-only edits do not select the macOS job; add `ci:full` to
+            # exercise a workflow change on its pull request.
+            swift:
               - 'Package.swift'
               - 'Package.resolved'
+              - 'Makefile'
               - 'Sources/**'
               - 'Tests/**'
               - 'Config/**'
-              - '.github/workflows/ci.yml'
-              - '.github/actions/setup-apple-toolchain/**'
-            core-journey:
-              - 'Project.swift'
+              - 'Resources/**'
+              - 'scripts/ci/affected-swift-tests.py'
+              - 'scripts/ci/retry-network.sh'
+              - 'scripts/ci/retry-xctest-crash.py'
+              - 'scripts/with-test-keychain.py'
+              - 'scripts/private-test-keychain.py'
+              - 'scripts/ci/verify-portable-core-boundary.py'
+              - 'scripts/ci/collect-macos-*.py'
+              - 'scripts/prepare-mac-cli-symbols.sh'
+              - 'scripts/tests/brand-assets.test.mjs'
+            # Sources of the API-checked library products (scripts/ci/check-api-compatibility.sh).
+            api:
               - 'Package.swift'
               - 'Package.resolved'
-              - 'Sources/SpeakApp/**'
               - 'Sources/SpeakCore/**'
+              - 'Sources/SpeakSync/**'
+              - 'Sources/SpeakiOS/**'
               - 'Sources/SpeakHotKeys/**'
-              - 'Tests/Fixtures/CoreJourneyTargetApp/**'
-              - 'Tests/SpeakAppUITests/**'
-              - 'Tests/SpeakAppTests/**'
-              - 'Tests/SpeakCoreTests/**'
-              - 'Tests/SpeakHotKeysTests/**'
-              - 'scripts/run-core-journey-e2e.sh'
-              - 'scripts/run-core-journey-e2e.py'
-              - 'scripts/run-core-journey-stages.py'
-              - 'scripts/verify-core-journey-ui.py'
-              - 'scripts/tests/test_core_journey_gate.py'
-              - 'scripts/tests/test_core_journey_stages.py'
-              - 'scripts/tests/verify-ci-gates.test.mjs'
-              - '.github/workflows/ci.yml'
-              - '.github/actions/setup-apple-toolchain/**'
+              - 'Sources/SpeakAutomationKit/**'
+              - 'Sources/SpeakWatchCore/**'
+              - 'scripts/ci/check-api-compatibility.sh'
+              - 'scripts/ci/api-breakage-allowlist.txt'
+            ios:
+              - 'Package.swift'
+              - 'Package.resolved'
+              - 'Sources/SpeakCore/**'
+              - 'Sources/SpeakSync/**'
+              - 'Sources/SpeakiOS/**'
 
-      # True when any changed file lies outside the native Android app, whose
-      # own workflow (android.yml) builds and tests it. A file matches only if
-      # it matches every pattern, hence the separate step.
+      # True when any changed file lies outside docs, the website, the native
+      # Android app (android.yml) and the Workers package (paid-access-worker
+      # below). A file matches only if it matches every pattern, hence the
+      # separate step. The list is the apple route in scripts/ci/routing.json.
       - name: Filter Apple-relevant paths
         if: github.event_name == 'pull_request'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -387,495 +134,188 @@ jobs:
               - '**'
               - '!android/**'
               - '!.github/workflows/android.yml'
-              - '!Docs/android-*.md'
+              - '!Docs/**'
+              - '!**/*.md'
+              - '!landing-page/**'
+              - '!.github/workflows/deploy-landing-page.yml'
+              - '!workers/**'
 
       - name: Select gate outputs
         id: select
         env:
           EVENT_NAME: ${{ github.event_name }}
-          PACKAGE: ${{ steps.filter.outputs.package }}
-          CORE_JOURNEY: ${{ steps.filter.outputs.core-journey }}
+          FULL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') || startsWith(github.head_ref, 'merge-batch/') }}
           APPLE: ${{ steps.apple.outputs.apple }}
+          SWIFT: ${{ steps.filter.outputs.swift }}
+          IOS: ${{ steps.filter.outputs.ios }}
+          API: ${{ steps.filter.outputs.api }}
         run: |
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            {
-              echo "package=$PACKAGE"
-              echo "core-journey=$CORE_JOURNEY"
-              echo "apple=$APPLE"
-            } >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$FULL" != "true" ]; then
+            if [ "$API" = "true" ]; then SWIFT=true; fi
+            if [ "$SWIFT" = "true" ]; then APPLE=true; fi
+            # Only untrusted pull requests (Dependabot, forks) get here: a
+            # trusted one skips this job and merges on its pre-pr record.
+            WORKERS=true
+            { echo "apple=$APPLE"; echo "swift=$SWIFT"; echo "ios=$IOS"; echo "api=$API"; echo "full=false"; echo "workers=$WORKERS"; } >> "$GITHUB_OUTPUT"
           else
-            # Push to main: no changed-file filtering, run every gate.
-            {
-              echo "package=true"
-              echo "core-journey=true"
-              echo "apple=true"
-            } >> "$GITHUB_OUTPUT"
+            # main push, merge-batch/* or ci:full pull request: no
+            # changed-file filtering, run every gate.
+            { echo "apple=true"; echo "swift=true"; echo "ios=true"; echo "api=true"; echo "full=true"; echo "workers=true"; } >> "$GITHUB_OUTPUT"
           fi
 
-  core-journey-e2e:
-    name: Core Dictation Journey (≤8m tests)
-    # This non-UI contract gate may use an explicitly approved native runner.
-    runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
-    timeout-minutes: 40
-    # Compiles the native-CI Keychain redirect into these test builds only;
-    # distribution builds never set it (#1360).
-    env:
-      JSTI_TEST_KEYCHAIN_REDIRECT: "1"
-    needs: release-paths
-    if: needs.release-paths.outputs.core-journey == 'true'
+  # Full runs (merge batches and main) ask for at most four hosted macOS
+  # slots at once, leaving one for other workflows, by chaining jobs into
+  # lanes: Debug -> journey; Release build -> API; iOS products ->
+  # simulator -> keyboard and watch; the two UI shards one after the other.
+  # Other later jobs in a lane still run when an earlier one fails.
+  # Each lane is a reusable workflow; a lane fails when any of its jobs does.
+  macos-debug:
+    name: macOS Debug
+    # Fail fast: no hosted macOS slot is taken until the cheap Ubuntu gates
+    # (Lint, Portable Swift (Linux), pre-PR evidence) pass.
+    needs: [release-paths, lint, portable-linux, pre-pr-evidence]
+    if: needs.release-paths.outputs.swift == 'true'
+    uses: ./.github/workflows/ci-macos-debug.yml
+    with:
+      full: ${{ needs.release-paths.outputs.full }}
+      ios: ${{ needs.release-paths.outputs.ios }}
+
+  macos-release:
+    name: macOS Release
+    needs: [release-paths, lint, portable-linux, pre-pr-evidence]
+    if: needs.release-paths.outputs.full == 'true'
+    uses: ./.github/workflows/ci-macos-release.yml
+
+  ios:
+    name: iOS
+    needs: [release-paths, lint, portable-linux, pre-pr-evidence]
+    if: needs.release-paths.outputs.full == 'true'
+    uses: ./.github/workflows/ci-ios.yml
+
+  journey-ui:
+    name: Core Journey UI
+    needs: [release-paths, lint, portable-linux, pre-pr-evidence]
+    if: needs.release-paths.outputs.full == 'true'
+    uses: ./.github/workflows/ci-journey-ui.yml
+
+  # Pull requests must carry a passing `scripts/pre-pr` record for the exact
+  # head (or its tree) in the current PR body, so a failure that pre-pr would
+  # have caught never reaches a macOS slot. Only Dependabot is exempt; a
+  # merge-batch PR carries a combined record for its head. Pushes pass
+  # straight through. The
+  # body is re-read for up to three minutes because it is usually updated
+  # just after the push that started this run.
+  pre-pr-evidence:
+    name: Pre-PR evidence (blocking)
+    # A trusted pull request's record is checked inside CI Gate instead.
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !startsWith(github.event.pull_request.user.login, 'dependabot') && !contains(github.event.pull_request.labels.*.name, 'ci:full') && !startsWith(github.head_ref, 'merge-batch/')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
-      - uses: actions/checkout@v7.0.1
-        timeout-minutes: 2
-
-      # Debug CI populates the shared cache. This gate only restores; uploading
-      # gigabytes afterwards would only lengthen it. The hosted runner matches
-      # build-macos's (macos-26-intel) because the key is architecture-scoped.
-      # Both Swift stage commands retain Debug's coverage instrumentation;
-      # plain build flags would invalidate the restored compilation graph.
-      # Hosted restores of the multi-gigabyte cache have exceeded 3 minutes.
-      - name: Restore Swift packages
-        timeout-minutes: 5
-        uses: actions/cache/restore@v6
-        with:
-          path: .build
-          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-${{ hashFiles('Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-
-
-      # Cold compile has its own finite 900s command budget so the journey
-      # runtime keeps its original 480s budget, independent of build time.
-      - name: Build core journey test products
-        timeout-minutes: 17
-        run: scripts/run-core-journey-e2e.sh --phase build
-
-      - name: Run prepared core journey gate
-        timeout-minutes: 10
-        run: python3 scripts/with-test-keychain.py bash scripts/run-core-journey-e2e.sh --phase test
-
-      - name: Upload stage diagnostics
-        if: always()
-        timeout-minutes: 3
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: core-journey-e2e-${{ github.run_attempt }}
-          path: .artifacts/core-journey-e2e
-          if-no-files-found: error
-
-  core-journey-fixture-ui:
-    name: Core Journey Fixture UI (${{ matrix.shard }})
-    # Hosted ARM has the UI automation entitlement; the native pool does not.
-    runs-on: macos-latest
-    # Each hotkey journey spends ~60s in real gesture windows. Parallel shards
-    # keep every shard inside the unchanged 600s UI runtime budget; the shard
-    # list in scripts/verify-core-journey-ui.py assigns every suite exactly once.
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [foundation, p0]
-    env:
-      CORE_JOURNEY_UI_SHARD: ${{ matrix.shard }}
-    # 2m checkout + 6m setup + 17m build/receipts + 12m UI/receipts + 3m upload.
-    # The former 600s job spent ~505s preparing before UI tests. Setup now has a
-    # separate 300s command budget; build has 900s; actual UI tests keep 600s.
-    # Each product/source receipt is separately bounded to 60s, not hidden setup.
-    # Setup's retried package resolution may take 11 minutes; tests keep 12.
-    timeout-minutes: 47
-    needs: release-paths
-    if: needs.release-paths.outputs.core-journey == 'true'
-    steps:
-      - uses: actions/checkout@v7.0.1
-        timeout-minutes: 2
-
-      - name: Prepare Tuist and macOS project
-        timeout-minutes: 11
-        run: python3 scripts/run-core-journey-stages.py ui --phase setup
-
-      - name: Build launched fixture test products
-        timeout-minutes: 17
-        run: python3 scripts/run-core-journey-stages.py ui --phase build
-
-      - name: Test Speak bootstrap, global hotkey, and launched fixture
-        timeout-minutes: 12
-        run: python3 scripts/run-core-journey-stages.py ui --phase test
-
-      - name: Upload launched-app diagnostics
-        if: always()
-        timeout-minutes: 3
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: core-journey-fixture-ui-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: |
-            .artifacts/core-journey-fixture-ui
-            !.artifacts/core-journey-fixture-ui/DerivedData
-          include-hidden-files: true
-          if-no-files-found: error
-
-  release-validation:
-    name: Build & Test (Release)
-    # Hosted ARM: a cold Intel release build exceeded the 45-minute budget.
-    runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
-    timeout-minutes: 45
-    # Compiles the native-CI Keychain redirect into these test builds only;
-    # distribution builds never set it (#1360).
-    env:
-      JSTI_TEST_KEYCHAIN_REDIRECT: "1"
-    needs: release-paths
-    if: needs.release-paths.outputs.package == 'true'
-    steps:
-      - uses: actions/checkout@v7.0.1
-
-      - name: Cache Swift packages (release)
-        uses: actions/cache@v6
-        with:
-          path: .build
-          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-release-${{ hashFiles('Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-release-
-
-      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
-      # release assets, which intermittently return 5xx; resolve with retries first.
-      - name: Resolve Swift packages
-        run: scripts/retry-network.sh swift package resolve
-
-      - name: Test (Release)
-        run: python3 scripts/with-test-keychain.py swift test -c release
-
-  build-ios-swiftpm:
-    name: Build iOS Library (SwiftPM)
-    needs: release-paths
-    # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
-    if: needs.release-paths.outputs.apple == 'true'
-    runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
         with:
           persist-credentials: false
-      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
-      # release assets, which intermittently return 5xx; resolve with retries first.
-      - name: Resolve Swift packages
-        run: scripts/retry-network.sh swift package resolve --disable-dependency-cache
-      - name: Build iOS Library
-        run: swift build --disable-dependency-cache --target SpeakiOSLib
-
-  build-ios-test-products:
-    name: Build iOS XCTest Products
-    needs: release-paths
-    # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
-    if: needs.release-paths.outputs.apple == 'true'
-    runs-on: macos-latest
-    timeout-minutes: 30
-    outputs:
-      artifact-id: ${{ steps.products.outputs.artifact-id }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-      - name: Set up Apple toolchain
-        uses: ./.github/actions/setup-apple-toolchain
-        with:
-          install-tuist: "true"
-      - name: Build complete simulator test products without booting a simulator
-        run: |
-          set -o pipefail
-          TUIST_IOS_KEYBOARD=1 scripts/retry-network.sh tuist generate --no-open
-          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
-            -workspace "Just Speak to It.xcworkspace" -scheme SpeakiOS
-          xcodebuild build-for-testing \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme SpeakiOS \
-            -destination "generic/platform=iOS Simulator" \
-            -only-testing:SpeakiOSTests \
-            -only-testing:SpeakiOSUITests \
-            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
-            -testProductsPath "$RUNNER_TEMP/SpeakiOS.xctestproducts" \
-            -skipPackagePluginValidation \
-            2>&1 | tee "$RUNNER_TEMP/ios-build-tests.log" | tail -50
-          python3 scripts/ios-test-products.py pack \
-            "$RUNNER_TEMP/SpeakiOS.xctestproducts" "$RUNNER_TEMP/ios-test-products.tar.gz"
-      - name: Upload immutable test products
-        id: products
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ios-test-products-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios-test-products.tar.gz
-          retention-days: 7
-          if-no-files-found: error
-      - name: Upload simulator compilation log
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ios-build-tests-log-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios-build-tests.log
-          retention-days: 7
-          if-no-files-found: error
-
-  build-ios:
-    name: Build iOS Library
-    # Simulator and UI execution remain on hosted ARM; native Macs are not
-    # configured for unattended UI automation and Intel execution was unstable.
-    runs-on: macos-latest
-    timeout-minutes: 30
-    needs: [release-paths, build-ios-test-products]
-    if: needs.release-paths.outputs.apple == 'true'
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Download exact-source test products
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: ${{ needs.build-ios-test-products.outputs.artifact-id }}
-          path: ${{ runner.temp }}/ios-test-products-download
-          merge-multiple: true
-
-      - name: Verify and restore iOS test products
-        run: |
-          python3 scripts/ios-test-products.py unpack \
-            "$RUNNER_TEMP/ios-test-products-download/ios-test-products.tar.gz" \
-            "$RUNNER_TEMP/ios-test-products"
-
-      - name: Create owned iOS Simulator matching the selected configuration
-        run: |
-          python3 scripts/owned-ios-ci-simulator.py create \
-            --receipt "$RUNNER_TEMP/owned-ios-simulator.json" --github-env "$GITHUB_ENV" \
-            --owner "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_JOB"
-
-      - name: Prepare iOS Simulator
-        run: python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
-
-      - name: Test iOS App and Action Button Settings
-        id: ios-tests
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: scripts/check-pre-pr-evidence.py
+          sparse-checkout-cone-mode: false
+      - name: Require a passing scripts/pre-pr record for this head
+        if: github.event_name == 'pull_request'
         env:
-          TEST_RUNNER_JSTI_OWNED_SETTINGS_TARGET: ${{ env.JSTI_OWNED_SETTINGS_TARGET }}
-        # The full log is kept: `tail` only shows the closing summary, which
-        # names a failed test without the assertion that failed (issue #793).
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          JSTI_PRE_PR_STRICT: "true"
         run: |
-          set -o pipefail
-          xcodebuild test-without-building \
-            -testProductsPath "$RUNNER_TEMP/ios-test-products/SpeakiOS.xctestproducts" \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
-            -only-testing:SpeakiOSTests \
-            -only-testing:SpeakiOSUITests \
-            -resultBundlePath "$RUNNER_TEMP/SpeakiOS.xcresult" \
-            -skipPackagePluginValidation \
-            2>&1 | tee "$RUNNER_TEMP/ios-tests.log" | tail -50
-
-      - name: Label these results as simulator, not device
-        if: ${{ always() }}
-        # ActivityKit and AVAudioSession are not simulator-faithful (issue
-        # #998), so a green run here is not evidence about Live Activity
-        # behaviour, audio interruptions, or routing. Say so where the result
-        # is read, not only in a test file's doc comment.
-        run: |
-          {
-            echo "### iOS tests — Simulator"
-            echo
-            echo "Outcome: ${{ steps.ios-tests.outcome }}"
-            echo
-            echo "These ran on \`platform=iOS Simulator\`. ActivityKit and"
-            echo "AVAudioSession do not behave as they do on a device, so this"
-            echo "job proves the app's own logic and screen flow only. Live"
-            echo "Activity content, audio interruptions, routing and the"
-            echo "hardware Action Button are settled by the manual device"
-            echo "matrix (\`.github/ISSUE_TEMPLATE/action_button_device_matrix.md\`)"
-            echo "and the opt-in \`ios-device-matrix.yml\` workflow."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Verify iOS XCTest execution evidence
-        if: ${{ always() }}
-        run: |
-          python3 scripts/verify-ios-test-evidence.py "$RUNNER_TEMP/ios-tests.log" \
-            --test-outcome "${{ steps.ios-tests.outcome }}" \
-            --output "$RUNNER_TEMP/ios-test-summary.json"
-
-      - name: Upload iOS test execution summary
-        if: ${{ always() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ios-test-summary-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ios-test-summary.json
-          retention-days: 7
-          if-no-files-found: error
-
-      # Both diagnostics also run when the job is cancelled (a superseded push
-      # cancels in-progress runs): a partial log still names the assertion
-      # that had already failed.
-      - name: Show failing assertions
-        if: ${{ failure() || cancelled() }}
-        run: |
-          echo "::group::Assertion failures and crashes from the iOS test log"
-          grep -nE 'error: |Fatal error|Assertion Failure|Failed to (get|find|launch)|Restarting after|crashed' \
-            "$RUNNER_TEMP/ios-tests.log" | head -200 || echo "(none matched)"
-          echo "::endgroup::"
-
-      - name: Upload iOS test results
-        if: ${{ failure() || cancelled() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ios-test-results
-          path: |
-            ${{ runner.temp }}/SpeakiOS.xcresult
-            ${{ runner.temp }}/ios-tests.log
-          if-no-files-found: ignore
-
-      - name: Remove only the simulator created by this job
-        if: always()
-        run: |
-          python3 scripts/owned-ios-ci-simulator.py cleanup \
-            --receipt "$RUNNER_TEMP/owned-ios-simulator.json" \
-            --owner "$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT:$GITHUB_JOB"
-
-      - name: Upload complete iOS XCTest log separately
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ios-tests-log-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/ios-tests.log
-            ${{ runner.temp }}/owned-ios-simulator.json
-          retention-days: 7
-          if-no-files-found: error
-
-  build-ios-keyboard:
-    needs: release-paths
-    # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
-    if: needs.release-paths.outputs.apple == 'true'
-    # Renamed from "Build iOS Keyboard (direct capture)" (issue #991). It is
-    # not a required status check, so the rename costs nothing, and the old
-    # name had become misleading: the job now builds the *shipping* hand-off
-    # shape first and the flagged direct-capture shape second.
-    #
-    # The job is kept rather than removed. The `JustSpeakKeyboard` scheme is
-    # the only place `APPLICATION_EXTENSION_API_ONLY=YES` is enforced against
-    # this code, so it catches extension-unsafe API that the SpeakiOS app build
-    # does not. Until this change the shipping shape was never built through
-    # that scheme at all — only the direct-capture one was — so the shape users
-    # actually receive had the weaker check. Both are built here now.
-    name: Build iOS Keyboard
-    runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Apple toolchain
-        uses: ./.github/actions/setup-apple-toolchain
-        with:
-          install-tuist: "true"
-
-      - name: Build Keyboard Extension, hand-off shape (unsigned)
-        # The shape every release ships: no in-extension capture engine, and
-        # therefore no AVFoundation or Speech linked into the appex (#991).
-        env:
-          TUIST_IOS_KEYBOARD: "1"
-          TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"
-        run: |
-          set -o pipefail
-          scripts/retry-network.sh tuist generate --no-open
-          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
-            -workspace "Just Speak to It.xcworkspace" -scheme JustSpeakKeyboard
-          xcodebuild build \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme JustSpeakKeyboard \
-            -destination generic/platform=iOS \
-            CODE_SIGNING_ALLOWED=NO \
-            -skipPackagePluginValidation \
-            -quiet \
-            2>&1 | tail -30
-
-      - name: Build Keyboard Extension, direct-capture shape (unsigned)
-        # The direct-capture shape only exists behind two flags, so its `#if
-        # IOS_KEYBOARD_DIRECT_CAPTURE` branches and its file-based Info.plist
-        # compile nowhere else. Build them here so the flagged code cannot rot.
-        # Build only: the hand-off shape already runs the flow tests in the
-        # Build iOS Library job, and this leg exists to catch compile rot.
-        env:
-          TUIST_IOS_KEYBOARD: "1"
-          TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "1"
-        run: |
-          set -o pipefail
-          scripts/retry-network.sh tuist generate --no-open
-          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
-            -workspace "Just Speak to It.xcworkspace" -scheme JustSpeakKeyboard
-          xcodebuild build \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme JustSpeakKeyboard \
-            -destination generic/platform=iOS \
-            CODE_SIGNING_ALLOWED=NO \
-            -skipPackagePluginValidation \
-            -quiet \
-            2>&1 | tail -30
-
-      - name: Build watchOS App (feature-flagged)
-        # Keep unsigned device builds together, outside the simulator test budget.
-        # The containing iOS build also verifies watch companion embedding.
-        run: |
-          set -o pipefail
-          TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 scripts/retry-network.sh tuist generate --no-open
-          scripts/retry-network.sh xcodebuild -resolvePackageDependencies -skipPackagePluginValidation \
-            -workspace "Just Speak to It.xcworkspace" -scheme JustSpeakWatchApp
-          xcodebuild build \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme JustSpeakWatchApp \
-            -destination generic/platform=watchOS \
-            CODE_SIGNING_ALLOWED=NO \
-            -skipPackagePluginValidation \
-            -quiet \
-            2>&1 | tail -30
-
-          xcodebuild build \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme SpeakiOS \
-            -destination generic/platform=iOS \
-            CODE_SIGNING_ALLOWED=NO \
-            -skipPackagePluginValidation \
-            -quiet \
-            2>&1 | tail -30
+          PR_HEAD_TREE="$(git rev-parse 'HEAD^{tree}')"
+          export PR_HEAD_TREE
+          for attempt in 1 2 3 4 5 6 7; do
+            PR_BODY="$(gh api "$PR_URL" --jq '.body // ""')" || PR_BODY=''
+            export PR_BODY
+            if python3 scripts/check-pre-pr-evidence.py; then exit 0; fi
+            [ "$attempt" -lt 7 ] && sleep 30
+          done
+          echo "::error::Run scripts/pre-pr on this commit (or its exact tree) and paste its --markdown output into the PR body."
+          exit 1
 
   lint:
     name: Lint
     needs: release-paths
-    # Android-only pull requests skip Apple jobs; a skipped job still satisfies a required check.
+    # Docs, website, Android and Workers-only pull requests skip it; a skipped
+    # job still satisfies a required check. SwiftLint, the accessibility
+    # checker and the Node/Ruby/Python tooling tests are platform-neutral, so
+    # this runs on Ubuntu and never takes a hosted macOS slot. Tests that need
+    # Apple tools skip here and run in build-macos on batches and main.
     if: needs.release-paths.outputs.apple == 'true'
-    # Hosted ARM: on Intel the tooling tests exceeded the 30-minute budget.
-    runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-latest"]') }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Cache lint tooling
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: Tooling/.build
-          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-tooling-${{ hashFiles('Tooling/Package.resolved') }}
+          # Tooling/.build: SwiftLint and SwiftFormat; .build/quality-tools: scripts/quality's Ruff,
+          # ShellCheck and actionlint (pinned and SHA-256 verified).
+          path: |
+            Tooling/.build
+            .build/quality-tools
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-tooling-${{ hashFiles('Tooling/Package.resolved', 'Tooling/quality-requirements.txt', 'scripts/quality') }}
 
-      # SwiftLint resolves through the isolated Tooling/ graph so app/test
-      # dependency changes cannot downgrade the linter (issue #677).
-      - name: SwiftLint
-        run: make lint
+      # The same target scripts/pre-pr runs, so a local pass means this passes:
+      # strict SwiftLint (isolated Tooling/ graph, issue #677), scripts/quality (SwiftFormat,
+      # Ruff, ShellCheck, actionlint; zero violations), accessibility,
+      # tooling Package.resolved drift and the tooling tests.
+      - name: Lint and tooling tests (make ci-lint)
+        run: make ci-lint
 
-      - name: Check tooling Package.resolved drift
-        run: git diff --exit-code Tooling/Package.resolved
-
-      - name: Test CI and release gates
-        run: make test-tooling
+  # The portable SwiftPM graph (SpeakCore portable kernel, SpeakSync,
+  # SpeakDesktop*, SpeakAutomationKit, CLI and Linux adapters) builds and
+  # tests on Ubuntu, so most shared-source coverage never waits for macOS.
+  portable-linux:
+    name: Portable Swift (Linux)
+    needs: release-paths
+    if: needs.release-paths.outputs.swift == 'true'
+    runs-on: ubuntu-24.04
+    container:
+      image: swift:6.2.3-jammy@sha256:33c73fc133767cdaafde26f0f9967c96ab25ff77618b7df1eabf46140bf2b6e6
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Normalize container workspace ownership
+        # The owned capture-writer tests verify the ownership+mode chain up to
+        # the checkout root; align the host bind mount with the container user.
+        run: |
+          owner="$(id -u):$(id -g)"
+          chown "$owner" /__w "$(dirname "$GITHUB_WORKSPACE")"
+          chmod 0755 /__w "$(dirname "$GITHUB_WORKSPACE")"
+          chown -R "$owner" "$GITHUB_WORKSPACE"
+          chmod 0755 "$GITHUB_WORKSPACE"
+      # Shared with scripts/pre-pr and precheck.yml, so they cannot drift.
+      - name: Verify the boundary, then build and test the portable graph
+        run: scripts/ci-portable-linux.sh
 
   paid-access-worker:
     name: Paid Access Worker
+    needs: release-paths
+    if: needs.release-paths.outputs.workers == 'true'
     runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_LINUX_RUNNER_LABELS || '["self-hosted","Linux","X64","omarchy-local"]') || '["ubuntu-latest"]') }}
     timeout-minutes: 15
     defaults:
       run:
         working-directory: workers/paid-access
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
           cache: npm
@@ -893,98 +333,145 @@ jobs:
       - name: Test
         run: npm test
 
-  api-compatibility:
-    name: Public API compatibility
-    # main (push/schedule/dispatch) and an explicitly approved PR head use the
-    # reviewed native pool; each runner's admission hook re-checks the source.
-    runs-on: ${{ fromJSON(((github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && (vars.JSTI_NATIVE_RUNNER_LABELS || '["jsti-reviewed-local","macOS"]') || '["macos-26-intel"]') }}
-    timeout-minutes: 30
-    needs: release-paths
-    if: github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'true'
+  # Opens (or comments on) a tracking issue when CI fails on main or on a
+  # merge-batch head, where the gates that pull requests skip first run.
+  # Push-only, hosted, and it never checks out repository code.
+  report-ci-failure:
+    name: Report merge-batch or main CI failure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: gate
+    if: failure() && !cancelled() && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'merge-batch/'))
+    permissions:
+      issues: write
     steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          # The baseline treeish must be resolvable locally.
-          fetch-depth: 0
-
-      # Exported library products must not lose or incompatibly change
-      # public symbols without a declared migration (issue #680). A PR title
-      # carrying the conventional '!' marker permits the reported break;
-      # Stable version selection and publication remain explicit decisions.
-      - name: Test public API compatibility fixtures
-        run: python3 -B -m unittest discover -s scripts/tests -p test_api_compatibility.py -v
-
-      # Binary targets (Sentry, Sparkle, NemoTextProcessing) download from GitHub
-      # release assets, which return 5xx (run 42573814973). Resolve with retries
-      # first so the diagnosis reuses the shared SwiftPM artefact cache.
-      - name: Resolve Swift packages
-        run: scripts/retry-network.sh swift package resolve
-
-      - name: Diagnose breaking public API changes
+      - name: Open or update the main CI failure issue
         env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: bash scripts/check-api-compatibility.sh "origin/${{ github.base_ref }}"
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REF_NAME: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if [ "$REF_NAME" = "main" ]; then
+            label=ci-main-failure; title="CI failing on main"
+          else
+            label=ci-batch-failure; title="CI failed on $REF_NAME"
+          fi
+          body="CI failed on $REF_NAME at $SHA: $RUN_URL"$'\n\n'"Pull requests merge on their pre-pr record; every build and test first runs in CI here. auto-revert.yml posts the suspects for a fix forward, reverts them if main stays red, and closes this issue once main is green."
+          number=$(gh issue list --state open --label "$label" --search "in:title \"$title\"" --json number,title \
+            --jq "map(select(.title == \"$title\"))[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "Still failing at $SHA: $RUN_URL"
+          else
+            gh label create "$label" --color B60205 --description "CI failed after pull-request checks" 2>/dev/null || true
+            gh issue create --title "$title" --label "$label" --body "$body"
+          fi
 
-  # Branch protection already requires this exact name. Make it an aggregate
-  # so release-mode and journey failures cannot merge behind a green debug job.
-  required-macos:
-    name: Build & Test (macOS)
+  # The single required check. A gate may skip only on a pull request whose
+  # path detection excluded it; batches and main must run every gate.
+  gate:
+    name: CI Gate
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
+    # A trusted pull request (same repository, not Dependabot, no ci:full,
+    # not a merge batch) merges on its passing scripts/pre-pr record alone,
+    # and every build and test runs on main after the merge. Its other jobs
+    # are all skipped, so this job is created as soon as the run starts and
+    # checks the record itself: one queue wait instead of three.
+    env:
+      TRUSTED_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !startsWith(github.event.pull_request.user.login, 'dependabot') && !contains(github.event.pull_request.labels.*.name, 'ci:full') && !startsWith(github.head_ref, 'merge-batch/') }}
     needs:
-      - build-macos
-      - build-ios
-      - build-ios-swiftpm
-      - build-ios-test-products
-      - build-ios-keyboard
-      - lint
       - release-paths
-      - release-validation
-      - core-journey-e2e
-      - core-journey-fixture-ui
-      - api-compatibility
+      - macos-debug
+      - portable-linux
+      - lint
+      - paid-access-worker
+      - pre-pr-evidence
+      - ios
+      - macos-release
+      - journey-ui
     # Evaluate GitHub's job results directly. This aggregate never checks out
-    # or executes a PR-controlled helper; workflow edits still require review.
-    permissions: {}
+    # or executes a PR-controlled helper: the record checker is read from the
+    # base commit. actions: write only lets it cancel its own run (below).
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
     steps:
+      - name: Require a passing scripts/pre-pr record for this head (trusted pull request)
+        if: env.TRUSTED_PR == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          JSTI_PRE_PR_STRICT: "true"
+        run: |
+          checker="$RUNNER_TEMP/check-pre-pr-evidence.py"
+          gh api -H 'Accept: application/vnd.github.raw' \
+            "repos/$REPO/contents/scripts/check-pre-pr-evidence.py?ref=$BASE_SHA" > "$checker"
+          PR_HEAD_TREE="$(gh api "repos/$REPO/git/commits/$PR_HEAD_SHA" --jq .tree.sha)"
+          export PR_HEAD_TREE
+          # The body is usually updated just after the push that started this run.
+          for attempt in 1 2 3 4 5 6 7; do
+            PR_BODY="$(gh api "$PR_URL" --jq '.body // ""')" || PR_BODY=''
+            export PR_BODY
+            if python3 "$checker"; then exit 0; fi
+            [ "$attempt" -lt 7 ] && sleep 30
+          done
+          echo "::error::Run scripts/pre-pr on this commit (or its exact tree) and paste its --markdown output into the PR body."
+          exit 1
+      # A cancelled run is not a failed one: end this check as cancelled so
+      # it neither reads as a red main nor counts as passing. If the cancel
+      # call fails, the gate still fails closed.
+      - name: Report a cancelled run as cancelled
+        if: >-
+          cancelled() || (contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'failure'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: /repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/force-cancel
+        run: |
+          echo '::notice::CI was cancelled before every gate finished; this check reports cancelled.'
+          if gh api -X POST "$RUN_URL" >/dev/null; then sleep 120; fi
+          echo '::error::Could not cancel this run; failing closed.'
+          exit 1
       - name: Reject unsuccessful CI gates
         if: >-
-          always() && (
+          always() && env.TRUSTED_PR != 'true' && (
             needs.release-paths.result != 'success' ||
+            needs.pre-pr-evidence.result != 'success' ||
             (needs.release-paths.outputs.apple != 'true' && needs.release-paths.outputs.apple != 'false') ||
-            (needs.release-paths.outputs.package != 'true' && needs.release-paths.outputs.package != 'false') ||
-            (needs.release-paths.outputs.core-journey != 'true' && needs.release-paths.outputs.core-journey != 'false') ||
-            (needs.build-macos.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'false' &&
-              needs.build-macos.result == 'skipped')) ||
-            (needs.build-ios.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'false' &&
-              needs.build-ios.result == 'skipped')) ||
-            (needs.build-ios-swiftpm.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'false' &&
-              needs.build-ios-swiftpm.result == 'skipped')) ||
-            (needs.build-ios-test-products.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'false' &&
-              needs.build-ios-test-products.result == 'skipped')) ||
-            (needs.build-ios-keyboard.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'false' &&
-              needs.build-ios-keyboard.result == 'skipped')) ||
+            (needs.release-paths.outputs.swift != 'true' && needs.release-paths.outputs.swift != 'false') ||
+            (needs.release-paths.outputs.full != 'true' && needs.release-paths.outputs.full != 'false') ||
+            (needs.release-paths.outputs.api != 'true' && needs.release-paths.outputs.api != 'false') ||
+            (needs.release-paths.outputs.workers != 'true' && needs.release-paths.outputs.workers != 'false') ||
+            (needs.paid-access-worker.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.workers == 'false' &&
+              needs.paid-access-worker.result == 'skipped')) ||
+            ((github.event_name != 'pull_request' || startsWith(github.head_ref, 'merge-batch/')) &&
+              needs.release-paths.outputs.full != 'true') ||
+            (needs.macos-debug.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.swift == 'false' &&
+              needs.macos-debug.result == 'skipped')) ||
+            (needs.portable-linux.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.swift == 'false' &&
+              needs.portable-linux.result == 'skipped')) ||
             (needs.lint.result != 'success' && !(
               github.event_name == 'pull_request' && needs.release-paths.outputs.apple == 'false' &&
               needs.lint.result == 'skipped')) ||
-            (needs.release-validation.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.package == 'false' &&
-              needs.release-validation.result == 'skipped')) ||
-            (needs.core-journey-e2e.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.core-journey == 'false' &&
-              needs.core-journey-e2e.result == 'skipped')) ||
-            (needs.core-journey-fixture-ui.result != 'success' && !(
-              github.event_name == 'pull_request' && needs.release-paths.outputs.core-journey == 'false' &&
-              needs.core-journey-fixture-ui.result == 'skipped')) ||
-            (needs.api-compatibility.result != 'success' && !(
-              (github.event_name != 'pull_request' || needs.release-paths.outputs.apple == 'false') &&
-              needs.api-compatibility.result == 'skipped'))
+            (needs.ios.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.full == 'false' &&
+              needs.ios.result == 'skipped')) ||
+            (needs.macos-release.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.full == 'false' &&
+              needs.macos-release.result == 'skipped')) ||
+            (needs.journey-ui.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.full == 'false' &&
+              needs.journey-ui.result == 'skipped'))
           )
         env:
           CI_GATE_NEEDS: ${{ toJSON(needs) }}
@@ -994,3 +481,19 @@ jobs:
           exit 1
       - name: Confirm successful CI gates
         run: echo 'All required CI gates passed; only explicitly excluded gates may skip.'
+
+  # Legacy required-check name, kept until the ruleset requires only
+  # "CI Gate"; then delete this job.
+  required-macos:
+    name: Build & Test (macOS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: gate
+    permissions: {}
+    steps:
+      - name: Mirror CI Gate
+        if: always() && needs.gate.result != 'success'
+        run: exit 1
+      - name: Confirm CI Gate
+        run: echo 'CI Gate passed.'

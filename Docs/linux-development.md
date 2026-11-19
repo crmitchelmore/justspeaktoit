@@ -17,12 +17,13 @@ criterion; this document says exactly what is verified and what is not.
 |---|---|
 | `SpeakDesktopHost` | Recording, transcription, History, output, post-processing, profiles, model catalogue, Read aloud, on-device model and iCloud sync orchestration, generic over `DesktopHostPlatform`. Shared with Windows (moved out of `SpeakWindows`). |
 | `CLinuxSystem/*` | pkg-config system libraries: `libadwaita-1`, `gio-unix-2.0`, `libpulse`, `libsecret-1`, `xtst`, `libcrypto` (OpenSSL). |
-| `CLinuxSupport` | The `jsti_*` C ABI (`include/CLinuxSupport.h`): window, clipboard, credentials, capture, private files, X11, portals, the whisper.cpp loader and GChecksum SHA-256, iCloud sync (group, loopback listener, sign-in page, envelope crypto), self-tests. |
+| `CLinuxSupport` | The `jsti_*` C ABI (`include/CLinuxSupport.h`, an umbrella over domain headers): window, clipboard, credentials, capture, private files, X11, portals, the whisper.cpp loader and GChecksum SHA-256, iCloud sync (group, loopback listener, sign-in page, envelope crypto), self-tests. |
+| `CLinuxSelfTest` | The window `--ui-smoke-test` checks (`jsti_window_self_test`), kept out of `CLinuxSupport` and linked only by the executable. |
 | `SpeakLinuxPlatform` | Testable Swift over the C ABI: keyring, capture, session detection, text-output options, output planning, the output job, History playback and speech, voice output staging, and the iCloud sync adapters. |
 | `SpeakLinux` | The executable: `LinuxHostPlatform`, events, shortcuts, `--self-test`, `--ui-smoke-test`, `--integration-test`. |
 
 The Linux targets are opt-in with `SPEAK_LINUX_TARGET=1`, like
-`SPEAK_WINDOWS_TARGET=1`, so the `portable-linux` job (which has no GTK
+`SPEAK_WINDOWS_TARGET=1`, so the portable Linux test job in `ci.yml` (which has no GTK
 packages) is unchanged.
 
 Gemini Transcribe Live, Meta Muse realtime ASR and Modulate Velma now use the
@@ -59,8 +60,8 @@ export SPEAK_LINUX_TARGET=1
 swift build --product SpeakLinux
 swift test                                  # portable, host and Linux tests
 .build/debug/SpeakLinux --self-test
-scripts/linux-desktop-checks.sh             # self-test + Xvfb window smoke test
-scripts/linux-integration-checks.sh         # keyring, PipeWire, portals, X11 paste
+scripts/linux/linux-desktop-checks.sh             # self-test + Xvfb window smoke test
+scripts/linux/linux-integration-checks.sh         # keyring, PipeWire, portals, X11 paste
 .build/debug/SpeakLinux                     # the app
 ```
 
@@ -78,7 +79,7 @@ sample History (`DesktopHostSampleHistory`, the transcripts the Mac's website
 screenshots use), visits every page and saves each one twice, as the visible
 window and as the whole scrolled page (`NN-name.png`, `NN-name-full.png`),
 then the dashboard and History in dark mode and the dashboard while recording.
-`scripts/linux-desktop-checks.sh` runs it when `JSTI_UI_SCREENSHOT_DIR` is set,
+`scripts/linux/linux-desktop-checks.sh` runs it when `JSTI_UI_SCREENSHOT_DIR` is set,
 and CI uploads the pictures as `linux-ui-screenshots`.
 
 Recording feedback uses a dedicated, warmed libpulse channel and the bundled
@@ -142,8 +143,8 @@ its sandbox; cross-sandbox host access is not established by this source.
 ### Canonical application icons
 
 The Linux application uses the canonical Mac icon exports, not a separately
-drawn approximation. `scripts/generate-icon.swift` invokes the dependency-free
-`scripts/generate-desktop-icons.py`, producing a private hicolor theme with
+drawn approximation. `scripts/assets/generate-icon.swift` invokes the dependency-free
+`scripts/assets/generate-desktop-icons.py`, producing a private hicolor theme with
 16, 24, 32, 48, 64, 128, 256 and 512px PNGs and transparent corners. SwiftPM
 bundles that theme in `SpeakApp_SpeakLinux.resources`; it is loaded via
 `Bundle.module`, not the current working directory. GTK sets the window icon
@@ -159,7 +160,7 @@ For a native developer layout, stage (do not install) the executable, resource
 bundles, desktop entry, metainfo and icons with:
 
 ```sh
-python3 scripts/stage-linux-desktop.py --binary .build/release/SpeakLinux \
+python3 scripts/linux/stage-linux-desktop.py --binary .build/release/SpeakLinux \
   --output .build/linux-desktop-layout --prefix /usr/local
 ```
 
@@ -177,7 +178,7 @@ Spaces, quotes, backslashes, dollar signs and backticks in prefixes use the two
 Desktop Entry escaping layers. Percent/equal-sign prefixes are refused before
 writing because they are not portable executable paths for desktop launchers.
 
-`python3 scripts/generate-desktop-icons.py --check` verifies exact exports;
+`python3 scripts/assets/generate-desktop-icons.py --check` verifies exact exports;
 `python3 -B -m unittest discover -s scripts/tests -p test_desktop_icons.py`
 checks native resource wiring and a synthetic staged layout. The GTK window
 self-test requires the canonical name to resolve in the theme. The Python
@@ -299,10 +300,17 @@ and Record; the status line sits at the bottom of every page.
   accessible names. The screenshot tour requires light/dark filter-popover
   artifacts; source assertions and snapshots do not replace physical accessibility
   acceptance.
+- **Browse OpenRouter models…**: Transcription (Remote Batch) and
+  Post-processing (Remote) open a modal GTK browser (`LinuxOpenRouterBrowser.c`)
+  over the picker's OpenRouter entries, with search, provider and
+  zero-listed-price filters, a details pane with pricing and a model-page link.
+  Choosing selects that picker entry, labelled `OpenRouter › name`; cleanup
+  choices save on Apply. Pages come from the shared `DesktopOpenRouterBrowser`,
+  so Windows shows the same rows (#1618).
 - Totals and row wording come from the shared `DesktopHistoryInsights` and
   `DesktopHistoryRowSummary` (SpeakDesktop), counted and formatted as the Mac
   counts them, so Windows shows the same figures.
-- Colours are the brand tokens in `SpeakCore/BrandColors.swift`; everything else
+- Colours are the brand tokens in `SpeakCore/App/Apple/BrandColors.swift`; everything else
   follows libadwaita, so the window honours the desktop's light or dark style.
   **General › Appearance** overrides it (Follow the system, Light, Dark), saved
   as `appearance` in `settings.json` and shared with Windows.
@@ -372,8 +380,8 @@ the harness; no real desktop key map is modified. This check is NOT_RUN locally
 and does not qualify AltGr, arbitrary layouts, runtime remapping or Wayland.
 
 With the app **already running**, desktop keyboard settings can also bind
-`justspeaktoit --speak-clipboard`, `justspeaktoit --speak-selected-text` and
-`justspeaktoit --paste-last-history`.
+`justspeaktoit --speak-clipboard`, `justspeaktoit --speak-selected-text`,
+`justspeaktoit --edit-selection-by-voice` and `justspeaktoit --paste-last-history`.
 The same running-app forwarding path supports `--stop-speech`,
 `--pause-resume-speech`, and `--quick-voice-1`, `--quick-voice-2` or
 `--quick-voice-3`. Quick Voice selects the corresponding saved favorite; it does
@@ -402,7 +410,7 @@ construction or store access. A valid `--toggle`, with optional `--background`
 or repeated identical toggle flags, keeps its existing cold-launch and
 running-app dictation behavior; it is not changed into a running-only command.
 Busy/recording states refuse clipboard/selected-text speech, History paste, Pause/Resume and
-Quick Voice; closing or modal-disabled windows refuse all commands. Stop follows
+Quick Voice; `--edit-selection-by-voice` toggles, so it is accepted while listening to finish the edit; closing or modal-disabled windows refuse all commands. Stop follows
 its own control's availability as described above. Refusal returns a nonzero exit
 status. Status 0 means admitted
 to the running app, not that speech or paste completed; results and provider
@@ -419,6 +427,18 @@ Output provider. Correction-learning consent does not authorize this read-only
 session; neither settings nor imports grant it. Stop access revokes pending
 reads before requesting speech Stop, and shutdown revokes access before draining
 settings. The app does not enable desktop accessibility.
+
+**Edit Selection by Voice** (`--edit-selection-by-voice`, the X11 global
+binding or a desktop keybinding) uses the same session access. The command
+arms one lease on the admitted field and reads its selection; you dictate an
+instruction and press the binding again to finish, and the cleanup model
+rewrites the text. The selection and instruction go to the configured cleanup
+provider. The app then replaces only that field's unchanged selection through
+AT-SPI `EditableText` (delete, then insert) and confirms it by reading the
+field back. Any focus, caret, selection or text change in the field during
+dictation, or a field without `EditableText`, aborts the edit and copies the
+rewrite instead; it never types into another field. There is no tray item,
+because clicking the tray moves focus off the captured field.
 
 Capture on the command path uses only an already-admitted field receipt. A
 single pending lease across session restarts prevents queued target accumulation.
@@ -457,15 +477,17 @@ Unavailable/wrong-mode IDs and changes to the active mode remain preserved but
 unapplied, with a notice; choosing a model explicitly replaces that pending
 choice. The queued GTK update emits no selection callback. Source-only restart,
 round-trip, failure and native smoke assertions accompany this mapping; all are
-NOT_RUN here. History-backup restore still does not apply settings.
+NOT_RUN here.
 
 General > Data backup > **Restore...** now uses the shared cancellable ZIP
 reader, privacy-safe preview, current single-use confirmation and transactional
 rollback. History text merges; app profiles can merge or, after a second
 confirmation, replace. Both GTK dialogs default to Cancel. The owned picker
 rejects late or cancelled results, the preview copies its token/report, busy
-state disables apply, and shutdown retires the dialog. Settings, saved audio,
-credentials, vocabulary, connections and models remain unapplied. Native
+state disables apply, and shutdown retires the dialog. Backups now carry and
+restore settings, connections, vocabulary, saved audio and, with the
+**Include API keys** switch (off by default), API keys; model files are never
+copied (see [data migration](data-migration.md#windows-and-linux)). Native
 smoke assertions and seven shared Host regressions are authored but NOT_RUN
 locally; this is source wiring, not an installed-desktop acceptance receipt.
 The shared restore engine also rechecks the preview's full History baseline
@@ -525,7 +547,7 @@ the condition is met. The expiry case intentionally measures the real 2.5-second
 lease. This authored fixture is NOT_RUN locally. It cannot qualify real
 compositor/AT-SPI app behavior, consent UI, provider requests or audible output.
 
-`scripts/linux-desktop-checks.sh` also opts into a cross-process fixture only
+`scripts/linux/linux-desktop-checks.sh` also opts into a cross-process fixture only
 inside its private session bus. It launches 39 real command-client processes
 against the production native command handler with a synthetic event callback:
 valid and repeated commands, `--background`, mixed action flags, unsupported
@@ -658,7 +680,7 @@ native execution are NOT_RUN here.** Exact-head Apple/portable checks,
 X11/GTK coexistence, registration failures, physical repeat/lock/layout
 behavior and shutdown still need native qualification. Xlib server loss can
 remain fatal despite reporting poll-detected listener failures. Linux
-system-wide Escape and voice editing remain separate gaps.
+system-wide Escape remains a separate gap.
 
 ### Escape and dictation delivery
 
@@ -716,7 +738,8 @@ API token serves both apps: they share the callback URL.
   page, opens it in the default browser (only `https` pages on `apple.com` or
   `icloud.com`; through the OpenURI portal inside Flatpak) and listens on
   `http://127.0.0.1:47823/cloudkit-sign-in` for the redirect carrying
-  `ckWebAuthToken`, only during sign-in and for at most ten minutes. A
+  `ckWebAuthToken` (Apple redirects to the token's registered
+  `https://justspeaktoit.com/cloudkit-sign-in`, which forwards it there), only during sign-in and for at most ten minutes. A
   connection that sends no complete request within five seconds is dropped,
   so an idle browser preconnection cannot hold the callback. The redirect is
   taken only from a process of this user (read from `/proc/net/tcp`) and only
@@ -742,7 +765,7 @@ API token serves both apps: they share the callback URL.
 
 The CloudKit API token is a build setting:
 `scripts/windows-cloudkit/configure-cloudkit-web.py` writes the
-`CLOUDKIT_WEB_API_TOKEN` secret into both `Sources/SpeakWindows` and
+`CLOUDKIT_WEB_API_TOKEN` secret (held in the `cloudkit` environment) into both `Sources/SpeakWindows` and
 `Sources/SpeakLinux/CloudKitWebBuildConfiguration.swift`, which are committed
 without one. No Linux workflow injects it yet, so every Linux build says
 "iCloud sync is not available in this build" and otherwise works. For local
@@ -756,9 +779,9 @@ proven on a physical desktop.
 
 | Feature | State | Evidence |
 |---|---|---|
-| Shared host controller (record, stop, transcribe, cancel, close, output slot, History) | Verified | `SpeakDesktopHostTests` with a fake platform; Windows Swift type-checks against it (`scripts/typecheck-windows-swift.sh`) |
+| Shared host controller (record, stop, transcribe, cancel, close, output slot, History) | Verified | `SpeakDesktopHostTests` with a fake platform; Windows Swift type-checks against it (`scripts/ci/typecheck-windows-swift.sh`) |
 | All 31 batch models, OpenRouter discovery, post-processing | Shared code, verified by the portable tests | `swift test` (portable suite) |
-| GTK window, events, record-bound History presentation | Verified headless on X11 and Wayland | `--ui-smoke-test` under Xvfb and headless Weston (`scripts/linux-wayland-smoke.sh`), window self-test, snapshot |
+| GTK window, events, record-bound History presentation | Verified headless on X11 and Wayland | `--ui-smoke-test` under Xvfb and headless Weston (`scripts/linux/linux-wayland-smoke.sh`), window self-test, snapshot |
 | Mac layout: sidebar pages, dashboard, History cards, totals, appearance | Verified headless on X11 | Window self-test (every page shown from the sidebar, the selected card holds its transcript, totals shown); `DesktopHistoryPresentationTests`; `--ui-screenshots` pictures of every page in light, dark and recording states (CI artifact). Real desktops and HiDPI **unverified** |
 | Recording HUD | X11: verified headless (window type, no input focus, bottom-centre placement) and under Xvfb + Openbox, where a Zenity field kept focus while it showed; Wayland: result notifications only | Window self-test and screenshot tour; real GNOME/KDE X11 sessions, multiple monitors, fractional scaling and Wayland notifications **unverified** |
 | Microphone capture (libpulse via PipeWire) | Verified with a virtual source | integration check: exact 100 ms frames, non-silent test tone; physical USB/Bluetooth microphones **unverified** |
@@ -781,8 +804,9 @@ proven on a physical desktop.
 | On-device transcription (whisper.cpp 1.9.4, the four pinned Whisper models) | Verified in a container with the CPU runtime built from the pin | `--local-transcription-self-test` downloaded the pinned tiny model through the app's installer and transcribed the JFK sample; `LinuxLocalTranscriptionTests` (GChecksum vectors; with the runtime: JFK, silence, cancellation before and during recognition, cache release by path, held removal); `DesktopHostLocalModelsTests` (download, pause and resume, readiness, removal ownership, a keyless local recording); `DesktopHostLocalModelVerificationTests` (a same-size tampered model the runtime refuses is deleted and yields no transcript; no separate rehash before loading); with the runtime, a same-size tampered copy and a digest the cached model's bytes lack are refused; `--self-test` (installer cycle, loader refusals); window self-test (Local models rows, events, no key row). Linux CI receipt for this revision, Vulkan (not built), aarch64 (not pinned), large models' speed and memory, and the group on real desktops **unverified**; Flatpak runtime qualification: [packaging](linux-packaging.md) |
 | Status notifier (panel icon and menu, like the Mac's menu bar extra) | Verified against a fake `org.kde.StatusNotifierWatcher`: registration, icon pixmaps, tooltip, menu layout and a Quit click that closes the app | Integration check; how KDE Plasma, the GNOME AppIndicator extension (Ubuntu) and other panels draw it **unverified** |
 | Launch at login | Outside Flatpak: an XDG autostart entry (`$XDG_CONFIG_HOME/autostart/com.justspeaktoit.JustSpeakToIt.desktop`, quoted `Exec` with `--background`) that the switch writes and removes, read back so a desktop's own startup settings (removal, `Hidden=true`, `X-GNOME-Autostart-enabled=false`) show here. Inside Flatpak: the Background portal's `RequestBackground` with `autostart` and the same command line, a refusal shown as off by the desktop, and the state last granted recorded in `settings.json`, because the sandbox cannot read the entry. A login launch creates the window minimised without asking for focus. Shared state, wording and status with Windows (`DesktopHostLoginItem`) | `LinuxLoginItemTests` (entry text and quoting, the desktop's switches, a dangling link); the window self-test (the switch follows the host and reports one click); the integration check (the fake portal grants, removes and refuses; `--background` starts minimised under Openbox). Real GNOME, KDE and XFCE sessions, the GNOME background-app dialog, and Wayland minimise-before-map **unverified** |
+| Tip jar | About shows a Support development card with one button per shared `TipWebLink` (GitHub Sponsors, Ko-fi), opened through the URI launcher; the amount is chosen in the browser and nothing unlocks. No paid access (#1625) | `SpeakDesktopHostTests` (`configureTipJar`); the window self-test's tip-link checks; Orca reading and a real browser launch **unverified** |
 | IBus insertion | **Not implemented** | Later phases |
-| Hands-free and silence | Shared sound-activation/utterance loop, bounded RAM pre-roll and manual silence auto-stop; fresh frozen X11 target, app profile and immutable provider inputs per utterance; record-bound output evidence; logind and an existing screen service required with fail-closed absence/service-loss handling | Not Apple's ML classifier. X11 paste keys are unconfirmed text delivery and stop listening; Wayland automatic utterances require clipboard-only output. X11 utterances resolve the canonical Linux executable matchers; Wayland exposes no app identity, so normal app settings apply and recording notes say so. Device/output method stay armed-run-owned; incompatible PCM-rate changes refuse before WAV/provider startup. Physical microphones/noise/latency, actual lock/sleep and installed Flatpak monitoring remain **unverified**; exact-head receipts and [settings coverage](desktop-settings-parity.md) qualify each slice separately |
+| Hands-free and silence | Shared sound-activation/utterance loop, bounded RAM pre-roll and manual silence auto-stop; fresh frozen X11 target, app profile and immutable provider inputs per utterance; record-bound output evidence; logind and an existing screen service required with fail-closed absence/service-loss handling | Fixed threshold, not the Apple apps' adaptive noise-floor gate. X11 paste keys are unconfirmed text delivery and stop listening; Wayland automatic utterances require clipboard-only output. X11 utterances resolve the canonical Linux executable matchers; Wayland exposes no app identity, so normal app settings apply and recording notes say so. Device/output method stay armed-run-owned; incompatible PCM-rate changes refuse before WAV/provider startup. Physical microphones/noise/latency, actual lock/sleep and installed Flatpak monitoring remain **unverified**; exact-head receipts and [settings coverage](desktop-settings-parity.md) qualify each slice separately |
 | Flatpak | Offline GNOME 50 build, bundle installation and installed resource/codec, real CPU transcription and GTK checks are defined in `Linux Flatpak` CI | Require an exact-revision successful [packaging receipt](linux-packaging.md); interactive portals, physical devices, Vulkan execution and Flathub publication remain **unverified** |
 
 ### Needs a physical desktop
@@ -992,8 +1016,8 @@ require separate qualification and activation.
 `.github/workflows/linux.yml` (ubuntu-24.04, `swift:6.2.3-noble`, pinned by
 digest) installs the packages above, then runs the boundary check, the
 release build, `swift test` with `SPEAK_LINUX_TARGET=1`,
-`scripts/linux-desktop-checks.sh` (uploading the window snapshot),
-`scripts/linux-integration-checks.sh`, `--local-transcription-self-test` on
+`scripts/linux/linux-desktop-checks.sh` (uploading the window snapshot),
+`scripts/linux/linux-integration-checks.sh`, `--local-transcription-self-test` on
 the JFK sample, and the Windows Swift type-check. The reusable
 `linux-local-runtime.yml` first builds the pinned whisper.cpp runtime in the
 same image (cached by its pins); the desktop job downloads it and a cached

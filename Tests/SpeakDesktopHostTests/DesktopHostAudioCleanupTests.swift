@@ -8,7 +8,7 @@ final class DesktopHostAudioCleanupTests: XCTestCase {
     func testRetryAfterAudioCleanup_PreservesSavedTranscriptAndMetadata() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("host-audio-retry-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         let id = UUID()
         var record = DesktopRecordingStore.Record(
@@ -47,7 +47,7 @@ final class DesktopHostAudioCleanupTests: XCTestCase {
     func testHeldPlaybackStop_CloseIsBoundedAndLateCompletionCannotDelete() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("host-audio-held-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(
+        let controller = try DesktopHostController<FakePlatform>.consented(
             directory: root, effects: SyntheticEffects(), shutdownGrace: .milliseconds(20)
         )
         await controller.markReadyForSelfTest()
@@ -75,7 +75,7 @@ final class DesktopHostAudioCleanupTests: XCTestCase {
     func testConfirmation_DeletesFrozenAudioAndKeepsHistoryAndLaterArrival() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("host-audio-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         let record = try await seed(controller)
         let folder = await controller.store.directory
@@ -99,7 +99,7 @@ final class DesktopHostAudioCleanupTests: XCTestCase {
     func testCancelAndInvalidToken_CannotDeleteAudio() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("host-audio-cancel-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         let record = try await seed(controller)
         await controller.beginAudioCleanupConfirmation()
@@ -119,7 +119,7 @@ final class DesktopHostAudioCleanupTests: XCTestCase {
     func testOperationStartedAfterConfirmation_RefusesCleanup() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("host-audio-busy-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         let record = try await seed(controller)
         await controller.beginAudioCleanupConfirmation()
@@ -137,7 +137,7 @@ final class DesktopHostAudioCleanupTests: XCTestCase {
     func testEmptyAndClosedController_DoNotPublishConfirmation() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("host-audio-empty-\(UUID())")
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         await controller.beginAudioCleanupConfirmation()
         await finish(controller)

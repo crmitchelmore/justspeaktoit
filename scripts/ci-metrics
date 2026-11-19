@@ -1,0 +1,557 @@
+#!/usr/bin/env python3
+"""Recompute the CI speed and reliability baseline from the GitHub API.
+
+Usage:
+  scripts/ci-metrics                      # last 30 days
+  scripts/ci-metrics --days 7             # the per-round scorecard window
+  scripts/ci-metrics --since 2026-11-10   # compare before/after a change
+  scripts/ci-metrics --since 2026-10-11 --until 2026-11-10 --json   # --until is exclusive
+  scripts/ci-metrics --refresh            # ignore the cached run lists
+
+Requires an authenticated `gh` CLI. Results are cached under ~/.cache/jsti-ci-metrics
+(override with CI_METRICS_CACHE): job lists of completed runs, and the run list of
+each day older than three days once every run that day has completed. A repeat
+report therefore only fetches recent days.
+
+Metrics:
+  scorecard            PR open -> merge, required gate p50/p90, main failure and
+                       cancellation rates, zombie count: the numbers to score a round by
+  pr_open_to_merge     created_at -> merged_at for PRs merged into main
+  ci_pr_success        wall time of successful CI pull_request runs
+  required_gate        run created -> last required check completed (successful PR runs)
+  macos_queue          macOS job started_at - created_at (sampled jobs that got a runner)
+  critical_path        per CI job: queue, run time and finish offset from run creation, and
+                       how often it was the last job to finish (the run's critical path end)
+  zombie_runs          runs of any workflow still queued/waiting/in progress after 24 h
+  integration          ready -> merged (final head pushed with a passing pre-pr record -> merge),
+                       main red minutes (failed main run done -> next green main run done),
+                       auto-reverts, broken Alphas (own main CI failed, or it carried a commit
+                       later auto-reverted; target <= 10%) and user-facing incidents
+                       (issues labelled user-facing-incident; target 0)
+  workflow totals      runs, failures, cancellations, wall minutes per workflow
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import statistics
+import subprocess
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+REPO = os.environ.get("CI_METRICS_REPO", "crmitchelmore/justspeaktoit")
+CI_PATH = ".github/workflows/ci.yml"
+# The main ruleset requires only "CI Gate" since 10 Nov 2026; the older contexts keep history comparable.
+REQUIRED_CHECKS = ("CI Gate", "Build & Test (macOS)", "Build iOS Library", "Lint")
+CACHE = Path(os.environ.get("CI_METRICS_CACHE", Path.home() / ".cache" / "jsti-ci-metrics"))
+ZOMBIE_HOURS = 24
+ACTIVE_STATUSES = ("queued", "waiting", "pending", "requested", "in_progress")
+
+
+def gh_api(path: str, paginate: bool = False) -> list | dict:
+    args = ["gh", "api", "-H", "Accept: application/vnd.github+json", path]
+    if paginate:
+        args[2:2] = ["--paginate", "--slurp"]
+    for attempt in range(4):
+        result = subprocess.run(args, capture_output=True, text=True)
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        if attempt == 3:
+            sys.exit(f"gh api {path} failed: {result.stderr.strip()}")
+        time.sleep(2 ** attempt)
+    raise AssertionError
+
+
+def ts(value: str | None) -> dt.datetime | None:
+    return dt.datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+
+
+def minutes(start: dt.datetime | None, end: dt.datetime | None) -> float | None:
+    if not start or not end:
+        return None
+    return max(0.0, (end - start).total_seconds() / 60)
+
+
+def pct(values: list[float], q: float) -> float | None:
+    values = sorted(v for v in values if v is not None)
+    if not values:
+        return None
+    if len(values) == 1:
+        return values[0]
+    return statistics.quantiles(values, n=100, method="inclusive")[int(q) - 1]
+
+
+def summary(values: list[float]) -> dict:
+    values = [v for v in values if v is not None]
+    return {"n": len(values), "p50": pct(values, 50), "p90": pct(values, 90)}
+
+
+# Only the fields the report reads are cached, which keeps a month of runs to a few MB.
+RUN_FIELDS = ("id", "name", "path", "event", "status", "conclusion", "created_at", "run_started_at",
+              "updated_at", "run_attempt", "head_branch", "head_sha", "html_url", "pull_requests")
+
+
+def day_runs(day: dt.date, refresh: bool = False, today: dt.date | None = None) -> list[dict]:
+    """One day's runs. Settled days (older than three days, nothing still running) come from the cache."""
+    cached = CACHE / "runs-v2" / REPO.replace("/", "__") / f"{day.isoformat()}.json"
+    if cached.exists() and not refresh:
+        return json.loads(cached.read_text())
+    pages = gh_api(f"repos/{REPO}/actions/runs?per_page=100&created={day.isoformat()}", paginate=True)
+    runs = [{k: run.get(k) for k in RUN_FIELDS} for page in pages for run in page.get("workflow_runs", [])]
+    for run in runs:
+        run["pull_requests"] = [pr["number"] for pr in run.get("pull_requests") or []]
+    settled = day < (today or dt.date.today()) - dt.timedelta(days=3)
+    if settled and all(run["status"] == "completed" for run in runs):
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.write_text(json.dumps(runs))
+    return runs
+
+
+def list_runs(since: dt.date, until: dt.date, refresh: bool = False) -> list[dict]:
+    # The runs API caps a single query at 1,000 results, so walk day by day.
+    days = [since + dt.timedelta(days=n) for n in range((until - since).days)]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        return [run for runs in pool.map(lambda d: day_runs(d, refresh), days) for run in runs]
+
+
+def list_zombies(now: dt.datetime | None = None) -> list[dict]:
+    """Runs of any workflow, of any age, still not finished ZOMBIE_HOURS after creation."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    found: dict[int, dict] = {}
+    for status in ACTIVE_STATUSES:
+        for page in gh_api(f"repos/{REPO}/actions/runs?per_page=100&status={status}", paginate=True):
+            for run in page.get("workflow_runs", []):
+                found[run["id"]] = run
+    return zombies(found.values(), now)
+
+
+def zombies(runs, now: dt.datetime) -> list[dict]:
+    out = []
+    for run in runs:
+        age = (now - ts(run["created_at"])).total_seconds() / 3600
+        if run.get("status") in ACTIVE_STATUSES and age > ZOMBIE_HOURS:
+            out.append({"id": run["id"], "workflow": workflow_label(run), "status": run["status"],
+                        "branch": run.get("head_branch"), "event": run.get("event"),
+                        "age_hours": round(age, 1), "url": run.get("html_url")})
+    return sorted(out, key=lambda z: -z["age_hours"])
+
+
+def list_merged_prs(since: dt.date, until: dt.date) -> list[dict]:
+    query = f"repo:{REPO} is:pr is:merged base:main merged:{since.isoformat()}..{(until - dt.timedelta(days=1)).isoformat()}"
+    items: list[dict] = []
+    page = 1
+    while True:
+        data = gh_api(f"search/issues?per_page=100&page={page}&q={query.replace(' ', '+')}")
+        items.extend(data.get("items", []))
+        if len(data.get("items", [])) < 100 or page >= 10:
+            return items
+        page += 1
+
+
+def run_jobs(run: dict) -> list[dict]:
+    CACHE.mkdir(parents=True, exist_ok=True)
+    cached = CACHE / f"{run['id']}-{run.get('run_attempt', 1)}.json"
+    if cached.exists():
+        return json.loads(cached.read_text())
+    pages = gh_api(f"repos/{REPO}/actions/runs/{run['id']}/attempts/{run.get('run_attempt', 1)}/jobs?per_page=100",
+                   paginate=True)
+    jobs = [job for page in pages for job in page.get("jobs", [])]
+    if run.get("status") == "completed":
+        cached.write_text(json.dumps(jobs))
+    return jobs
+
+
+def workflow_label(run: dict) -> str:
+    path = run.get("path") or ""
+    if path.startswith("dynamic/"):
+        return "Dependabot updates (dynamic)"
+    return path.split("@")[0].removeprefix(".github/workflows/") or run["name"]
+
+
+def job_name(job: dict) -> str:
+    """A job's own name. Jobs in ci.yml's reusable lane workflows are reported as "<lane> / <job>";
+    dropping the lane keeps their history comparable with runs from before the lanes."""
+    return job["name"].split(" / ")[-1]
+
+
+def is_macos(job: dict) -> bool:
+    labels = " ".join(job.get("labels") or []).lower()
+    return "macos" in labels
+
+
+def ran(job: dict) -> bool:
+    """A job that got a runner. Cancelled-before-start jobs carry synthetic start times."""
+    return job.get("conclusion") != "skipped" and bool(job.get("runner_name") or job.get("runner_id"))
+
+
+def critical_path(runs_with_jobs: list[tuple[dict, list[dict]]]) -> list[dict]:
+    """Per CI job name: queue, run time and finish offset from run creation (minutes), and how often
+    it was the last substantive job to finish, i.e. the end of that run's critical path."""
+    per: dict[str, dict] = {}
+    for run, jobs in runs_with_jobs:
+        created = ts(run["created_at"])
+        finished = [j for j in jobs if ran(j) and j.get("completed_at")]
+        if not finished:
+            continue
+        # Aggregate gate jobs finish last but run for seconds; the path ends at the last real work.
+        work = [j for j in finished if (minutes(ts(j.get("started_at")), ts(j["completed_at"])) or 0) >= 1] or finished
+        last = job_name(max(work, key=lambda j: j["completed_at"]))
+        for job in finished:
+            started, completed = ts(job.get("started_at")), ts(job["completed_at"])
+            row = per.setdefault(job_name(job), {"queue": [], "run": [], "finish": [], "last": 0})
+            row["queue"].append(minutes(ts(job.get("created_at")), started))
+            row["run"].append(minutes(started, completed))
+            row["finish"].append(minutes(created, completed))
+            row["last"] += job_name(job) == last
+    table = [{"job": name, "n": len(row["finish"]), "last_to_finish": row["last"],
+              "queue_p50": pct(row["queue"], 50), "queue_p90": pct(row["queue"], 90),
+              "run_p50": pct(row["run"], 50), "run_p90": pct(row["run"], 90),
+              "finish_p50": pct(row["finish"], 50), "finish_p90": pct(row["finish"], 90)}
+             for name, row in per.items()]
+    return sorted(table, key=lambda r: -(r["finish_p90"] or 0))
+
+
+MARKER = re.compile(r"<!-- pre-pr-summary (\{.*?\}) -->")
+
+
+def pre_pr_record(body: str) -> dict | None:
+    """The newest scripts/pre-pr marker in a PR body, as the Pre-PR evidence check reads it."""
+    records = MARKER.findall(body or "")
+    try:
+        return json.loads(records[-1]) if records else None
+    except json.JSONDecodeError:
+        return None
+
+
+def escapes(ci_runs: list[dict], pr_for, body_of, tree_of) -> dict:
+    """CI Gate failures on pull-request and merge-batch heads, split by the head's pre-pr evidence.
+
+    An escape is a failure whose PR body held a passing pre-pr record for that exact head (by commit,
+    or by `tree` when pre-pr ran before the commit). Target: under 1% of gate failures.
+    """
+    failed = [r for r in ci_runs if r.get("conclusion") == "failure" and (
+        r["event"] == "pull_request" or (r["event"] == "push" and (r.get("head_branch") or "").startswith("merge-batch/")))]
+    counts = {"gate_failures": len(failed), "escaped": 0, "no_evidence": 0, "failing_or_stale_evidence": 0}
+    listed = []
+    for run in failed:
+        number = pr_for(run)
+        record = pre_pr_record(body_of(number)) if number else None
+        if not record:
+            counts["no_evidence"] += 1
+            continue
+        same = record.get("head") == run["head_sha"] or (record.get("tree") and record["tree"] == tree_of(run["head_sha"]))
+        if record.get("result") == "pass" and same:
+            counts["escaped"] += 1
+            listed.append({"pr": number, "run": run.get("html_url"), "head": run["head_sha"][:12]})
+        else:
+            counts["failing_or_stale_evidence"] += 1
+    counts["escape_rate"] = round(counts["escaped"] / len(failed), 4) if failed else None
+    counts["escapes"] = listed
+    return counts
+
+
+def github_escapes(ci_runs: list[dict]) -> dict:
+    bodies: dict[int, str] = {}
+
+    def pr_for(run: dict) -> int | None:
+        if run.get("pull_requests"):
+            return run["pull_requests"][0]
+        if run["event"] == "push":
+            owner = REPO.split("/")[0]
+            prs = gh_api(f"repos/{REPO}/pulls?state=all&head={owner}:{run['head_branch']}&per_page=1")
+            return prs[0]["number"] if prs else None
+        return None
+
+    def body_of(number: int) -> str:
+        if number not in bodies:
+            bodies[number] = gh_api(f"repos/{REPO}/pulls/{number}").get("body") or ""
+        return bodies[number]
+
+    return escapes(ci_runs, pr_for, body_of, lambda sha: gh_api(f"repos/{REPO}/git/commits/{sha}")["tree"]["sha"])
+
+
+REVERT_TRAILER = re.compile(r"^Auto-revert-of:\s*(.+)$", re.M)
+SOURCE_LINE = re.compile(r"^Source: ([0-9a-f]{40})$", re.M)
+MAIN_EVENTS = ("push", "workflow_dispatch")
+
+
+def main_red_minutes(main_runs: list[dict], start: dt.datetime, end: dt.datetime) -> dict:
+    """Minutes main was red: from a failed main run finishing to the next green one finishing."""
+    decided = sorted((r for r in main_runs if r.get("event") in MAIN_EVENTS and r.get("head_branch", "main") == "main"
+                      and r.get("conclusion") in ("success", "failure")), key=lambda r: r["updated_at"])
+    red_since, total, episodes = None, 0.0, 0
+    for run in decided:
+        done = min(max(ts(run["updated_at"]), start), end)
+        if run["conclusion"] == "failure" and red_since is None:
+            red_since, episodes = done, episodes + 1
+        elif run["conclusion"] == "success" and red_since is not None:
+            total += minutes(red_since, done) or 0
+            red_since = None
+    if red_since is not None:
+        total += minutes(red_since, end) or 0
+    window = minutes(start, end) or 1
+    return {"minutes": round(total), "episodes": episodes, "fraction": round(total / window, 4)}
+
+
+def alpha_broken(alphas: list[dict], ci_conclusion, reverts: list[dict], is_ancestor) -> dict:
+    """An Alpha is broken when its own main CI failed or it carried a commit that was later auto-reverted."""
+    broken = []
+    for alpha in alphas:
+        source = alpha["source"]
+        reverted = any(is_ancestor(culprit, source) and not is_ancestor(revert["merge"], source)
+                       for revert in reverts for culprit in revert["culprits"])
+        if ci_conclusion(source) == "failure" or reverted:
+            broken.append(alpha["tag"])
+    return {"published": len(alphas), "broken": len(broken), "broken_tags": broken,
+            "rate": round(len(broken) / len(alphas), 4) if alphas else None}
+
+
+def integration(prs: list[dict], ci_runs: list[dict], pr_detail, alphas: list[dict], is_ancestor,
+                incidents: int, start: dt.datetime, end: dt.datetime) -> dict:
+    """Integration speed and safety: ready -> merged, main red time, auto-reverts, broken Alphas, incidents."""
+    first_pr_run: dict[str, dt.datetime] = {}
+    for run in ci_runs:
+        if run["event"] == "pull_request" and run.get("head_sha"):
+            created = ts(run["created_at"])
+            first_pr_run[run["head_sha"]] = min(created, first_pr_run.get(run["head_sha"], created))
+    ready, reverts, no_record = [], [], 0
+    for pr in prs:
+        labels = {label["name"] for label in pr.get("labels", [])}
+        detail = pr_detail(pr["number"])
+        if "auto-revert" in labels:
+            culprits = [sha for match in REVERT_TRAILER.findall(detail.get("body") or "") for sha in match.split()]
+            reverts.append({"pr": pr["number"], "merge": detail.get("merge_commit_sha"), "culprits": culprits})
+            continue
+        record = pre_pr_record(detail.get("body") or "")
+        head = (detail.get("head") or {}).get("sha")
+        if not record or record.get("result") != "pass" or head not in first_pr_run:
+            no_record += 1
+            continue
+        ready.append(minutes(first_pr_run[head], ts(pr["pull_request"]["merged_at"])))
+    latest: dict[str, dict] = {}
+    for run in ci_runs:
+        if run["event"] in MAIN_EVENTS and run.get("status") == "completed" and run.get("head_sha"):
+            if run["head_sha"] not in latest or run["created_at"] > latest[run["head_sha"]]["created_at"]:
+                latest[run["head_sha"]] = run
+    return {
+        "ready_to_merged_minutes": {**summary(ready), "without_record": no_record},
+        "main_red": main_red_minutes(ci_runs, start, end),
+        "auto_reverts": len(reverts),
+        "auto_revert_prs": [r["pr"] for r in reverts],
+        "alpha": alpha_broken(alphas, lambda sha: (latest.get(sha) or {}).get("conclusion"), reverts, is_ancestor),
+        "user_facing_incidents": incidents,
+    }
+
+
+def github_integration(prs: list[dict], ci_runs: list[dict], since: dt.date, until: dt.date) -> dict:
+    start = dt.datetime.combine(since, dt.time(), dt.timezone.utc)
+    end = min(dt.datetime.combine(until, dt.time(), dt.timezone.utc), dt.datetime.now(dt.timezone.utc))
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        details = dict(zip((p["number"] for p in prs), pool.map(lambda p: gh_api(f"repos/{REPO}/pulls/{p['number']}"), prs)))
+    alphas = []
+    for page in gh_api(f"repos/{REPO}/releases?per_page=100", paginate=True):
+        for release in page:
+            published = ts(release.get("published_at"))
+            source = SOURCE_LINE.search(release.get("body") or "")
+            if (release["tag_name"].startswith("alpha-build-") and not release.get("draft") and published
+                    and start <= published < end and source):
+                alphas.append({"tag": release["tag_name"], "source": source.group(1)})
+
+    def is_ancestor(a: str | None, b: str) -> bool:
+        return bool(a) and subprocess.run(["git", "merge-base", "--is-ancestor", a, b],
+                                          capture_output=True).returncode == 0
+
+    query = (f"repo:{REPO} is:issue label:user-facing-incident "
+             f"created:{since.isoformat()}..{(until - dt.timedelta(days=1)).isoformat()}")
+    incidents = gh_api(f"search/issues?per_page=1&q={query.replace(' ', '+')}").get("total_count", 0)
+    return integration(prs, ci_runs, details.__getitem__, alphas, is_ancestor, incidents, start, end)
+
+
+def compute(args: argparse.Namespace) -> dict:
+    until = args.until or (dt.date.today() + dt.timedelta(days=1))
+    since = args.since or (until - dt.timedelta(days=args.days))
+    runs = list_runs(since, until, args.refresh)
+    prs = list_merged_prs(since, until)
+    zombie_runs = list_zombies()
+
+    per_workflow: dict[str, dict] = {}
+    for run in runs:
+        stats = per_workflow.setdefault(workflow_label(run), {"runs": 0, "success": 0, "failure": 0, "cancelled": 0,
+                                                      "pr_cancelled": 0, "wall_minutes": 0.0})
+        stats["runs"] += 1
+        conclusion = run.get("conclusion") or "in_progress"
+        if conclusion in ("success", "failure", "cancelled"):
+            stats[conclusion] += 1
+        if conclusion == "cancelled" and run["event"] == "pull_request":
+            stats["pr_cancelled"] += 1
+        stats["wall_minutes"] += minutes(ts(run.get("run_started_at")), ts(run.get("updated_at"))) or 0
+
+    ci_runs = [r for r in runs if r.get("path") == CI_PATH]
+    escape = (args.escapes or github_escapes)(ci_runs)
+    flow = (getattr(args, "integration", None) or github_integration)(prs, ci_runs, since, until)
+    ci_pr = [r for r in ci_runs if r["event"] == "pull_request"]
+    ci_success = [minutes(ts(r.get("run_started_at")), ts(r.get("updated_at")))
+                  for r in ci_pr if r.get("conclusion") == "success"]
+
+    gate, queue, job_minutes = [], [], {"macos": 0.0, "other": 0.0}
+    # Job data comes from CI runs only: the required gate lives there and its
+    # macOS jobs dominate the shared hosted queue.
+    sampled = sorted((r for r in ci_runs if r.get("status") == "completed"),
+                     key=lambda r: r["created_at"], reverse=True)[: args.max_job_runs]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        sampled_jobs = list(zip(sampled, pool.map(run_jobs, sampled)))
+    for run, jobs in sampled_jobs:
+        created = ts(run["created_at"])
+        for job in jobs:
+            started, completed = ts(job.get("started_at")), ts(job.get("completed_at"))
+            if not ran(job):
+                continue
+            duration = minutes(started, completed) or 0
+            job_minutes["macos" if is_macos(job) else "other"] += duration
+            if is_macos(job):
+                queue.append(minutes(ts(job.get("created_at")), started))
+        if run["event"] == "pull_request" and run.get("conclusion") == "success":
+            required = [ts(j["completed_at"]) for j in jobs
+                        if job_name(j) in REQUIRED_CHECKS and j.get("completed_at")]
+            if required:
+                gate.append(minutes(created, max(required)))
+
+    failures = sum(s["failure"] for s in per_workflow.values())
+    cancelled_pr = sum(s["pr_cancelled"] for s in per_workflow.values())
+    ci_main_all = [r for r in ci_runs if r["event"] == "push" and r.get("status") == "completed"]
+    ci_main = [r for r in ci_main_all if r.get("conclusion") in ("success", "failure")]
+    open_to_merge = {k: (v / 60 if isinstance(v, float) else v) for k, v in summary(
+        [minutes(ts(p["created_at"]), ts(p["pull_request"]["merged_at"])) for p in prs]).items()}
+    main_failure_rate = (round(sum(r["conclusion"] == "failure" for r in ci_main) / len(ci_main), 4)
+                         if ci_main else None)
+    main_cancel_rate = (round(sum(r.get("conclusion") == "cancelled" for r in ci_main_all) / len(ci_main_all), 4)
+                        if ci_main_all else None)
+    pr_cancel_rate = (round(sum(r.get("conclusion") == "cancelled" for r in ci_pr) / len(ci_pr), 4)
+                      if ci_pr else None)
+    return {
+        "repo": REPO,
+        "window": {"since": since.isoformat(), "until": until.isoformat()},
+        "scorecard": {
+            "pr_open_to_merge_hours_p50": open_to_merge["p50"], "pr_open_to_merge_hours_p90": open_to_merge["p90"],
+            "merged_prs": open_to_merge["n"],
+            "required_gate_minutes_p50": pct(gate, 50), "required_gate_minutes_p90": pct(gate, 90),
+            "main_failure_rate": main_failure_rate, "main_runs_judged": len(ci_main),
+            "main_cancel_rate": main_cancel_rate, "ci_pr_cancel_rate": pr_cancel_rate,
+            "zombie_runs": len(zombie_runs),
+            "pre_pr_escape_rate": escape["escape_rate"], "gate_failures": escape["gate_failures"],
+            "ready_to_merged_minutes_p50": flow["ready_to_merged_minutes"]["p50"],
+            "ready_to_merged_minutes_p90": flow["ready_to_merged_minutes"]["p90"],
+            "main_red_minutes": flow["main_red"]["minutes"], "main_red_fraction": flow["main_red"]["fraction"],
+            "auto_reverts": flow["auto_reverts"], "alpha_broken_rate": flow["alpha"]["rate"],
+            "user_facing_incidents": flow["user_facing_incidents"],
+        },
+        "integration": flow,
+        "pr_open_to_merge_hours": open_to_merge,
+        "ci_pr_success_minutes": summary(ci_success),
+        "required_gate_minutes": summary(gate),
+        "critical_path": critical_path(sampled_jobs),
+        "zombie_runs": zombie_runs,
+        "pre_pr_escapes": escape,
+        "macos_queue_minutes": summary(queue),
+        "job_minutes_sampled": {k: round(v) for k, v in job_minutes.items()},
+        "sampled_job_runs": len(sampled),
+        "runs": len(runs),
+        "failed_runs": failures,
+        "pr_runs_cancelled": cancelled_pr,
+        "failure_rate": round(failures / len(runs), 4) if runs else None,
+        "ci_pr_runs": len(ci_pr),
+        "ci_pr_cancelled": sum(r.get("conclusion") == "cancelled" for r in ci_pr),
+        "ci_pr_failed": sum(r.get("conclusion") == "failure" for r in ci_pr),
+        "ci_main_failure_rate": main_failure_rate,
+        "workflows": dict(sorted(per_workflow.items(), key=lambda kv: -kv[1]["wall_minutes"])),
+    }
+
+
+def fmt(value) -> str:
+    return "—" if value is None else (f"{value:.1f}" if isinstance(value, float) else str(value))
+
+
+def rate(value) -> str:
+    return "—" if value is None else f"{value * 100:.1f}%"
+
+
+def render(data: dict) -> str:
+    card = data["scorecard"]
+    lines = [f"# CI metrics for {data['repo']} ({data['window']['since']} → {data['window']['until']}, exclusive)", "",
+             "## Scorecard", "",
+             f"- PR open → merge: p50 {fmt(card['pr_open_to_merge_hours_p50'])} h, "
+             f"p90 {fmt(card['pr_open_to_merge_hours_p90'])} h ({card['merged_prs']} merged PRs)",
+             f"- Required gate: p50 {fmt(card['required_gate_minutes_p50'])} min, "
+             f"p90 {fmt(card['required_gate_minutes_p90'])} min",
+             f"- Main CI failure rate: {rate(card['main_failure_rate'])} of {card['main_runs_judged']} decided runs; "
+             f"main cancelled {rate(card['main_cancel_rate'])}; PR CI cancelled {rate(card['ci_pr_cancel_rate'])}",
+             f"- Zombie runs (unfinished after {ZOMBIE_HOURS} h): {card['zombie_runs']}",
+             f"- Pre-PR escape rate: {rate(card['pre_pr_escape_rate'])} of {card['gate_failures']} PR/batch CI "
+             f"failures had a passing scripts/pre-pr record for that head (target < 1%); "
+             f"{data['pre_pr_escapes']['no_evidence']} had none, "
+             f"{data['pre_pr_escapes']['failing_or_stale_evidence']} a failing or stale one",
+             f"- Ready → merged: p50 {fmt(card['ready_to_merged_minutes_p50'])} min, "
+             f"p90 {fmt(card['ready_to_merged_minutes_p90'])} min "
+             f"({data['integration']['ready_to_merged_minutes']['n']} PRs; "
+             f"{data['integration']['ready_to_merged_minutes']['without_record']} without a passing pre-pr record)",
+             f"- Main red: {card['main_red_minutes']} min ({rate(card['main_red_fraction'])} of the window, "
+             f"{data['integration']['main_red']['episodes']} episodes); auto-reverts: {card['auto_reverts']}",
+             f"- Broken Alphas: {rate(card['alpha_broken_rate'])} of {data['integration']['alpha']['published']} "
+             f"published (target ≤ 10%); user-facing incidents: {card['user_facing_incidents']} (target 0)", "",
+             "| Metric | n | p50 | p90 |", "|---|---|---|---|"]
+    for key, label in (("pr_open_to_merge_hours", "PR open → merge (h)"),
+                       ("ci_pr_success_minutes", "CI workflow, successful PR runs (min)"),
+                       ("required_gate_minutes", "Required gate, run created → last required check (min)"),
+                       ("macos_queue_minutes", "macOS job queue (min)")):
+        row = data[key]
+        lines.append(f"| {label} | {row['n']} | {fmt(row['p50'])} | {fmt(row['p90'])} |")
+    lines += ["", f"CI PR runs: {data['ci_pr_runs']} · cancelled: {data['ci_pr_cancelled']} · "
+              f"failed: {data['ci_pr_failed']} · main push failure rate: {rate(data['ci_main_failure_rate'])}",
+              f"Runs: {data['runs']} · failed: {data['failed_runs']} · "
+              f"PR runs cancelled: {data['pr_runs_cancelled']} · failure rate: {rate(data['failure_rate'])}",
+              f"Job minutes over {data['sampled_job_runs']} sampled runs: macOS {data['job_minutes_sampled']['macos']}, "
+              f"other {data['job_minutes_sampled']['other']}", "",
+              "| Workflow | runs | failed | cancelled (PR) | wall min |", "|---|---|---|---|---|"]
+    for name, stats in data["workflows"].items():
+        lines.append(f"| {name} | {stats['runs']} | {stats['failure']} | {stats['cancelled']} ({stats['pr_cancelled']}) "
+                     f"| {round(stats['wall_minutes'])} |")
+    lines += ["", f"## CI critical path ({data['sampled_job_runs']} sampled runs, slowest finish first)", "",
+              "| Job | n | last to finish | queue p50/p90 | run p50/p90 | finish p50/p90 (min) |",
+              "|---|---|---|---|---|---|"]
+    for row in data["critical_path"][:15]:
+        lines.append(f"| {row['job']} | {row['n']} | {row['last_to_finish']} | {fmt(row['queue_p50'])}/"
+                     f"{fmt(row['queue_p90'])} | {fmt(row['run_p50'])}/{fmt(row['run_p90'])} | "
+                     f"{fmt(row['finish_p50'])}/{fmt(row['finish_p90'])} |")
+    lines += ["", f"## Zombie runs ({len(data['zombie_runs'])})", ""]
+    if data["zombie_runs"]:
+        lines += ["| Workflow | status | branch | age (h) | run |", "|---|---|---|---|---|"]
+        lines += [f"| {z['workflow']} | {z['status']} | {z['branch']} | {z['age_hours']} | {z['url']} |"
+                  for z in data["zombie_runs"]]
+    else:
+        lines.append("None.")
+    return "\n".join(lines)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--days", type=int, default=30)
+    parser.add_argument("--since", type=dt.date.fromisoformat)
+    parser.add_argument("--until", type=dt.date.fromisoformat)
+    parser.add_argument("--max-job-runs", type=int, default=300,
+                        help="newest completed CI runs whose jobs are fetched (default 300)")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--refresh", action="store_true", help="refetch run lists instead of using the cache")
+    parser.set_defaults(escapes=None, integration=None)
+    args = parser.parse_args()
+    data = compute(args)
+    print(json.dumps(data, indent=2) if args.json else render(data))
+
+
+if __name__ == "__main__":
+    main()

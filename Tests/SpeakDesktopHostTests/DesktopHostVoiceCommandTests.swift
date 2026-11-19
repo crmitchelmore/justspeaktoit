@@ -15,7 +15,7 @@ final class DesktopHostVoiceCommandTests: XCTestCase {
         DesktopHostModels.configure(streamingQualified: true)
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-command-\(UUID())")
         effects = VoiceCommandEffects()
-        controller = try DesktopHostController(directory: directory, effects: effects)
+        controller = try DesktopHostController.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         batchIndex = try XCTUnwrap(DesktopHostModels.all.firstIndex {
             DesktopTranscription.provider(for: $0.id) != nil

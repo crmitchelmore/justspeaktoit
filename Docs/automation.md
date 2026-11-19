@@ -23,6 +23,8 @@ directly between them:
 | history | Get Last Transcription | `speak history` | `get_history` |
 | say | — | `speak say <text>` | `speak_text` |
 | voices | — | `speak voices` | `list_voices` |
+| config get | — | `speak config get [<key>...] [--prefix <p>]` | `get_configuration` |
+| config set | — | `speak config set <key=value>... [--dry-run]` | `set_configuration` |
 | polish | Polish Text | — | — |
 
 ## Named local capture await (qualification pending)
@@ -77,6 +79,22 @@ configured in the app — nothing is duplicated.
 | Transcribe Audio File | Yes | Yes | Transcript text |
 | Get Last Transcription | Yes | Yes | Most recent history entry (polished text preferred) |
 | Polish Text | Yes | Yes | Cleaned-up (or custom-prompt-processed) text |
+
+Which iOS recording action to use (also shown in **Settings → Recording &
+Shortcuts → Action Button & Shortcuts**):
+
+| Action | Use it for |
+| --- | --- |
+| **Toggle Recording** | One button that starts, then stops. Recommended for Back Tap, widgets and Siri. |
+| **Start Recording** + **Stop Recording** | Separate start and stop buttons. Neither returns text. |
+| **Dictate** | Records until you pause and returns the text to the next action. |
+| **Stop Dictation and Get Text** | Stops a recording and returns the text to the next action. |
+
+The **Transcribe Voice** control (Control Center, Lock Screen, Action Button) is
+the Control version of Toggle Recording. Its action appears in Shortcuts as
+"Transcribe Voice Control" (formerly "Toggle Transcription"); use Toggle
+Recording in your own shortcuts. "Copy Last Transcript" is the Live Activity's
+copy button; use Copy Full Transcript or Get Last Transcription instead.
 
 Notes:
 
@@ -331,6 +349,8 @@ speak say [<text>... | -f <file> | -] [-o <file>] [--play] [--json] [--timeout <
           [--provider <id>] [--model <id>] [--voice <id|name>]
           [--speed <n>] [--pitch <semitones>] [--quality <q>] [--language <id>]
 speak voices [--provider <id>] [--json]
+speak config get [<key>...] [--prefix <prefix>] [--json]
+speak config set <key=value>... [--dry-run] [--json]
 speak status [--json]
 speak mcp
 speak --help | --version
@@ -341,6 +361,8 @@ speak --help | --version
 `speak say` speaks text with the running app's own voices, keys,
 pronunciation dictionary and speed/pitch settings. The CLI still holds no
 credentials and no provider code; it sends the text and the app synthesizes it.
+`say` and `voices` first shipped in Alpha 3.2.0 (alpha-build-77); a Stable app
+or Homebrew CLI without them answers `Unknown command "say"`.
 
 - **Text** comes from the arguments, from `-f <file>` (UTF-8), or from standard
   input when neither is given (or with `-`). Use `--` before text that starts
@@ -355,7 +377,8 @@ credentials and no provider code; it sends the text and the app synthesizes it.
     the selected voice if it offers that model, else the first voice that does.
   - `--voice <id|name>` — a voice ID or display name (`openai/alloy`, `Daniel`).
     `--voice system` forces the on-device voice.
-  - `--speed <n>` (1 is normal), `--pitch <semitones>` (whole numbers, −12 to
+  - `--speed <n>` (1 is normal; on the system voice the scale is not linear,
+    so 1.25 is roughly 1.7× and 2 roughly 3.5× normal), `--pitch <semitones>` (whole numbers, −12 to
     12), `--quality standard|high|highest` and `--language <id>` (`automatic`
     or an ID such as `en_US`; `en-US` also works).
 
@@ -378,7 +401,9 @@ credentials and no provider code; it sends the text and the app synthesizes it.
 - **Output**: with no `-o`, the speech plays aloud and the command returns when
   it finishes. `-o <file>` writes `.wav`, `.mp3` or `.m4a` (chosen by the
   extension) without playing; add `--play` to do both. An existing file is
-  replaced only once the new audio is complete.
+  replaced only once the new audio is complete. The file holds the whole text:
+  if the system voice stops early, `say` fails with `speech_failed` rather
+  than returning a partial file.
 - **Platforms**: the Windows and Linux apps have no on-device voice yet, so
   with no configured voice `speak say` fails with `unsupported_command` there
   rather than guessing a paid voice; `--voice system` fails the same way. They encode MP3
@@ -513,9 +538,69 @@ of the client's PATH (replace `<you>` with your user name, or use
 | `await_transcript` | `capture_id` (required), `since_id`, `timeout_seconds` (>0–600; default 60) | Exact successful local capture and frozen History entry |
 | `speak_text` | `text` (required), `provider`, `model`, `voice`, `speed`, `pitch`, `quality`, `language`, `path`, `play`, `timeout_seconds` | Voice and model used and the file written, once playback has finished |
 | `list_voices` | `provider` | Providers, voices and models `speak_text` can use, marking the app's voice |
+| `get_configuration` | `keys`, `prefix` | Current settings, their schema (type, default, allowed values or range, platforms) and which API keys are stored |
+| `set_configuration` | `changes` (required object), `dry_run` | What changed or would change, ignored keys and warnings |
 
 Every tool also returns `structuredContent` with the same fields as the CLI's
 `--json` `data` object.
+
+### Settings (`speak config`, `get_configuration`, `set_configuration`)
+
+The app's settings are described by one shared schema in SpeakCore
+(`Sources/SpeakCore/SettingsConfiguration/`): each key's type, default, allowed
+values or range, platforms, and whether it is read-only or sensitive. The same
+document backs Settings › General › Advanced › **Edit raw configuration** on
+the Mac. Windows and Linux (#1608) serve the same tools through `speak` and MCP
+with their own field list, derived from the portable desktop preferences
+(`SettingsSchema+Desktop.swift`), so the keys there are the desktop preference
+names (`showHUD`, `preferredLocale`, `holdThreshold`). `get_configuration`
+reports which schema the host uses in `platform`. Their Preferences › General ›
+**Edit raw configuration** window (#1670) edits the same document through
+`DesktopHostRawConfiguration.swift`, needs no automation grant, and keeps
+read-only keys with a warning.
+The iPhone has no automation server, but Settings › General › **Edit raw
+configuration** edits, validates, imports and exports the same document format
+over its own field list (`SettingsSchema+iOS.swift`, keyed by the iOS settings
+names such as `selectedModel` and `hardwareTriggerDestination`). It includes
+the Read aloud settings (`ttsProvider`, `ttsModel`, `ttsVoice`, `ttsSpeed`,
+`ttsLanguageIdentifier`, `sonioxTTSRegion`), which the iPhone has no Settings
+page for yet; the provider, model, voice and speed must form one selection the
+shared voice catalogues accept. Android has
+no automation server either; Settings › **Edit raw configuration** does the same
+over `SettingsSchema+Android.swift` (keyed by its preference names such as
+`cloud_model` and `history_retention`, plus the shared `appearance`,
+`recordingSound*`, `silence*` and `autoCorrections*` keys) and refuses to apply
+while dictating.
+
+- **Reading** works whenever automation is on. `get_configuration` returns
+  `settings`, `apiKeys` and `schema`; narrow it with `keys` or `prefix`.
+  API keys are never returned, only whether each is stored (`apiKeys.openai:
+  true`).
+- **Writing** needs a second opt-in: Settings › General › Automation › **Allow
+  automation to change settings** on the Mac, or Preferences › General ›
+  **Allow automation to change settings** on Windows and Linux. Without it
+  `set_configuration` fails with `unsupported_command`, but `dry_run: true`
+  still validates. A preferences import never turns it on; the computer's own
+  choice is kept. Windows and Linux refuse a write while dictation is running.
+- Changes are validated together (type, range, allowed values, model IDs in
+  the shared catalogue, and cross-field rules such as Auto-Clean needing a
+  live model that supports it) and applied **all or none**. Every invalid key
+  is reported with its `settings.<key>` path, and nothing changes.
+- Read-only keys (`analyticsEnabled`, `selectedHotKey`, `enableAutomationServer`,
+  `allowAutomationConfigurationChanges`) change only in the app. Keys another
+  platform owns are accepted, reported in `ignoredKeys` and not applied. On
+  Windows and Linux a Modulate feature key that is absent uses the provider
+  default.
+- `speak config set` parses each value as JSON when it can and falls back to a
+  string, so `ttsSpeed=1.2`, `showCompactHUD=false` and
+  `postProcessingModel=openai/gpt-4o-mini` all work; quote JSON arrays and
+  objects for the shell.
+
+```sh
+speak config get --prefix tts
+speak config set ttsSpeed=1.2 showCompactHUD=true --dry-run
+speak config set ttsSpeed=1.2 showCompactHUD=true
+```
 
 ### Behaviour worth knowing
 

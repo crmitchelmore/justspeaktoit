@@ -53,7 +53,7 @@ Replace `SPARKLE_PUBLIC_KEY_PLACEHOLDER` with your actual public key.
 
 ### App Side
 - `UpdaterManager.swift` - Manages Sparkle's `SPUUpdater`
-- `SpeakApp.swift` - Adds "Check for Updates…" menu item
+- `SpeakCommands.swift` - Adds the "Check for Updates…" menu item (`CheckForUpdatesView.swift`)
 - Info.plist contains `SUFeedURL` pointing to `https://justspeaktoit.com/appcast.xml`
 
 ### Release Workflow

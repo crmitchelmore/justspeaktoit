@@ -46,7 +46,8 @@ private struct MigrationContentView: View {
                                     controller.exportCategories.insert(category)
                                 } else {
                                     controller.exportCategories.remove(category)
-                                } }
+                                }
+                            }
                         ))
                     }
                     Text("Models include names and download sources, never model files or runtimes.")
@@ -134,7 +135,8 @@ private struct MigrationContentView: View {
             .font(.caption).foregroundStyle(.secondary)
         }
         .sheet(isPresented: $controller.showingModelDownloads) {
-            MigrationModelDownloadsView(controller: controller) }
+            MigrationModelDownloadsView(controller: controller)
+        }
         .disabled(controller.busy)
         .confirmationDialog(
             "This export contains API keys and credentials",

@@ -1,6 +1,7 @@
 #if os(Windows)
 import Foundation
 import SpeakCore
+import CWindowsSelfTest
 import CWindowsSupport
 import XCTest
 @testable import SpeakWindowsPlatform

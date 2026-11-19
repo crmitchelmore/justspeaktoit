@@ -15,6 +15,17 @@ import org.junit.Test
 class DictationReducerTest {
     private val mode = RecognitionMode.OnDevice
 
+    @Test
+    fun testFinishingRecogniser_keepsTheMicrophoneUntilItsResultOrCancel() {
+        val finishing = run(Start(mode), Ready, Partial("hi"), StopRequested)
+        assertTrue(finishing is DictationState.Finishing)
+        assertTrue(finishing.holdsMicrophone)
+        assertTrue(DictationState.Finishing(RecognitionMode.SpeechService, "").holdsMicrophone)
+        assertFalse(DictationState.Finishing(RecognitionMode.Cloud, "").holdsMicrophone)
+        assertFalse(DictationReducer.reduce(finishing, Final("hi")).holdsMicrophone)
+        assertFalse(DictationReducer.reduce(finishing, Cancelled).holdsMicrophone)
+    }
+
     private fun run(vararg events: DictationEvent): DictationState =
         events.fold(DictationState.Idle as DictationState, DictationReducer::reduce)
 

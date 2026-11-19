@@ -79,106 +79,22 @@ public enum LinuxSignInPage {
     }
 }
 
-/// A 127.0.0.1-only HTTP listener: the Apple ID sign-in callback, and the
-/// loopback fake server in tests. A connection that sends no complete request
-/// within `requestWindow` is dropped, so an idle browser preconnection cannot
-/// hold the callback. Each request reports which user's process sent it, so
-/// the callback can refuse other accounts on this computer.
-public final class LinuxLoopbackListener: DesktopLoopbackListener, @unchecked Sendable {
-    public struct Connection: DesktopLoopbackRequest, @unchecked Sendable {
-        fileprivate let handle: OpaquePointer
+/// The sign-in callback listener (`DesktopNativeLoopbackListener`) over
+/// LinuxCloudSync.c, whose peer owner comes from /proc/net/tcp and tcp6.
+public typealias LinuxLoopbackListener = DesktopNativeLoopbackListener
 
-        public var request: Data {
-            var count = 0
-            guard let bytes = jsti_loopback_request(handle, &count) else { return Data() }
-            return Data(bytes: bytes, count: count)
-        }
+extension DesktopNativeLoopback {
+    public static let linux = DesktopNativeLoopback(
+        listen: jsti_loopback_listen, accept: jsti_loopback_accept, request: jsti_loopback_request,
+        peerOwner: jsti_loopback_peer_owner, respond: jsti_loopback_respond,
+        destroyConnection: jsti_loopback_connection_destroy, cancel: jsti_loopback_cancel,
+        destroy: jsti_loopback_destroy,
+        failure: { LinuxNativeError(message: $0) }
+    )
+}
 
-        /// The request line and header fields.
-        public var head: DesktopLoopbackRequestHead? { DesktopLoopbackRequestHead(parsing: request) }
-
-        /// Whose process connected, from the kernel's TCP tables. Read while
-        /// the connection is open, before `respond`.
-        public var peer: DesktopLoopbackPeer {
-            switch jsti_loopback_peer_owner(handle) {
-            case 0: return .currentUser
-            case 1: return .otherUser
-            default: return .unknown
-            }
-        }
-
-        /// Writes a complete response and closes the connection.
-        public func respond(_ bytes: Data) {
-            _ = bytes.withUnsafeBytes {
-                jsti_loopback_respond(handle, $0.bindMemory(to: UInt8.self).baseAddress, $0.count)
-            }
-            jsti_loopback_connection_destroy(handle)
-        }
-    }
-
-    private let lock = NSLock()
-    private var handle: OpaquePointer?
-    public let port: UInt16
-
-    public init(port: UInt16 = 0, requestWindow: Duration = .seconds(5)) throws {
-        var bound: UInt16 = 0
-        var error = [CChar](repeating: 0, count: 512)
-        guard let handle = jsti_loopback_listen(
-            port, Self.milliseconds(requestWindow), &bound, &error, error.count
-        ) else {
-            throw LinuxNativeError(message: String(cString: error))
-        }
-        self.handle = handle
-        self.port = bound
-    }
-
-    /// Waits off the calling thread for one complete request.
-    public func nextRequest(within timeout: Duration) async throws -> Connection? {
-        let milliseconds = Self.milliseconds(timeout)
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                DispatchQueue.global(qos: .utility).async {
-                    continuation.resume(with: self.acceptNow(milliseconds))
-                }
-            }
-        } onCancel: {
-            self.cancel()
-        }
-    }
-
-    private func acceptNow(_ milliseconds: Int32) -> Result<Connection?, Error> {
-        guard let handle = lock.withLock({ handle }) else { return .failure(CancellationError()) }
-        var connection: OpaquePointer?
-        var error = [CChar](repeating: 0, count: 512)
-        switch jsti_loopback_accept(handle, milliseconds, &connection, &error, error.count) {
-        case 0:
-            guard let connection else { return .failure(LinuxNativeError(message: "No connection.")) }
-            return .success(Connection(handle: connection))
-        case 1: return .success(nil)
-        case 3: return .failure(CancellationError())
-        default: return .failure(LinuxNativeError(message: String(cString: error)))
-        }
-    }
-
-    /// Ends a waiting `nextRequest` with `CancellationError`, and every later one.
-    public func cancel() {
-        lock.withLock { if let handle { jsti_loopback_cancel(handle) } }
-    }
-
-    /// Stops listening. Only after every `nextRequest` has returned.
-    public func close() {
-        lock.withLock {
-            if let handle { jsti_loopback_destroy(handle) }
-            handle = nil
-        }
-    }
-
-    deinit { close() }
-
-    private static func milliseconds(_ duration: Duration) -> Int32 {
-        let (seconds, attoseconds) = duration.components
-        let total = seconds.multipliedReportingOverflow(by: 1_000)
-        guard !total.overflow else { return seconds < 0 ? 0 : Int32.max }
-        return Int32(clamping: max(0, total.partialValue + attoseconds / 1_000_000_000_000_000))
+extension DesktopNativeLoopbackListener {
+    public convenience init(port: UInt16 = 0, requestWindow: Duration = .seconds(5)) throws {
+        try self.init(native: .linux, port: port, requestWindow: requestWindow)
     }
 }

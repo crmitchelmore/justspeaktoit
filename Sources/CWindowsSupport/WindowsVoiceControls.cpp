@@ -34,7 +34,7 @@ struct Dialog {
     UINT dpi = 96;
     bool saving = false;
 };
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 std::wstring speedCaption(const Options &options) {
     std::wostringstream stream; stream.imbue(std::locale::classic());
     stream << std::setprecision(15) << L"&Speed (" << options.minimumSpeed << L" to " << options.maximumSpeed << L")";
@@ -94,11 +94,7 @@ bool save(HWND window, Dialog &dialog) {
     return true;
 }
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
+    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
     LRESULT themed = 0;
     if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
@@ -113,8 +109,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             if (child) SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(dialog->font), TRUE);
             return child != nullptr;
         };
-        dialog->font = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        dialog->font = jsti::chrome::dialogFont(window);
         if (!add(L"STATIC", dialog->options.voice.c_str(), SS_LEFT, 980, 20, 18, 450, 36) ||
             !add(L"STATIC", speedCaption(dialog->options).c_str(), 0, speedLabel, 20, 65, 250, 24) ||
             !add(L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, speedID, 300, 60, 150, 34) ||

@@ -178,8 +178,8 @@ final class SyncRecordCodecTests: XCTestCase {
 
     func testContainerFamiliesReadTheReleaseTrainCatalogue() throws {
         for train in ReleaseTrain.allCases {
-            XCTAssertEqual(SyncContainerFamily.macOS.containerIdentifier(in: train), train.macCloudContainer)
-            XCTAssertEqual(SyncContainerFamily.iOS.containerIdentifier(in: train), train.iosCloudContainer)
+            XCTAssertEqual(SyncContainerFamily.macOS.containerIdentifier(in: train), train.cloudContainer)
+            XCTAssertEqual(SyncContainerFamily.iOS.containerIdentifier(in: train), train.legacyIOSCloudContainer)
             for family in SyncContainerFamily.allCases {
                 XCTAssertNoThrow(try CloudKitWebServicesConfiguration(
                     family: family,

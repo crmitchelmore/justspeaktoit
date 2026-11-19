@@ -136,14 +136,17 @@ test('native setup requires preinstalled Tuist and never invokes Homebrew', t =>
 
 test('CI preserves the selected Xcode and validates helper changes through both release path gates', () => {
   const source = workflow('ci');
-  const calls = steps(source).filter(step => step.uses === helper);
+  // ci.yml's iOS lane (ci-ios.yml) builds the test products and the keyboard and watch apps.
+  const calls = steps(workflow('ci-ios')).filter(step => step.uses === helper);
   assert.equal(calls.length, 2);
   for (const call of calls) assert.deepEqual(call.inputs, { 'install-tuist': 'true' });
   const filters = source.slice(source.indexOf('          filters: |'), source.indexOf('      - name: Select gate outputs'));
   for (const section of filters.split(/^            (?:package|core-journey):$/m).slice(1)) {
     assert.ok(section.includes("- '.github/actions/setup-apple-toolchain/**'"));
   }
-  assert.doesNotMatch(source, /github\.event\.number == 1038|JSTI_MAC_RUNNER/);
+  for (const name of ['ci', 'ci-macos-debug', 'ci-macos-release', 'ci-ios', 'ci-journey-ui']) {
+    assert.doesNotMatch(workflow(name), /github\.event\.number == 1038|JSTI_MAC_RUNNER/, name);
+  }
   const device = workflow('ios-device-matrix');
   assert.doesNotMatch(device, /uses: \.\/\.github\/actions\/setup-apple-toolchain/);
   assert.match(device, /TUIST_PINNED_VERSION: "4\.207\.0"/);

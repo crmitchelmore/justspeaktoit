@@ -4,11 +4,10 @@ import copy
 import hashlib
 import io
 import json
-from pathlib import Path
 import struct
 import warnings
 import zipfile
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "Tests" / "SpeakTestSupport" / "MigrationArchiveFixtures"

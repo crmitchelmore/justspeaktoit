@@ -5,7 +5,8 @@ import XCTest
 /// catalogue hides them. Saved selections move only to a verified equivalent;
 /// otherwise requests fail with an actionable error until the user chooses.
 final class ModelRetirementTests: XCTestCase {
-    private let transcription = ModelRetirements.all.filter { $0.mode != .speech }
+    private let transcription = ModelRetirements.all.filter { $0.mode == .batch || $0.mode == .live }
+    private let cleanup = ModelRetirements.all.filter { $0.mode == .postProcessing }
     private let beforeAll = ModelRetirement.utcDate("2026-11-01")!
 
     private func catalogue(for mode: ModelRetirement.Mode) -> [ModelCatalog.Option] {
@@ -79,6 +80,24 @@ final class ModelRetirementTests: XCTestCase {
                 XCTAssertTrue(error.localizedDescription.contains("Choose another model in Settings"), id)
             }
         }
+    }
+
+    func testRetiringCleanupModels_areRemovedAndMoveImmediately() {
+        // Superseded cleanup models leave the catalogue at once (CleanupModelRemovals),
+        // so none waits for its shutdown day.
+        XCTAssertTrue(cleanup.isEmpty)
+        let today = Date()
+        for (id, successor) in [
+            "openai/gpt-5-mini": "openai/gpt-6-luna",
+            "openai/gpt-5.4-nano": "openai/gpt-6-luna",
+            "native/openai/gpt-5-mini": "native/openai/gpt-6-luna",
+            "native/groq/llama-3.1-8b-instant": "native/groq/openai/gpt-oss-20b"
+        ] {
+            XCTAssertFalse(ModelCatalog.postProcessing.contains { $0.id == id }, id)
+            XCTAssertEqual(ModelCatalog.normalizedPostProcessingModel(id, at: today), successor)
+            XCTAssertNil(ModelRetirements.retirement(for: successor), "successor must not chain: \(successor)")
+        }
+        XCTAssertNil(ModelRetirements.retirement(for: ModelCatalog.defaultPostProcessingModel))
     }
 
     func testDiarizeRetirement_pointsAtSpeakerLabellingModels() throws {

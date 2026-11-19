@@ -38,7 +38,7 @@ if(tool==='git') {
  else if(preparing && args[0]==='tag' && args[1]==='-a') fs.copyFileSync(args[args.indexOf('-F')+1],path.join(root,'prepared-manifest.json'));
  else if(preparing && args[0]==='show') result('lock');
  else if(preparing && args[0]==='rev-list') result('${baseline}');
- else if(preparing && ['config','push','log'].includes(args[0])) {}
+ else if(preparing && ['config','push','log','ls-tree'].includes(args[0])) {}
  else if(args[0]!=='merge-base') throw Error('Unexpected git mutation: '+args.join(' '));
 } else if(args[0]==='api') {
  if(args.includes('--paginate')) result([Object.keys(manifests).map(tag_name=>({tag_name,assets:tag_name.startsWith('alpha-')?[{name:'ios-receipt.json',id:'ios-alpha-receipt'}]:[]}))]);

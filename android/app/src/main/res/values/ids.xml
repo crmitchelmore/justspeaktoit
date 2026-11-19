@@ -6,4 +6,6 @@
     <item name="keyboard_switch" type="id" />
     <item name="keyboard_delete" type="id" />
     <item name="keyboard_enter" type="id" />
+    <item name="keyboard_profile" type="id" />
+    <item name="keyboard_voice_edit" type="id" />
 </resources>

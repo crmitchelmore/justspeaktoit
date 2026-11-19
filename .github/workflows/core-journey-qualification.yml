@@ -35,16 +35,16 @@ jobs:
       CORE_JOURNEY_UI_SHARD: ${{ matrix.shard }}
       ITERATIONS: 4
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 2
 
       - name: Prepare Tuist and macOS project
         timeout-minutes: 11
-        run: python3 scripts/run-core-journey-stages.py ui --phase setup
+        run: python3 scripts/core-journey/run-core-journey-stages.py ui --phase setup
 
       - name: Build launched fixture test products
         timeout-minutes: 17
-        run: python3 scripts/run-core-journey-stages.py ui --phase build
+        run: python3 scripts/core-journey/run-core-journey-stages.py ui --phase build
 
       # Iteration 1 is the cold run on this fresh VM; 2-4 reuse the same host.
       # Every iteration runs once under the unchanged 600s budget and is
@@ -61,7 +61,7 @@ jobs:
           failed=0
           for iteration in $(seq 1 "$ITERATIONS"); do
             started=$(date +%s)
-            python3 scripts/run-core-journey-stages.py ui --phase test
+            python3 scripts/core-journey/run-core-journey-stages.py ui --phase test
             code=$?
             seconds=$(( $(date +%s) - started ))
             out="$root/iterations/$iteration"
@@ -108,9 +108,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 2
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         timeout-minutes: 5
         with:
           # Every attempt of this run: a job whose earlier attempt never reached
@@ -121,7 +121,7 @@ jobs:
       - name: Decide qualification
         run: |
           set -o pipefail
-          python3 scripts/summarise-core-journey-qualification.py receipts qualification foundation,p0 \
+          python3 scripts/core-journey/summarise-core-journey-qualification.py receipts qualification foundation,p0 \
             | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Upload qualification record
         if: always()

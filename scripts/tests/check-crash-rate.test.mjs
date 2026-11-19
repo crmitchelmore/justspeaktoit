@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const script = fileURLToPath(new URL('../check-crash-rate.sh', import.meta.url));
+const script = fileURLToPath(new URL('../release-maintenance/check-crash-rate.sh', import.meta.url));
 const release = 'justspeaktoit-mac@2.30.1+202609051234';
 const response = (rate, count = 100) => JSON.stringify({ groups: [{ totals: {
   'crash_free_rate(session)': rate, 'sum(session)': count,

@@ -6,7 +6,7 @@ import XCTest
 import SpeakCore
 import SpeakLinuxWebSocket
 
-/// The Linux WebSocket transport against scripts/websocket-loopback-probe.py,
+/// The Linux WebSocket transport against scripts/loopback/websocket-loopback-probe.py,
 /// the same bounded RFC 6455 peer the Windows WinHTTP adapter is qualified
 /// with. Each test starts its own probe on IPv4 loopback; no provider, key or
 /// external network is used.
@@ -182,7 +182,7 @@ final class Outcome<Value>: @unchecked Sendable {
     }
 }
 
-/// Runs scripts/websocket-loopback-probe.py for one test.
+/// Runs scripts/loopback/websocket-loopback-probe.py for one test.
 final class LoopbackProbe {
     let port: Int
     private let process = Process()
@@ -202,7 +202,7 @@ final class LoopbackProbe {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = [
             ProcessInfo.processInfo.environment["PYTHON"] ?? "python3",
-            Self.repository.appendingPathComponent("scripts/websocket-loopback-probe.py").path,
+            Self.repository.appendingPathComponent("scripts/loopback/websocket-loopback-probe.py").path,
             "--ready-file", ready.path, "--max-seconds", "180"
         ]
         process.standardOutput = log

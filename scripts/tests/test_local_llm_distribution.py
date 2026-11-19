@@ -21,7 +21,7 @@ PACKAGE_TESTS = load("llm_msix_fixtures", "scripts/windows-package/test_windows_
 BUILD = BUNDLE_TESTS.BUILD
 PACKAGE = BUILD.local_llm_package
 MSIX = PACKAGE_TESTS.windows_msix
-LINUX = load("llm_linux_staging", "scripts/stage-linux-desktop.py")
+LINUX = load("llm_linux_staging", "scripts/linux/stage-linux-desktop.py")
 LICENSE = (ROOT / "Sources/CLlamaCpp/upstream/LICENSE").read_bytes()
 
 

@@ -50,7 +50,7 @@ final class DesktopHostShortcutPressMicrophoneTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("press-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         effects = PressEffects()
-        controller = try DesktopHostController(
+        controller = try DesktopHostController.consented(
             directory: directory, effects: effects, shutdownGrace: .milliseconds(10)
         )
         await controller.markReadyForSelfTest()
@@ -93,6 +93,31 @@ final class DesktopHostShortcutPressMicrophoneTests: XCTestCase {
         await controller.warmOperationalBlockForTest(true)
         await controller.warmMicrophoneForShortcutPress(deviceID: "")
         XCTAssertTrue(effects.captures.isEmpty)
+    }
+
+    func testPressHold_ListedUntilReleasedFromStatus() async throws {
+        let registry = SystemResourceRegistry()
+        await controller.useSystemResourceRegistry(registry)
+        XCTAssertTrue(registry.holds.isEmpty)
+        await controller.warmMicrophoneForShortcutPress(deviceID: "mic-a")
+        let hold = try XCTUnwrap(registry.holds.first)
+        XCTAssertEqual(registry.holds.count, 1)
+        XCTAssertEqual(hold.kind, .microphone)
+        XCTAssertEqual(hold.title, "Hotkey warm-up")
+        XCTAssertEqual(hold.releaseTitle, "Close")
+        let released = await DesktopSystemResources.release(hold.id.uuidString, registry: registry)
+        XCTAssertTrue(released)
+        XCTAssertEqual(try XCTUnwrap(effects.captures.first).log, ["start", "stop", "destroy"])
+        XCTAssertTrue(registry.holds.isEmpty, "Closing the capture ends its hold")
+    }
+
+    func testClose_EndsSystemResourceHolds() async throws {
+        let registry = SystemResourceRegistry()
+        await controller.useSystemResourceRegistry(registry)
+        await controller.warmMicrophoneForShortcutPress(deviceID: "mic-a")
+        XCTAssertFalse(registry.holds.isEmpty)
+        await controller.close()
+        XCTAssertTrue(registry.holds.isEmpty, "A closed controller holds nothing")
     }
 
     func testClose_EndsPressCapture() async throws {

@@ -1,5 +1,6 @@
 import Foundation
 import CWindowsAutomation
+import CWindowsSelfTest
 import CWindowsSupport
 import SpeakDesktop
 import SpeakCore
@@ -12,7 +13,8 @@ enum WindowsNative {
         guard result == 0 else { throw WindowsNativeError(message: String(cString: buffer)) }
     }
 
-    /// The `--self-test` checks for storage, staging, Launch at login, streaming, audio and the automation pipe.
+    /// The `--self-test` checks for storage, staging, Launch at login, streaming, audio, the automation pipe
+    /// and the Send from phone listener.
     static func storageMediaAndAutomationSelfTests() throws {
         try checked { jsti_private_storage_self_test($0, $1) }
         try checked { jsti_login_item_self_test($0, $1) }
@@ -21,6 +23,7 @@ enum WindowsNative {
         try checked { jsti_audio_conversion_self_test($0, $1) }
         try checked { jsti_audio_playback_self_test($0, $1) }
         try checked { jsti_automation_pipe_self_test($0, $1) }
+        try checked { jsti_transport_self_test($0, $1) }
     }
 
     static func update(_ status: String, transcript: String? = nil, state: Int32 = -1) {
@@ -82,7 +85,8 @@ enum WindowsNative {
             strings.append(pointer)
             return UnsafePointer(pointer)
         }
-        let rows = records.map { record in
+        // The native list refuses more rows than this; History pages stay far below it.
+        let rows = records.prefix(10_000).map { record in
             // The card wording is shared with Linux; the title and detail stay
             // the list's accessible text and the selected row's summary.
             let summary = DesktopHistoryRowSummary(record)
@@ -189,12 +193,11 @@ enum WindowsNative {
 }
 
 func captureAudio(_ samples: UnsafePointer<Int16>?, _ count: Int, _ context: UnsafeMutableRawPointer?) {
-    guard let samples, let context else { return }
-    Unmanaged<WindowsCaptureContext>.fromOpaque(context).takeUnretainedValue().receive(samples, count: count)
+    guard let samples, let capture = NativeCallbackContext<WindowsCaptureContext>.resolve(context) else { return }
+    capture.receive(samples, count: count)
 }
 
 func captureError(_ message: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let capture = Unmanaged<WindowsCaptureContext>.fromOpaque(context).takeUnretainedValue()
+    guard let capture = NativeCallbackContext<WindowsCaptureContext>.resolve(context) else { return }
     capture.fail(message.map(String.init(cString:)) ?? "Microphone capture failed.")
 }

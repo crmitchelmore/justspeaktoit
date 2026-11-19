@@ -48,18 +48,18 @@ make lint
 ```
 
 # Repository structure
-- `/Sources/SpeakApp/` - Main application code
-  - `SpeakApp.swift` - Entry point, App protocol implementation
-  - `WireUp.swift` - Dependency injection bootstrap
-  - `MainManager.swift` - Session lifecycle orchestration
-  - `*Manager.swift` - Domain managers (HUD, History, Transcription, etc.)
-  - `*View.swift` - SwiftUI views
-  - `Services/` - External service integrations
-  - `Models/` - Data models
-  - `TextToSpeech/` - TTS clients and protocols
-- `/Tests/SpeakAppTests/` - XCTest suite
-- `/Config/` - App configuration (Info.plist)
-- `/scripts/` - Build and version scripts
+This agent covers the macOS app (`SpeakApp`). The repo also holds `SpeakCore` (shared cross-platform code), `SpeakiOS`, `SpeakDesktop` (Windows/Linux) and `android/`; see `Docs/Architecture.md` and `AGENTS.md` for the full map and the rules for where code belongs.
+
+- `/Sources/SpeakApp/` - macOS application code, grouped by domain folder
+  - `App/SpeakApp.swift` - Entry point, App protocol implementation
+  - `App/WireUp.swift` (+ `WireUp+*.swift`) - Dependency injection bootstrap and `AppEnvironment`
+  - `Session/MainManager.swift` (+ `MainManager+*.swift`) - Session lifecycle orchestration
+  - `Settings/AppSettings.swift` (+ `AppSettings+*.swift`) - Settings and domain preference stores
+  - `Live/`, `Transcription/`, `PostProcessing/`, `Output/`, `HUD/`, `History/`, `Audio/`, `Views/`, `Services/`, `TextToSpeech/` - Domain code and views
+- `/Sources/SpeakCore/` - Shared models, providers and platform-neutral logic
+- `/Tests/` - Per-module XCTest targets (`SpeakAppTests`, `SpeakCoreTests`, ...)
+- `/Config/` - App configuration (`AppInfo.plist`)
+- `/scripts/` - Build, release and check scripts (including `scripts/pre-pr`)
 
 # Architecture patterns
 
@@ -78,29 +78,31 @@ let consumer = Consumer(myService: myService)
 ## Text processing pipeline
 Order matters - each step transforms text sequentially:
 ```
-Transcription → TextProcessor → PersonalLexicon → PostProcessing → Output
+Transcription → TranscriptionTextProcessor → PersonalLexiconService → PostProcessingManager → Output
 ```
-- **TextProcessor**: Voice commands (e.g., "copy pasta" → clipboard)
-- **PersonalLexicon**: User-defined replacements and corrections
-- **PostProcessing**: LLM cleanup (optional)
+- **TranscriptionTextProcessor**: Voice commands (e.g., "copy pasta" → clipboard, via SpeakCore `VoiceCommandProcessor`)
+- **PersonalLexiconService**: User-defined replacements and corrections
+- **PostProcessingManager**: LLM cleanup (optional)
+
+`Session/SessionServices.swift` holds the three services for a session.
 
 ## Settings pattern
-Adding a new setting requires three changes in `AppSettings.swift`:
-1. Add case to `DefaultsKey` enum
-2. Add `@Published var` with `didSet` that calls `store()`
-3. Initialize in `init()` from UserDefaults
+Adding a new setting takes four changes:
+1. Add a case to `ApplicationPreferenceKey` (`Sources/SpeakCore/App/ApplicationPreferenceKey.swift`; `AppSettings.DefaultsKey` is a typealias for it)
+2. Add a `@Published var` to `AppSettings` or the matching domain store (for example `CleanupTuningPreferences` in `AppSettings+CleanupTuning.swift`) with a `didSet` that calls `persistence.store`
+3. Initialise it in that type's `init` through `AppSettingsPersistence` (`flag`, `integer`, `number`)
+4. Register it in `SettingsSearchCatalog` (see Settings Search Registry in `AGENTS.md`)
 
 ```swift
-enum DefaultsKey: String {
-    case myNewSetting  // 1. Add key
-}
+// ApplicationPreferenceKey.swift
+case myNewSetting  // 1. Add key
 
 @Published var myNewSetting: Bool {  // 2. Add property
-    didSet { store(myNewSetting, key: .myNewSetting) }
+  didSet { persistence.store(myNewSetting, key: .myNewSetting) }
 }
 
-// In init():
-myNewSetting = defaults.object(forKey: DefaultsKey.myNewSetting.rawValue) as? Bool ?? true  // 3. Initialize
+// In init(persistence:):
+myNewSetting = persistence.flag(.myNewSetting, default: true)  // 3. Initialise
 ```
 
 ## Manager pattern
@@ -145,24 +147,23 @@ final class MyWindowController: NSWindowController {
 # Audio pipeline
 
 ## Transcription providers
-Three live transcription backends, unified via `LiveTranscriptionController` protocol:
-- **NativeOSXLiveTranscriber**: Apple's SFSpeechRecognizer (on-device)
-- **DeepgramLiveController**: Deepgram WebSocket streaming
-- **LocalWhisperLiveController**: Local Whisper server
-
-`SwitchingLiveTranscriber` routes to the appropriate controller based on model selection.
+Live backends conform to `LiveTranscriptionController` (`Sources/SpeakCore/PostProcessing/LLMProtocols.swift`). `SwitchingLiveTranscriber` (`Sources/SpeakApp/Live/`) routes on the selected model to:
+- **NativeOSXLiveTranscriber** and **AppleSpeechAnalyzerLiveController**: Apple on-device speech
+- **WhisperKitLiveController**, **FluidAudioParakeetLiveController**, **SherpaOnnxLiveController**: downloaded local models
+- **OpenAIRealtimeLiveController**: OpenAI Realtime
+- **SharedClientLiveController**: cloud providers (Deepgram, AssemblyAI, xAI and others) through the shared clients in `Sources/SpeakCore/Live/Providers/`
 
 ## Audio format conversion
-Deepgram and Whisper require 16kHz mono PCM16. Use `AVAudioConverter`:
+Cloud streaming clients take 16kHz mono PCM16 (`SharedClientAudioProcessor`). Use `AVAudioConverter`:
 ```swift
 let converter = AVAudioConverter(from: inputFormat, to: outputFormat)
 converter.convert(to: outputBuffer, error: &error) { ... }
 ```
 
 # Testing guidelines
-- Tests in `Tests/SpeakAppTests/`
+- macOS app tests in `Tests/SpeakAppTests/`; shared code tests in `Tests/SpeakCoreTests/`
 - Name pattern: `test<Behaviour>_<Expectation>()`
-- Run `make test` before PRs
+- Run `scripts/pre-pr` before opening a PR (see Pre-PR Checks in `AGENTS.md`); `make test` runs the full suite
 - Focus on composability and integration over unit tests
 
 # Common issues
@@ -174,7 +175,7 @@ converter.convert(to: outputBuffer, error: &error) { ... }
 
 ## Audio tap conflicts
 **Symptom**: "Audio engine already has a tap" error
-**Fix**: Always call `inputNode.removeTap(onBus: 0)` before installing new tap
+**Fix**: Call `inputNode.removeTap(onBus: 0)` before installing a new tap, and install it with `installTapSafely` (SpeakCore), never `installTap`; SwiftLint `unsafe_audio_tap` enforces this
 
 ## Transcription stops unexpectedly
 **Symptom**: Live transcription ends without final result
@@ -182,7 +183,7 @@ converter.convert(to: outputBuffer, error: &error) { ... }
 **Fix**: Check delegate callbacks for errors, ensure permissions granted
 
 # Commit conventions
-- Use Conventional Commits: `feat:`, `fix:`, `chore:`, `refactor:`
+- Use Conventional Commits: `feat:`, `fix:`, `chore:`, `refactor:`, with a `(mac)` or `(ios)` scope for platform-specific changes (they filter the per-platform release notes)
 - Imperative mood: "Add feature" not "Added feature"
 - Scope to single concern per commit
 
@@ -190,5 +191,5 @@ converter.convert(to: outputBuffer, error: &error) { ... }
 Always include:
 - **Files changed**
 - **What changed** (1–3 bullets)
-- **How to verify** (`make build`, `make test`)
+- **How to verify** (`scripts/pre-pr` result; any human check goes in `Docs/manual-checks.yml` for Alpha testers after merge, never as a merge blocker)
 - **Risks / edge cases**

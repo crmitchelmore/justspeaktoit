@@ -2,6 +2,7 @@
 import AVFoundation
 import Foundation
 import SpeakCore
+import UIKit
 import os.log
 
 private let logger = SpeakLogger.logger(category: "AudioSessionManager")
@@ -21,6 +22,7 @@ public final class AudioSessionManager: ObservableObject {
     var permissionRequest: ((@escaping @Sendable (Bool) -> Void) -> Void)?
     var configureRecording: (() async throws -> Void)?
     var deactivateRecording: (() -> Void)?
+    var applicationIsInForeground: () -> Bool = { UIApplication.shared.applicationState != .background }
 
     /// A registered audio-session callback. The owner is held weakly so
     /// entries registered by a transcriber are pruned automatically once that
@@ -102,28 +104,21 @@ public final class AudioSessionManager: ObservableObject {
         }
         let session = AVAudioSession.sharedInstance()
 
-        do {
-            // Preferred: an isolated (non-mixable) measurement session for the
-            // cleanest capture. Fail fast (no retry back-off): in the foreground
-            // this succeeds on the first attempt, and when it can't (a background
-            // trigger is *guaranteed* to be refused with cannotInterruptOthers)
-            // there is no point burning the retry budget before falling back to a
-            // mixable session below.
-            try configureCategory(on: session, mixWithOthers: false)
-            try await activate(session, maxAttempts: 1)
-        } catch let error as AudioSessionConfigurationError
-            where error.operation == .setActive
-            && AudioSessionActivation.isCannotInterruptOthers(error.underlying) {
-            // A `cannotInterruptOthers` rejection is how the system refuses a
-            // *non-mixable* session that tries to go active from the background
-            // (Action Button / Shortcuts / Siri). Re-configure as a *mixable*
-            // session and try again — mixable sessions are allowed to activate
-            // from the background because they don't interrupt other audio. Keep
-            // the retry back-off here to ride out a transient owner still tearing
-            // its own session down.
+        let categories = KeyboardHandoffStartDiagnosis.sessionCategories(
+            applicationIsInForeground: applicationIsInForeground()
+        )
+        if categories.first == .mixable {
+            // From the background (for example a keyboard hand-off while
+            // another app is in front, issue #1469) never switch the active
+            // session to non-mixable: iOS refuses it and can interrupt the
+            // readiness session, after which recording cannot restart until
+            // the app is opened.
             try configureCategory(on: session, mixWithOthers: true)
             try await activate(session)
+        } else {
+            try await configureForegroundRecording(on: session)
         }
+        await applyPreferredInput(on: session)
 
         try Task.checkCancellation()
         lastError = nil
@@ -209,28 +204,25 @@ public final class AudioSessionManager: ObservableObject {
         ports.isEmpty ? "none" : ports.map(\.portType.rawValue).joined(separator: "+")
     }
 
-    private static func describe(options: AVAudioSession.CategoryOptions) -> String {
-        var names: [String] = []
-        if options.contains(.mixWithOthers) { names.append("mixWithOthers") }
-        if options.contains(.duckOthers) { names.append("duckOthers") }
-        if options.contains(.allowBluetooth) { names.append("allowBluetooth") }
-        if options.contains(.defaultToSpeaker) { names.append("defaultToSpeaker") }
-        if options.contains(.interruptSpokenAudioAndMixWithOthers) {
-            names.append("interruptSpokenAudioAndMixWithOthers")
-        }
-        if options.contains(.allowBluetoothA2DP) { names.append("allowBluetoothA2DP") }
-        if options.contains(.allowAirPlay) { names.append("allowAirPlay") }
-        if #available(iOS 14.5, *), options.contains(.overrideMutedMicrophoneInterruption) {
-            names.append("overrideMutedMicrophoneInterruption")
-        }
-        return names.isEmpty ? "none" : names.joined(separator: ",")
-    }
-
     /// Deactivate audio session when done recording.
+    ///
+    /// Skipped while ``activeSessionHold`` reports that keyboard readiness is
+    /// still recording on the same mixable session (issue #1469): deactivating
+    /// would stop it, and a background app cannot start recording again. The
+    /// hold is not cleared per request, because a cancelled transcriber can
+    /// release the session after the request has already ended.
     public func deactivate() {
         if let deactivateRecording {
             deactivateRecording()
             isConfigured = false
+            return
+        }
+        // Honoured only while the session is still the mixable one readiness
+        // records on; a foreground capture's isolated session deactivates.
+        let session = AVAudioSession.sharedInstance()
+        if Self.activeSessionHold?() == true, session.categoryOptions.contains(.mixWithOthers) {
+            isConfigured = false
+            logger.info("Kept session active for keyboard readiness")
             return
         }
         do {
@@ -332,6 +324,7 @@ public final class AudioSessionManager: ObservableObject {
 
         logger.info("Route changed: \(String(describing: reason), privacy: .public)")
         updateCurrentRoute()
+        refreshPreferredInputStatus()
         notifyRouteChangeObservers(reason: reason)
     }
 
@@ -344,4 +337,58 @@ public final class AudioSessionManager: ObservableObject {
         }
     }
 }
+
+extension AudioSessionManager {
+    /// Set by keyboard readiness while it keeps recording through a background
+    /// dictation, so a finishing transcriber leaves the shared session active.
+    static var activeSessionHold: (() -> Bool)?
+    /// The exact options of the mixable recording session. Keyboard readiness
+    /// holds its session open with these, so a background hand-off finds the
+    /// category already in place and does not reconfigure an active session.
+    static let mixableRecordingOptions: AVAudioSession.CategoryOptions =
+        baseRecordingOptions.union(.mixWithOthers)
+
+    private static func describe(options: AVAudioSession.CategoryOptions) -> String {
+        var names: [String] = []
+        if options.contains(.mixWithOthers) { names.append("mixWithOthers") }
+        if options.contains(.duckOthers) { names.append("duckOthers") }
+        if options.contains(.allowBluetooth) { names.append("allowBluetooth") }
+        if options.contains(.defaultToSpeaker) { names.append("defaultToSpeaker") }
+        if options.contains(.interruptSpokenAudioAndMixWithOthers) {
+            names.append("interruptSpokenAudioAndMixWithOthers")
+        }
+        if options.contains(.allowBluetoothA2DP) { names.append("allowBluetoothA2DP") }
+        if options.contains(.allowAirPlay) { names.append("allowAirPlay") }
+        if #available(iOS 14.5, *), options.contains(.overrideMutedMicrophoneInterruption) {
+            names.append("overrideMutedMicrophoneInterruption")
+        }
+        return names.isEmpty ? "none" : names.joined(separator: ",")
+    }
+
+    private func configureForegroundRecording(on session: AVAudioSession) async throws {
+        do {
+            // Preferred: an isolated (non-mixable) measurement session for the
+            // cleanest capture. Fail fast (no retry back-off): in the foreground
+            // this succeeds on the first attempt, and when it can't (a background
+            // trigger is *guaranteed* to be refused with cannotInterruptOthers)
+            // there is no point burning the retry budget before falling back to a
+            // mixable session below.
+            try configureCategory(on: session, mixWithOthers: false)
+            try await activate(session, maxAttempts: 1)
+        } catch let error as AudioSessionConfigurationError
+            where error.operation == .setActive
+            && AudioSessionActivation.isCannotInterruptOthers(error.underlying) {
+            // A `cannotInterruptOthers` rejection is how the system refuses a
+            // *non-mixable* session that tries to go active from the background
+            // (Action Button / Shortcuts / Siri). Re-configure as a *mixable*
+            // session and try again — mixable sessions are allowed to activate
+            // from the background because they don't interrupt other audio. Keep
+            // the retry back-off here to ride out a transient owner still tearing
+            // its own session down.
+            try configureCategory(on: session, mixWithOthers: true)
+            try await activate(session)
+        }
+    }
+}
+
 #endif

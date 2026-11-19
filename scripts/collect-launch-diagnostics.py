@@ -30,9 +30,10 @@ def timestamp(value):
     if not isinstance(value, str):
         return None
     try:
-        # Apple .ips/.crash timestamps separate the numeric UTC offset with a
-        # space, unlike ISO 8601. Preserve timezone information when normalising.
-        result = datetime.fromisoformat(re.sub(r" ([+-]\d{4})$", r"\1", value))
+        # Apple .ips/.crash timestamps separate a `+HHMM` UTC offset with a
+        # space, unlike ISO 8601. Python 3.9 (macOS's /usr/bin/python3) parses
+        # only `+HH:MM`, so normalise to that and keep the timezone.
+        result = datetime.fromisoformat(re.sub(r" ([+-]\d{2})(\d{2})$", r"\1:\2", value))
         return result.timestamp() if result.tzinfo else None
     except ValueError:
         return None

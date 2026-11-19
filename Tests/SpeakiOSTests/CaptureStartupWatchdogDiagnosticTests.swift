@@ -101,7 +101,7 @@ final class CaptureStartupWatchdogDiagnosticTests: XCTestCase {
         guard await self.completed(run.session.entered, timeout: 2) else { return }
         // Only this fixture's existing monitor seam has an immediate no-input bound.
         // The actual one-second service tick and typed trip/cancellation path run unchanged.
-        run.service.watchdog = CaptureWatchdogMonitor(CaptureWatchdogBudget(firstInputDeadline: 0))
+        run.service.watchdog.monitor = CaptureWatchdogMonitor(CaptureWatchdogBudget(firstInputDeadline: 0))
         run.session.onStartupObservation?(.stage(.engineStarted))
         guard await self.completed(run.done, timeout: 4) else { return }
         XCTAssertTrue(run.error is CancellationError)
@@ -116,7 +116,7 @@ final class CaptureStartupWatchdogDiagnosticTests: XCTestCase {
     // holds, through the same monitor seam the no-input fixture uses; the real
     // tick, trip and cancellation path still run unchanged.
     private func expireStartDeadline(_ run: StartupDiagnosticRun) {
-        run.service.watchdog = CaptureWatchdogMonitor(CaptureWatchdogBudget(startDeadline: 0))
+        run.service.watchdog.monitor = CaptureWatchdogMonitor(CaptureWatchdogBudget(startDeadline: 0))
     }
 
     private func completed(_ receipt: XCTestExpectation, timeout: TimeInterval) async -> Bool {

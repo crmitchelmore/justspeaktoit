@@ -56,12 +56,18 @@ input for every added identifier:
 | --- | --- |
 | `thinkingmachines/inkling` | Hosted Inkling audio understanding |
 | `thinkingmachines/inkling-small` | Smaller hosted Inkling tier |
-| `thinkingmachines/inkling:free` | Free hosted tier, subject to availability and rate limits |
-| `thinkingmachines/inkling-small:free` | Free Small tier, subject to availability and rate limits |
 | `google/gemini-3.1-pro-preview` | Currently advertised Gemini Pro audio preview |
 | `mistralai/voxtral-small-24b-2507` | Voxtral Small audio-instruct model, distinct from Mini transcription |
 | `google/gemini-3.8-flash` | Current advertised Gemini Flash audio-chat generation |
 | `google/gemini-3.5-flash-lite` | Current advertised Gemini Flash Lite audio-chat generation |
+
+The free `thinkingmachines/inkling:free` and `thinkingmachines/inkling-small:free`
+routes were added here too, but OpenRouter has since removed them: on 13 November
+2026 neither was listed and requests returned HTTP 404 (#1655). They are no longer
+in the catalogue. Saved selections move to the paid `thinkingmachines/inkling` and
+`thinkingmachines/inkling-small` routes of the same model and OpenRouter key, which
+are token-billed ($1.00/$4.05 and $0.45/$1.20 per million input/output tokens
+at that check). History recorded on the free routes keeps its $0 estimate.
 
 These are **batch-only hosted choices**, using the existing
 `POST https://openrouter.ai/api/v1/chat/completions` inline base64 `input_audio`
@@ -74,7 +80,7 @@ same shared ownership; portable desktop routing already does so.
 The [OpenRouter audio guide](https://openrouter.ai/docs/guides/overview/multimodal/audio)
 warns that accepted formats depend on the actual model/provider.
 [Inkling's official card](https://thinkingmachines.ai/model-card/inkling/)
-specifies 16 kHz WAV and recommends audio within 20 minutes. All four Inkling
+specifies 16 kHz WAV and recommends audio within 20 minutes. Both Inkling
 routes therefore prepare mono PCM16 WAV in process on Apple and validate the
 native canonical WAV on portable hosts, with an explicit 20-minute preparation
 limit. Portable import adapters are told that these routes need native

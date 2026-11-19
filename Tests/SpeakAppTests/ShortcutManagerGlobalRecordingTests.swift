@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 
 @testable import SpeakApp
@@ -79,6 +80,31 @@ final class ShortcutManagerGlobalRecordingTests: XCTestCase {
             manager.conflicts.contains { $0.action == .startStopRecording },
             "binding recording to ⇧⌘S should warn about Save As"
         )
+    }
+
+    /// Space and Escape are app shortcuts for Pause/Resume and Stop Speaking. Consuming them
+    /// while nothing was speaking meant Escape never closed a sheet and Space never pressed
+    /// the focused button.
+    func testHandleKeyEvent_withAnInactiveShortcut_leavesTheKeyForTheFocusedControl() throws {
+        _ = NSApplication.shared
+        let manager = makeManager()
+        var speaking = false
+        var stops = 0
+        manager.register(action: .stopTTS, isActive: { speaking }, handler: { stops += 1 })
+        let escape = try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                context: nil, characters: "\u{1B}", charactersIgnoringModifiers: "\u{1B}",
+                isARepeat: false, keyCode: 53
+            )
+        )
+
+        XCTAssertFalse(manager.handleKeyEvent(escape, isGlobal: false), "idle Escape should pass through")
+        XCTAssertEqual(stops, 0)
+
+        speaking = true
+        XCTAssertTrue(manager.handleKeyEvent(escape, isGlobal: false), "Escape should stop active speech")
+        XCTAssertEqual(stops, 1)
     }
 
     // MARK: - Helpers

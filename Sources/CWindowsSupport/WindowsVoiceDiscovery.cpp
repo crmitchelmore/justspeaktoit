@@ -82,7 +82,7 @@ void emit(Dialog &dialog, const char *path, const std::string &text = "", bool s
     const auto &identity = dialog.modern && !session ? dialog.epoch : dialog.token;
     dialog.callback(118, -1, text.c_str(), identity.c_str(), path, dialog.context);
 }
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 bool rows(const char *text, std::vector<std::string> &result) {
     if (!text || strlen(text) > 262144) return false;
     if (!text[0]) return true;
@@ -117,8 +117,7 @@ void layout(HWND window) {
         bottom, scale(window, 120), height, TRUE);
 }
 void font(HWND window, Dialog &dialog) {
-    HFONT next = CreateFontW(-MulDiv(10, GetDpiForWindow(window), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    HFONT next = jsti::chrome::dialogFont(window);
     if (!next) return;
     for (int id : {headingID, providerID, keyID, voicesID, statusID, refreshID, chooseID, closeID})
         SendDlgItemMessageW(window, id, WM_SETFONT, reinterpret_cast<WPARAM>(next), TRUE);
@@ -165,19 +164,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             if (!eligible) { pending = {}; pendingProviders.clear(); return 0; }
         }
     }
-    auto dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
+    auto dialog = jsti::chrome::dialogInstance<Dialog>(window, message, lparam);
     if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
     LRESULT themed = 0;
     if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
     switch (message) {
     case WM_CREATE: {
         auto add = [&](const wchar_t *type, const wchar_t *text, DWORD style, int id, DWORD extended = 0) {
-            return CreateWindowExW(extended, type, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 1, 1, window,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr) != nullptr;
+            return jsti::chrome::addControl(window, type, text, style, id, extended);
         };
         if (!add(L"STATIC", L"Account Voice &provider: presets and explicitly refreshed account voices", 0, headingID) ||
             !add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, providerID) ||
@@ -288,16 +282,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         break;
     case WM_SIZE: layout(window); return 0;
-    case WM_GETMINMAXINFO: {
-        RECT size{0, 0, scale(window, 600), scale(window, 460)};
-        AdjustWindowRectExForDpi(&size, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_CONTROLPARENT, GetDpiForWindow(window));
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {size.right - size.left, size.bottom - size.top};
+    case WM_GETMINMAXINFO:
+        jsti::chrome::minimumTrackSize(window, lparam, 600, 460, WS_OVERLAPPEDWINDOW, WS_EX_CONTROLPARENT);
         return 0;
-    }
     case WM_DPICHANGED: {
-        const auto bounds = reinterpret_cast<const RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        jsti::chrome::applySuggestedBounds(window, lparam);
         font(window, *dialog); layout(window); return 0;
     }
     case WM_CLOSE: DestroyWindow(window); return 0;

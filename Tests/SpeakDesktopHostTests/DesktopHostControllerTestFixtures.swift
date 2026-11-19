@@ -32,11 +32,18 @@ struct FakeJob: Sendable {
 final class FakePlayback: DesktopHostPlayback, @unchecked Sendable {
     let stopping = Gate(open: true)
     var stopGate: Gate?
+    private let savedAudioLock = NSLock()
+    private var savedAudio = false
+    var isPlayingSavedAudio: Bool { savedAudioLock.withLock { savedAudio } }
     func setStatusHandler(_ handler: @escaping @Sendable (UInt64, String) -> Void) {}
     func isCurrent(revision: UInt64) -> Bool { false }
-    func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws {}
+    func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws {
+        savedAudioLock.withLock { savedAudio = true }
+    }
     func togglePause(recordID: UUID) -> Bool { false }
-    func stop(announcing: Bool) {}
+    func stop(announcing: Bool) { savedAudioLock.withLock { savedAudio = false } }
+    /// The saved recording reaching its end on its own.
+    func finishSavedAudio() { savedAudioLock.withLock { savedAudio = false } }
     func stop(unless recordID: UUID) {}
     // With no suspending `stopGate`, this preserves the pre-existing hold/release
     // contract hands-free arming relies on. When a comparison suspends playback via

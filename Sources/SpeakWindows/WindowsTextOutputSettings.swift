@@ -1,4 +1,5 @@
 import Foundation
+import SpeakDesktop
 import SpeakCore
 import SpeakWindowsPlatform
 import CWindowsSupport
@@ -24,8 +25,7 @@ extension WindowsNative {
 /// uses it. The dialog is then refreshed from what was actually saved, so a
 /// reopened dialog never shows a choice that failed to save.
 func textOutputEvent(_ method: Int32, _ insertion: Int32, _ restore: Int32, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    guard let holder = NativeCallbackContext<WindowsEventContext>.resolve(context) else { return }
     var choice = WindowsTextOutputOptions(
         nativeChoice: WindowsTextOutputNativeChoice(method: method, insertion: insertion, restoreClipboard: restore)
     )
@@ -45,7 +45,7 @@ func textOutputEvent(_ method: Int32, _ insertion: Int32, _ restore: Int32, _ co
         }
         let saved = await holder.controller.textOutputOptions()
         do {
-            try WindowsNative.configureTextOutput(saved, context: Unmanaged.passUnretained(holder).toOpaque())
+            try WindowsNative.configureTextOutput(saved, context: holder.callbackContext)
         } catch { WindowsNative.update(error.localizedDescription) }
     }
 }

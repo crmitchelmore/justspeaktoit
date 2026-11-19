@@ -11,6 +11,7 @@
 // same render loop runs against WASAPI in production and against a synthetic
 // engine in tests without an endpoint.
 #include "WindowsSupportInternal.hpp"
+#include "WindowsMediaReader.hpp"
 #include <mmreg.h>
 #include <audioclient.h>
 #include <mmdeviceapi.h>
@@ -84,7 +85,7 @@ void require(HRESULT result, const char *operation);
 void describe(const Failure &failure, char *buffer, size_t capacity);
 std::string describe(const Failure &failure);
 
-bool localPath(const char *text, std::wstring &path);
+using jsti::media::localPath;
 // Pins the input: read-only, write/delete sharing denied, leaf reparse points
 // refused, regular disk files of 1 byte to `limit` bytes only. Nothing beyond
 // the size query is read here; Media Foundation streams what it needs later.
@@ -224,41 +225,15 @@ public:
 
 // Shared between the asynchronous source reader callback and the decode
 // worker. Owned by the playback object so cancellation can wake any wait.
-struct ReadState {
-    std::mutex mutex;
-    std::condition_variable changed;
-    bool pending = false, ready = false, flushed = false, closed = false;
+struct ReadState : jsti::media::ReadState {
     // Set by the render thread once it has ended for any reason, after it
     // published its result, so a reader stalled on the codec wakes at once
     // and reports the render outcome instead of waiting for the decode timeout.
     bool renderEnded = false;
     bool renderEndObserved = false; // Internal regression witness: the pending read woke for the render result.
-    HRESULT result = S_OK;
-    DWORD flags = 0;
-    IMFSample *sample = nullptr;
-    ~ReadState() { if (sample) sample->Release(); }
 };
-
-class ReaderCallback final : public IMFSourceReaderCallback {
-    std::atomic<ULONG> references{1};
-    const std::shared_ptr<ReadState> state;
-public:
-    explicit ReaderCallback(std::shared_ptr<ReadState> state) : state(std::move(state)) {}
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **result) override;
-    ULONG STDMETHODCALLTYPE AddRef() override { return ++references; }
-    ULONG STDMETHODCALLTYPE Release() override { const ULONG count = --references; if (!count) delete this; return count; }
-    HRESULT STDMETHODCALLTYPE OnReadSample(HRESULT result, DWORD, DWORD flags, LONGLONG, IMFSample *sample) override;
-    HRESULT STDMETHODCALLTYPE OnFlush(DWORD) override;
-    HRESULT STDMETHODCALLTYPE OnEvent(DWORD, IMFMediaEvent *event) override;
-};
-
-struct ReaderResources {
-    jsti::COM<IMFSourceReader> reader;
-    const std::shared_ptr<ReadState> state;
-    explicit ReaderResources(std::shared_ptr<ReadState> state) : state(std::move(state)) {}
-    ~ReaderResources() { close(); }
-    HRESULT close();
-};
+using ReaderCallback = jsti::media::ReaderCallback<ReadState>;
+using ReaderResources = jsti::media::ReaderResources<ReadState>;
 
 // Waits for the pending asynchronous read. Cancellation and the end of the
 // render thread are part of the predicate and both notify this condition

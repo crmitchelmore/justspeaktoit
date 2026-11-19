@@ -31,8 +31,8 @@ temporary Keychain. Invariants that keep a developer machine safe:
   identity still match; it never signals an unverified reused process-group ID.
 """
 import errno
-import importlib.util
 import fcntl
+import importlib.util
 import json
 import os
 import secrets

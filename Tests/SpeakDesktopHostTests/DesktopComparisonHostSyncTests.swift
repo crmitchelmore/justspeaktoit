@@ -8,7 +8,7 @@ final class DesktopComparisonHostSyncTests: XCTestCase {
     func testNativeConsentRetryAndEditorCloseUseSeparateOwnedHooks() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         let log = ComparisonSyncHookLog()
         await controller.installComparisonSync(log.hooks)
         await controller.comparisonEvent(100, text: "", index: 0)
@@ -34,7 +34,7 @@ final class DesktopComparisonHostSyncTests: XCTestCase {
     func testClosedHostCannotInstallHooksOrAdmitConsentAndRetry() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: SyntheticEffects())
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: SyntheticEffects())
         await controller.close()
         let log = ComparisonSyncHookLog()
         await controller.installComparisonSync(log.hooks)

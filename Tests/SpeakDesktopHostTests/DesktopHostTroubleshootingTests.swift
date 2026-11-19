@@ -12,10 +12,11 @@ final class DesktopHostTroubleshootingTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("troubleshooting-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         await controller.markReadyForSelfTest()
         FakeLog.shared.setKey("", name: "openrouter.apiKey")
-        await controller.savePostProcessing(enabled: true, modelIndex: 0, prompt: "Synthetic prompt.", key: "")
+        await controller.saveOpenRouterPostProcessing(enabled: true, prompt: "Synthetic prompt.", key: "")
     }
 
     override func tearDown() async throws {
@@ -32,7 +33,8 @@ final class DesktopHostTroubleshootingTests: XCTestCase {
         XCTAssertEqual(saved.modelIdentifier, snapshot.processing.modelIdentifier)
         XCTAssertEqual(saved.customPrompt, snapshot.processing.customPrompt)
         await controller.close()
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects())
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects())
         let restarted = await controller.postProcessingOptions()
         XCTAssertEqual(restarted, saved)
     }
@@ -52,7 +54,7 @@ final class DesktopHostTroubleshootingTests: XCTestCase {
 
     func testChangedProcessing_RefusesStaleFix() async throws {
         let snapshot = await configuration()
-        await controller.savePostProcessing(enabled: true, modelIndex: 0, prompt: "A newer prompt.", key: "")
+        await controller.saveOpenRouterPostProcessing(enabled: true, prompt: "A newer prompt.", key: "")
         do {
             try await controller.disablePostProcessingForTroubleshooting(expected: snapshot.processing)
             XCTFail("A stale report must not disable newer settings.")

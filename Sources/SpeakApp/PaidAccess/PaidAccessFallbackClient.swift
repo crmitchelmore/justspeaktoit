@@ -16,8 +16,9 @@ protocol PaidAccessFallbackClient: StreamingChatLLMClient, BatchTranscriptionCli
     /// Whether serving `model` needs a remote call at all — a local model does not.
     func requiresRemoteAccess(for model: String) async -> Bool
 
-    /// Whether the user has supplied their own credentials for that remote call.
-    func hasStoredAPIKey() async -> Bool
+    /// Whether the user has supplied their own credentials for that remote call:
+    /// the provider's key for a native model, otherwise the OpenRouter key.
+    func hasStoredAPIKey(forModel model: String) async -> Bool
 }
 
 extension OpenRouterAPIClient: PaidAccessFallbackClient {}

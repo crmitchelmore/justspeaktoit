@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "channel": "store",
+  "releaseTrain": null,
+  "notes": [
+    "Microsoft Store identity, reserved in Partner Center on 13 Nov 2026 (issue #1157, Product identity page). Name, publisher and publisher display name must stay exactly as Partner Center states them, or the Store rejects the upload.",
+    "The Store signs the package after certification, so the Store bundle is uploaded unsigned and needs no windows-signing certificate. It is a different package family from the sideloaded beta and developer packages; all three share the %LOCALAPPDATA%\\JustSpeakToIt data directory.",
+    "The display name must equal the reserved Store name \"Just Speak to It\".",
+    "runFullTrust and unvirtualizedResources are restricted capabilities: each submission must justify them in Partner Center (Docs/windows-installer.md, Microsoft Store package).",
+    "The version comes from the Stable candidate manifest's 12-digit build (windows_installer.package_version); its fourth part is 0, as the Store requires.",
+    "The execution aliases are the beta's: install the Store app or the sideloaded beta, not both. Settings in the developer notes about write virtualisation, the startup task, maxVersionTested and processor architectures apply unchanged."
+  ],
+  "identity": {
+    "name": "ChrisMitchelmore.JustSpeaktoIt",
+    "publisher": "CN=4F44EE59-E9FC-48C5-A032-B34982E6C0CB",
+    "packageFamilyName": "ChrisMitchelmore.JustSpeaktoIt_wqe2sjac9b4k8",
+    "storeProductId": "9PDFKWGH31HP",
+    "processorArchitectures": [
+      "x64",
+      "arm64"
+    ]
+  },
+  "presentation": {
+    "displayName": "Just Speak to It",
+    "publisherDisplayName": "Chris Mitchelmore",
+    "description": "Dictate into any Windows app with Just Speak to It.",
+    "language": "en-GB"
+  },
+  "application": {
+    "id": "JustSpeakToIt",
+    "executable": "SpeakWindows.exe",
+    "executionAlias": "JustSpeakToIt.exe",
+    "windowClass": "JustSpeakToItWindows",
+    "startupTask": {
+      "id": "JustSpeakToIt",
+      "parameters": "--background"
+    }
+  },
+  "cli": {
+    "id": "JustSpeakToItCLI",
+    "executable": "speak.exe",
+    "executionAlias": "JustSpeakToItCLI.exe"
+  },
+  "targetDeviceFamily": {
+    "name": "Windows.Desktop",
+    "minVersion": "10.0.19041.0",
+    "maxVersionTested": "10.0.20348.0"
+  },
+  "capabilities": {
+    "restricted": [
+      "runFullTrust",
+      "unvirtualizedResources"
+    ],
+    "device": [
+      "microphone"
+    ]
+  },
+  "fileSystem": {
+    "writeVirtualization": "disabled",
+    "dataDirectory": "%LOCALAPPDATA%\\JustSpeakToIt",
+    "dataDirectoryName": "JustSpeakToIt"
+  },
+  "assets": {
+    "source": "Resources/AppIcon.iconset/icon_512x512@2x.png",
+    "images": {
+      "Assets/StoreLogo.png": 50,
+      "Assets/StoreLogo.scale-200.png": 100,
+      "Assets/StoreLogo.scale-400.png": 200,
+      "Assets/Square44x44Logo.png": 44,
+      "Assets/Square44x44Logo.scale-125.png": 55,
+      "Assets/Square44x44Logo.scale-150.png": 66,
+      "Assets/Square44x44Logo.scale-200.png": 88,
+      "Assets/Square44x44Logo.scale-400.png": 176,
+      "Assets/Square44x44Logo.targetsize-16_altform-unplated.png": 16,
+      "Assets/Square44x44Logo.targetsize-24_altform-unplated.png": 24,
+      "Assets/Square44x44Logo.targetsize-32_altform-unplated.png": 32,
+      "Assets/Square44x44Logo.targetsize-48_altform-unplated.png": 48,
+      "Assets/Square44x44Logo.targetsize-256_altform-unplated.png": 256,
+      "Assets/Square44x44Logo.targetsize-16_altform-lightunplated.png": 16,
+      "Assets/Square44x44Logo.targetsize-24_altform-lightunplated.png": 24,
+      "Assets/Square44x44Logo.targetsize-32_altform-lightunplated.png": 32,
+      "Assets/Square44x44Logo.targetsize-48_altform-lightunplated.png": 48,
+      "Assets/Square44x44Logo.targetsize-256_altform-lightunplated.png": 256,
+      "Assets/Square150x150Logo.png": 150,
+      "Assets/Square150x150Logo.scale-125.png": 188,
+      "Assets/Square150x150Logo.scale-150.png": 225,
+      "Assets/Square150x150Logo.scale-200.png": 300,
+      "Assets/Square150x150Logo.scale-400.png": 600
+    }
+  }
+}

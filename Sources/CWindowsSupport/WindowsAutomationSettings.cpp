@@ -47,7 +47,7 @@ struct Dialog {
     int shown = -1;
 };
 
-int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
+using jsti::chrome::scale;
 
 std::wstring wideText(const std::string &text) {
     std::wstring result;
@@ -228,71 +228,41 @@ void command(HWND window, Dialog &dialog, int id) {
     }
 }
 
-LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto dialog = reinterpret_cast<Dialog *>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        dialog = static_cast<Dialog *>(reinterpret_cast<CREATESTRUCTW *>(lparam)->lpCreateParams);
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialog));
-    }
-    if (!dialog) return DefWindowProcW(window, message, wparam, lparam);
-    LRESULT themed = 0;
-    if (jsti::chrome::dialogMessage(window, message, wparam, lparam, themed)) return themed;
+constexpr jsti::chrome::DialogFrame dialogFrame{
+    minimumClientWidth, minimumClientHeight, windowStyle, windowExStyle, toggleID, IDCANCEL};
+
+bool create(HWND window, Dialog &dialog) {
+    if (!createControls(window, dialog)) return false;
+    SetTimer(window, refreshTimer, 250, nullptr);
+    return true;
+}
+
+bool handle(HWND window, Dialog &dialog, UINT message, WPARAM wparam, LPARAM, LRESULT &) {
     switch (message) {
-    case WM_CREATE:
-        if (!createControls(window, *dialog)) return -1;
-        SetTimer(window, refreshTimer, 250, nullptr);
-        return 0;
     case WM_TIMER:
-        if (wparam == refreshTimer) refresh(window, *dialog);
-        return 0;
-    case WM_GETMINMAXINFO: {
-        RECT frame{0, 0, scale(window, minimumClientWidth), scale(window, minimumClientHeight)};
-        AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(window));
-        reinterpret_cast<MINMAXINFO *>(lparam)->ptMinTrackSize = {frame.right - frame.left, frame.bottom - frame.top};
-        return 0;
-    }
-    case WM_SIZE: layout(window); return 0;
-    case WM_DPICHANGED: {
-        const RECT *bounds = reinterpret_cast<RECT *>(lparam);
-        SetWindowPos(window, nullptr, bounds->left, bounds->top, bounds->right - bounds->left,
-            bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
-        refreshFont(window, *dialog); layout(window); return 0;
-    }
-    case WM_ACTIVATE:
-        if (LOWORD(wparam) == WA_INACTIVE) { dialog->focus = GetFocus(); return 0; }
-        SetFocus(dialog->focus && IsChild(window, dialog->focus) ? dialog->focus : GetDlgItem(window, toggleID));
-        return 0;
-    case DM_GETDEFID: return MAKELRESULT(IDCANCEL, DC_HASDEFID);
+        if (wparam == refreshTimer) refresh(window, dialog);
+        return true;
     case WM_COMMAND:
-        if (HIWORD(wparam) == BN_CLICKED) command(window, *dialog, LOWORD(wparam));
-        return 0;
-    case WM_CLOSE: close(window); return 0;
+        if (HIWORD(wparam) == BN_CLICKED) command(window, dialog, LOWORD(wparam));
+        return true;
     case WM_DESTROY:
         KillTimer(window, refreshTimer);
-        if (dialog->font) { DeleteObject(dialog->font); dialog->font = nullptr; }
-        if (dialog->code) { DeleteObject(dialog->code); dialog->code = nullptr; }
-        return 0;
+        if (dialog.code) { DeleteObject(dialog.code); dialog.code = nullptr; }
+        return false;
     }
-    return DefWindowProcW(window, message, wparam, lparam);
+    return false;
+}
+
+const jsti::chrome::DialogProcedure<Dialog> dialogParts{dialogFrame, layout, refreshFont, create, close, handle};
+
+LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    return jsti::chrome::dialogProcedure(dialogParts, window, message, wparam, lparam);
 }
 
 HWND createDialog(HWND owner, Dialog &dialog) {
-    const HINSTANCE instance = GetModuleHandleW(nullptr);
-    WNDCLASSW type{};
-    type.lpfnWndProc = procedure;
-    type.hInstance = instance;
-    type.lpszClassName = L"JustSpeakToItAutomationSettings";
-    type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return nullptr;
     dialog.owner = owner;
-    RECT frame{0, 0, scale(owner, 680), scale(owner, 600)};
-    AdjustWindowRectExForDpi(&frame, windowStyle, FALSE, windowExStyle, GetDpiForWindow(owner));
-    RECT bounds{};
-    GetWindowRect(owner, &bounds);
-    return CreateWindowExW(windowExStyle, type.lpszClassName, L"CLI and MCP setup — Just Speak to It",
-        windowStyle, bounds.left + scale(owner, 40), bounds.top + scale(owner, 40), frame.right - frame.left,
-        frame.bottom - frame.top, owner, nullptr, instance, &dialog);
+    return jsti::chrome::createOwnedDialog(owner, L"JustSpeakToItAutomationSettings", procedure, L"CLI and MCP setup — Just Speak to It",
+        680, 600, windowStyle, windowExStyle, &dialog);
 }
 
 Configuration snapshot() {
@@ -320,18 +290,7 @@ void jsti_show_automation_settings(HWND owner, bool (*enabled)(), void (*toggle)
         jsti_window_update(jsti::systemError("Opening CLI and MCP setup").c_str(), nullptr, -1);
         return;
     }
-    EnableWindow(owner, FALSE);
-    ShowWindow(window, SW_SHOW);
-    SetFocus(GetDlgItem(window, toggleID));
-    MSG message{};
-    BOOL result = 1;
-    while (IsWindow(window) && (result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
-        if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
-    }
-    if (IsWindow(window)) close(window);
-    if (IsWindow(owner)) { EnableWindow(owner, TRUE); SetActiveWindow(owner); }
-    if (result == 0) PostQuitMessage(static_cast<int>(message.wParam));
-    else if (result < 0) jsti_window_update(jsti::systemError("Reading CLI and MCP setup messages").c_str(), nullptr, -1);
+    jsti::chrome::runModalDialog(owner, window, toggleID, close, "CLI and MCP setup");
 }
 
 int jsti_window_set_automation_details(const char *pipe_name, const char *cli_path, const char *usage,
@@ -374,8 +333,10 @@ const wchar_t *packagedAliasName() {
     // A family name is <package name>_<publisher id>.
     static constexpr wchar_t developer[] = L"com.justspeaktoit.windows.developer_";
     static constexpr wchar_t beta[] = L"com.justspeaktoit.windows_";
+    static constexpr wchar_t store[] = L"ChrisMitchelmore.JustSpeaktoIt_";
     if (_wcsnicmp(family, developer, wcslen(developer)) == 0) return L"JustSpeakToItDeveloperCLI.exe";
     if (_wcsnicmp(family, beta, wcslen(beta)) == 0) return L"JustSpeakToItCLI.exe";
+    if (_wcsnicmp(family, store, wcslen(store)) == 0) return L"JustSpeakToItCLI.exe";
     return nullptr;
 }
 

@@ -3,6 +3,7 @@
 #include "WindowsOnboarding.hpp"
 #include "WindowsTray.hpp"
 #include "WindowsWindowChrome.hpp"
+#include <climits>
 #include <mutex>
 #include <new>
 
@@ -34,7 +35,13 @@ struct Configuration {
 std::mutex mutex;
 Configuration current;
 HWND guideWindow = nullptr;
-struct Guide { Page page; HFONT font = nullptr, titleFont = nullptr; bool awaitingReturn = false; };
+struct Guide {
+    Page page; HFONT font = nullptr, titleFont = nullptr; bool awaitingReturn = false;
+    // Focus kept across deactivation, and what a screen reader last heard.
+    HWND focus = nullptr;
+    int32_t announcedStep = INT32_MIN;
+    std::wstring announcedStatus;
+};
 int px(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
 
 void notify(int32_t command, int32_t step, int32_t value) {
@@ -86,6 +93,25 @@ void refresh(HWND window, Guide &guide) {
     ShowWindow(GetDlgItem(window, skipID), page.isLast ? SW_HIDE : SW_SHOWNA);
     SetDlgItemTextW(window, nextID, page.isLast ? L"&Finish" : page.isOptional ? L"&Next (skip)" : L"&Next");
     layout(window);
+    // Back is disabled on the first step and action buttons come and go, so
+    // focus left on one moves to Next rather than to the bare window.
+    HWND focus = GetFocus();
+    if (GetActiveWindow() == window &&
+        (!focus || focus == window || (IsChild(window, focus) && (!IsWindowVisible(focus) || !IsWindowEnabled(focus)))))
+        SetFocus(GetDlgItem(window, nextID));
+    // Next and Back only say "pressed", so the new step is announced; so is a
+    // changed status, which reports what an action did.
+    if (page.title.empty()) return;
+    if (page.step != guide.announcedStep) {
+        guide.announcedStep = page.step;
+        guide.announcedStatus = page.status;
+        std::wstring text = page.progress.empty() ? page.title : page.progress + L". " + page.title;
+        if (!page.detail.empty()) text += L". " + page.detail;
+        jsti::accessibility::announce(window, text, false);
+    } else if (page.status != guide.announcedStatus) {
+        guide.announcedStatus = page.status;
+        if (!page.status.empty()) jsti::accessibility::announce(window, page.status, false);
+    }
 }
 
 bool controls(HWND window, Guide &guide) {
@@ -176,6 +202,17 @@ void perform(HWND window, int index) {
     notify(JSTI_GUIDE_COMMAND_ACTION, step, action);
 }
 
+// Windows activates the next window in z-order when an active window is
+// destroyed, which may be another app. Hand activation to the main window
+// first so keyboard focus lands back in the app.
+void closeGuide(HWND window) {
+    HWND owner = GetWindow(window, GW_OWNER);
+    if (owner && GetActiveWindow() == window && IsWindowVisible(owner) && IsWindowEnabled(owner)) {
+        SetActiveWindow(owner);
+    }
+    DestroyWindow(window);
+}
+
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     auto *guide = reinterpret_cast<Guide *>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
@@ -204,12 +241,15 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             guide->awaitingReturn = false;
             notify(JSTI_GUIDE_COMMAND_ACTION, guide->page.step, JSTI_GUIDE_ACTION_NONE);
         }
-        break;
+        if (HIWORD(wparam)) break;
+        // Back from a settings dialog or Windows Settings, focus returns to a control.
+        jsti::chrome::rememberFocus(window, wparam, guide->focus, nextID);
+        return 0;
     case refreshMessage: refresh(window, *guide); return 0;
     case WM_COMMAND: {
         const int32_t step = guide->page.step;
         switch (LOWORD(wparam)) {
-        case IDCANCEL: DestroyWindow(window); return 0;
+        case IDCANCEL: closeGuide(window); return 0;
         case firstActionID: case secondActionID: case thirdActionID:
             if (HIWORD(wparam) == BN_CLICKED) perform(window, LOWORD(wparam) - firstActionID);
             return 0;
@@ -217,18 +257,18 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case skipID:
             if (HIWORD(wparam) != BN_CLICKED) return 0;
             notify(JSTI_GUIDE_COMMAND_SKIP, step, 0);
-            DestroyWindow(window);
+            closeGuide(window);
             return 0;
         case nextID:
             if (HIWORD(wparam) != BN_CLICKED) return 0;
             if (!guide->page.isLast) { notify(JSTI_GUIDE_COMMAND_NEXT, step, 0); return 0; }
             notify(JSTI_GUIDE_COMMAND_FINISH, step, 0);
-            DestroyWindow(window);
+            closeGuide(window);
             return 0;
         }
         break;
     }
-    case WM_CLOSE: DestroyWindow(window); return 0;
+    case WM_CLOSE: closeGuide(window); return 0;
     case WM_NCDESTROY: {
         { std::lock_guard<std::mutex> lock(mutex); if (guideWindow == window) guideWindow = nullptr; }
         if (guide->font) DeleteObject(guide->font);

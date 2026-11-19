@@ -20,6 +20,6 @@ test('Tuist receives the frozen commit through its exported environment namespac
  const configure=readFileSync('scripts/release-train.mjs','utf8');
  assert.match(configure,/TUIST_RELEASE_SOURCE:manifest\.source/);
  assert.doesNotMatch(project,/environment\["RELEASE_SOURCE"\]/);
- assert.equal((project.match(/environment\["TUIST_RELEASE_SOURCE"\]/g)||[]).length,3,
-  'app, watch and keyboard metadata must all use the Tuist-visible commit');
+ assert.equal((project.match(/environment\["TUIST_RELEASE_SOURCE"\]/g)||[]).length,6,
+  'app, watch, keyboard, phone/watch widget and Share metadata must all use the Tuist-visible commit');
 });

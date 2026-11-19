@@ -133,7 +133,7 @@ final class HistoryManagerTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let expected = HistoryManager.calculateStatistics(for: manager.allItems)
+        let expected = HistoryStatistics.calculate(for: manager.allItems)
         let actual = manager.statistics
         XCTAssertEqual(actual.totalSessions, expected.totalSessions, message, file: file, line: line)
         XCTAssertEqual(

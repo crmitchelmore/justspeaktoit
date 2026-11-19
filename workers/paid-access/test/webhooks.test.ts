@@ -88,7 +88,7 @@ async function seedRevokedEntitlement(userId: string): Promise<void> {
 }
 
 async function entitlementStatus(userId: string): Promise<string | null> {
-  return (await new Repository(env.DB).findEntitlement(userId))?.status ?? null;
+  return (await new Repository(env.DB).entitlements.findEntitlement(userId))?.status ?? null;
 }
 
 describe('Stripe webhook signature verification', () => {
@@ -349,7 +349,7 @@ describe('Stripe webhook idempotency', () => {
     expect((await postStripeWebhook(repurchase)).status).toBe(200);
 
     expect(await entitlementStatus(userId)).toBe('active');
-    const row = await new Repository(env.DB).findEntitlement(userId);
+    const row = await new Repository(env.DB).entitlements.findEntitlement(userId);
     expect(row?.revokedAt).toBeNull();
     expect(row?.revocationReason).toBeNull();
   });
@@ -363,7 +363,7 @@ describe('Stripe webhook idempotency', () => {
     expect((await postStripeWebhook(yearly)).status).toBe(200);
 
     expect(await entitlementStatus(userId)).toBe('active');
-    const row = await new Repository(env.DB).findEntitlement(userId);
+    const row = await new Repository(env.DB).entitlements.findEntitlement(userId);
     expect(row?.planId).toBe(PLAN_YEARLY_PRICE_ID);
   });
 });

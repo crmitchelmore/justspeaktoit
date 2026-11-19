@@ -1,0 +1,190 @@
+name: Microsoft Store
+# Unsigned Microsoft Store .msixbundle (x64 + ARM64) under the identity
+# Partner Center reserved (scripts/windows-package/package-identity-store.json),
+# and its submission to Store product 9PDFKWGH31HP.
+#
+# The bundle is built from the same qualified runtime bundles as the beta
+# installer and is never signed here: the Store re-signs what it accepts, so no
+# windows-signing secret is read. Only Publish Stable submits it (submit: true
+# for a stable-candidate-N manifest on main), with the Entra credentials of the
+# main-only microsoft-store environment. A dispatch or a main push only builds
+# and uploads the bundle, which is also what the first, manual Partner Center
+# submission uses. See Docs/windows-installer.md.
+on:
+  workflow_call:
+    inputs:
+      manifest:
+        description: Immutable Stable candidate manifest tag
+        required: true
+        type: string
+      submit:
+        description: Submit the bundle to the Microsoft Store
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Manifest tag to package for the Store (blank packages the current Alpha); never submits
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - scripts/windows-package/package-identity-store.json
+      - scripts/windows-package/msix_identity.py
+      - scripts/windows-package/build-windows-installer-bundle.ps1
+      - scripts/windows-package/submit-microsoft-store.ps1
+      - .github/workflows/windows-store.yml
+permissions:
+  contents: read
+concurrency:
+  group: windows-store-${{ inputs.manifest || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sources:
+    name: Fetch the qualified x64 and ARM64 runtime bundles
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      mode: ${{ steps.resolve.outputs.mode }}
+      version: ${{ steps.resolve.outputs.version }}
+      source: ${{ steps.resolve.outputs.source }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve and verify the runtime bundles
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANIFEST: ${{ inputs.manifest }}
+        run: |
+          tag="$MANIFEST"
+          if [ -z "$tag" ]; then tag=$(node scripts/windows-installer-release.mjs rehearsal-tag); fi
+          if [ -n "$tag" ] && ! gh release view "$tag" --json assets --jq '.assets[].name' | grep -qx desktop-qualification.json; then
+            # An iOS-only candidate, or one prepared before desktop
+            # qualification, has no qualified Windows bundles to package.
+            echo "::notice::$tag has no desktop qualification receipt; no Store bundle is built."
+            tag=""
+          fi
+          if [ -z "$tag" ]; then
+            [ -n "$MANIFEST" ] || echo "::notice::No qualified Alpha matches the current runtime policy; no Store bundle is built."
+            { echo "tag="; echo "mode=skip"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node scripts/windows-installer-release.mjs sources "$tag" sources > /dev/null
+          {
+            echo "tag=$tag"; echo "mode=package"
+            echo "version=$(jq -r .version sources/sources.json)"; echo "source=$(jq -r .source sources/sources.json)"
+          } >> "$GITHUB_OUTPUT"
+          jq . sources/sources.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ steps.resolve.outputs.mode == 'package' }}
+        with:
+          name: windows-store-sources
+          path: sources/
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: Build the unsigned Store bundle
+    needs: sources
+    if: ${{ needs.sources.outputs.mode == 'package' }}
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-store-sources
+          path: sources
+      - name: Test the packaging tools
+        shell: pwsh
+        run: |
+          python -B -X warn_default_encoding -W error::EncodingWarning -m unittest discover -s scripts/windows-package -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build and verify the Store bundle
+        shell: powershell
+        env:
+          SOURCE: ${{ needs.sources.outputs.source }}
+          VERSION: ${{ needs.sources.outputs.version }}
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'store'
+          $built = (Get-Content -Raw sources/sources.json | ConvertFrom-Json).bundles
+          ./scripts/windows-package/build-windows-installer-bundle.ps1 -Channel store -X64Bundle sources/x64 -Arm64Bundle sources/arm64 `
+            -ExpectedCommit $env:SOURCE -X64Commit $built.x64.commit -Arm64Commit $built.arm64.commit -Version $env:VERSION `
+            -Output $root -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
+          New-Item -ItemType Directory -Force -Path store | Out-Null
+          Copy-Item -LiteralPath (Join-Path $root "JustSpeakToIt-store_$($env:VERSION)_unsigned.msixbundle") `
+            -Destination "store/JustSpeakToIt-store_$($env:VERSION).msixbundle"
+          Copy-Item -Path (Join-Path $root '*.json'), (Join-Path $root '*.log') -Destination store
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-store-bundle
+          path: store/
+          if-no-files-found: error
+          retention-days: 30
+
+  # Holds the Partner Center Entra credentials, so every action is pinned to a
+  # reviewed commit. The microsoft-store environment admits only main.
+  submit:
+    name: Submit the bundle to the Microsoft Store
+    needs: [sources, package]
+    if: ${{ inputs.submit && startsWith(needs.sources.outputs.tag, 'stable-candidate-') && github.ref == 'refs/heads/main' }}
+    runs-on: windows-2022
+    timeout-minutes: 90
+    environment: microsoft-store
+    steps:
+      - name: Read the Store configuration
+        id: config
+        shell: pwsh
+        env:
+          MICROSOFT_STORE_TENANT_ID: ${{ secrets.MICROSOFT_STORE_TENANT_ID }}
+          MICROSOFT_STORE_CLIENT_ID: ${{ secrets.MICROSOFT_STORE_CLIENT_ID }}
+          MICROSOFT_STORE_CLIENT_SECRET: ${{ secrets.MICROSOFT_STORE_CLIENT_SECRET }}
+          MICROSOFT_STORE_SELLER_ID: ${{ secrets.MICROSOFT_STORE_SELLER_ID }}
+        run: |
+          $names = 'MICROSOFT_STORE_TENANT_ID', 'MICROSOFT_STORE_CLIENT_ID', 'MICROSOFT_STORE_CLIENT_SECRET', 'MICROSOFT_STORE_SELLER_ID'
+          $missing = @($names | Where-Object { -not [Environment]::GetEnvironmentVariable($_) })
+          if ($missing.Count -eq $names.Count) {
+            Write-Output "::notice::The microsoft-store environment has no Partner Center credentials; the Store bundle was built but not submitted."
+            "enabled=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          if ($missing.Count -gt 0) { throw "The microsoft-store environment is missing $($missing -join ', ')." }
+          "enabled=true" >> $env:GITHUB_OUTPUT
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ steps.config.outputs.enabled == 'true' }}
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: ${{ steps.config.outputs.enabled == 'true' }}
+        with:
+          name: windows-store-bundle
+          path: store
+      - name: Submit to Partner Center
+        if: ${{ steps.config.outputs.enabled == 'true' }}
+        shell: powershell
+        env:
+          MICROSOFT_STORE_TENANT_ID: ${{ secrets.MICROSOFT_STORE_TENANT_ID }}
+          MICROSOFT_STORE_CLIENT_ID: ${{ secrets.MICROSOFT_STORE_CLIENT_ID }}
+          MICROSOFT_STORE_CLIENT_SECRET: ${{ secrets.MICROSOFT_STORE_CLIENT_SECRET }}
+          MICROSOFT_STORE_SELLER_ID: ${{ secrets.MICROSOFT_STORE_SELLER_ID }}
+          VERSION: ${{ needs.sources.outputs.version }}
+        run: |
+          ./scripts/windows-package/submit-microsoft-store.ps1 -Bundle "store/JustSpeakToIt-store_$($env:VERSION).msixbundle" `
+            -ToolCache (Join-Path $env:RUNNER_TEMP 'store-tools') -Evidence store/microsoft-store-submission.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ steps.config.outputs.enabled == 'true' }}
+        with:
+          name: windows-store-submission
+          path: store/microsoft-store-submission.json
+          if-no-files-found: error
+          retention-days: 90

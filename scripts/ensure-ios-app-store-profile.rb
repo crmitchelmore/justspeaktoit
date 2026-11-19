@@ -16,6 +16,11 @@
 # concurrent refresh of the same profile (404 on delete, 409 on create) is
 # resolved by searching again.
 #
+# With --register NAME the App ID is registered first when missing, and every
+# --capability TYPE (for example APP_GROUPS) is enabled on it. The API cannot
+# associate a specific App Group with an App ID, so a required group still
+# needs that one portal step before the profile can carry it.
+#
 # Never prints profile content. Run with:
 #   APP_STORE_CONNECT_KEY_ID=... APP_STORE_CONNECT_ISSUER_ID=... \
 #   APP_STORE_CONNECT_KEY_PATH=... ruby scripts/ensure-ios-app-store-profile.rb \
@@ -71,9 +76,12 @@ module IOSProfileEnsure
 
   class Ensurer
     def initialize(client:, bundle_id:, certificate_serial:, required: {}, preferred: {}, exact: [],
+                   register_name: nil, capabilities: [],
                    logger: ->(message) { puts message }, warner: ->(message) { warn message },
                    sleeper: ->(seconds) { sleep(seconds) })
       @client = client
+      @register_name = register_name
+      @capabilities = capabilities
       @bundle_id = bundle_id
       @certificate_serial = certificate_serial
       @required = required
@@ -94,10 +102,18 @@ module IOSProfileEnsure
 
     # Returns the decoded profile bytes.
     def ensure_profile
+      register if @register_name
       attempt(retry_conflict: true)
     end
 
     private
+
+    def register
+      IOSProfileBootstrap::Provisioner.new(client: @client, bundle_id: @bundle_id, bundle_name: @register_name,
+                                           capabilities: @capabilities, profile_name: profile_name,
+                                           certificate_serial: @certificate_serial, logger: @logger,
+                                           sleeper: @sleeper).ensure_registration
+    end
 
     def attempt(retry_conflict:)
       bundle_resource_id = fetch_bundle.fetch("id")
@@ -227,13 +243,15 @@ module IOSProfileEnsure
   end
 
   def self.main(argv)
-    options = { required: {}, preferred: {}, exact: [] }
+    options = { required: {}, preferred: {}, exact: [], capabilities: [] }
     OptionParser.new do |parser|
       parser.on("--bundle-id IDENTIFIER") { |value| options[:bundle_id] = value }
       parser.on("--certificate-serial SERIAL") { |value| options[:certificate_serial] = value }
       parser.on("--require KEY=VALUE") { |value| parse_expectation(value, options[:required]) }
       parser.on("--prefer KEY=VALUE") { |value| parse_expectation(value, options[:preferred]) }
       parser.on("--exact KEY") { |value| options[:exact] << value }
+      parser.on("--register NAME") { |value| options[:register_name] = value }
+      parser.on("--capability TYPE") { |value| options[:capabilities] << value }
       parser.on("--output PATH") { |value| options[:output] = value }
     end.parse!(argv)
     missing_options = %i[bundle_id certificate_serial output].reject { |key| options[key] && !options[key].empty? }
@@ -247,7 +265,8 @@ module IOSProfileEnsure
     ensurer = Ensurer.new(client: IOSProfileBootstrap::Client.new(transport: transport),
                           bundle_id: options[:bundle_id], certificate_serial: options[:certificate_serial],
                           required: options[:required], preferred: options[:preferred],
-                          exact: options[:exact])
+                          exact: options[:exact], register_name: options[:register_name],
+                          capabilities: options[:capabilities])
     File.binwrite(options[:output], ensurer.ensure_profile)
   rescue ApiError, ValidationError => error
     abort(error.message)

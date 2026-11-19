@@ -48,7 +48,7 @@ final class DesktopHistoryPresentationTests: XCTestCase {
         XCTAssertEqual(DesktopHistoryFormat.totalDuration(68.9), "01m 08s")
         XCTAssertEqual(DesktopHistoryFormat.spend(0, locale: locale), "—")
         XCTAssertEqual(DesktopHistoryFormat.spend(Decimal(string: "0.13")!, locale: locale), "$0.13")
-        XCTAssertEqual(DesktopHistoryFormat.spend(Decimal(string: "0.0021")!, locale: locale), "<$0.01")
+        XCTAssertEqual(DesktopHistoryFormat.spend(Decimal(string: "0.0021")!, locale: locale), "$0.0021")
         XCTAssertEqual(DesktopHistoryFormat.spend(Decimal(string: "0.01")!, locale: locale), "$0.01")
         XCTAssertEqual(DesktopHistoryFormat.audioLength(24), "24.00")
         XCTAssertEqual(DesktopHistoryFormat.audioLength(7.236), "07.24")

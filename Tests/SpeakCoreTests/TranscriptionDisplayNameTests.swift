@@ -13,10 +13,10 @@ final class TranscriptionDisplayNameTests: XCTestCase {
         )
         XCTAssertEqual(
             ModelCatalog.transcriptionDisplayName(
-                for: XAIVoiceModels.thinkFast2CatalogID,
+                for: XAIVoiceModels.voice3CatalogID,
                 isBatch: false
             ),
-            "Grok Voice Think Fast 2.0 (Streaming)"
+            "Grok Voice 3.0 (Streaming)"
         )
         XCTAssertEqual(
             ModelCatalog.transcriptionDisplayName(

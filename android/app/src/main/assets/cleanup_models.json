@@ -1,0 +1,60 @@
+{
+  "models" : [
+    {
+      "allowedHosts" : [
+        ".hf.co",
+        ".huggingface.co",
+        "huggingface.co"
+      ],
+      "bytes" : 1107409472,
+      "catalogId" : "local/post-processing/qwen3-1.7b-q4",
+      "displayName" : "Qwen3 1.7B Q4",
+      "filename" : "Qwen3-1.7B-Q4_K_M.gguf",
+      "license" : "Apache-2.0",
+      "minimumDeviceMemoryBytes" : 5368709120,
+      "provenance" : "Hugging Face unsloth/Qwen3-1.7B-GGUF @ d7f544eead698dbd1f15126ef60b45a1e1933222, LFS SHA-256 b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897",
+      "repository" : "unsloth/Qwen3-1.7B-GGUF",
+      "revision" : "d7f544eead698dbd1f15126ef60b45a1e1933222",
+      "sha256" : "b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897",
+      "summary" : "Recommended tiny local LLM for higher-quality cleanup. Current Qwen3 family, stronger instructions.",
+      "url" : "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/d7f544eead698dbd1f15126ef60b45a1e1933222/Qwen3-1.7B-Q4_K_M.gguf"
+    },
+    {
+      "allowedHosts" : [
+        ".hf.co",
+        ".huggingface.co",
+        "huggingface.co"
+      ],
+      "bytes" : 396705472,
+      "catalogId" : "local/post-processing/qwen3-0.6b-q4",
+      "displayName" : "Qwen3 0.6B Q4",
+      "filename" : "Qwen3-0.6B-Q4_K_M.gguf",
+      "license" : "Apache-2.0",
+      "provenance" : "Hugging Face unsloth/Qwen3-0.6B-GGUF @ 50968a4468ef4233ed78cd7c3de230dd1d61a56b, LFS SHA-256 ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a",
+      "repository" : "unsloth/Qwen3-0.6B-GGUF",
+      "revision" : "50968a4468ef4233ed78cd7c3de230dd1d61a56b",
+      "sha256" : "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a",
+      "summary" : "Fastest current Qwen3 tiny local model. Good for quick simple cleanup on-device.",
+      "url" : "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/50968a4468ef4233ed78cd7c3de230dd1d61a56b/Qwen3-0.6B-Q4_K_M.gguf"
+    },
+    {
+      "allowedHosts" : [
+        ".hf.co",
+        ".huggingface.co",
+        "huggingface.co"
+      ],
+      "bytes" : 270590880,
+      "catalogId" : "local/post-processing/smollm2-360m-instruct-q4",
+      "displayName" : "SmolLM2 360M Instruct Q4",
+      "filename" : "SmolLM2-360M-Instruct-Q4_K_M.gguf",
+      "license" : "Apache-2.0",
+      "provenance" : "Hugging Face bartowski/SmolLM2-360M-Instruct-GGUF @ 7be6f65f1db715fe5dc5a4634c0d459b4eed42ec, LFS SHA-256 2fa3f013dcdd7b99f9b237717fa0b12d75bbb89984cc1274be1471a465bac9c2",
+      "repository" : "bartowski/SmolLM2-360M-Instruct-GGUF",
+      "revision" : "7be6f65f1db715fe5dc5a4634c0d459b4eed42ec",
+      "sha256" : "2fa3f013dcdd7b99f9b237717fa0b12d75bbb89984cc1274be1471a465bac9c2",
+      "summary" : "Smallest recommended download. Best for quick cleanup, with lower quality on complex transcripts.",
+      "url" : "https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/7be6f65f1db715fe5dc5a4634c0d459b4eed42ec/SmolLM2-360M-Instruct-Q4_K_M.gguf"
+    }
+  ],
+  "version" : 1
+}

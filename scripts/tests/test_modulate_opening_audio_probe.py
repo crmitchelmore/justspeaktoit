@@ -1,10 +1,8 @@
 """Real loopback sockets prove the HTTP101 barrier and exact synthetic receipt."""
 import base64
-import http.client
 import importlib.util
 import json
 import os
-from pathlib import Path
 import select
 import socket
 import struct
@@ -13,10 +11,11 @@ import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
 import uuid
+from pathlib import Path
+from unittest.mock import patch
 
-SPEC = importlib.util.spec_from_file_location("modulate_opening", Path(__file__).resolve().parents[1] / "modulate-opening-audio-probe.py")
+SPEC = importlib.util.spec_from_file_location("modulate_opening", Path(__file__).resolve().parents[1] / "qualification/modulate-opening-audio-probe.py")
 PEER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PEER)
 
@@ -60,16 +59,19 @@ class HeldModulatePeerTests(unittest.TestCase):
         cls.thread.join(2)
 
     def control(self, identifier, action, body=None):
-        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
-        try:
-            connection.request("GET" if action == "state" else "POST", f"/control/{identifier}/{action}",
-                               body=json.dumps(body).encode() if body is not None else None,
-                               headers={"X-JSTI-Probe": "local-only"})
-            response = connection.getresponse()
-            self.assertEqual(response.status, 200)
-            return json.loads(response.read())
-        finally:
-            connection.close()
+        # Read to EOF: the server closes only after freeing the request's shared connection slot, so the
+        # next connection can never find it still taken and be dropped unanswered.
+        data = json.dumps(body).encode() if body is not None else b""
+        method = "GET" if action == "state" else "POST"
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as sock:
+            sock.sendall((f"{method} /control/{identifier}/{action} HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                          f"X-JSTI-Probe: local-only\r\nContent-Length: {len(data)}\r\n\r\n").encode() + data)
+            response = bytearray()
+            while chunk := sock.recv(4096):
+                response.extend(chunk)
+        head, _, payload = bytes(response).partition(b"\r\n\r\n")
+        self.assertTrue(head.startswith(b"HTTP/1.1 200 "), head)
+        return json.loads(payload)
 
     def held(self, ids=(1, 2), ack_after=1):
         identifier = str(uuid.uuid4())
@@ -168,7 +170,10 @@ class HeldModulatePeerTests(unittest.TestCase):
                 self.control(extra, "configure", {"ids": [99], "ackAfter": 1})
                 refused = self.connect_upgrade(extra)
                 sockets.append(refused)
-                self.assertTrue(refused.recv(4096).startswith(b"HTTP/1.1 503 "))
+                reply = bytearray()
+                while chunk := refused.recv(4096):  # EOF means the refusal's connection slot is free again.
+                    reply.extend(chunk)
+                self.assertTrue(reply.startswith(b"HTTP/1.1 503 "), bytes(reply))
                 self.assertEqual(self.control(extra, "state")["stage"], "configured")
                 for identifier, sock in held:
                     self.release(identifier, sock)  # Every accepted socket is releasable at capacity.
@@ -186,7 +191,7 @@ class HeldModulatePeerTests(unittest.TestCase):
 
 
 RUNNER_SPEC = importlib.util.spec_from_file_location(
-    "modulate_runner", Path(__file__).resolve().parents[1] / "qualify-modulate-opening-audio.py")
+    "modulate_runner", Path(__file__).resolve().parents[1] / "qualification/qualify-modulate-opening-audio.py")
 RUNNER = importlib.util.module_from_spec(RUNNER_SPEC)
 RUNNER_SPEC.loader.exec_module(RUNNER)
 # This contract lists the four semantic scenarios independently of runner code.
@@ -212,7 +217,7 @@ class OwnedRunnerTests(unittest.TestCase):
                 self.assertTrue(RUNNER.qualification(output)[0])
 
     def test_runner_reaps_owned_peer_and_command_and_preserves_nonzero_and_timeout(self):
-        runner = Path(__file__).resolve().parents[1] / "qualify-modulate-opening-audio.py"
+        runner = Path(__file__).resolve().parents[1] / "qualification/qualify-modulate-opening-audio.py"
         with tempfile.TemporaryDirectory(prefix="modulate-owned-runner-") as directory:
             for scenario, expected in (("pass", 0), ("timeout", 124), ("fake-zero", 1), ("failed-command", 7)):
                 output = Path(directory) / scenario
@@ -224,8 +229,11 @@ class OwnedRunnerTests(unittest.TestCase):
                         "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); "
                         f"print({result_text!r}, flush=True); " + ending)
                 result = subprocess.run([sys.executable, "-B", str(runner), "--output-dir", str(output),
-                                         "--test-timeout", "1", "--", sys.executable, "-B", "-c", code, str(pid_file)],
-                                        capture_output=True, text=True, timeout=15)
+                                         # Only the timeout scenario relies on the deadline; a loaded
+                                         # interpreter can take over 1 s to start the others.
+                                         "--test-timeout", "1" if scenario == "timeout" else "10",
+                                         "--", sys.executable, "-B", "-c", code, str(pid_file)],
+                                        capture_output=True, text=True, timeout=60)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 receipt = json.loads((output / "qualification.json").read_text())
                 self.assertEqual(receipt["qualificationExitCode"], expected)
@@ -239,17 +247,17 @@ class OwnedRunnerTests(unittest.TestCase):
 
 
     def test_sigterm_enters_owned_cleanup_and_writes_a_failing_receipt(self):
-        runner = Path(__file__).resolve().parents[1] / "qualify-modulate-opening-audio.py"
+        runner = Path(__file__).resolve().parents[1] / "qualification/qualify-modulate-opening-audio.py"
         with tempfile.TemporaryDirectory(prefix="modulate-owned-signal-") as directory:
             output = Path(directory) / "receipt"
             process = subprocess.Popen([sys.executable, "-B", str(runner), "--output-dir", str(output), "--",
                                         sys.executable, "-B", "-c", "import time; time.sleep(30)"],
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             try:
-                self.assertTrue(select.select([process.stdout], [], [], 5)[0], "owned child readiness was signalled")
+                self.assertTrue(select.select([process.stdout], [], [], 60)[0], "owned child readiness was signalled")
                 self.assertEqual(process.stdout.readline().strip(), "Owned Modulate test command started")
                 process.terminate()
-                _, stderr = process.communicate(timeout=10)
+                _, stderr = process.communicate(timeout=60)
                 self.assertEqual(process.returncode, 143, stderr)
                 receipt = json.loads((output / "qualification.json").read_text())
                 self.assertEqual(receipt["qualificationExitCode"], 143)
@@ -262,7 +270,7 @@ class OwnedRunnerTests(unittest.TestCase):
                     process.communicate(timeout=10)
 
     def test_edited_symlink_directory_or_unverifiable_lock_refuses_command_before_any_child(self):
-        runner = Path(__file__).resolve().parents[1] / "qualify-modulate-opening-audio.py"
+        runner = Path(__file__).resolve().parents[1] / "qualification/qualify-modulate-opening-audio.py"
         with tempfile.TemporaryDirectory(prefix="modulate-lock-admission-") as directory:
             for kind in ("edited", "symlink", "directory", "unverifiable"):
                 root = Path(directory) / kind
@@ -352,7 +360,7 @@ class OwnedRunnerTests(unittest.TestCase):
                 self.assertEqual(target.read_bytes(), original)
 
     def test_runner_records_before_command_pre_restore_and_after_without_changing_test_exit_semantics(self):
-        runner = Path(__file__).resolve().parents[1] / "qualify-modulate-opening-audio.py"
+        runner = Path(__file__).resolve().parents[1] / "qualification/qualify-modulate-opening-audio.py"
         with tempfile.TemporaryDirectory(prefix="modulate-source-state-") as directory:
             for scenario, expected in (("deleted-lock", 0), ("initially-missing-lock", 0),
                                        ("source-change", 0), ("failed-source-change", 7)):

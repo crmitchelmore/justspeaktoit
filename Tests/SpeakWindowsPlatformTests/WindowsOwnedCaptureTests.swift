@@ -1,3 +1,4 @@
+import CWindowsSelfTest
 import CWindowsSupport
 import Foundation
 import SpeakDesktop

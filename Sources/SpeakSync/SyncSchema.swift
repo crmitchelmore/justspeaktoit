@@ -139,10 +139,9 @@ enum KeySyncMetadataRecordField {
 }
 
 /// The two existing CloudKit containers. `macOS` is the shared container
-/// (#1119): Windows, Linux and the Mac App Store build use it, and iOS builds
-/// with the shared-container flag join it. `iOS` is the legacy iPhone
-/// container, kept until the move is verified on devices
-/// (`Docs/cloudkit-shared-container.md`).
+/// (#1119) that every platform now uses for History and encrypted API keys.
+/// `iOS` is the legacy iPhone container, read only by the one-time migration
+/// until the move is verified on devices (`Docs/cloudkit-shared-container.md`).
 public enum SyncContainerFamily: String, CaseIterable, Sendable {
     /// The shared container: History, Compare Models rounds and encrypted API keys.
     case macOS
@@ -153,8 +152,8 @@ public enum SyncContainerFamily: String, CaseIterable, Sendable {
     /// the canonical `ReleaseTrains.json` catalogue.
     public func containerIdentifier(in train: ReleaseTrain) -> String {
         switch self {
-        case .macOS: return train.macCloudContainer
-        case .iOS: return train.iosCloudContainer
+        case .macOS: return train.cloudContainer
+        case .iOS: return train.legacyIOSCloudContainer
         }
     }
 

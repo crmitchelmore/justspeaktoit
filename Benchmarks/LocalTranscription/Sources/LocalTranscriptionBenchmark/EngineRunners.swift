@@ -15,8 +15,8 @@ protocol LocalBenchmarkEngineRunner: AnyObject {
 final class WhisperKitBenchmarkRunner: LocalBenchmarkEngineRunner {
     let engine = LocalTranscriptionEngine.whisperKit
     // Keep in step with the argmax-oss-swift pin in Package.resolved.
-    let runtimeVersion = "argmax-oss-swift 1.1.0"
-    let runtimeCommit: String? = "1e2a163736dfa5a198e637ae44c114e1c6d5cc2d"
+    let runtimeVersion = "argmax-oss-swift 1.1.1"
+    let runtimeCommit: String? = "1bbc57cb7fe6410248a685b1c5a3c6d56adc2ed4"
     private let pipeline: WhisperKit
 
     init(model: String, modelRepo: String?) async throws {

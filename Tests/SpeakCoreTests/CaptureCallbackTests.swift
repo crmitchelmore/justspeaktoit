@@ -101,6 +101,25 @@ final class CaptureCallbackTests: XCTestCase {
         XCTAssertNil(CaptureCallback.validated("http://example.com/collect"))
     }
 
+    func testRefusesBrowserSchemesThatWouldLoadTheCallbackFromTheWeb() {
+        for raw in [
+            "x-safari-https://example.com/collect",
+            "X-Safari-HTTP://example.com/collect",
+            "googlechromes://example.com/collect",
+            "googlechrome-x-callback://x-callback-url/open/?url=https%3A%2F%2Fexample.com",
+            "firefox://open-url?url=https://example.com/collect",
+            "firefox-focus://open-url?url=https://example.com/collect",
+            "microsoft-edge-https://example.com/collect",
+            "brave://open-url?url=https://example.com/collect",
+            "opera-https://example.com/collect",
+            "duckduckgo://example.com/collect",
+            "x-web-search://?collect",
+            "wss://example.com/collect"
+        ] {
+            XCTAssertNil(CaptureCallback.validated(raw), "should refuse \(raw)")
+        }
+    }
+
     func testRefusesContentAndMessagingSchemes() {
         for raw in [
             "javascript:alert(1)",

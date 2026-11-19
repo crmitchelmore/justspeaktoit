@@ -46,7 +46,7 @@ async function issueSession(
   const signingKey = requireSecret(context.env, 'SESSION_SIGNING_KEY');
   const refresh = await createRefreshToken();
 
-  const sessionId = await context.repository.createAuthSession({
+  const sessionId = await context.repository.users.createAuthSession({
     userId: user.id,
     refreshTokenHash: refresh.hash,
     deviceLabel,
@@ -61,7 +61,7 @@ async function issueSession(
     context.nowSeconds,
   );
 
-  const entitlement = await context.repository.ensureEntitlement(user.id, context.nowSeconds);
+  const entitlement = await context.repository.entitlements.ensureEntitlement(user.id, context.nowSeconds);
 
   return jsonResponse(
     {
@@ -96,7 +96,7 @@ export async function handleAppleSignIn(
     });
   } catch {
     context.logger.warn('auth.apple.rejected');
-    await context.repository.recordAudit({
+    await context.repository.audit.recordAudit({
       userId: null,
       actor: 'user',
       action: 'auth.apple.sign_in',
@@ -108,7 +108,7 @@ export async function handleAppleSignIn(
     throw new ApiError('unauthorized', 'Apple identity token could not be verified');
   }
 
-  const user = await context.repository.upsertUserByAppleSub(
+  const user = await context.repository.users.upsertUserByAppleSub(
     claims.subject,
     claims.emailVerified ? claims.email : null,
     context.nowSeconds,
@@ -117,7 +117,7 @@ export async function handleAppleSignIn(
     throw new ApiError('forbidden', 'This account is disabled');
   }
 
-  await context.repository.recordAudit({
+  await context.repository.audit.recordAudit({
     userId: user.id,
     actor: 'user',
     action: 'auth.apple.sign_in',
@@ -138,7 +138,7 @@ export async function handleRefresh(
   const body = await readJson<RefreshBody>(request, MAX_AUTH_BODY_BYTES);
   const token = readString(body.refresh_token, 'refresh_token', 512);
 
-  const consumed = await context.repository.consumeRefreshToken(
+  const consumed = await context.repository.users.consumeRefreshToken(
     await refreshTokenHash(token),
     context.nowSeconds,
   );
@@ -146,7 +146,7 @@ export async function handleRefresh(
     throw new ApiError('unauthorized', 'Refresh token is not valid');
   }
 
-  const user = await context.repository.findUserById(consumed.userId);
+  const user = await context.repository.users.findUserById(consumed.userId);
   if (user === null || user.disabledAt !== null) {
     throw new ApiError('unauthorized', 'Refresh token is not valid');
   }
@@ -157,8 +157,8 @@ export async function handleRefresh(
 }
 
 export async function handleSignOut(context: AuthenticatedContext): Promise<Response> {
-  await context.repository.revokeSession(context.session.sessionId, context.nowSeconds);
-  await context.repository.recordAudit({
+  await context.repository.users.revokeSession(context.session.sessionId, context.nowSeconds);
+  await context.repository.audit.recordAudit({
     userId: context.session.userId,
     actor: 'user',
     action: 'auth.sign_out',

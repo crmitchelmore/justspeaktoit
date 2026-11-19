@@ -1,4 +1,5 @@
 #if os(Windows)
+import CWindowsSelfTest
 import CWindowsSupport
 import XCTest
 

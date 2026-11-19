@@ -48,6 +48,10 @@ final class AssemblyAITestSocket: StreamingWebSocketConnection, @unchecked Senda
         lock.withLock { messages.compactMap { if case .text(let text) = $0 { text } else { nil } } }
     }
     var cancels: Int { lock.withLock { cancelValue } }
+    /// Sends handed to this socket whose completion has not been delivered.
+    var pendingSends: Int { lock.withLock { completions.count } }
+    /// Every message handed to this socket, in order.
+    var sent: [StreamingWebSocketMessage] { lock.withLock { messages } }
     func resume(onOpen: @escaping @Sendable () -> Void) { lock.withLock { opener = onOpen } }
     func open() { lock.withLock { opener }?() }
     func begin() { emit(#"{"type":"Begin"}"#) }

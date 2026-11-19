@@ -8,7 +8,7 @@ import SpeakWindowsPlatform
 
 /// The actual shared Mistral Voxtral client over the production WinHTTP
 /// adapter, against the bounded Voxtral peer in
-/// `scripts/websocket-loopback-probe.py`. The client builds its own request;
+/// `scripts/loopback/websocket-loopback-probe.py`. The client builds its own request;
 /// only scheme, host and port are redirected to loopback, so the path, model
 /// query and Bearer header the peer verifies are the client's own. The key and
 /// audio are synthetic: this qualifies the transport path, not a provider

@@ -1,12 +1,27 @@
 package com.justspeaktoit.android.dictation
 
+import com.justspeaktoit.android.cloud.CloudCatalog
+import com.justspeaktoit.android.local.CleanupModelsState
+import com.justspeaktoit.android.local.LlamaModel
+import com.justspeaktoit.android.local.LocalModelItem
+import com.justspeaktoit.android.local.ModelInstallState
+import com.justspeaktoit.android.settings.AppPreferences
+import com.justspeaktoit.android.settings.DictationProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DictationUiStateTest {
     private val both = RecognizerCapabilities(34, speechServiceAvailable = true, onDeviceAvailable = true)
+
+    @Test
+    fun testKeepAudioOnCancel_defaultsOnWithTheCanonicalKey() {
+        assertEquals("keepAudioOnCancel", AppPreferences.KEY_KEEP_AUDIO_ON_CANCEL)
+        assertTrue(AppPreferences.DEFAULT_KEEP_AUDIO_ON_CANCEL)
+        assertTrue(DictationUiState().keepAudioOnCancel)
+    }
 
     @Test
     fun testCanStart_waitsForAvailabilityCheck() {
@@ -38,5 +53,68 @@ class DictationUiStateTest {
         val state = DictationUiState(options = options, chosenMode = RecognitionMode.OnDevice, checkingAvailability = false)
         assertEquals(RecognitionMode.OnDevice, state.activeMode)
         assertFalse(state.canStart)
+    }
+
+    @Test
+    fun testDownloadedCleanupModel_isReadyOnlyWhenDownloadedWithItsRuntime_andAProfilesCloudModelWins() {
+        val model = LlamaModel(
+            catalogId = SMOL, displayName = "SmolLM2", summary = "", repository = "r", revision = "v",
+            url = "https://huggingface.co/r/resolve/v/m.gguf", filename = "m.gguf", bytes = 1, sha256 = "0".repeat(64),
+            license = "Apache-2.0", allowedHosts = listOf("huggingface.co"), minimumDeviceMemoryBytes = null,
+        )
+        fun state(installState: ModelInstallState, runtime: Boolean = true) = DictationUiState(
+            cleanupEnabled = true,
+            localCleanup = CleanupModelsState(
+                runtimeAvailable = runtime,
+                models = listOf(LocalModelItem(model, installState)),
+                selectedId = SMOL,
+            ),
+        )
+        val installed = state(ModelInstallState.Installed)
+        assertTrue("No cloud key is needed", installed.cleanupReady)
+        assertEquals(SMOL, installed.sessionLocalCleanupModelId)
+        assertFalse(state(ModelInstallState.NotDownloaded()).cleanupReady)
+        assertFalse(state(ModelInstallState.Installed, runtime = false).cleanupReady)
+        assertFalse(installed.copy(cleanupEnabled = false).cleanupReady)
+
+        val cloud = CloudCatalog.cleanupModels.first()
+        val profile = DictationProfile(id = "P", name = "Work", cleanupModelId = cloud.selectionId)
+        val profiled = installed.copy(profile = profile)
+        assertNull(profiled.sessionLocalCleanupModelId)
+        assertFalse("The profile's cloud model needs its key", profiled.cleanupReady)
+        assertTrue(profiled.copy(savedKeys = setOf(cloud.cloudProvider)).cleanupReady)
+    }
+
+    @Test
+    fun testProfilesDownloadedCleanupModel_winsOverTheUsersChoice_andIsHandedOverEvenWhenMissing() {
+        val names = mapOf(SMOL to "SmolLM2", QWEN to "Qwen3 0.6B")
+        fun state(selectedId: String?, profileModel: String?, cleanupEnabled: Boolean? = true) = DictationUiState(
+            cleanupEnabled = false,
+            localCleanup = CleanupModelsState(runtimeAvailable = true, selectedId = selectedId, names = names),
+            profile = DictationProfile(
+                id = "P", name = "Notes", cleanupEnabled = cleanupEnabled, cleanupModelId = profileModel,
+            ),
+        )
+
+        val overCloud = state(selectedId = null, profileModel = QWEN)
+        assertEquals(QWEN, overCloud.sessionLocalCleanupModelId)
+        assertEquals(
+            "a missing model fails visibly rather than turning cleanup off",
+            QWEN,
+            overCloud.sessionDownloadedCleanupModelId,
+        )
+        assertTrue("no cloud key is needed", overCloud.cleanupReady)
+
+        assertEquals(QWEN, state(selectedId = SMOL, profileModel = QWEN).sessionDownloadedCleanupModelId)
+        assertNull(state(selectedId = null, profileModel = QWEN, cleanupEnabled = false).sessionDownloadedCleanupModelId)
+
+        val elsewhere = state(selectedId = null, profileModel = "local/post-processing/mac-only-mlx")
+        assertNull("a model Android has no entry for keeps the user's choice", elsewhere.profileLocalCleanupModelId)
+        assertNull(elsewhere.sessionDownloadedCleanupModelId)
+    }
+
+    private companion object {
+        const val SMOL = "local/post-processing/smollm2-360m-instruct-q4"
+        const val QWEN = "local/post-processing/qwen3-0.6b-q4"
     }
 }

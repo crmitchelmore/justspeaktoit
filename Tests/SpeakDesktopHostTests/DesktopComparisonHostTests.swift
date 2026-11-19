@@ -18,7 +18,7 @@ final class DesktopComparisonHostTests: XCTestCase {
         let second = root.appendingPathComponent("second.wav")
         try bytes.write(to: second)
         let effects = ComparisonHostEffects(sourceToMutate: second)
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         let existing = try await seedComparisonHistory(controller)
         let historyDirectory = await controller.store.directory
@@ -90,7 +90,7 @@ final class DesktopComparisonHostTests: XCTestCase {
         try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data(repeating: 4, count: 3200), sampleRate: 16_000))
             .write(to: source)
         let effects = ComparisonHostEffects(sourceToMutate: root.appendingPathComponent("mutable-fixture"))
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         let models = ["modulate/velma-2-stt-batch", "openai/whisper-1"]
         await controller.comparisonEvent(
@@ -120,7 +120,7 @@ final class DesktopComparisonHostTests: XCTestCase {
         try bytes.write(to: source)
         let gate = Gate(open: false)
         let effects = ComparisonHostEffects(sourceToMutate: source, gate: gate)
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         let selected = Array(DesktopHostModels.visible.prefix(2)).map(\.id)
         let payload = "\n" + selected.joined(separator: "\t") + "\n" + source.path
@@ -154,7 +154,7 @@ final class DesktopComparisonHostTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let effects = ComparisonHostEffects(sourceToMutate: root, liveEnabled: true)
         try seedModulateComparisonSettings(root)
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         let selected = Array(DesktopHostModels.visible.filter {
             DesktopHostModels.isLive($0.id) && LiveTranscriptionRouting.route(for: $0.id)?.sampleRate == 24_000
@@ -343,7 +343,7 @@ extension DesktopComparisonHostTests {
         let bytes = try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data(repeating: 4, count: 3200), sampleRate: 16000))
         try bytes.write(to: source)
         let effects = ComparisonHostEffects(sourceToMutate: root.appendingPathComponent("mutable-fixture"))
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         let existing = try await seedComparisonHistory(controller)
         let selected = Array(DesktopHostModels.visible.prefix(2)).map(\.id)
@@ -379,7 +379,7 @@ extension DesktopComparisonHostTests {
         let gate = Gate(open: false)
         defer { gate.release() }
         let effects = ComparisonHostEffects(sourceToMutate: root, gate: gate, liveEnabled: true)
-        let controller = try DesktopHostController<FakePlatform>(directory: root, effects: effects)
+        let controller = try DesktopHostController<FakePlatform>.consented(directory: root, effects: effects)
         await controller.markReadyForSelfTest()
         let selected = Array(DesktopHostModels.visible.filter {
             DesktopHostModels.isLive($0.id) && LiveTranscriptionRouting.route(for: $0.id)?.sampleRate == 24_000

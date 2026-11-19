@@ -75,7 +75,7 @@ final class BatchRequestDiagnosticReceiptTests: XCTestCase {
     func testStaleAndCancelledReceiptsCannotMutateEitherSession() async {
         let first = self.session()
         let replacement = self.session()
-        let receipt = TranscriptionManager.BatchDiagnosticReceipt.handoff(Self.handoff)
+        let receipt = TranscriptionDiagnosticReceipt.handoff(Self.handoff)
         let original = first.diagnosticContext
         let originalReplacement = replacement.diagnosticContext
         MainManager.retainBatchDiagnostic(receipt, for: first, activeSession: replacement)
@@ -124,9 +124,9 @@ final class BatchRequestDiagnosticReceiptTests: XCTestCase {
 
     func testTypedFailureProjectionNeverParsesUnknownErrorsOrInventsHandoffs() {
         let error = NSError(domain: Self.canary, code: 401, userInfo: ["HTTPStatus": 401, "body": Self.canary])
-        XCTAssertEqual(TranscriptionManager.batchFailure(error, stage: .admission),
+        XCTAssertEqual(TranscriptionDiagnostics.failure(error, stage: .admission),
                        .init(stage: .admission, code: .unknown, domain: .unknown))
-        XCTAssertEqual(TranscriptionManager.batchFailure(URLError(.timedOut), stage: .request),
+        XCTAssertEqual(TranscriptionDiagnostics.failure(URLError(.timedOut), stage: .request),
                        .init(stage: .request, code: .timeout, domain: .transport))
         let session = self.session()
         MainManager.retainBatchDiagnostic(.failure(.init(stage: .admission, code: .authentication)),
@@ -241,7 +241,7 @@ extension BatchRequestDiagnosticReceiptTests {
         let exit = XCTestExpectation(description: "delayed lookup request exited for cleanup")
         let task = Task { @MainActor in
             defer { exit.fulfill() }
-            return try await TranscriptionManager.performBatchTranscription(
+            return try await BatchTranscriptionRouter.performBatchTranscription(
                 at: self.privateURL, model: { fixture.settings.batchTranscriptionModel },
                 settings: fixture.settings, batchClient: fixture.client,
                 providerForModel: { _ in await lookup.wait(); return nil },
@@ -317,9 +317,9 @@ extension BatchRequestDiagnosticReceiptTests {
 
     private func transcribe(
         _ fixture: BatchDiagnosticFixture,
-        onDiagnostic: ((TranscriptionManager.BatchDiagnosticReceipt) -> Void)? = nil
+        onDiagnostic: ((TranscriptionDiagnosticReceipt) -> Void)? = nil
     ) async throws -> TranscriptionResult {
-        try await TranscriptionManager.performBatchTranscription(
+        try await BatchTranscriptionRouter.performBatchTranscription(
             at: self.privateURL, model: { fixture.settings.batchTranscriptionModel },
             settings: fixture.settings, batchClient: fixture.client,
             providerForModel: { _ in nil },

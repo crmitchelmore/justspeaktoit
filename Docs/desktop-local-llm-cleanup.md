@@ -74,7 +74,7 @@ not successful native inference or model quality.
 Pass the resulting **whole** `LocalLLMRuntime` folder through the platform's
 existing packager with its additive `--local-llm-runtime` argument.
 `scripts/windows-bundle/build-windows-bundle.py` retains the nested folder beside
-`SpeakWindows.exe`; `scripts/stage-linux-desktop.py` retains it beside the staged
+`SpeakWindows.exe`; `scripts/linux/stage-linux-desktop.py` retains it beside the staged
 `justspeaktoit` executable. Omitting the argument preserves the existing bundle
 behavior and does not install or advertise an available runtime.
 Runtime resolution does not read PATH, LD_LIBRARY_PATH or

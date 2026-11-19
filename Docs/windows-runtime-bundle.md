@@ -56,7 +56,7 @@ Neither executable's inclusion changes GUI startup, capabilities or icons.
 
 ## Canonical application icons
 
-`scripts/generate-icon.swift` also runs `scripts/generate-desktop-icons.py`.
+`scripts/assets/generate-icon.swift` also runs `scripts/assets/generate-desktop-icons.py`.
 The dependency-free exporter reuses `Resources/AppIcon.iconset` pixels, rather
 than drawing another waveform. It writes a multi-resolution
 `Resources/Desktop/AppIcon.ico` and an architecture-neutral Win32 `.res` with
@@ -75,7 +75,7 @@ shortcut. The ZIP itself still performs no installation or autostart change.
 MSIX installs its Start menu entry through its manifest; see
 [Windows installer](windows-installer.md).
 
-Check generated assets with `python3 scripts/generate-desktop-icons.py --check`
+Check generated assets with `python3 scripts/assets/generate-desktop-icons.py --check`
 and run `python3 -B -m unittest discover -s scripts/tests -p test_desktop_icons.py`.
 The native window self-test also loads both resource groups at every exported
 size and checks the bitmap dimensions. Python checks prove export bytes and

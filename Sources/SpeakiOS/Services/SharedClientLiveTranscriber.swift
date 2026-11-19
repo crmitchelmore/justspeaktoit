@@ -49,8 +49,6 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private var displayedTranscriptRevision: UInt64 = 0
     private var reportedClientFailure = false
 
-    private var ownsAudioSession = false
-    private var hasInputTap = false
     // Isolates system boundaries in lifecycle tests.
     var drainCaptureWork: (() async -> Void)?
     var clientFactory: (() -> StreamingTranscriptionClient?)?
@@ -59,21 +57,14 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         Task { @MainActor in update() }
     }
 
-    private func removeInputTap() {
-        guard hasInputTap else { return }
-        audioEngine.inputNode.removeTap(onBus: 0)
-        hasInputTap = false
-    }
     private let route: LiveTranscriptionRoute
     private let apiKey: String
     private let language: String?
     private let keywords: [String]
 
     private var client: StreamingTranscriptionClient?
-    private let audioEngine = AVAudioEngine()
-    private let configurationObserver = CaptureDisruptionObserver()
-    private let captureInterruptionObserver = CaptureDisruptionObserver()
-    var configurationNotificationObject: AnyObject { audioEngine }
+    private let captureInput: LiveCaptureInput
+    var configurationNotificationObject: AnyObject { captureInput.engine }
     private var startTime: Date?
     /// Finalised text so far, folded by the hosted client's declared final
     /// shape once `start()` knows which client is in use (issue #700).
@@ -84,17 +75,13 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     public let audioRecorder = AudioRecordingPersistence()
     let recordingLoss = RecordingLossReporting()
 
-    /// Serial queue that takes tap buffers off the real-time audio thread —
-    /// persistence and resample + network sends all run here, not in the tap
-    /// callback.
-    private let audioProcessingQueue = DispatchQueue(label: "com.speak.ios.sharedclient.audioProcessing")
-    /// Pools for tap-buffer copies and converter output so the hot path never allocates.
-    private let tapBufferPool = PCMBufferPool(maximumBuffers: 4)
-    private let outputBufferPool = PCMBufferPool(maximumBuffers: 2)
-    /// The resampler retained for the whole session, plus its end-of-stream
-    /// flush (issue #872). Built on `start()` before the tap is installed and
-    /// only touched on `audioProcessingQueue` after that, so it needs no lock.
-    private let converterCache = LiveConverterCache()
+    /// Takes tap buffers off the real-time audio thread: persistence, the
+    /// retained resampler and network sends all run on its serial queue.
+    private let audioProcessor = LiveTapPCMProcessor(
+        queueLabel: "com.speak.ios.sharedclient.audioProcessing", poolLabel: "ios-shared-client"
+    )
+    /// This run's conversion-failure owner: reported once, text kept.
+    private(set) var conversionFailure: LivePCMConversionFailureReport?
     /// Audio handed to the client that no response has accounted for yet — set
     /// on the audio-processing queue, read and cleared on the main actor, so it
     /// carries its own lock (issue #641: the short-utterance loss).
@@ -112,6 +99,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         self.language = language
         self.keywords = keywords
         self.audioSessionManager = audioSessionManager
+        captureInput = LiveCaptureInput(audioSessionManager: audioSessionManager)
     }
 
     public func start() async throws {
@@ -152,7 +140,6 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
         try await ensureMicrophonePermission()
         try Task.checkCancellation()
-        ownsAudioSession = true
         try await configureAudioSession()
         try Task.checkCancellation()
 
@@ -190,6 +177,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         displayedTranscriptRevision = 0
         reportedClientFailure = false
         firstInputSignal = FirstInputSignal()
+        conversionFailure = makeConversionFailureReport(captureID: captureID, state: state)
         let enqueue = enqueueClientUpdate
         client.start(
             onTranscript: { [weak self] text, isFinal in
@@ -210,31 +198,19 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     private func observeCaptureConfiguration() {
-        configurationObserver.observe(.AVAudioEngineConfigurationChange, object: audioEngine) { [weak self] in
-            self?.audioEngine.isRunning == true
-        } onDisruption: { [weak self] in
-            self?.handleCaptureDisruption(.microphoneChanged)
+        captureInput.armDisruptionHandling { [weak self] in
+            guard let self else { return false }
+            return self.isRunning && !self.isStopping
+        } onStopped: { [weak self] reason in
+            // The owner drains the provider and recording once through its normal stop path.
+            // Interruption itself is a stopped notice; a real drain failure still reaches onError.
+            if !reason.isControlledInterruption { self?.error = reason }
+            self?.onError?(reason)
         }
-        captureInterruptionObserver.observeAudioInterruption { [weak self] in
-            self?.handleCaptureDisruption(.interrupted)
-        }
-    }
-
-    private func handleCaptureDisruption(_ reason: iOSTranscriptionError) {
-        guard isRunning, !isStopping else { return }
-        configurationObserver.stop()
-        captureInterruptionObserver.stop()
-        audioEngine.stop()
-        removeInputTap()
-        // The owner drains the provider and recording once through its normal stop path.
-        // Interruption itself is a stopped notice; a real drain failure still reaches onError.
-        if !reason.isControlledInterruption { error = reason }
-        onError?(reason)
     }
 
     public func stop() async -> TranscriptionResult {
-        configurationObserver.stop()
-        captureInterruptionObserver.stop()
+        captureInput.disarmDisruptionHandling()
         let lossRun = recordingLoss.currentReport
         guard isRunning, !isStopping else {
             await cleanupTask?.value
@@ -244,12 +220,11 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         isStopping = true
         defer { isStopping = false }
 
-        audioEngine.stop()
-        removeInputTap()
+        captureInput.halt()
         // Buffers handed to the queue just before the tap came off are still
         // being written and sent; let them land before the client is finalised
         // and the recorder is closed.
-        await audioProcessingQueue.drainPendingWork()
+        await audioProcessor.drainPendingWork()
         guard isRunning else {
             await cleanupTask?.value
             return makeResult(text: partialText, duration: 0)
@@ -259,6 +234,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         // chunks use, before the client is finalised, or the tail of a short
         // utterance is dropped (issue #872).
         await drainConverterTail()
+        audioProcessor.finishRun()
         guard isRunning else {
             await cleanupTask?.value
             return makeResult(text: partialText, duration: 0)
@@ -271,7 +247,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         activeCaptureID = nil
         recordingLoss.finish(recorder: audioRecorder, run: lossRun)
         isRunning = false
-        releaseAudioSession()
+        captureInput.releaseAudioSession()
 
         // `partialText` is the fullest view (finalised text plus any trailing
         // non-final words); fall back to the accumulated finals if empty.
@@ -286,8 +262,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     public func cancel() {
-        configurationObserver.stop()
-        captureInterruptionObserver.stop()
+        captureInput.disarmDisruptionHandling()
         startup.cancel()
         _ = cleanupCapture()
     }
@@ -297,13 +272,11 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     private func cleanupCapture() -> Task<Void, Never>? {
-        configurationObserver.stop()
-        captureInterruptionObserver.stop()
+        captureInput.disarmDisruptionHandling()
         recordingLoss.cancel()
         if let cleanupTask { return cleanupTask }
-        guard isRunning || ownsAudioSession || hasInputTap else { return nil }
-        audioEngine.stop()
-        removeInputTap()
+        guard isRunning || captureInput.holdsCaptureResources else { return nil }
+        captureInput.halt()
         if let state = transcriptState { apply(state.cancel(), from: state, notify: false) }
         activeCaptureID = nil
         isRunning = false
@@ -311,7 +284,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
             if let drainCaptureWork {
                 await drainCaptureWork()
             } else {
-                await audioProcessingQueue.drainPendingWork()
+                await audioProcessor.drainPendingWork()
             }
             finishCaptureCleanup()
             cleanupTask = nil
@@ -325,10 +298,10 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         client = nil
         // Cancelled audio is thrown away, so there is nothing to drain — just
         // drop the converter so the next session builds a fresh one.
-        converterCache.reset()
+        audioProcessor.finishRun()
         // Cancel persistent recording (keeps the partial file).
         audioRecorder.cancelRecording()
-        releaseAudioSession()
+        captureInput.releaseAudioSession()
     }
 
 }
@@ -343,12 +316,6 @@ extension SharedClientLiveTranscriber {
     }
 
     // MARK: - Private
-
-    private func releaseAudioSession() {
-        guard ownsAudioSession else { return }
-        audioSessionManager.deactivate()
-        ownsAudioSession = false
-    }
 
     /// Closes the client, giving providers that can still deliver words a
     /// bounded grace period first.
@@ -432,7 +399,7 @@ extension SharedClientLiveTranscriber {
 
     private func configureAudioSession() async throws {
         do {
-            try await audioSessionManager.configureForRecording()
+            try await captureInput.claimAudioSession()
             onStartupObservation?(.stage(.audioSessionConfigured))
         } catch {
             if Task.isCancelled || error is CancellationError { throw CancellationError() }
@@ -458,67 +425,11 @@ extension SharedClientLiveTranscriber {
 
 private extension SharedClientLiveTranscriber {
     func startAudioEngine() throws {
-        let inputNode = audioEngine.inputNode
+        let inputNode = captureInput.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
-        let (targetFormat, converter) = try makeConverter(from: nativeFormat)
-        let sampleRate = Double(route.sampleRate)
-        let client = self.client
-
-        let conversion = Conversion(
-            targetFormat: targetFormat, converter: converter, targetSampleRate: sampleRate
-        )
-        let nativeSampleRate = nativeFormat.sampleRate
-        let signal = firstInputSignal
-        let captureID = activeCaptureID
-        // The safety writer opens before the tap and the engine, so the file
-        // covers the very first buffers instead of starting a beat late
-        // (issue #992); a writer failure is reported, never fatal (issue #950).
-        recordingLoss.startWriter(audioRecorder, format: nativeFormat)
-        let lossReport = recordingLoss.currentReport
-        try inputNode.installTapSafely(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
-            // Copy the buffer and hop off the real-time audio thread —
-            // heavy work in the tap makes CoreAudio drop mic buffers.
-            guard let self, let copied = lossReport.copyCapture(buffer, using: self.tapBufferPool) else { return }
-            if copied.frameLength > 0, let captureID, signal.markObserved() {
-                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
-            }
-            self.audioProcessingQueue.async {
-                defer { self.tapBufferPool.recycle(copied) }
-                self.audioRecorder.writeBuffer(copied)
-                self.convertAndSend(
-                    buffer: copied, nativeSampleRate: nativeSampleRate,
-                    conversion: conversion, client: client
-                )
-            }
-        }
-        hasInputTap = true
-
-        audioEngine.prepare()
-        try audioEngine.start()
-        // Only after the engine actually returned.
-        onStartupObservation?(.stage(.engineStarted))
-    }
-
-    /// Bundles the audio-conversion context handed to the capture tap.
-    struct Conversion {
-        let targetFormat: AVAudioFormat
-        let converter: AVAudioConverter
-        let targetSampleRate: Double
-    }
-
-    func makeConverter(
-        from nativeFormat: AVAudioFormat
-    ) throws -> (AVAudioFormat, AVAudioConverter) {
-        guard let targetFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: Double(route.sampleRate),
-            channels: 1,
-            interleaved: false
-        // The cache owns the converter for the session: it is reused for every
-        // tap buffer (never `reset()` between chunks, which would wipe the
-        // resampler's filter history) and flushed at stop by
-        // `drainConverterTail()`.
-        ), let converter = converterCache.converter(from: nativeFormat, to: targetFormat) else {
+        guard let outputFormat = audioProcessor.prepareOutputFormat(
+            from: nativeFormat, sampleRate: Double(route.sampleRate)
+        ), let conversionFailure else {
             let err = iOSTranscriptionError.audioSessionFailed(
                 NSError(domain: "SharedClientLiveTranscriber", code: -1,
                         userInfo: [NSLocalizedDescriptionKey: "Failed to build audio converter"])
@@ -526,77 +437,60 @@ private extension SharedClientLiveTranscriber {
             self.error = err
             throw err
         }
-        return (targetFormat, converter)
+        let signal = firstInputSignal
+        let captureID = activeCaptureID
+        // The safety writer opens before the tap and the engine, so the file
+        // covers the very first buffers instead of starting a beat late
+        // (issue #992); a writer failure is reported, never fatal (issue #950).
+        recordingLoss.startWriter(audioRecorder, format: nativeFormat)
+        let run = LiveTapPCMProcessor.Run(
+            recorder: audioRecorder,
+            lossReport: recordingLoss.currentReport,
+            outputFormat: outputFormat,
+            onInput: { [weak self] in
+                guard let captureID, signal.markObserved() else { return }
+                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+            },
+            send: Self.sender(to: client, recording: unansweredAudio) ?? { _ in },
+            onConversionFailure: conversionFailure
+        )
+        try captureInput.installTap { try audioProcessor.installTap(on: $0, format: nativeFormat, run: run) }
+        try captureInput.startEngine()
+        // Only after the engine actually returned.
+        onStartupObservation?(.stage(.engineStarted))
     }
 
-    nonisolated func convertAndSend(
-        buffer: AVAudioPCMBuffer,
-        nativeSampleRate: Double,
-        conversion: Conversion,
-        client: StreamingTranscriptionClient?
-    ) {
-        let ratio = conversion.targetSampleRate / nativeSampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1
-        guard let outputBuffer = outputBufferPool.buffer(
-            format: conversion.targetFormat, frameCapacity: capacity
-        ) else {
-            return
-        }
-        defer { outputBufferPool.recycle(outputBuffer) }
-        var conversionError: NSError?
-        var didProvideInput = false
-        let status = conversion.converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
-            // One-shot input: returning the same buffer with .haveData again
-            // would make the converter duplicate audio frames.
-            guard !didProvideInput else {
-                outStatus.pointee = .noDataNow
-                return nil
+    /// Lost capture audio fails this run like a provider error: reported once,
+    /// with the text received so far kept for recovery.
+    func makeConversionFailureReport(
+        captureID: UUID, state: SharedClientTranscriptState
+    ) -> LivePCMConversionFailureReport {
+        let enqueue = enqueueClientUpdate
+        return LivePCMConversionFailureReport { [weak self] error in
+            guard let snapshot = state.fail(error) else { return }
+            enqueue { [weak self] in
+                guard let self, self.activeCaptureID == captureID else { return }
+                self.apply(snapshot, from: state)
             }
-            didProvideInput = true
-            outStatus.pointee = .haveData
-            return buffer
         }
-        guard status != .error, let data = Self.pcm16Data(from: outputBuffer) else { return }
-        guard let client else { return }
-        unansweredAudio.record()
-        client.sendAudio(data)
+    }
+
+    /// Every chunk handed to the client, the converter tail included, is
+    /// audio no response has accounted for yet (issue #641).
+    nonisolated static func sender(
+        to client: StreamingTranscriptionClient?, recording unansweredAudio: UnansweredAudioSignal
+    ) -> (@Sendable (Data) -> Void)? {
+        guard let client else { return nil }
+        return { data in
+            unansweredAudio.record()
+            client.sendAudio(data)
+        }
     }
 
     /// Flushes the retained resampler's trailing frames down the same send path
-    /// the live chunks use, then releases the converter (issue #872).
-    ///
-    /// Hops through `audioProcessingQueue` so the tail lands strictly after the
-    /// last queued tap chunk and strictly before the client is finalised —
-    /// mirroring the `queue.sync` drain in the macOS controllers.
+    /// the live chunks use, before the client is finalised (issue #872).
     func drainConverterTail() async {
-        let client = self.client
-        let cache = converterCache
-        let unansweredAudio = self.unansweredAudio
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            audioProcessingQueue.async {
-                defer { continuation.resume() }
-                // Drain unconditionally: the converter is released either way,
-                // so a session that lost its client still starts clean.
-                let tail = cache.drain()
-                guard let client, let tail, let data = Self.pcm16Data(from: tail) else { return }
-                unansweredAudio.record()
-                client.sendAudio(data)
-            }
-        }
-    }
-
-    /// Float32 mono frames → little-endian PCM16 bytes, the wire format the
-    /// shared clients expect.
-    nonisolated static func pcm16Data(from buffer: AVAudioPCMBuffer) -> Data? {
-        guard let channelData = buffer.floatChannelData?[0] else { return nil }
-        let frameCount = Int(buffer.frameLength)
-        guard frameCount > 0 else { return nil }
-        var samples = [Int16](repeating: 0, count: frameCount)
-        for index in 0..<frameCount {
-            let clamped = max(-1.0, min(1.0, channelData[index]))
-            samples[index] = Int16(clamped * Float(Int16.max))
-        }
-        return samples.withUnsafeBufferPointer { Data(buffer: $0) }
+        await audioProcessor.drainTail(send: Self.sender(to: client, recording: unansweredAudio))
     }
 }
 

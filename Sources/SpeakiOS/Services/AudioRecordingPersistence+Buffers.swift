@@ -33,11 +33,11 @@ extension AudioRecordingPersistence {
     /// exactly once, without blocking the audio thread.
     nonisolated func reportIssueIfNeeded(_ controller: RecordingPersistenceAdmissionController) {
         // Latch and handler are read under one lock hold so two threads can
-        // never both observe an unset latch (see `issueLock`).
-        let handler = issueLock.withLock { () -> (@Sendable (RecordingPersistenceDiagnostics) -> Void)? in
-            guard !didReportIssue else { return nil }
-            didReportIssue = true
-            return storedIssueHandler
+        // never both observe an unset latch (see `issueLatch`).
+        let handler = issueLatch.withLock { latch -> (@Sendable (RecordingPersistenceDiagnostics) -> Void)? in
+            guard !latch.didReport else { return nil }
+            latch.didReport = true
+            return latch.handler
         }
         guard let handler else { return }
         let diagnostics = controller.diagnostics
@@ -45,5 +45,14 @@ extension AudioRecordingPersistence {
             handler(diagnostics)
         }
     }
+}
+
+/// The once-per-session issue latch and the handler it releases, guarded
+/// together by `AudioRecordingPersistence.issueLatch`.
+struct PersistenceIssueLatch: Sendable {
+    var handler: (@Sendable (RecordingPersistenceDiagnostics) -> Void)?
+    /// Set after the first drop/write failure so the owning-session callback
+    /// fires exactly once, off the audio thread.
+    var didReport = false
 }
 #endif

@@ -2,6 +2,7 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 import SpeakDesktopHost
+import SpeakDesktopNativeBindings
 import SpeakLinuxPlatform
 import CLinuxSupport
 
@@ -55,6 +56,7 @@ func runSelfTest() throws {
 /// until the window closes, then drains every queue and closes the controller.
 func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws {
     try LinuxWindow.configureAbout()
+    try DesktopNativeBindings.configureOpenRouterBrowser()
     try LinuxWindow.configureTroubleshooting(holder)
     defer { jsti_troubleshooting_clear() }
     try LinuxWindow.configureAPIKeys(holder)
@@ -74,19 +76,21 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         LinuxWindow.postProcessing(await controller.postProcessingOptions())
         _ = jsti_window_set_azure_resource(await controller.azureResourceEndpoint())
         LinuxWindow.voiceOutput(await controller.voiceOutputSettings())
-        LinuxWindow.voiceSources(context: Unmanaged.passUnretained(holder).toOpaque())
+        LinuxWindow.voiceSources(context: holder.callbackContext)
         _ = jsti_window_set_appearance(Int32(await controller.appearance().rawValue))
         await controller.configureLocalModels()
-        await controller.configureLocalCleanup(presenter: Unmanaged.passUnretained(holder).toOpaque())
+        await controller.configureLocalCleanup(presenter: holder.callbackContext)
         try LinuxWindow.configureModelPreferences(await controller.preferredModelIDs())
         return await controller.selectedIndex()
     }
     LinuxCloudSync.configure(holder)
-    let context = Unmanaged.passUnretained(holder).toOpaque()
+    LinuxPhoneReceiver.configure(holder)
+    let context = holder.callbackContext
     let windowFailure = runGTKEventLoop(selected: selected, context: context, holder: holder)
     LinuxWindow.endVoiceProviderCallbacks(providerCallbacks)
     try shutDownWindow(controller: controller, holder: holder)
-    withExtendedLifetime(holder) {}
+    // Every native registration is cleared; a late callback finds nothing.
+    holder.callbacks.unregister()
     if let windowFailure { throw windowFailure }
     if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }
 }
@@ -98,12 +102,14 @@ private func shutDownWindow(controller: LinuxAppController, holder: LinuxEventCo
         holder.shortcuts.stop()
         holder.historyPaste.stop()
         LinuxSelectedTextTarget.stopSessionAccess()
+        holder.systemResources.stop()
         if !holder.smokeTest { holder.microphones.stop() }
         await holder.finishSettings()
         await controller.stopProviderCredentialEdits()
         holder.apiKeys.stop()
         _ = await holder.automation.applyOffThread(enabled: false)
         await LinuxCloudSync.shutDown(holder)
+        await LinuxPhoneReceiver.shutDown(holder)
         // Closing first cancels a shortcut's transcription instead of waiting
         // on its provider; queued shortcuts then find the controller closed.
         let report = await controller.close()
@@ -119,7 +125,7 @@ private func shutDownWindow(controller: LinuxAppController, holder: LinuxEventCo
 /// raised while marshalling arguments or running `jsti_window_run` instead
 /// of throwing, so the caller can still perform its own cleanup first.
 private func runGTKEventLoop(selected: Int, context: UnsafeMutableRawPointer, holder: LinuxEventContext) -> Error? {
-    let strings = LinuxWindow.Strings()
+    let strings = DesktopNativeStrings()
     let rows = LinuxWindow.modelRows(strings)
     var arguments = CommandLine.arguments.map { strdup($0) }
     defer { arguments.forEach { free($0) } }
@@ -248,6 +254,9 @@ let remoteDesktop = !smokeTest && session.displayServer == .wayland
     && LinuxPortal.version(of: LinuxPortal.remoteDesktop) != nil
 LinuxHostPlatform.configure(session: session, remoteDesktopAvailable: remoteDesktop)
 
+// Set once a real session's telemetry is active, so a fatal error can be
+// reported (only with crash-report consent) before the process exits.
+var sessionTelemetry: DesktopTelemetry?
 do {
     try LinuxFiles.preparePrivateDirectory(directory)
     if profileSessionProbe { try LinuxProfileSessionProbe.prepare(directory: directory) }
@@ -259,6 +268,15 @@ do {
     let effects: any DesktopHostEffects<LinuxHostPlatform>
     if let probeEffects { effects = probeEffects } else { effects = LinuxNativeEffects() }
     let controller = try LinuxAppController(directory: directory, effects: effects)
+    if profileSessionProbe { try blocking { await controller.allowCloudSharingForSelfTest() } }
+    if !smokeTest {
+        let telemetry = controller.telemetry
+        let http = DesktopHostTelemetryHTTP(
+            transport: LinuxCloudKitTransport(timeout: DesktopHostTelemetryHTTP.timeout)
+        )
+        try blocking { await telemetry.activate(.current(platform: .linux), http: http) }
+        sessionTelemetry = telemetry
+    }
     let holder = LinuxEventContext(controller: controller, smokeTest: smokeTest)
     holder.needsSetupAtLaunch = needsSetup
     try LinuxOnboarding.configure(holder)
@@ -272,11 +290,13 @@ do {
     }
     defer { if smokeTest { try? FileManager.default.removeItem(at: directory) } }
     try runWindow(controller: controller, holder: holder)
+    if let telemetry = sessionTelemetry { try blocking { await telemetry.finishCleanly() } }
     if let screenshotDirectory {
         print("Saved the window's pages to \(screenshotDirectory).")
     } else if smokeTest && integrationCheck == nil {
         print("Native window creation and shutdown passed.")
     }
 } catch {
+    if let telemetry = sessionTelemetry { _ = try? blocking { await telemetry.reportFatal(error) } }
     fail(error)
 }

@@ -7,7 +7,7 @@ the current allowlist: TextEdit (`com.apple.TextEdit`) and Notes
 allowlist expansion; do not temporarily allowlist another app for this run.
 
 The source of truth for that scope is
-[`StreamingInsertionAllowlist`](../Sources/SpeakApp/StreamingInsertionAllowlist.swift).
+[`StreamingInsertionAllowlist`](../Sources/SpeakApp/Output/StreamingInsertionAllowlist.swift).
 Unit tests support the policy and reconciliation rules, but only an unlocked,
 interactive Mac can qualify actual app Accessibility behavior.
 
@@ -74,6 +74,13 @@ In a named Notes editor field, exercise all of the following:
    edit must be preserved even when that prevents exact final equality.
 5. Move focus after the first partial to another clean field or app. Confirm
    the new target stays unchanged and inspect the original target separately.
+6. Press Escape mid-dictation. Notes reports no document identity and reuses
+   one element for every note, so the streamed words must stay, and History
+   records that the document's identity could not be verified (#1561). In a
+   saved TextEdit document, which reports its file, the words must disappear
+   and the field must return to its pre-recording text and caret (or
+   selection); if you edited inside or next to the streamed region first, the
+   field must be left exactly as it was.
 
 For exactness, compare the expected streamed region—not an entire pre-populated
 field—with the appropriate final History text, accounting for expected prefix
@@ -104,7 +111,7 @@ be observed. Never leave an unobserved row looking like an inferred pass.
 
 ## Interpreting finalization safely
 
-[`LiveTextInserter.streamingFinalize(with:)`](../Sources/SpeakApp/LiveTextInserter.swift)
+[`LiveTextInserter.streamingFinalize(with:)`](../Sources/SpeakApp/Output/LiveTextInserter.swift)
 can return `.applied` after focus is lost or a final patch fails, provided
 verified partials already landed. This prevents a duplicate one-shot insertion;
 it does **not** prove that the field equals the final or polished History text.

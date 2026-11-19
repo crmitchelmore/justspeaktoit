@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""Fast, path-aware checks to run before opening or pushing a pull request.
+
+Usage:
+    scripts/pre-pr               # check everything changed against origin/main
+    scripts/pre-pr --plan        # list the checks that would run, then exit
+    scripts/pre-pr --full        # whole affected test targets instead of matched tests
+    scripts/pre-pr --base REF    # compare against another base
+    scripts/pre-pr --fetch       # fetch origin/main first
+    scripts/pre-pr --markdown    # print the PR-body summary after the run
+    scripts/pre-pr --no-fix      # skip the autofix pass (scripts/quality fix) that runs first
+    scripts/pre-pr --fail-on-fix # fail if the autofix changed anything (the pre-push hook uses it)
+
+First it autofixes the changed files (`scripts/quality fix`: SwiftFormat,
+SwiftLint --fix, Ruff, ESLint) and lists what it changed, so the record covers
+the fixed tree; commit those edits. Then it compares HEAD plus uncommitted and
+untracked files with the merge base of --base, selects the lint, build and unit-test checks for each affected area,
+and writes a machine-readable summary to .build/pre-pr/summary.json (and a
+Markdown copy for the PR body). The exit status is 0 only when every selected
+check passed. Advisory checks report "warn" and never fail the run. The
+pass/fail/warn/skip/incomplete rules live in one place, scripts/ci/pre_pr_outcome.py.
+
+It fails closed: a required check whose tool is missing fails, and so does a
+Swift change that runs no unit tests (no covering test target, an empty filter
+or a filter that matches nothing). Unit tests are chosen from the SwiftPM target
+graph (`swift package dump-package`): every test file, in a test target that
+depends on the changed module, that names a type the changed file declares or
+extends. Unmatched changes fall back to the module's whole test target.
+
+Speed: the machine-heavy checks run in lanes side by side under the machine
+lock (build then unit tests; public API; make ci-lint); JSTI_PRE_PR_LANES=off
+runs them one at a time. The SwiftPM checks build the checked snapshot in a
+persistent build mirror (scripts/ci/pre_pr/mirror.py), so a new worktree's
+build is incremental rather than cold; JSTI_PRE_PR_MIRROR=off builds in place.
+JSTI_PRE_PR_SLOTS runs (default 2) hold the lock at once, each with its own
+mirror and Linux container volume. Portable Swift (Linux) runs in a local
+docker, podman or Apple container when one runs (scripts/linux-precheck).
+
+Safety: it never runs UI tests, xcodebuild, the core-journey harness, app
+launches or other foreground automation. Swift tests use a private file
+Keychain (JSTI_TEST_KEYCHAIN=1) in a separate scratch path, so the developer's
+Keychain and normal .build stay untouched.
+"""
+from __future__ import annotations
+
+import argparse
+import contextlib
+import datetime as dt
+import json
+import os
+import sys
+import threading
+import time
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'ci'))
+# The checks live in scripts/ci/pre_pr/; this file owns the command line, the autofix pass and the run order.
+from pre_pr import environment, mirror
+from pre_pr.environment import ROOT, changed_files, display, git, outcomes, worktree_tree
+from pre_pr.lock import machine_lock
+from pre_pr.planner import plan
+from pre_pr.runner import Check, finish, launch, relocate, run, settle
+from pre_pr.summary import SCHEMA_VERSION, markdown
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    parser.add_argument('--base', default='origin/main')
+    parser.add_argument('--fetch', action='store_true', help='fetch the base before comparing')
+    parser.add_argument('--full', action='store_true', help='run every macOS unit-test target CI could run')
+    parser.add_argument('--quick', action='store_true',
+                        help='type-level macOS test selection (faster, but narrower than CI)')
+    linux = parser.add_mutually_exclusive_group()
+    linux.add_argument('--remote-linux', dest='linux', action='store_const', const='remote',
+                       help='run Portable Swift (Linux) on a precheck/** branch even if a container runtime exists')
+    linux.add_argument('--container-linux', dest='linux', action='store_const', const='container',
+                       help='run Portable Swift (Linux) with local docker, podman or Apple container')
+    linux.add_argument('--no-linux', dest='linux', action='store_const', const='skip',
+                       help="skip Portable Swift (Linux); the result is then 'incomplete', which CI rejects")
+    parser.add_argument('--plan', action='store_true', help='print the selected checks and exit')
+    parser.add_argument('--keep-going', action='store_true', help='run every check even after a failure')
+    parser.add_argument('--markdown', action='store_true', help='print the PR-body summary when done')
+    parser.add_argument('--verbose', '-v', action='store_true', help='stream check output')
+    parser.add_argument('--no-fix', action='store_true', help='skip the autofix pass that runs first')
+    parser.add_argument('--fail-on-fix', action='store_true',
+                        help='fail when the autofix changes a file (for hooks, where the commit is already made)')
+    args = parser.parse_args()
+
+    if args.fetch and args.base.startswith('origin/'):
+        git('fetch', '--quiet', 'origin', args.base.removeprefix('origin/'))
+    merge_base, files = changed_files(args.base)
+    checks, areas = plan(files, args.full, args.quick, args.linux or 'auto', args.base)
+
+    print(f'pre-pr: {len(files)} changed files against {args.base} ({merge_base[:12]})')
+    for name, hits in areas.items():
+        print(f'  {name:<20} {len(hits)} file{"s" if len(hits) != 1 else ""}')
+    if args.plan:
+        for check in checks:
+            print(f'  would run [{check.area}] {check.title}: {" ".join(check.command)[:160]}')
+        return 0
+
+    # Only the checks that load this machine take the machine-wide lock (machine_lock); autofix,
+    # quick checks and remote GitHub runs proceed in parallel with other worktrees.
+    autofix = run_autofix(args, files)
+    head = git('rev-parse', 'HEAD')
+    tree = worktree_tree()
+    dirty = bool(git('status', '--porcelain'))
+    return execute(args, [autofix, *checks], areas, files, merge_base, head, tree, dirty)
+
+
+def run_autofix(args, files: list[str]) -> Check:
+    """scripts/quality fix over the changed files, recorded as the run's first check."""
+    check = Check('autofix', 'quality', 'Autofix (scripts/quality fix)', ['python3', 'scripts/quality', 'fix'],
+                  exclusive=False)
+    if args.no_fix:
+        settle(check, outcomes().before_launch(skip_reason='--no-fix', failure='', missing_tool=None,
+                                               advisory=False))
+        return check
+    print(f'▶ [quality] {check.title}', flush=True)
+    existing = [f for f in files if (ROOT / f).is_file()]
+    if not existing:
+        check.status = 'pass'
+        check.note = 'no files to fix'
+        return check
+    before = worktree_tree()
+    check.command = [*check.command, *existing]
+    finish(check, launch(check), args.verbose, restore=False)  # its edits are the point; keep them
+    after = worktree_tree()
+    changed = git('diff-tree', '-r', '--name-only', before, after).splitlines() if before and after else []
+    if changed and check.status == 'pass':
+        shown = ', '.join(changed[:5]) + ('…' if len(changed) > 5 else '')
+        check.note = f'fixed {len(changed)} file{"s" if len(changed) != 1 else ""}: {shown}'
+        print(f'pre-pr: autofix changed {len(changed)} file(s); review and commit them:', flush=True)
+        for name in changed:
+            print(f'    {name}', flush=True)
+        if args.fail_on_fix:
+            check.status = 'fail'
+            check.note += '; commit the fixes and push again'
+    mark = outcomes().ICONS[check.status]
+    print(f'  {mark} [quality] {check.title}: {check.status}{" — " + check.note if check.note else ""}', flush=True)
+    return check
+
+
+def execute(args, checks, areas, files, merge_base, head, tree, dirty) -> int:
+    started = time.monotonic()
+    failed = False
+    output = threading.Lock()  # lanes report from their own threads
+
+    def report(check: Check) -> None:
+        nonlocal failed
+        mark = outcomes().ICONS[check.status]
+        with output:
+            print(f'  {mark} [{check.area}] {check.title}: {check.status} in {check.duration:.0f}s'
+                  f'{" — " + check.note if check.note else ""}', flush=True)
+            if check.status == 'fail':
+                failed = True
+                if check.log.exists():
+                    tail = check.log.read_text(encoding='utf-8', errors='replace').splitlines()[-40:]
+                    print('\n'.join(f'    │ {line}' for line in tail), flush=True)
+
+    def stopped(check: Check) -> bool:
+        return failed and not args.keep_going and not check.advisory
+
+    def run_foreground(check: Check, cancel: threading.Event | None = None) -> None:
+        if stopped(check):
+            settle(check, outcomes().not_run('earlier failure'))
+            with output:
+                print(f'⏭️  [{check.area}] {check.title} — skipped after an earlier failure', flush=True)
+            return
+        with output:
+            print(f'▶ [{check.area}] {check.title}', flush=True)
+        run(check, args.verbose, None if check.advisory or args.keep_going else cancel)
+        report(check)
+
+    def run_lanes(group: list[Check]) -> None:
+        """Each lane's checks in order, the lanes side by side; a failure stops the other lanes."""
+        lanes: dict[str, list[Check]] = {}
+        for check in group:
+            lanes.setdefault(check.lane or check.id, []).append(check)
+        if len(lanes) < 2 or os.environ.get('JSTI_PRE_PR_LANES', '').lower() in ('off', '0', 'no', 'false'):
+            for check in group:
+                run_foreground(check)
+            return
+        cancel = threading.Event()
+
+        def lane(checks: list[Check]) -> None:
+            for check in checks:
+                run_foreground(check, cancel)
+                if failed and not args.keep_going:
+                    cancel.set()
+
+        threads = [threading.Thread(target=lane, args=(checks,), daemon=True) for checks in lanes.values()]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    def use_slot(group: list[Check], slot: int) -> None:
+        """Give the run its lock slot's own build mirror and Linux container volume."""
+        if slot:
+            for check in group:
+                if check.id == 'portable-linux':
+                    check.env = {**check.env, 'JSTI_PORTABLE_VOLUME': f'jsti-portable-build-{slot}'}
+        use_mirror(group, slot)
+
+    def use_mirror(group: list[Check], slot: int) -> None:
+        """Move the SwiftPM checks into the slot's warm build mirror (one run owns it at a time)."""
+        movable = [c for c in group if c.mirror and c.command and not c.skip_reason and not c.failure]
+        if not movable:
+            return
+        begun = time.monotonic()
+        path = mirror.sync(tree, head, slot)
+        if path is None:
+            print('pre-pr: no build mirror (JSTI_PRE_PR_MIRROR=off or it could not be set up); building in place')
+            return
+        for check in movable:
+            relocate(check, path)
+        print(f'pre-pr: SwiftPM checks build in the warm mirror {path} '
+              f'(synced in {time.monotonic() - begun:.1f}s)', flush=True)
+
+    def start_background(group):
+        launched = []
+        for check in group:
+            if stopped(check):
+                settle(check, outcomes().not_run('earlier failure'))
+                launched.append((check, None))
+                continue
+            print(f'▶ [{check.area}] {check.title} (in the background; log {display(check.log)})', flush=True)
+            launched.append((check, launch(check)))
+        return launched
+
+    def await_background(launched) -> None:
+        for check, process in launched:
+            if process is not None and failed and not args.keep_going:
+                process.terminate()  # linux-precheck deletes its branch on SIGTERM
+                process.wait()
+                settle(check, outcomes().not_run('stopped after an earlier failure'))
+            else:
+                if process is not None:
+                    print(f'… waiting for [{check.area}] {check.title}', flush=True)
+                finish(check, process, args.verbose)
+            report(check)
+
+    if checks and checks[0].id == 'autofix':
+        failed = checks[0].status == 'fail'
+    rest = [c for c in checks if c.id != 'autofix']
+    shared = [c for c in rest if not c.exclusive]
+    exclusive = [c for c in rest if c.exclusive]
+    # Remote runs start first and are awaited last, outside the lock; so are the cheap local checks.
+    remote = start_background([c for c in shared if c.background])
+    for check in shared:
+        if not check.background:
+            run_foreground(check)
+    runnable = any(c.command and not c.skip_reason and not c.failure and not stopped(c) for c in exclusive)
+    with machine_lock() if runnable else contextlib.nullcontext() as slot:
+        if runnable:
+            use_slot(exclusive, slot or 0)
+        local = start_background([c for c in exclusive if c.background])
+        run_lanes([c for c in exclusive if not c.background])
+        await_background(local)
+    await_background(remote)
+    result = outcomes().run_result((c.status for c in checks), any(c.incomplete for c in checks))
+
+    summary = {
+        'schema': SCHEMA_VERSION,
+        'tool': 'scripts/pre-pr',
+        'generated_at': dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds'),
+        'head': head, 'tree': tree, 'dirty': dirty, 'base_ref': args.base, 'merge_base': merge_base,
+        'full': args.full, 'changed_file_count': len(files), 'areas': sorted(areas),
+        'result': result,
+        'duration_seconds': round(time.monotonic() - started, 1),
+        'checks': [{'id': c.id, 'area': c.area, 'title': c.title, 'status': c.status,
+                    'advisory': c.advisory, 'duration_seconds': round(c.duration, 1), 'note': c.note,
+                    'command': c.command[:8]} for c in checks],
+    }
+    out = environment.OUT
+    out.mkdir(parents=True, exist_ok=True)
+    (out / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n', encoding='utf-8')
+    (out / 'summary.md').write_text(markdown(summary) + '\n', encoding='utf-8')
+    print(f'pre-pr: {summary["result"].upper()} in {summary["duration_seconds"]:.0f}s — '
+          f'summary in {display(out / "summary.json")} and summary.md')
+    if args.markdown:
+        print(markdown(summary))
+    return outcomes().exit_status(result)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -7,7 +7,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+
 from test_paid_access_recovery import block
+
+# A hang guard, not a speed check: swiftc on a Mac loaded by parallel agents can take minutes.
+COMPILE_TIMEOUT = 600
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -15,11 +19,11 @@ ROOT = Path(__file__).resolve().parents[2]
 @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('xcrun'), 'Apple Swift required')
 class PaidEndpointTests(unittest.TestCase):
     def test_app_flag_and_both_composed_clients_use_the_same_endpoint(self):
-        transport = (ROOT / 'Sources/SpeakCore/PaidAccess/PaidAccessHTTPClient.swift').read_text()
+        transport = (ROOT / 'Sources/SpeakCore/PaidAccess/Apple/PaidAccessHTTPClient.swift').read_text()
         manager = (ROOT / 'Sources/SpeakApp/PaidAccess/PaidAccessManager.swift').read_text()
-        wire = (ROOT / 'Sources/SpeakApp/WireUp.swift').read_text()
+        wire = (ROOT / 'Sources/SpeakApp/App/WireUp+PaidAccess.swift').read_text()
         composition = wire[wire.index('    let paidClient = PaidAccessHTTPClient('):
-                           wire.index('    let transcription = TranscriptionManager(')]
+                           wire.index('    return (paidAccess, routedClient)')]
         core = ('import Foundation\npublic struct PaidAccessHTTPClient {\n'
                 + block(transport, 'public static var defaultBaseURL:')
                 + '''\npublic let baseURL: URL
@@ -27,6 +31,7 @@ class PaidEndpointTests(unittest.TestCase):
                 }''')
         app = '''import Foundation
 import SpeakCore
+
 struct AppSecureStorageSessionStore { init(storage: Int) {} }
 struct PaidAccessManager {
     let client: PaidAccessHTTPClient
@@ -55,12 +60,12 @@ print(String(data: try JSONSerialization.data(withJSONObject: [
             # Intentionally no PAID_ACCESS flag on the Core build.
             subprocess.run(common + ['-emit-library', '-emit-module', '-module-name', 'SpeakCore',
                                      str(directory / 'Core.swift'), '-o', str(directory / 'libSpeakCore.dylib')],
-                           cwd=temp, capture_output=True, check=True, text=True, timeout=60)
+                           cwd=temp, capture_output=True, check=True, text=True, timeout=COMPILE_TIMEOUT)
             for enabled in [False, True]:
                 binary = directory / ('internal' if enabled else 'normal')
                 subprocess.run(common + (['-D', 'PAID_ACCESS'] if enabled else []) +
                                ['-I', temp, '-L', temp, '-lSpeakCore', str(directory / 'App.swift'), '-o', str(binary)],
-                               capture_output=True, check=True, text=True, timeout=60)
+                               capture_output=True, check=True, text=True, timeout=COMPILE_TIMEOUT)
                 for override in ['', 'http://127.0.0.1:9876/staging', 'https://staging.invalid/api', 'file:///tmp/api']:
                     with self.subTest(enabled=enabled, override=override):
                         result = subprocess.run([str(binary)], env={**os.environ, 'DYLD_LIBRARY_PATH': temp,

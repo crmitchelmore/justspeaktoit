@@ -1,7 +1,7 @@
 import importlib.util
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 spec = importlib.util.spec_from_file_location(
     "replacement", Path(__file__).resolve().parents[1] / "verify-sparkle-replacement.py"

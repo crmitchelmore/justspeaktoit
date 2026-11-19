@@ -9,7 +9,10 @@ extension TTSProvider {
     /// Estimated spend for `characterCount` characters, or `nil` when synthesis
     /// is free or the selected model rate is unknown.
     func estimatedCost(characterCount: Int, quality: TTSQuality, voiceID: String? = nil) -> Decimal? {
-        if self == .deepgram, voiceID?.hasPrefix("deepgram/flux-") == true { return nil }
+        if self == .deepgram, let voiceID {
+            return DeepgramTTSAPI.costPerThousandCharacters(forVoiceID: voiceID)
+                .map { Decimal(characterCount) * $0 / 1000 }
+        }
         // Orpheus prices English and Arabic differently, and the voice decides
         // which model runs.
         if self == .groq {

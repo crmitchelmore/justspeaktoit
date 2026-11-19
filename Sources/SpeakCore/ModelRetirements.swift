@@ -16,6 +16,7 @@ public struct ModelRetirement: Sendable, Equatable {
         case batch
         case live
         case speech
+        case postProcessing
     }
 
     public let id: String
@@ -122,7 +123,7 @@ public enum ModelRetirements {
             recommendedID: gptTranscribe,
             migrationNote: "OpenRouter does not offer its successor. Choose GPT Transcribe or another "
                 + "model; this selection is not moved automatically.")
-    ] + OpenAITTSModel.allCases.map {
+    ] + postProcessing + OpenAITTSModel.allCases.map {
         // OpenAI's named successor, gpt-realtime-2.1-mini, is a Realtime
         // conversational model that `/v1/audio/speech` does not accept.
         ModelRetirement(
@@ -131,6 +132,11 @@ public enum ModelRetirements {
             migrationNote: "choose OpenAI Realtime 2.1 mini or another voice provider; "
                 + "this selection is not moved automatically.")
     }
+
+    /// Announced cleanup shutdowns. Empty while every superseded cleanup model has
+    /// already been taken out of the catalogue: `CleanupModelRemovals` moves those
+    /// selections at once rather than on their shutdown day.
+    static let postProcessing: [ModelRetirement] = []
 
     public static func retirement(for id: String) -> ModelRetirement? {
         all.first { $0.id == id }

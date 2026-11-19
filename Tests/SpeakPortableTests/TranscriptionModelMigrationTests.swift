@@ -48,6 +48,25 @@ final class TranscriptionModelMigrationTests: XCTestCase {
         }
     }
 
+    /// OpenRouter removed the free Inkling routes (#1655): saved selections move
+    /// to the paid route of the same model, which stays on OpenRouter's key.
+    func testRemovedFreeInklingRoutes_moveToThePaidRouteOfTheSameModel() {
+        let moves = [
+            "thinkingmachines/inkling:free": "thinkingmachines/inkling",
+            "thinkingmachines/inkling-small:free": "thinkingmachines/inkling-small"
+        ]
+        for (removed, paid) in moves {
+            XCTAssertFalse(batch.contains(removed), removed)
+            XCTAssertFalse(OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs.contains(removed), removed)
+            XCTAssertTrue(batch.contains(paid), paid)
+            XCTAssertEqual(ModelCatalog.normalizedBatchTranscriptionModel(" \(removed) "), paid)
+            XCTAssertEqual(
+                ModelCredentialResolver.requirement(for: paid, purpose: .batchTranscription),
+                .apiKey(identifier: "openrouter.apiKey", providerName: "OpenRouter")
+            )
+        }
+    }
+
     /// Custom models, including ones under a provider that has catalogue
     /// entries, and discovered OpenRouter selections are never retired.
     func testCustomAndDiscoveredIdentifiers_areKeptAsSaved() {

@@ -1,5 +1,6 @@
 #include "CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
+#include "WindowsMediaReader.hpp"
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
@@ -82,26 +83,6 @@ struct MediaPlatform {
     }
 };
 
-bool localPath(const char *text, std::wstring &path) {
-    if (!jsti::wide(text, path) || path.size() > 32000) return false;
-    std::replace(path.begin(), path.end(), L'/', L'\\');
-    if (path.compare(0, 4, L"\\\\?\\") == 0) path.erase(0, 4);
-    if (path.size() < 4 || !((path[0] >= L'A' && path[0] <= L'Z') ||
-                            (path[0] >= L'a' && path[0] <= L'z')) ||
-        path[1] != L':' || path[2] != L'\\' || path.find_first_of(L":\"<>|?*", 2) != std::wstring::npos) return false;
-    size_t start = 3;
-    while (start < path.size()) {
-        const size_t end = path.find(L'\\', start);
-        const auto part = path.substr(start, end == std::wstring::npos ? end : end - start);
-        if (part.empty() || part == L"." || part == L".." || part.back() == L'.' || part.back() == L' ' ||
-            std::any_of(part.begin(), part.end(), [](wchar_t ch) { return ch < 32; })) return false;
-        if (end == std::wstring::npos) break;
-        start = end + 1;
-        if (start == path.size()) return false;
-    }
-    path.insert(0, L"\\\\?\\");
-    return true;
-}
 
 // A read-only stream over the exact validated handle, rather than asking the
 // resolver to reopen a pathname. The handle denies concurrent write/delete.
@@ -162,92 +143,10 @@ public:
     HRESULT STDMETHODCALLTYPE Clone(IStream **result) override { if (result) *result = nullptr; return E_NOTIMPL; }
 };
 
-struct ReadState {
-    std::mutex mutex;
-    std::condition_variable changed;
-    bool pending = false, ready = false, flushed = false, closed = false;
-    HRESULT result = S_OK;
-    DWORD flags = 0;
-    IMFSample *sample = nullptr;
-    ~ReadState() { if (sample) sample->Release(); }
-};
-
-class ReaderCallback final : public IMFSourceReaderCallback {
-    std::atomic<ULONG> references{1};
-    const std::shared_ptr<ReadState> state;
-public:
-    explicit ReaderCallback(std::shared_ptr<ReadState> state) : state(std::move(state)) {}
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **result) override {
-        if (!result) return E_POINTER;
-        *result = nullptr;
-        if (id != IID_IUnknown && id != IID_IMFSourceReaderCallback) return E_NOINTERFACE;
-        *result = static_cast<IMFSourceReaderCallback *>(this); AddRef(); return S_OK;
-    }
-    ULONG STDMETHODCALLTYPE AddRef() override { return ++references; }
-    ULONG STDMETHODCALLTYPE Release() override { const ULONG count = --references; if (!count) delete this; return count; }
-    HRESULT STDMETHODCALLTYPE OnReadSample(HRESULT result, DWORD, DWORD flags, LONGLONG, IMFSample *sample) override {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        if (state->closed || !state->pending) return S_OK;
-        state->pending = false;
-        state->ready = true;
-        if (SUCCEEDED(state->result)) state->result = result;
-        state->flags = flags;
-        if (state->sample) state->sample->Release();
-        state->sample = sample;
-        if (sample) sample->AddRef();
-        state->changed.notify_all();
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE OnFlush(DWORD) override {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        state->pending = false;
-        state->flushed = true;
-        state->changed.notify_all();
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE OnEvent(DWORD, IMFMediaEvent *event) override {
-        HRESULT result = S_OK;
-        if (event) event->GetStatus(&result);
-        if (FAILED(result)) {
-            std::lock_guard<std::mutex> lock(state->mutex);
-            if (!state->closed) { state->result = result; state->changed.notify_all(); }
-        }
-        return S_OK;
-    }
-};
-
-struct ReaderResources {
-    jsti::COM<IMFSourceReader> reader;
-    const std::shared_ptr<ReadState> state;
-    explicit ReaderResources(std::shared_ptr<ReadState> state) : state(std::move(state)) {}
-    ~ReaderResources() { close(); }
-    HRESULT close() {
-        if (!reader.value) return S_OK;
-        bool pending;
-        { std::lock_guard<std::mutex> lock(state->mutex); pending = state->pending; state->flushed = false; }
-        HRESULT result = S_OK;
-        if (pending) {
-            result = reader->Flush(MF_SOURCE_READER_ALL_STREAMS);
-            if (SUCCEEDED(result)) {
-                std::unique_lock<std::mutex> lock(state->mutex);
-                if (!state->changed.wait_for(lock, std::chrono::seconds(5), [&] { return state->flushed; })) {
-                    result = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
-                }
-            }
-        }
-        IMFSample *sample = nullptr;
-        {
-            std::lock_guard<std::mutex> lock(state->mutex);
-            state->closed = true;
-            sample = state->sample;
-            state->sample = nullptr;
-        }
-        if (sample) sample->Release();
-        reader.value->Release();
-        reader.value = nullptr;
-        return result;
-    }
-};
+using jsti::media::localPath;
+using ReadState = jsti::media::ReadState;
+using ReaderCallback = jsti::media::ReaderCallback<ReadState>;
+using ReaderResources = jsti::media::ReaderResources<ReadState>;
 
 void put16(uint8_t *bytes, uint16_t value) {
     bytes[0] = static_cast<uint8_t>(value); bytes[1] = static_cast<uint8_t>(value >> 8);

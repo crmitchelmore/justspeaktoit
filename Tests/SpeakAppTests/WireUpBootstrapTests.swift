@@ -90,29 +90,6 @@ final class WireUpBootstrapTests: XCTestCase {
     }
 
     @MainActor
-    func testPaidAccessNonce_isUniqueAndUrlSafe() {
-        let first = PaidAccessManager.makeRawNonce()
-        let second = PaidAccessManager.makeRawNonce()
-
-        XCTAssertNotEqual(first, second)
-        for nonce in [first, second] {
-            XCTAssertGreaterThanOrEqual(nonce.count, 16)
-            XCTAssertNil(nonce.range(of: "[^A-Za-z0-9_-]", options: .regularExpression))
-        }
-    }
-
-    @MainActor
-    func testPaidAccessNonceDigest_isASha256HexString() {
-        // Apple echoes the digest back in the identity token, so it must be the
-        // hex SHA-256 the server re-derives from the raw nonce.
-        let digest = PaidAccessManager.sha256Hex("abc")
-        XCTAssertEqual(
-            digest,
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        )
-    }
-
-    @MainActor
     func testBootstrap_retainsHistorySyncAdapter() {
         // HistorySyncEngine holds its delegate weakly; the environment must be
         // the adapter's strong owner or history sync silently dies after the

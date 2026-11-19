@@ -5,7 +5,7 @@ import XCTest
 @testable import SpeakiOSLib
 
 /// Regression coverage for the writer-admission race: `writeBuffer` holds
-/// `stateLock` across the `ioQueue` submit, so a buffer admitted while a session
+/// `writerState` across the `ioQueue` submit, so a buffer admitted while a session
 /// is open is queued ahead of that session's close barrier. If the lock were
 /// released before the submit (the pre-fix shape), a stalled writer could enqueue
 /// after `stopRecording`, resolve `ioFile` at execution time, and splice its audio
@@ -66,7 +66,7 @@ final class AudioRecordingPersistenceRaceTests: XCTestCase {
         persistence.writeAdmissionStallHook = nil
 
         // Release the stalled writer at the verified synchronisation point: the
-        // hook fires only when the close path finds `stateLock` already held by
+        // hook fires only when the close path finds `writerState` already held by
         // the admitted write, so the overlap under test is observed rather than
         // timed. Under the pre-fix lock scope nothing contends, the hook never
         // fires, and the stalled write lands in session two — which is exactly

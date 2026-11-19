@@ -32,8 +32,7 @@ public struct WindowsPipeAutomationClient: AutomationRequesting {
         guard let pipeName else {
             throw nameError ?? AutomationError(code: .internalError, message: "Could not name the automation pipe.")
         }
-        let seconds = request.resolvedTimeout + AutomationClientTiming.responseGracePeriod
-        let timeout = UInt32(clamping: Int((seconds * 1_000).rounded(.up)))
+        let timeout = AutomationClientTiming.transportTimeoutMilliseconds(for: request)
         var connection: OpaquePointer?
         var error = [CChar](repeating: 0, count: 512)
         let status = jsti_automation_pipe_connect(pipeName, timeout, &connection, &error, error.count)

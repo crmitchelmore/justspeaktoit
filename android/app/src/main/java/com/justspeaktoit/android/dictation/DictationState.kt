@@ -10,7 +10,14 @@ enum class RecognitionMode {
 
     /** A bring-your-own-key cloud model. Audio is uploaded to the chosen provider. */
     Cloud,
+
+    /** A downloaded Whisper model (whisper.cpp). The recording is transcribed on the phone after it stops. */
+    Downloaded,
 }
+
+/** Modes that record a file and transcribe it after stopping, rather than streaming to a recogniser. */
+val RecognitionMode.recordsAudio: Boolean
+    get() = this == RecognitionMode.Cloud || this == RecognitionMode.Downloaded
 
 /** Why a session ended without a usable transcript. */
 enum class DictationFailure {
@@ -24,15 +31,41 @@ enum class DictationFailure {
     Server,
     Client,
     TooManyRequests,
+
+    /** The provider account has no credit or quota left; waiting will not help. */
+    OutOfCredit,
     LanguageNotSupported,
     LanguageUnavailable,
     LeftApp,
+
+    /** A phone or VoIP call took the audio. */
+    InterruptedByCall,
+
+    /** Another app took audio focus for good. */
+    AudioFocusLost,
+
+    /** A headset or Bluetooth microphone was connected or disconnected. */
+    AudioDeviceChanged,
+
+    /** A recording that ended without its owner (the app closed or was stopped) and was saved. */
+    RecordingRecovered,
     Unavailable,
     InvalidKey,
     KeyUnavailable,
     MissingKey,
     AudioTooLarge,
     UnsupportedAudio,
+    /** A live (streaming) model was asked to transcribe a file, which only batch models can do. */
+    LiveOnlyModel,
+
+    /** The chosen downloaded model is not on the phone; nothing else is used instead. */
+    ModelMissing,
+
+    /** The downloaded model file would not load; removing and downloading it again repairs it. */
+    ModelCorrupt,
+
+    /** The downloaded-model runtime is missing or could not transcribe this recording. */
+    LocalModelFailed,
     Unknown,
 }
 
@@ -56,6 +89,14 @@ sealed interface DictationState {
 
     val isActive: Boolean
         get() = this is Starting || this is Listening || this is Finishing
+
+    /**
+     * Whether the session still has the microphone open. A speech recogniser keeps listening while it
+     * finishes, until its final result or cancellation; a recorded session's recorder is tracked separately,
+     * and its Finishing is only the upload or the downloaded model's transcription.
+     */
+    val holdsMicrophone: Boolean
+        get() = this is Starting || this is Listening || (this is Finishing && !mode.recordsAudio)
 }
 
 sealed interface DictationEvent {
@@ -67,6 +108,9 @@ sealed interface DictationEvent {
     data class Partial(val text: String) : DictationEvent
 
     data object StopRequested : DictationEvent
+
+    /** The recogniser stopped hearing speech; its result follows. Ends capture timing, not the session. */
+    data object EndOfSpeech : DictationEvent
 
     data class Final(val text: String) : DictationEvent
 
@@ -112,6 +156,8 @@ object DictationReducer {
         }
 
         DictationEvent.Cancelled -> if (state.isActive) DictationState.Idle else state
+
+        DictationEvent.EndOfSpeech -> state
     }
 
     private fun DictationState.activeMode(): RecognitionMode? = when (this) {

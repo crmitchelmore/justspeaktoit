@@ -149,4 +149,28 @@ final class AutomationIntentSupportTests: XCTestCase {
         XCTAssertNil(AutomationIntentSupport.bestTranscript(raw: "", polished: nil))
         XCTAssertNil(AutomationIntentSupport.bestTranscript(raw: "\n\t ", polished: "  "))
     }
+
+    func testMostRecentTranscript_skipsEntriesWithoutText() {
+        let items: [(raw: String, polished: String?)] = [
+            (raw: " ", polished: nil),
+            (raw: "second raw", polished: "Second polished."),
+            (raw: "third raw", polished: nil)
+        ]
+        XCTAssertEqual(
+            AutomationIntentSupport.mostRecentTranscript(in: items, raw: { $0.raw }, polished: { $0.polished }),
+            "Second polished."
+        )
+    }
+
+    func testMostRecentTranscript_returnsNilWhenHistoryHasNoText() {
+        let items: [(raw: String, polished: String?)] = [(raw: "", polished: "  ")]
+        XCTAssertNil(
+            AutomationIntentSupport.mostRecentTranscript(in: items, raw: { $0.raw }, polished: { $0.polished })
+        )
+    }
+
+    func testNonBlankPolishOutput_rejectsWhitespaceOnly() {
+        XCTAssertNil(AutomationIntentSupport.nonBlankPolishOutput(" \n\t"))
+        XCTAssertEqual(AutomationIntentSupport.nonBlankPolishOutput(" Done. "), " Done. ")
+    }
 }

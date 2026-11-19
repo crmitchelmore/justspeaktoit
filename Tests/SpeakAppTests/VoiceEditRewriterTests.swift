@@ -38,10 +38,10 @@ final class VoiceEditRewriterTests: XCTestCase {
 
     func testModel_prefersTheConfiguredCloudPostProcessingModel() {
         let settings = makeSettings()
-        settings.postProcessingModel = "  qwen/qwen3.6-flash  "
+        settings.postProcessingModel = "  qwen/qwen3.8-flash  "
         let rewriter = VoiceEditRewriter(client: RecordingChatClient(), settings: settings)
 
-        XCTAssertEqual(rewriter.model, "qwen/qwen3.6-flash")
+        XCTAssertEqual(rewriter.model, "qwen/qwen3.8-flash")
     }
 
     func testModel_fallsBackToCatalogDefaultWhenUnset() {

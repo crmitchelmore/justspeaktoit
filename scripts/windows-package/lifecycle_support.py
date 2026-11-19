@@ -28,8 +28,9 @@ TRANSCRIPT = ("Lifecycle fixture transcript: \N{GREEK SMALL LETTER KAPPA}\N{GREE
               "kept through install, upgrade and uninstall.")
 RECOVERED_FAILURE = "Recording was interrupted. Audio recovered for retry."  # DesktopRecordingStore
 SAMPLE_RATE = 16_000
-# Files the app itself may create beside user data; never user data.
-APP_CREATED_FILES = {"OpenRouterAudioCatalog.json", "onboarding.json"}
+# Files the app itself may create beside user data; never user data. telemetry.json holds the
+# opt-in consent and installation ID; session-running.json exists only while the app runs.
+APP_CREATED_FILES = {"OpenRouterAudioCatalog.json", "onboarding.json", "session-running.json", "telemetry.json"}
 
 
 def sha256(data):

@@ -26,6 +26,9 @@ enum class ModeStatus {
 
     /** Usable if the user chooses it, but never picked by default: the language model is unconfirmed. */
     Unverified,
+
+    /** Downloaded mode has no downloaded model chosen yet. */
+    NeedsModel,
 }
 
 data class ModeAvailability(val mode: RecognitionMode, val status: ModeStatus) {
@@ -40,6 +43,8 @@ object RecognizerAvailability {
         caps: RecognizerCapabilities,
         onDeviceLanguage: LanguageSupport,
         cloudKeySaved: Boolean = false,
+        /** Downloaded mode's status, or null where this build offers no downloaded models. */
+        downloaded: ModeStatus? = null,
     ): List<ModeAvailability> {
         val onDevice = when {
             caps.sdkInt < ON_DEVICE_MIN_SDK -> ModeStatus.RequiresNewerAndroid
@@ -57,12 +62,22 @@ object RecognizerAvailability {
             ModeAvailability(RecognitionMode.OnDevice, onDevice),
             ModeAvailability(RecognitionMode.SpeechService, service),
             ModeAvailability(RecognitionMode.Cloud, if (cloudKeySaved) ModeStatus.Ready else ModeStatus.NeedsKey),
-        )
+        ) + listOfNotNull(downloaded?.let { ModeAvailability(RecognitionMode.Downloaded, it) })
     }
 
     /**
-     * Prefers private, on-device recognition, then the device speech service. Cloud is never a
-     * default: it is used only when the user chooses it. Returns null when nothing is usable.
+     * Downloaded mode is unavailable without its native runtime, needs a model until the chosen one is
+     * downloaded and verified, and is otherwise ready.
+     */
+    fun downloadedStatus(runtimeAvailable: Boolean, modelInstalled: Boolean): ModeStatus = when {
+        !runtimeAvailable -> ModeStatus.NotProvided
+        !modelInstalled -> ModeStatus.NeedsModel
+        else -> ModeStatus.Ready
+    }
+
+    /**
+     * Prefers private, on-device recognition, then the device speech service. Cloud and Downloaded are
+     * never a default: they are used only when the user chooses them. Returns null when nothing is usable.
      */
     fun defaultMode(options: List<ModeAvailability>): RecognitionMode? =
         options.firstOrNull { it.mode == RecognitionMode.OnDevice && it.status == ModeStatus.Ready }?.mode

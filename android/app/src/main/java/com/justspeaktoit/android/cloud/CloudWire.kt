@@ -4,17 +4,27 @@ import com.justspeaktoit.android.dictation.DictationFailure
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.net.SocketTimeoutException
 import java.util.Locale
 
 /** Request and response formats for OpenAI-compatible endpoints. Pure, so it is unit-tested. */
 object CloudWire {
-    /** Form fields for `/audio/transcriptions`. Language is sent as an ISO 639-1 code. */
-    fun transcriptionFields(model: CloudModel, languageTag: String?): List<Pair<String, String>> {
+    /**
+     * Form fields for `/audio/transcriptions`. Language is sent as an ISO 639-1 code; [prompt] is a
+     * vocabulary glossary, sent only to models that accept one.
+     */
+    fun transcriptionFields(
+        model: CloudModel,
+        languageTag: String?,
+        prompt: String? = null,
+    ): List<Pair<String, String>> {
         val fields = mutableListOf("model" to model.apiName, "response_format" to "json")
         val language = languageTag?.let { Locale.forLanguageTag(it).language }?.takeIf { it.isNotEmpty() }
         if (language != null) fields += model.languageField to language
+        if (model.supportsPrompt && !prompt.isNullOrBlank()) fields += "prompt" to prompt
         return fields
     }
 
@@ -24,50 +34,89 @@ object CloudWire {
         fun contentLength(fileBytes: Long): Long = head.size + fileBytes + tail.size
     }
 
-    /** Builds everything around the file part so the audio itself can be streamed from disk. */
+    /**
+     * Builds everything around the file part so the audio itself can be streamed from disk.
+     * [trailingFields] follow the file, for providers (Modulate) that read their options after it.
+     */
     fun multipart(
         fields: List<Pair<String, String>>,
         fileField: String,
         fileName: String,
         mimeType: String,
         boundary: String,
+        trailingFields: List<Pair<String, String>> = emptyList(),
     ): Multipart {
+        fun StringBuilder.field(name: String, value: String) {
+            append("--").append(boundary).append("\r\n")
+            append("Content-Disposition: form-data; name=\"").append(name).append("\"\r\n\r\n")
+            append(value).append("\r\n")
+        }
         val head = buildString {
-            for ((name, value) in fields) {
-                append("--").append(boundary).append("\r\n")
-                append("Content-Disposition: form-data; name=\"").append(name).append("\"\r\n\r\n")
-                append(value).append("\r\n")
-            }
+            for ((name, value) in fields) field(name, value)
             append("--").append(boundary).append("\r\n")
             append("Content-Disposition: form-data; name=\"").append(fileField)
                 .append("\"; filename=\"").append(fileName).append("\"\r\n")
             append("Content-Type: ").append(mimeType).append("\r\n\r\n")
         }
-        val tail = "\r\n--$boundary--\r\n"
+        val tail = buildString {
+            append("\r\n")
+            for ((name, value) in trailingFields) field(name, value)
+            append("--").append(boundary).append("--\r\n")
+        }
         return Multipart(boundary, head.toByteArray(), tail.toByteArray())
     }
 
-    fun cleanupBody(model: String, transcript: String): String = JSONObject()
-        .put("model", model)
-        .put(
-            "messages",
-            JSONArray()
-                .put(JSONObject().put("role", "system").put("content", CleanupPolicy.systemPrompt()))
-                .put(JSONObject().put("role", "user").put("content", CleanupPolicy.userMessage(transcript))),
-        )
-        .toString()
+    fun cleanupUrl(model: CleanupModel): String = "${model.cloudProvider.baseUrl}/chat/completions"
+
+    /** Anthropic rejects requests without an output limit; other routes keep their default. */
+    const val ANTHROPIC_MAX_TOKENS = 8_192
+
+    fun cleanupMaxTokens(model: CleanupModel): Int? =
+        if (model.provider == CloudProvider.Anthropic) ANTHROPIC_MAX_TOKENS else null
+
+    fun cleanupBody(
+        model: String,
+        transcript: String,
+        maxTokens: Int? = null,
+        systemPrompt: String = CleanupPolicy.systemPrompt(),
+    ): String = chatBody(model, systemPrompt, CleanupPolicy.userMessage(transcript), maxTokens)
+
+    /** One system and one user message; cleanup and voice edit both use it. */
+    fun chatBody(model: String, systemPrompt: String, userMessage: String, maxTokens: Int? = null): String =
+        JSONObject()
+            .put("model", model)
+            .apply { if (maxTokens != null) put("max_tokens", maxTokens) }
+            .put(
+                "messages",
+                JSONArray()
+                    .put(JSONObject().put("role", "system").put("content", systemPrompt))
+                    .put(JSONObject().put("role", "user").put("content", userMessage)),
+            )
+            .toString()
 
     /** @throws CloudException when the body is not the expected JSON. */
     fun transcriptText(body: String): String = parse { JSONObject(body).requireString("text") }
 
     /** Rejects output the model did not finish (for example `finish_reason: "length"`). */
-    fun cleanupText(body: String): String = parse {
+    fun cleanupText(body: String): String = parse { replyContent(body) }
+
+    /**
+     * [cleanupText] without trimming: `VoiceEditPolicy.normalizedRewrite` decides which whitespace
+     * is accidental, since a selection may end in a newline the rewrite must keep.
+     */
+    fun rewriteText(body: String): String = try {
+        replyContent(body)
+    } catch (e: JSONException) {
+        throw CloudException(DictationFailure.Server, "Unexpected response", e)
+    }
+
+    private fun replyContent(body: String): String {
         val choice = JSONObject(body).getJSONArray("choices").getJSONObject(0)
         val finish = choice.opt("finish_reason")
         if (finish is String && finish != "stop") {
             throw CloudException(DictationFailure.Server, "Cleanup did not finish: $finish")
         }
-        choice.getJSONObject("message").requireString("content")
+        return choice.getJSONObject("message").requireString("content")
     }
 
     // Android's getString() coerces null, numbers and objects to text; only a real string is a transcript.
@@ -80,13 +129,53 @@ object CloudWire {
         throw CloudException(DictationFailure.Server, "Unexpected response", e)
     }
 
-    fun failureForStatus(status: Int): DictationFailure = when (status) {
+    /** Transcripts and cleanups are small; a larger body is not a response this app asked for. */
+    const val MAX_RESPONSE_BYTES = 1024 * 1024
+
+    /**
+     * Reads a UTF-8 response body of at most [limit] bytes, so a misbehaving or hostile endpoint
+     * cannot exhaust memory. @throws CloudException when the body is larger.
+     */
+    fun readBody(input: InputStream, limit: Int = MAX_RESPONSE_BYTES): String {
+        val out = ByteArrayOutputStream()
+        val buffer = ByteArray(8 * 1024)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            if (out.size() + read > limit) {
+                throw CloudException(DictationFailure.Server, "Response larger than $limit bytes")
+            }
+            out.write(buffer, 0, read)
+        }
+        return out.toString(Charsets.UTF_8.name())
+    }
+
+    /**
+     * [body] is the error response when it was read. An account with no credit is not a rate limit
+     * that waiting fixes (#1789): OpenRouter reports it as 402, OpenAI as 429 `insufficient_quota`.
+     */
+    fun failureForStatus(status: Int, body: String = ""): DictationFailure = when (status) {
         401, 403 -> DictationFailure.InvalidKey
+        402 -> DictationFailure.OutOfCredit
         408 -> DictationFailure.NetworkTimeout
-        429 -> DictationFailure.TooManyRequests
+        429 -> if (isOutOfCredit(body)) DictationFailure.OutOfCredit else DictationFailure.TooManyRequests
         in 400..499 -> DictationFailure.Client
         else -> DictationFailure.Server
     }
+
+    private fun isOutOfCredit(body: String): Boolean {
+        val error = try {
+            JSONObject(body).optJSONObject("error")
+        } catch (e: JSONException) {
+            null
+        } ?: return false
+        return error.optString("code") == INSUFFICIENT_QUOTA || error.optString("type") == INSUFFICIENT_QUOTA
+    }
+
+    private const val INSUFFICIENT_QUOTA = "insufficient_quota"
+
+    /** Enough of an error response to read its error code; the rest is never needed. */
+    const val MAX_ERROR_BYTES = 16 * 1024
 
     fun failureForIo(error: IOException): DictationFailure =
         if (error is SocketTimeoutException) DictationFailure.NetworkTimeout else DictationFailure.Network

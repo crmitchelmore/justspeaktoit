@@ -38,7 +38,7 @@ final class XAISpeechToTextTests: XCTestCase {
     func testFactory_splitsTheDedicatedStreamFromTheGrokVoiceSession() throws {
         let sttRoute = try XCTUnwrap(LiveTranscriptionRouting.route(for: XAISpeechToText.liveCatalogID))
         let voiceRoute = try XCTUnwrap(
-            LiveTranscriptionRouting.route(for: XAIVoiceModels.thinkFast2CatalogID)
+            LiveTranscriptionRouting.route(for: XAIVoiceModels.voice3CatalogID)
         )
         XCTAssertTrue(
             LiveTranscriptionClientFactory.makeClient(

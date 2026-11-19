@@ -5,6 +5,7 @@ import os
 import plistlib
 import sys
 from pathlib import Path
+
 surface = sys.argv[1]
 train = os.environ['RELEASE_TRAIN']
 config = json.loads(Path('Sources/SpeakCore/Resources/ReleaseTrains.json').read_text())[train]

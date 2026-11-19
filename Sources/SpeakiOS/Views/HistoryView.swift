@@ -11,6 +11,7 @@ public struct HistoryView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var historyManager = iOSHistoryManager.shared
     @ObservedObject private var syncEngine = HistorySyncEngine.shared
+    @ObservedObject private var sendToMac = SendToMacService.shared
     @State private var showingClearConfirmation = false
     @State private var showSkeletonLoading = false
     @State private var showingFilters = false
@@ -22,6 +23,8 @@ public struct HistoryView: View {
     @State private var startDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var endDate = Date()
     @State private var filteredItems: [iOSHistoryItem] = []
+    /// Rows are built a page at a time; filtering still covers all history.
+    @State private var pageWindow = HistoryPageWindow()
     @State private var statistics = HistoryPresentationStatistics(items: [])
     @State private var availableModels: [String] = []
     @State private var derivedStateReady = false
@@ -63,6 +66,15 @@ public struct HistoryView: View {
                 syncStatusIcon
             }
             if !historyManager.items.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        UsageInsightsView()
+                    } label: {
+                        Image(systemName: "chart.bar.xaxis")
+                    }
+                    .accessibilityLabel("Usage insights")
+                    .accessibilityIdentifier("historyUsageInsightsButton")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showingFilters = true
@@ -106,6 +118,7 @@ public struct HistoryView: View {
         .refreshable {
             await historyManager.triggerSync()
         }
+        .sendToMacStatusBanner(sendToMac)
         .sheet(item: $issueReport) { IOSIssueReportPreview(controller: $0) }
         .task { await historyManager.loadIfNeededAndWait() }
         .onReceive(historyManager.$items) { items in
@@ -113,6 +126,7 @@ public struct HistoryView: View {
             refreshDerivedState(items: items)
         }
         .onChange(of: filterKey) { _, _ in
+            pageWindow.reset()
             refreshDerivedState(items: historyManager.items)
         }
         .confirmationDialog(
@@ -163,7 +177,7 @@ public struct HistoryView: View {
             }
             Section {
                 ForEach(0..<5, id: \.self) { _ in
-                    iOSHistoryItemSkeleton()
+                    HistoryItemSkeleton()
                 }
             }
         }
@@ -177,8 +191,20 @@ public struct HistoryView: View {
         }
     }
 
+    @ViewBuilder
     private var noMatchesState: some View {
-        ContentUnavailableView.search(text: searchText)
+        if hasActiveFilters {
+            ContentUnavailableView {
+                Label("No Matches", systemImage: "line.3.horizontal.decrease.circle")
+            } description: {
+                Text("No transcriptions match your search and filters.")
+            } actions: {
+                Button("Clear Search and Filters", action: clearSearchAndFilters)
+                    .accessibilityIdentifier("historyClearFiltersButton")
+            }
+        } else {
+            ContentUnavailableView.search(text: searchText)
+        }
     }
 
     private var historyList: some View {
@@ -197,7 +223,7 @@ public struct HistoryView: View {
                 statsHeader
             }
             Section {
-                ForEach(filteredItems) { item in
+                ForEach(displayedItems) { item in
                     HistoryItemRow(
                         item: item,
                         isSynced: historyManager.isSynced(item),
@@ -212,7 +238,10 @@ public struct HistoryView: View {
                         onDelete: { Task { await historyManager.removeAndWait(item) } },
                         onReport: {
                             issueReport = IOSIssueReportController(snapshot: IOSIssueReporter.snapshot(for: item))
-                        }
+                        },
+                        onSendToMac: sendToMac.sendAction(
+                            text: item.bestText, model: item.model, duration: item.duration
+                        )
                     )
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
@@ -230,9 +259,19 @@ public struct HistoryView: View {
                         .tint(.blue)
                     }
                 }
+                if pageWindow.hasMore(total: filteredItems.count) {
+                    HistoryLoadMoreFooter(shown: displayedItems.count, total: filteredItems.count) {
+                        pageWindow.loadMore(total: filteredItems.count)
+                    }
+                    .id("history-load-more-\(pageWindow.limit)")
+                }
             }
         }
         .listSectionSpacing(density.listSectionSpacing)
+    }
+
+    private var displayedItems: ArraySlice<iOSHistoryItem> {
+        filteredItems.prefix(pageWindow.visibleCount(of: filteredItems.count))
     }
 
     private var statsHeader: some View {
@@ -277,21 +316,6 @@ public struct HistoryView: View {
         density.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize)
     }
 
-    private var query: HistorySearchQuery {
-        let range: ClosedRange<Date>?
-        if dateRangeEnabled {
-            range = HistorySearchQuery.normalizedDayRange(from: startDate, through: endDate)
-        } else {
-            range = nil
-        }
-        return HistorySearchQuery(
-            searchText: searchText,
-            modelIdentifiers: selectedModel.map { [$0] } ?? [],
-            includeErrorsOnly: errorsOnly,
-            dateRange: range
-        )
-    }
-
     private var filterKey: HistoryViewFilterKey {
         HistoryViewFilterKey(
             searchText: searchText,
@@ -304,7 +328,7 @@ public struct HistoryView: View {
     }
 
     private func refreshDerivedState(items: [iOSHistoryItem]) {
-        let state = HistoryViewDerivedState(items: items, query: query)
+        let state = HistoryViewDerivedState(items: items, query: filterKey.query())
         filteredItems = state.filteredItems
         statistics = state.statistics
         availableModels = state.availableModels
@@ -312,7 +336,14 @@ public struct HistoryView: View {
     }
 
     private var hasActiveFilters: Bool {
-        errorsOnly || selectedModel != nil || dateRangeEnabled
+        filterKey.hasActiveFilters
+    }
+
+    private func clearSearchAndFilters() {
+        searchText = ""
+        errorsOnly = false
+        selectedModel = nil
+        dateRangeEnabled = false
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -322,55 +353,6 @@ public struct HistoryView: View {
             return "\(minutes)m \(secs)s"
         }
         return "\(secs)s"
-    }
-}
-
-private struct HistoryFilterSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding var errorsOnly: Bool
-    @Binding var selectedModel: String?
-    @Binding var dateRangeEnabled: Bool
-    @Binding var startDate: Date
-    @Binding var endDate: Date
-    let availableModels: [String]
-
-    var body: some View {
-        Form {
-            Section("Show") {
-                Toggle("Errors only", isOn: $errorsOnly)
-                Picker("Model", selection: $selectedModel) {
-                    Text("All Models").tag(String?.none)
-                    ForEach(availableModels, id: \.self) { model in
-                        Text(ModelCatalog.friendlyName(for: model)).tag(String?.some(model))
-                    }
-                }
-            }
-
-            Section("Date Range") {
-                Toggle("Limit by date", isOn: $dateRangeEnabled)
-                if dateRangeEnabled {
-                    DatePicker("From", selection: $startDate, displayedComponents: .date)
-                    DatePicker("To", selection: $endDate, in: startDate..., displayedComponents: .date)
-                }
-            }
-
-            if errorsOnly || selectedModel != nil || dateRangeEnabled {
-                Section {
-                    Button("Reset Filters", role: .destructive) {
-                        errorsOnly = false
-                        selectedModel = nil
-                        dateRangeEnabled = false
-                    }
-                }
-            }
-        }
-        .navigationTitle("Filter History")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }
-            }
-        }
     }
 }
 

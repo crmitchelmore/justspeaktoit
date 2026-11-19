@@ -138,7 +138,16 @@ static void apply_row(LocalRow *row, const char *name, const char *detail, const
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row->row), name);
     adw_action_row_set_subtitle(row->row, detail);
     gtk_widget_set_tooltip_text(GTK_WIDGET(row->row), about);
-    gtk_button_set_label(row->download, state == JSTI_LOCAL_MODEL_PARTIAL ? "Resume download" : "Download");
+    const char *download = state == JSTI_LOCAL_MODEL_PARTIAL ? "Resume download" : "Download";
+    gtk_button_set_label(row->download, download);
+    /* Every row has the same button text, so the model name tells agents which one. */
+    const char *verbs[] = {download, "Cancel download of", "Remove"};
+    GtkButton *buttons[] = {row->download, row->cancel, row->remove};
+    for (guint i = 0; i < G_N_ELEMENTS(buttons); ++i) {
+        gchar *accessible = g_strdup_printf("%s %s", verbs[i], name);
+        jsti_accessible_set_name(GTK_WIDGET(buttons[i]), accessible);
+        g_free(accessible);
+    }
     gtk_widget_set_visible(GTK_WIDGET(row->download),
                            state == JSTI_LOCAL_MODEL_NOT_INSTALLED || state == JSTI_LOCAL_MODEL_PARTIAL);
     gtk_widget_set_visible(GTK_WIDGET(row->cancel), state == JSTI_LOCAL_MODEL_DOWNLOADING);

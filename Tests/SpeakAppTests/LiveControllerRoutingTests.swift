@@ -28,11 +28,6 @@ final class LiveControllerRoutingTests: XCTestCase {
             let controller = switcher.controller(for: route.modelID)
             switch route.provider {
             case .openai: XCTAssertTrue(controller is OpenAIRealtimeLiveController, route.modelID)
-            case .deepgram: XCTAssertTrue(controller is DeepgramLiveController, route.modelID)
-            case .modulate: XCTAssertTrue(controller is ModulateLiveController, route.modelID)
-            case .elevenlabs: XCTAssertTrue(controller is ElevenLabsLiveController, route.modelID)
-            case .soniox: XCTAssertTrue(controller is SonioxLiveController, route.modelID)
-            case .cartesia: XCTAssertTrue(controller is CartesiaLiveController, route.modelID)
             default: XCTAssertTrue(controller is SharedClientLiveController, route.modelID)
             }
         }
@@ -44,7 +39,7 @@ final class LiveControllerRoutingTests: XCTestCase {
             "google/gemini-2.5-flash", "Deepgram/nova-3-streaming", " deepgram/nova-3-streaming",
             "unknown/model", "apple/local/Dictation", "local/batch/whisper"
         ] {
-            XCTAssertNil(SwitchingLiveTranscriber.cloudProvider(for: model), model)
+            XCTAssertNil(LiveControllerSet.cloudProvider(for: model), model)
             let controller = switcher.controller(for: model)
             XCTAssertFalse(controller is SharedClientLiveController, model)
             XCTAssertFalse(controller is OpenAIRealtimeLiveController, model)

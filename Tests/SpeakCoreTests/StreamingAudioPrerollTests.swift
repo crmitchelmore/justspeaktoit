@@ -182,11 +182,6 @@ final class StreamingAudioPrerollTests: XCTestCase {
     /// | xAI Grok Voice | shared provider session preroll | rows below |
     /// | Modulate | shared provider session preroll | rows below |
     ///
-    /// `SonioxLiveTranscriber` in `SpeakApp` owns the same shared buffer, so it
-    /// is in the table above, but it is a macOS-only provider that this target
-    /// cannot construct — hence the separate file rather than a row in
-    /// `sharedPrerollClients`.
-    ///
     /// Each row carries the capture rate that client streams at, because the
     /// budget is seconds of audio and therefore a *different* byte ceiling per
     /// client. Asserting against the largest supported rate would let a 16kHz

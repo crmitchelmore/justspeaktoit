@@ -1,6 +1,7 @@
 #if os(Windows)
 import Foundation
 import CWindowsSupport
+import SpeakDesktopSync
 import SpeakSync
 import SpeakTestSupport
 import XCTest
@@ -84,7 +85,7 @@ final class LoopbackCloudKitServer: @unchecked Sendable {
         let listener = listener
         task = Task.detached {
             while !Task.isCancelled {
-                guard let connection = try? await listener.accept(timeout: .seconds(30)) else { continue }
+                guard let connection = try? await listener.nextRequest(within: .seconds(30)) else { continue }
                 connection.respond(server.handle(rawRequest: connection.request))
             }
         }
@@ -225,22 +226,23 @@ final class WinHTTPCloudKitTransportTests: XCTestCase {
         let listener = try WindowsLoopbackListener()
         let target = "/cloudkit-sign-in?ckWebAuthToken=abc%2Bdef%3D"
         let url = try XCTUnwrap(URL(string: "http://127.0.0.1:\(listener.port)" + target))
-        let accepted = Task { try await listener.accept(timeout: .seconds(20)) }
+        let accepted = Task { try await listener.nextRequest(within: .seconds(20)) }
         let reply = Task {
             try await WinHTTPCloudKitTransport(timeout: .seconds(20)).send(
                 CloudKitWebServicesHTTPRequest(method: "GET", url: url, headers: [:], body: nil), responseLimit: 4096
             )
         }
-        let connection = try await accepted.value
-        let received = try XCTUnwrap(connection.target)
+        let next = try await accepted.value
+        let connection = try XCTUnwrap(next)
+        let received = try XCTUnwrap(connection.head?.target)
         // WinHTTP in this process: the TCP table's owner is this user.
-        let owner = connection.peerIsCurrentUser
+        let owner = connection.peer
         connection.respond(Data("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".utf8))
         let response = try await reply.value
         listener.close()
 
         XCTAssertEqual(received, target)
-        XCTAssertEqual(owner, true)
+        XCTAssertEqual(owner, .currentUser)
         XCTAssertEqual(response.statusCode, 200)
         XCTAssertEqual(String(bytes: response.body, encoding: .utf8), "ok")
     }
@@ -248,13 +250,14 @@ final class WinHTTPCloudKitTransportTests: XCTestCase {
     func testCancellingARequestToASilentPeerReturnsPromptly() async throws {
         let listener = try WindowsLoopbackListener()
         let url = try XCTUnwrap(URL(string: "http://127.0.0.1:\(listener.port)/silent"))
-        let held = Task { try await listener.accept(timeout: .seconds(20)) }
+        let held = Task { try await listener.nextRequest(within: .seconds(20)) }
         let request = Task {
             try await WinHTTPCloudKitTransport(timeout: .seconds(30)).send(
                 CloudKitWebServicesHTTPRequest(method: "GET", url: url, headers: [:], body: nil), responseLimit: 4096
             )
         }
-        let connection = try await held.value
+        let next = try await held.value
+        let connection = try XCTUnwrap(next)
         let started = ContinuousClock.now
         request.cancel()
         do {

@@ -193,7 +193,7 @@ private final class ProgressivePlaybackFixture {
     var scheduled: () -> Void = {}
     var inspected: () -> Void = {}
     var wait: (() async throws -> Void)?
-    var acquire: () throws -> OpenRouterIOSAudioSessionLease? = { nil }
+    var acquire: () throws -> VoiceOutputAudioSessionLease? = { nil }
 
     func player() -> OpenRouterIOSProgressivePlayback {
         var dependencies = OpenRouterIOSProgressivePlayback.Dependencies()

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Recordings go to the user's paired phone, not directly to a service.
+         The phone app declares its subsequent provider processing. -->
+    <key>NSPrivacyTracking</key>
+    <false/>
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+    <!-- No NSPrivacyAccessedAPITypes: this bundle calls no required-reason
+         API (RequiredReasonAPIManifestTests). Add the key with real reasons
+         when it does; never ship it as an empty array. -->
+</dict>
+</plist>

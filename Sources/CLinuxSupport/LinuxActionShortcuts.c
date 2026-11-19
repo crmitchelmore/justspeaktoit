@@ -75,7 +75,7 @@ GPtrArray *jsti_action_shortcuts_copy_rows(const JSTILinuxActionShortcut *rows, 
             row->identifier == NULL || !g_utf8_validate(row->identifier, -1, NULL) ||
             !g_utf8_validate(row->title, -1, NULL) || !g_utf8_validate(row->chord, -1, NULL) ||
             !g_utf8_validate(row->note, -1, NULL) || !g_utf8_validate(row->page, -1, NULL) ||
-            row->run < 0 || row->run > 12 || (row->modifiers & ~13u) != 0 ||
+            row->run < 0 || row->run > 13 || (row->modifiers & ~13u) != 0 ||
             row->identifier[0] == '\0' || strlen(row->identifier) > 128 ||
             (row->binding_enabled != 0 && row->binding_enabled != 1) ||
             (row->binding_global != 0 && row->binding_global != 1) ||
@@ -292,7 +292,7 @@ int32_t jsti_action_shortcuts_self_test(char *error, size_t capacity) {
             GDK_CONTROL_MASK | GDK_ALT_MASK, NULL, capture_run) && captured == 5;
     }
     g_clear_pointer(&selected_rows, g_ptr_array_unref);
-    paste.run = 13;
+    paste.run = 14;
     paste_rows = jsti_action_shortcuts_copy_rows(&paste, 1);
     okay = okay && paste_rows == NULL;
     g_clear_pointer(&paste_rows, g_ptr_array_unref);

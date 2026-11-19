@@ -6,7 +6,8 @@ final class CaptureDeliveryPreferenceTests: XCTestCase {
     func testFields_UseMacKeysDefaultsAndPortableGroups() throws {
         XCTAssertEqual(CaptureDeliveryPreference.fields.map(\.key), [
             "audioPreWarmingEnabled", "warmMicrophoneOnKeyPress", "streamingInsertionEnabled",
-            "pasteRemoteTranscriptsAtCursor", "historyFlushInterval", "cancelRecordingOnEscape"
+            "pasteRemoteTranscriptsAtCursor", "historyFlushInterval", "cancelRecordingOnEscape",
+            "keepAudioOnCancel"
         ])
         let configuration = try DesktopConfiguration()
         XCTAssertTrue(configuration.audioPreWarmingEnabled)

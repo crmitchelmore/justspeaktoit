@@ -55,7 +55,7 @@ actor SystemTTSClient: TextToSpeechClient {
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
     // System voice doesn't require API key
-    return .success(message: "System voice requires no API key")
+    .success(message: "System voice requires no API key")
   }
 
   // MARK: - Private Helpers
@@ -109,104 +109,5 @@ actor SystemTTSClient: TextToSpeechClient {
     }
 
     return traits
-  }
-}
-
-/// Writes one utterance's buffers to an audio file and reports completion.
-///
-/// Finishes on the synthesizer's empty end buffer, falling back to its finish
-/// callback; cancellation stops synthesis.
-private final class SystemSpeechFileWriter: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
-  private let url: URL
-  private let format: AudioFormat
-  private let synthesizer = AVSpeechSynthesizer()
-  private let lock = NSLock()
-  private var file: AVAudioFile?
-  private var continuation: CheckedContinuation<Void, Error>?
-  private var outcome: Result<Void, Error>?
-
-  init(url: URL, format: AudioFormat) {
-    self.url = url
-    self.format = format
-    super.init()
-    synthesizer.delegate = self
-  }
-
-  func write(_ utterance: AVSpeechUtterance) async throws {
-    try await withTaskCancellationHandler {
-      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-        let settled = lock.withLock { () -> Result<Void, Error>? in
-          if let outcome { return outcome }
-          self.continuation = continuation
-          return nil
-        }
-        if let settled { continuation.resume(with: settled); return }
-        synthesizer.write(utterance) { [weak self] buffer in self?.append(buffer) }
-      }
-    } onCancel: {
-      self.finish(.failure(CancellationError()))
-      self.synthesizer.stopSpeaking(at: .immediate)
-    }
-  }
-
-  private func append(_ buffer: AVAudioBuffer) {
-    guard let pcm = buffer as? AVAudioPCMBuffer else { return }
-    guard pcm.frameLength > 0 else { finish(.success(())); return }
-    do {
-      try lock.withLock {
-        guard outcome == nil else { return }
-        if file == nil {
-          file = try AVAudioFile(
-            forWriting: url, settings: Self.settings(for: format, matching: pcm.format),
-            commonFormat: pcm.format.commonFormat, interleaved: pcm.format.isInterleaved
-          )
-        }
-        try file?.write(from: pcm)
-      }
-    } catch {
-      finish(.failure(TTSError.synthesisFailure("Could not write system speech: \(error.localizedDescription)")))
-      synthesizer.stopSpeaking(at: .immediate)
-    }
-  }
-
-  private func finish(_ result: Result<Void, Error>) {
-    let settled = lock.withLock { () -> (CheckedContinuation<Void, Error>?, Result<Void, Error>)? in
-      guard outcome == nil else { return nil }
-      var result = result
-      if case .success = result, file == nil {
-        result = .failure(TTSError.synthesisFailure("The system voice produced no audio"))
-      }
-      outcome = result
-      file = nil  // Releasing the file closes it before anyone reads it.
-      defer { continuation = nil }
-      return (continuation, result)
-    }
-    if let (continuation, result) = settled { continuation?.resume(with: result) }
-  }
-
-  func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-    // The empty end buffer normally finishes first; this is the fallback, after
-    // a grace period so a trailing buffer is not cut off.
-    DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.finish(.success(())) }
-  }
-
-  func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-    finish(.failure(CancellationError()))
-  }
-
-  private static func settings(for format: AudioFormat, matching pcm: AVAudioFormat) -> [String: Any] {
-    var settings: [String: Any] = [
-      AVSampleRateKey: pcm.sampleRate, AVNumberOfChannelsKey: pcm.channelCount
-    ]
-    switch format {
-    case .wav:
-      settings[AVFormatIDKey] = kAudioFormatLinearPCM
-      settings[AVLinearPCMBitDepthKey] = 16
-      settings[AVLinearPCMIsFloatKey] = false
-      settings[AVLinearPCMIsBigEndianKey] = false
-    case .m4a, .mp3:
-      settings[AVFormatIDKey] = kAudioFormatMPEG4AAC
-    }
-    return settings
   }
 }

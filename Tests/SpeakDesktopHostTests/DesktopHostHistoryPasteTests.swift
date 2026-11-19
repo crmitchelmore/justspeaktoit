@@ -13,7 +13,7 @@ final class DesktopHostHistoryPasteTests: XCTestCase {
         FakeLog.shared.reset()
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("history-paste-\(UUID())")
         effects = HistoryPasteEffects()
-        controller = try DesktopHostController(directory: directory, effects: effects)
+        controller = try DesktopHostController.consented(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
         FakeLog.shared.installKeyReadHook { name in
             XCTFail("Pasting History must not read credentials: \(name)")

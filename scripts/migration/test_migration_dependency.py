@@ -1,11 +1,10 @@
 import json
-from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from pathlib import Path
 
 from migration_dependency import license_entry
-
 
 ROOT = Path(__file__).resolve().parents[2]
 

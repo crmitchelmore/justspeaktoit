@@ -35,7 +35,7 @@ test("release-page furniture is stripped from bundled notes", () => {
         "",
         "**Full changelog:** https://github.com/example/repo/compare/mac-v1...mac-v2",
         "",
-        "<!-- release-notes: model=gpt-5.6-luna effort=medium -->",
+        "<!-- release-notes: model=gpt-6-luna effort=medium -->",
         "",
     ].join("\n"));
 

@@ -28,7 +28,7 @@ final class VoiceEditRewriter {
     guard let openRouterClient = client as? OpenRouterAPIClient else { return true }
     let requiresRemote = await openRouterClient.requiresRemoteAccess(for: model)
     guard requiresRemote else { return true }
-    return await openRouterClient.hasStoredAPIKey()
+    return await openRouterClient.hasStoredAPIKey(forModel: model)
   }
 
   func rewrite(selection: String, instruction: String) async throws -> String {

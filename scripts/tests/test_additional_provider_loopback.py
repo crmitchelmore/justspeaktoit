@@ -2,30 +2,27 @@
 import base64
 import importlib.util
 import json
-from pathlib import Path
 import struct
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-
 SPEC = importlib.util.spec_from_file_location(
-    "websocket_peer", Path(__file__).resolve().parents[1] / "websocket-loopback-probe.py"
+    "websocket_peer", Path(__file__).resolve().parents[1] / "loopback/websocket-loopback-probe.py"
 )
 PEER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PEER)
+import loopback_additional as ADDITIONAL  # noqa: E402  (the peer put scripts/loopback on sys.path)
 
 
 class AdditionalProviderPeerTests(unittest.TestCase):
     def drive(self, provider, scenario="complete", corrupt_pcm=False, assistant_request=False):
         handler = PEER.ProbeHandler.__new__(PEER.ProbeHandler)
-        handler.additional_provider = provider
-        handler.additional_scenario = scenario
-        handler.additional_query = {
-            "key": ["synthetic-loopback-key"], "api_key": ["synthetic-loopback-key"],
-            "sessionId": ["synthetic"], "model": ["grok-voice-think-fast-2.0"],
-        }
-        handler.additional_headers = {"authorization": "Bearer synthetic-loopback-key"}
         handler.pending = bytearray()
+        peer = ADDITIONAL.AdditionalProviderPeer(handler, provider, scenario, {
+            "key": ["synthetic-loopback-key"], "api_key": ["synthetic-loopback-key"],
+            "sessionId": ["synthetic"], "model": ["grok-voice-3.0"],
+        }, {"authorization": "Bearer synthetic-loopback-key"})
         rate = 24000 if provider in ("meta", "grok") else 16000
         incoming = []
 
@@ -80,8 +77,9 @@ class AdditionalProviderPeerTests(unittest.TestCase):
         handler.read_message = lambda **_: incoming.pop(0)
         handler.send_frame = lambda opcode, payload, **kwargs: frames.append((opcode, payload))
         handler.request = object()
-        with patch.object(PEER.select, "select", return_value=([], [], [])), patch.object(PEER, "log") as log:
-            handler.run_additional_provider()
+        with patch.object(ADDITIONAL.select, "select", return_value=([], [], [])), \
+                patch.object(ADDITIONAL, "log") as log:
+            peer.run()
             self.assertEqual(log.call_args.kwargs["frames"], 3)
             self.assertTrue(log.call_args.kwargs["endVerified"])
         return frames

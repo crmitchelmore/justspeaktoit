@@ -3,11 +3,14 @@ import AppIntents
 import Foundation
 import SpeakCore
 
-// App Intent declarations intentionally stay together so Shortcuts metadata and
-// foreground-continuation behavior remain auditable in one place. That is worth
-// more than the file-length rule: splitting the recording intents across files
-// is how one of them quietly ends up with a different authentication policy or
-// a different destination precedence from its siblings.
+// The four recording intents (start, start/toggle, stop and the Control Center
+// toggle) intentionally stay together so their foreground-continuation,
+// authentication and destination precedence remain auditable in one place.
+// That is worth more than the file-length rule: splitting them across files is
+// how one of them quietly ends up with a different policy from its siblings.
+// The plumbing they share with the Dictate and automation intents lives in
+// `RecordingIntentStartSupport.swift`; the copy intents and the App Shortcuts
+// provider, which carry no recording policy, live in their own files.
 // swiftlint:disable file_length
 
 // MARK: - Audio Recording Intent (Action Button / Shortcuts)
@@ -46,108 +49,6 @@ private func stopResultDialog(
     }
 }
 
-/// A keyboard-owned dictation shares the microphone with every hardware
-/// trigger. Rather than colliding with it — refusing with "already recording",
-/// or stopping it into the *hardware* destination and losing the field the
-/// keyboard was aiming at — a physical press finishes it into that field
-/// (issue #1002).
-///
-/// Returns `true` when the press was consumed by the keyboard session.
-///
-/// Every supported stop entry point must run this **before** its own generic
-/// stop: `StopTranscriptionRecordingIntent`, the Action Button toggle, the
-/// Control Center toggle's off position, and `StopDictationIntent`. Stopping
-/// the service directly would finalise a keyboard-owned capture with the
-/// *hardware* destination and publish a pickup offer, instead of completing
-/// the nonce-scoped handoff into the field the keyboard opened it for.
-@available(iOS 18, *)
-@MainActor
-func finishedKeyboardSessionIfActive() -> Bool {
-    switch KeyboardDeliveryPublisher.sessionRouting() {
-    case let .finishKeyboardSession(requestID):
-        return KeyboardInstantDictationCoordinator.shared.finishKeyboardSession(requestID: requestID)
-    case .keyboardSessionStarting:
-        // The keyboard has asked for a recording that has not begun. Racing
-        // its start-up would either double-start or silently drop it.
-        return true
-    case .proceed:
-        return false
-    }
-}
-
-/// Starts recording with foreground recovery if the required Live Activity is unavailable.
-///
-/// `LiveActivityIntent` permits activity creation without opening the app when
-/// requested within its awaited `perform()` execution. `AudioRecordingIntent`
-/// requires that activity throughout microphone capture. Keep this call awaited
-/// so the service can reuse a primed activity or request one before starting audio.
-///
-/// The grant does not guarantee success in every device state. If the service
-/// reports `liveActivityUnavailable`, retain the narrow foreground-continuation
-/// retry: the app briefly comes to the front, where starting a Live Activity is
-/// permitted, and recording proceeds. Other failures propagate without starting
-/// audio through this fallback.
-///
-/// `entry` is the timestamp taken at `perform()` entry. It is passed through
-/// unchanged — including into the foreground retry — so the measured startup
-/// covers the intent hop rather than restarting the clock partway down the
-/// path (issue #972).
-@available(iOS 18, *)
-func startRecordingContinuingInForegroundIfNeeded(
-    from intent: some ForegroundContinuableIntent,
-    trigger: CaptureTrigger,
-    parameters: CaptureRunParameters = .none,
-    entry: StartupEntry,
-    endPointing: CaptureEndPointingRequest? = nil
-) async throws {
-    let service = await TranscriptionRecordingService.shared
-    try await startRecordingWithForegroundRecovery(
-        service: service,
-        start: { request in
-            try await service.startRecording(
-                trigger: trigger,
-                parameters: parameters,
-                endPointing: endPointing,
-                destination: nil,
-                entry: entry,
-                configurationRequest: request
-            )
-        },
-        continueInForeground: { continuation in
-            try await intent.requestToContinueInForeground(continuation: continuation)
-        }
-    )
-}
-
-/// The same two-attempt owner, with private operations injectable for local lifecycle tests.
-/// A foreground-framework error is not evidence that the user declined permission.
-@available(iOS 18, *)
-@MainActor
-func startRecordingWithForegroundRecovery(
-    service: TranscriptionRecordingService,
-    start: @escaping @MainActor (CaptureConfigurationRequest) async throws -> Void,
-    continueInForeground: (@escaping @MainActor () async throws -> Void) async throws -> Void
-) async throws {
-    let request = CaptureConfigurationRequest()
-    @MainActor func attempt() async throws {
-        // Configuration remains frozen across recovery; admission belongs to each attempt.
-        request.admittedRunID = nil
-        request.serviceStartReturnedNormally = false
-        try await start(request)
-        request.serviceStartReturnedNormally = true
-    }
-    do {
-        do {
-            try await attempt()
-        } catch iOSTranscriptionError.liveActivityUnavailable {
-            try await continueInForeground { try await attempt() }
-        }
-    } catch {
-        service.recordTerminalStartupFailure(error, request: request)
-        throw error
-    }
-}
-
 /// The overrides a start intent carries, or a visible failure.
 ///
 /// Validation happens before anything is allocated, so a Shortcut that names a
@@ -177,22 +78,6 @@ private func resolvedRunParameters(
     }
 }
 
-/// Resolves a start intent's parameters, journaling a refusal under its own
-/// diagnostic code. The refusal happens before the foreground helper, so
-/// without this the health screen would keep reporting an older run (#996).
-@available(iOS 18, *)
-func journalingRefusedStartParameters(
-    service: TranscriptionRecordingService,
-    _ resolve: () throws -> CaptureRunParameters
-) async throws -> CaptureRunParameters {
-    do {
-        return try resolve()
-    } catch let failure as CaptureParameterFailure {
-        await service.recordRefusedStartParameters(failure)
-        throw failure
-    }
-}
-
 /// Idempotent start intent for users who wire their Action Button / Shortcut
 /// to a one-shot start (and a separate one to stop). If a recording is already
 /// in progress this intent leaves it running and reports the state.
@@ -200,7 +85,12 @@ func journalingRefusedStartParameters(
 public struct StartTranscriptionIntent: AudioRecordingIntent, LiveActivityIntent, ForegroundContinuableIntent {
     public static var title: LocalizedStringResource = "Start Recording"
     public static var description = IntentDescription(
-        "Start a fresh transcription. No-op if already recording. Pair with Stop Recording to finish."
+        """
+        Only starts recording, and does nothing if one is already running. Use it with Stop Recording \
+        when you want separate start and stop buttons. For one button that does both, use Toggle Recording.
+        """,
+        categoryName: "Recording",
+        searchKeywords: ["begin", "start", "dictation", "transcription"]
     )
 
     public static var openAppWhenRun: Bool = false
@@ -314,7 +204,12 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, LiveActiv
 
     public static var title: LocalizedStringResource = "Toggle Recording"
     public static var description = IntentDescription(
-        "Start or stop voice transcription. Result lands in the destination you chose in Settings."
+        """
+        Starts recording, or stops it if one is running. Recommended for the Action Button, Back Tap, \
+        and widgets. The transcript goes to the destination chosen in Settings.
+        """,
+        categoryName: "Recording",
+        searchKeywords: ["begin", "start", "stop", "transcription", "transcribe", "action button"]
     )
 
     public static var openAppWhenRun: Bool = false
@@ -354,7 +249,7 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, LiveActiv
     /// destination applies to whichever half runs, because a toggle that stops
     /// an unparameterised recording still has somewhere to put the text.
     public static var parameterSummary: some ParameterSummary {
-        Summary("Toggle recording") {
+        Summary("Start or stop recording") {
             \.$destination
             \.$language
             \.$model
@@ -432,7 +327,13 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, LiveActiv
 public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivityIntent {
     public static var title: LocalizedStringResource = "Stop Recording"
     public static var description = IntentDescription(
-        "Stops the current transcription and routes the result to the destination you chose in Settings."
+        """
+        Stops the current recording and sends the transcript to the destination chosen in Settings. \
+        Works while the device is locked but returns no text; to use the text in a later action, \
+        use Stop Dictation and Get Text.
+        """,
+        categoryName: "Recording",
+        searchKeywords: ["end", "finish", "transcription"]
     )
 
     public static var openAppWhenRun: Bool = false
@@ -478,7 +379,7 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
         // Explicit beats the override the start carried, which beats the
         // global setting.
         let resolved = await service.resolvedStopSelection(explicit: destination?.destination)
-        let canPostProcess = await AppSettings.shared.hasOpenRouterKey
+        let canPostProcess = await AppSettings.shared.hasPostProcessingKey
         let result = await service.stopRecording(
             selection: resolved,
             keyboardDeliverySource: .hardwareTrigger
@@ -508,7 +409,17 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
 @available(iOS 18, *)
 public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIntent, LiveActivityIntent,
     ForegroundContinuableIntent {
-    public static var title: LocalizedStringResource = "Toggle Transcription"
+    /// Named after the control it backs (#1470): "Toggle Transcription" read as
+    /// a different feature from Toggle Recording. Renaming the title keeps saved
+    /// shortcuts working, which hiding the intent would not.
+    public static var title: LocalizedStringResource = "Transcribe Voice Control"
+    public static var description = IntentDescription(
+        """
+        The action behind the Transcribe Voice control: turns recording on or off. \
+        In your own shortcuts, use Toggle Recording instead.
+        """,
+        categoryName: "Recording"
+    )
 
     /// Deliberately runs without authentication: Control Center is reachable
     /// from the lock screen and this toggle returns no transcript — results
@@ -570,235 +481,6 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
             break
         }
         return .result()
-    }
-}
-
-// MARK: - Result Row Intents
-
-/// Copies the completed transcript from the Live Activity result row.
-///
-/// `LiveActivityIntent` conformance is what makes this in-process: without it the
-/// widget extension performs the intent itself, and a UI-less extension cannot
-/// write the general pasteboard (PBErrorDomain 11). It is the same mechanism the
-/// Stop button already relies on.
-///
-/// The row only shows this button when the payload carries a preview, i.e. when
-/// the completed transcript was actually published to the App Group, so the
-/// button is never offered for a session whose text cannot be retrieved. The
-/// activity is moved to `.copied` only after `UIPasteboard.changeCount` confirms
-/// the write landed — nothing else in the app sets that outcome, so a `Copied`
-/// row always corresponds to a clipboard write that really happened.
-///
-/// The intent is *not* parameterless: "the last completed transcript" is a moving
-/// target. The activity is reused and a finished row is offered for three
-/// minutes, so between rendering a row and tapping it another session can finish
-/// and replace what the App Group holds. `completionID` is the id of the
-/// completion that rendered the tapped row, and the copy is refused unless the
-/// stored transcript is still that completion's — a caller is never handed a
-/// different recording's text.
-@available(iOS 18, *)
-public struct CopyLastTranscriptIntent: LiveActivityIntent {
-    public static var title: LocalizedStringResource = "Copy Last Transcript"
-    public static var description = IntentDescription(
-        "Copies the transcript shown on the completed recording row to the clipboard."
-    )
-
-    public static var openAppWhenRun: Bool = false
-    /// Reads and writes private transcript data, so never run on a locked device.
-    public static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
-
-    /// The completion the tapped row was rendered from.
-    @Parameter(title: "Completion")
-    public var completionID: String
-
-    public init() {}
-
-    public init(completionID: String) {
-        self.completionID = completionID
-    }
-
-    public func perform() async throws -> some IntentResult & ProvidesDialog {
-        let state = SharedTranscriptionState.shared
-        // Bound to the row that was tapped, not to whatever finished most
-        // recently: a row whose transcript has been superseded refuses rather
-        // than copying the newer session's text.
-        guard let text = state.completedTranscript(matching: completionID) else {
-            return .result(dialog: "That transcript is no longer the latest one. Open the app to find it.")
-        }
-
-        let copied = await MainActor.run { Self.copyConfirmingChangeCount(text) }
-        guard copied else {
-            return .result(dialog: "Couldn’t reach the clipboard. Open the app to copy it.")
-        }
-
-        await TranscriptionActivityManager.shared.markCompletionCopied(completionID: completionID)
-        let wordCount = text.split(whereSeparator: \.isWhitespace).count
-        return .result(dialog: "Copied \(wordCount) words.")
-    }
-
-    /// Writes to the pasteboard and reports whether the system observed the write.
-    @MainActor
-    static func copyConfirmingChangeCount(
-        _ text: String,
-        clipboard: TranscriptClipboard = .shared
-    ) -> Bool {
-        clipboard.copy(text)
-    }
-}
-
-// MARK: - Copy Intents
-
-/// App Intent to copy the last transcribed sentence to clipboard.
-/// Can be triggered from Live Activity, Shortcuts, or Siri.
-struct CopyLastSentenceIntent: AppIntent {
-    static var title: LocalizedStringResource = "Copy Last Sentence"
-    static var description = IntentDescription("Copies the most recent transcribed sentence to the clipboard")
-
-    // Make this available from Live Activity
-    static var openAppWhenRun: Bool = false
-    /// Returns and copies private transcript data, so never run on a locked device.
-    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
-
-    func perform() async throws -> some IntentResult {
-        let lastSentence = SharedTranscriptionState.shared.lastTranscribedSentence
-
-        guard !lastSentence.isEmpty else {
-            return .result(value: "No recent transcription to copy")
-        }
-
-        let copied = await MainActor.run { Self.copy(lastSentence) }
-        guard copied else { return .result(value: "Couldn’t reach the clipboard. Open the app to copy it.") }
-
-        return .result(value: "Copied: \(lastSentence.prefix(50))...")
-    }
-
-    @MainActor
-    static func copy(_ text: String, clipboard: TranscriptClipboard = .shared) -> Bool {
-        clipboard.copy(text)
-    }
-}
-
-/// App Intent to copy the full transcript to clipboard.
-struct CopyFullTranscriptIntent: AppIntent {
-    static var title: LocalizedStringResource = "Copy Full Transcript"
-    static var description = IntentDescription("Copies the entire transcription to the clipboard")
-
-    static var openAppWhenRun: Bool = false
-    /// Returns and copies private transcript data, so never run on a locked device.
-    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
-
-    func perform() async throws -> some IntentResult {
-        let fullText = SharedTranscriptionState.shared.currentTranscriptText
-
-        guard !fullText.isEmpty else {
-            return .result(value: "No transcription to copy")
-        }
-
-        let copied = await MainActor.run { Self.copy(fullText) }
-        guard copied else { return .result(value: "Couldn’t reach the clipboard. Open the app to copy it.") }
-
-        let wordCount = fullText.split(separator: " ").count
-        return .result(value: "Copied \(wordCount) words")
-    }
-
-    @MainActor
-    static func copy(_ text: String, clipboard: TranscriptClipboard = .shared) -> Bool {
-        clipboard.copy(text)
-    }
-}
-
-/// App Shortcuts provider exposing transcription actions (iOS 18+, includes recording).
-@available(iOS 18, *)
-struct TranscriptionShortcuts: AppShortcutsProvider {
-    static var appShortcuts: [AppShortcut] {
-        AppShortcut(
-            intent: StartTranscriptionRecordingIntent(),
-            phrases: [
-                "Toggle recording with \(.applicationName)",
-                "Transcribe with \(.applicationName)",
-                "Record with \(.applicationName)"
-            ],
-            shortTitle: "Toggle Recording",
-            systemImageName: "mic.fill"
-        )
-
-        AppShortcut(
-            intent: StartTranscriptionIntent(),
-            phrases: [
-                "Start recording with \(.applicationName)",
-                "Start transcription with \(.applicationName)",
-                // The parameterised phrase is what makes a spoken destination
-                // possible at all: "Start recording to History Only with
-                // Just Speak to It".
-                "Start recording to \(\.$destination) with \(.applicationName)"
-            ],
-            shortTitle: "Start Recording",
-            systemImageName: "mic.badge.plus"
-        )
-
-        AppShortcut(
-            intent: StopTranscriptionRecordingIntent(),
-            phrases: [
-                "Stop recording with \(.applicationName)",
-                "Stop transcription with \(.applicationName)"
-            ],
-            shortTitle: "Stop Recording",
-            systemImageName: "stop.fill"
-        )
-
-        // The one-shot action (#1011) had no phrase, so the only spoken way to
-        // get text back was the two-step Start / "Stop dictation and get text"
-        // pair. Every parameter it needs has a default, so a bare phrase runs.
-        AppShortcut(
-            intent: DictateIntent(),
-            phrases: [
-                "Dictate with \(.applicationName)",
-                "Take a note with \(.applicationName)",
-                "Dictate to \(\.$destination) with \(.applicationName)"
-            ],
-            shortTitle: "Dictate",
-            systemImageName: "waveform.badge.mic"
-        )
-
-        AppShortcut(
-            intent: StopDictationIntent(),
-            phrases: [
-                "Stop dictation and get text with \(.applicationName)",
-                "Finish dictation with \(.applicationName)"
-            ],
-            shortTitle: "Stop and Get Text",
-            systemImageName: "text.badge.checkmark"
-        )
-
-        AppShortcut(
-            intent: GetLastTranscriptionIntent(),
-            phrases: [
-                "Get my last transcription from \(.applicationName)",
-                "Get the last dictation from \(.applicationName)"
-            ],
-            shortTitle: "Last Transcription",
-            systemImageName: "clock.arrow.circlepath"
-        )
-
-        AppShortcut(
-            intent: CopyLastSentenceIntent(),
-            phrases: [
-                "Copy last sentence from \(.applicationName)",
-                "Copy recent transcription from \(.applicationName)"
-            ],
-            shortTitle: "Copy Last Sentence",
-            systemImageName: "doc.on.doc"
-        )
-
-        AppShortcut(
-            intent: CopyFullTranscriptIntent(),
-            phrases: [
-                "Copy full transcript from \(.applicationName)",
-                "Copy all transcription from \(.applicationName)"
-            ],
-            shortTitle: "Copy Full Transcript",
-            systemImageName: "doc.on.doc.fill"
-        )
     }
 }
 

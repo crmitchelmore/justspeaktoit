@@ -75,8 +75,7 @@ public final class GestureDetector {
       self?.fire(.singleTap, source: source)
     }
     pendingSingleTapWorkItem = workItem
-    DispatchQueue.main.asyncAfter(deadline: .now() + configuration.doubleTapWindow) {
-      [weak workItem] in
+    DispatchQueue.main.asyncAfter(deadline: .now() + configuration.doubleTapWindow) { [weak workItem] in
       guard let workItem, !workItem.isCancelled else { return }
       workItem.perform()
     }

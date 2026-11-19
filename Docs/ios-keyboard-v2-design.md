@@ -67,11 +67,32 @@ Every request snapshots its chosen app profile, language, transcription model,
 and post-processing selection. The app either executes that snapshot or returns
 `profileUnavailable`; it does not silently substitute another model.
 
+The app also publishes whether the App profile can run (its route exists on
+iOS and its provider key is stored and readable) with the profile catalogue,
+using the shared `TranscriptionModelAvailability` rule in SpeakCore. The
+profile menu keeps an unavailable profile selectable but marks it with a
+warning and a note such as "Unavailable: Azure Speech API key not set", which
+the chip and VoiceOver also read. The app republishes when keys change, and
+still re-checks at start, so the published flag is advice and never a gate.
+In-app, Shortcut and Action Button recordings follow the same rule: an
+unavailable selected model refuses to start with a message naming the model
+and the reason, rather than recording with Apple speech. Only the documented
+offline fallback (#999) changes the model, and it says so and tags History.
+
 The transport uses nonce-scoped App Group records. Request, transcription, and
 result lifetimes are 180, 90, and 60 seconds respectively. A stale, expired, or
 cancelled result cannot land in a later request or a different target. Interim
 text may appear in the keyboard strip, while the completed transcript is inserted
 once through the document proxy.
+
+When the keyboard is used in another app, the containing app is in the
+background. iOS lets a background app keep recording but not start recording
+(`cannotStartRecording`, `'!rec'`), so a background hand-off keeps the readiness
+engine running and the audio session active through the dictation, and uses the
+same mixable category readiness holds. Only a foreground hand-off hands the
+engine over. Start failures are classified by
+`KeyboardHandoffStartDiagnosis` and logged with the stage and decoded audio
+code; none of them blames the microphone permission (issue #1469).
 
 The App Group also carries language selection and a schema-versioned, non-secret
 profile projection. It never carries audio, credentials, custom prompts, or

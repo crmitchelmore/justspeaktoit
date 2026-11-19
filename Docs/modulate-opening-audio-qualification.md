@@ -38,7 +38,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-spec = importlib.util.spec_from_file_location("modulate_gate", "scripts/qualify-modulate-opening-audio.py")
+spec = importlib.util.spec_from_file_location("modulate_gate", "scripts/qualification/qualify-modulate-opening-audio.py")
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 lock = gate.admit_portable_lock(Path.cwd())
@@ -48,7 +48,7 @@ try:
 finally:
     gate.restore_deleted_portable_lock(lock)
 PY
-SPEAK_PORTABLE_CORE=1 python3 -B scripts/qualify-modulate-opening-audio.py \
+SPEAK_PORTABLE_CORE=1 python3 -B scripts/qualification/qualify-modulate-opening-audio.py \
   --output-dir "$modulate_scratch/receipt" -- \
   xcrun swift test --configuration release --jobs 2 --skip-build \
   --scratch-path "$modulate_scratch/build" \

@@ -17,8 +17,8 @@ final class DesktopHostXAIVoiceTests: XCTestCase {
         FakeSpeech.shared.reset()
         DesktopHostModels.configure(streamingQualified: false)
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-xai-\(UUID())")
-        controller = try DesktopHostController<FakePlatform>(directory: directory, effects: SyntheticEffects(),
-                                                             shutdownGrace: .milliseconds(60))
+        controller = try DesktopHostController<FakePlatform>.consented(
+            directory: directory, effects: SyntheticEffects(), shutdownGrace: .milliseconds(60))
         await controller.markReadyForSelfTest()
     }
 

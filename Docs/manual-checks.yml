@@ -568,7 +568,8 @@ sessions:
         steps:
           - "Turn on VoiceOver (Command-F5). Move to the History search field, then the Pronunciation search, Word and Pronunciation fields."
           - "In Settings \u203a API Keys, move through two provider cards and listen to the key field and the Get API Key link."
-          - "In Settings \u203a Transcription, choose Local and move through the model list's Download, Use and Delete buttons, then choose Remote again."
+          - "In Settings \u203a Transcription, choose Local. If no local model is downloaded yet, download the smallest one and wait for it to finish, so its Use and Delete buttons appear."
+          - "Move through the model list's Download, Use and Delete buttons, then choose Remote again."
           - "Open the Remote Streaming model chooser, move to its search field and a few rows, then press Done."
           - "Turn VoiceOver off."
         expected: "Every field reads a name (\"Search history\", \"Search pronunciations\", the provider's API key), not only its placeholder. Each Get API Key link names its provider, and each Download, Use and Delete button names its model. The chooser's search field reads \"Search\" and the chooser's title, and the Transcription location is back on Remote."

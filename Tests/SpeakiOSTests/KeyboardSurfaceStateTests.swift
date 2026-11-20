@@ -30,7 +30,7 @@ final class KeyboardSurfaceStateTests: XCTestCase {
         )
         XCTAssertEqual(
             surface(.handoff(.openAppManually, endReason: nil)).stripText,
-            "Open Just Speak once to reconnect Instant Dictation, then return here."
+            "In Just Speak › Settings › Set Up Keyboard, enable or reconnect Instant Dictation. Then return here."
         )
     }
 

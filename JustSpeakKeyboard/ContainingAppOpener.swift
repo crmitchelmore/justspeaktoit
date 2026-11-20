@@ -9,14 +9,13 @@ import UIKit
 /// the one that still works since iOS 18 removed the single-argument
 /// `openURL:`.
 enum ContainingAppOpener {
+    private typealias OpenURLCompletion = @convention(block) (Bool) -> Void
     private typealias OpenURLFunction = @convention(c) (
-        AnyObject, Selector, NSURL, NSDictionary, AnyObject?
+        AnyObject, Selector, NSURL, NSDictionary, OpenURLCompletion
     ) -> Void
 
-    /// - Returns: `false` when no application object answered, so the caller
-    ///   can fall back to asking the user to open the app themselves.
     @MainActor
-    static func open(_ url: URL, from responder: UIResponder) -> Bool {
+    static func open(_ url: URL, from responder: UIResponder, completion: @escaping @MainActor (Bool) -> Void) {
         let selector = NSSelectorFromString("openURL:options:completionHandler:")
         var current: UIResponder? = responder
         while let candidate = current {
@@ -24,11 +23,13 @@ enum ContainingAppOpener {
                candidate.responds(to: selector),
                let implementation = candidate.method(for: selector) {
                 let openURL = unsafeBitCast(implementation, to: OpenURLFunction.self)
-                openURL(candidate, selector, url as NSURL, NSDictionary(), nil)
-                return true
+                openURL(candidate, selector, url as NSURL, NSDictionary()) { opened in
+                    Task { @MainActor in completion(opened) }
+                }
+                return
             }
             current = candidate.next
         }
-        return false
+        completion(false)
     }
 }

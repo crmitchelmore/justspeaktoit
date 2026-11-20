@@ -63,7 +63,7 @@ enum KeyboardStatusCopy {
             // readiness (issue #995).
             return Self.connectPrompt(endReason)
         case .openAppManually:
-            return "Open Just Speak once to reconnect Instant Dictation, then return here."
+            return "In Just Speak › Settings › Set Up Keyboard, enable or reconnect Instant Dictation. Then return here."
         case .recording:
             return "Listening via Just Speak…"
         case .transcribing:

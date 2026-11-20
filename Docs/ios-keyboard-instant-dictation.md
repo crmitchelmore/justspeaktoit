@@ -26,9 +26,10 @@ opens Just Speak through its own `justspeaktoit://keyboard-connect` link
 saying how to go back. Recording then starts by itself when the keyboard
 reappears. Before this, the keyboard only said "Open Just Speak", and opening
 the app did nothing unless Instant Dictation had already been switched on in
-Keyboard settings, so the keyboard stayed disconnected. If the keyboard cannot
-open the app (`ContainingAppOpener` finds no application object), it falls back
-to asking the user to open it.
+Keyboard settings, so the keyboard stayed disconnected. If the system refuses
+the launch or no application object handles it, the keyboard directs the user
+to Just Speak › Settings › Set Up Keyboard to enable or reconnect Instant
+Dictation before returning. Opening the app alone is not enough on first setup.
 
 In this handoff path the keyboard extension never opens the microphone: the
 containing app owns the foreground-consented audio session and stays alive with

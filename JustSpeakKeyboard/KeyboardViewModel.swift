@@ -51,7 +51,9 @@ final class KeyboardViewModel: ObservableObject {
     private var isSecureField = false
     private var activeInputModeCount = 0
     private var handBack: (() -> Void)?
-    private var openContainingApp: ((URL) -> Bool)?
+    typealias AppOpener = (URL, @escaping @MainActor (Bool) -> Void) -> Void
+    private var openContainingApp: AppOpener?
+    private var pendingAppOpen: UUID?
     private var readContext: KeyboardProxyReader?
     private let corrections: KeyboardCorrectionObserver
 
@@ -188,7 +190,7 @@ final class KeyboardViewModel: ObservableObject {
         isSecureField: Bool,
         activeInputModeCount: Int = 0,
         handBack: (() -> Void)? = nil,
-        openContainingApp: ((URL) -> Bool)? = nil,
+        openContainingApp: AppOpener? = nil,
         insertText: @escaping (String) -> Void,
         deleteBackward: @escaping () -> Void,
         contextBeforeInput: @escaping () -> String?,
@@ -314,6 +316,7 @@ final class KeyboardViewModel: ObservableObject {
         proxyUnmarkText = nil
         handBack = nil
         openContainingApp = nil
+        pendingAppOpen = nil
         readContext = nil
         corrections.keyboardDidDisappear()
         // No document is open to this keyboard any more, so nothing can be
@@ -411,10 +414,18 @@ final class KeyboardViewModel: ObservableObject {
     /// to connect it. Recording starts by itself when the keyboard reappears
     /// and the session is ready.
     private func connectToApp() {
-        if let url = KeyboardConnectLink.url(), openContainingApp?(url) == true {
+        guard pendingAppOpen == nil else { return }
+        guard let url = KeyboardConnectLink.url(), let openContainingApp else {
+            handoff.noteAppCouldNotBeOpened()
             return
         }
-        handoff.noteAppCouldNotBeOpened()
+        let attempt = UUID()
+        pendingAppOpen = attempt
+        openContainingApp(url) { [weak self] opened in
+            guard let self, pendingAppOpen == attempt else { return }
+            pendingAppOpen = nil
+            if !opened { handoff.noteAppCouldNotBeOpened() }
+        }
     }
 
     /// Explicit one-tap pickup of the chip (#1003).

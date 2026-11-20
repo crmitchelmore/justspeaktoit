@@ -1050,17 +1050,18 @@ sessions:
       - id: "iphone-keyboard-connect"
         issues:
           - 661
-        title: "Keyboard: Connect opens Just Speak and dictation starts on return"
+        title: "Keyboard: Connect or recover manually, then dictate on return"
         minutes: 4
         core: true
-        build: "TestFlight Just Speak to It Alpha that includes the keyboard Connect key"
+        build: "TestFlight Just Speak to It, first Alpha that includes the keyboard Connect recovery fix (#1845)"
         steps:
           - "Keyboard enabled with Allow Full Access on. In Just Speak, Settings \u203a Keyboard: if Instant Dictation is on, tap Turn Off Instant Dictation. Swipe home."
           - "In Notes switch to the Just Speak keyboard. Read the status line and the mic key's caption."
           - "Tap the mic key. Allow the microphone if asked."
-          - "Go back to Notes with the back link at the top left, say \"keyboard connect\" and stop."
+          - "If iOS refuses the launch, check that the keyboard points to Just Speak > Settings > Set Up Keyboard. Follow those steps to enable or reconnect Instant Dictation."
+          - "Return to Notes with the back link or the app switcher, say \"keyboard connect\" and stop."
           - "Force-quit Just Speak, return to Notes, and repeat from the Just Speak keyboard."
-        expected: "The status line says to tap the mic to connect and the key reads Connect. Tapping it opens Just Speak with a \"Keyboard connected\" sheet. Back in Notes recording starts by itself and the words insert once. After the force-quit, Connect works the same way. The keyboard never just says to open the app with no way to do it."
+        expected: "Connect either opens Just Speak with a \"Keyboard connected\" sheet or gives the manual setup steps without changing the text field. After either path, recording starts on return and the words insert once. Record which path iOS used before and after the force-quit."
         final_gate: true
       - id: "iphone-keyboard-background-repeat"
         issues:

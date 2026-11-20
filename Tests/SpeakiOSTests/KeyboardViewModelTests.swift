@@ -215,9 +215,9 @@ final class KeyboardViewModelTests: XCTestCase {
     func testMicWhileDisconnected_opensTheAppToConnectAndAutoStartsOnceReady() throws {
         let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
         var opened: [URL] = []
-        activate(harness.model, document: DocumentProxy(before: "Host"), openContainingApp: {
-            opened.append($0)
-            return true
+        activate(harness.model, document: DocumentProxy(before: "Host"), openContainingApp: { url, completion in
+            opened.append(url)
+            completion(true)
         })
         XCTAssertEqual(harness.model.handoff.presentation, .waitingForApp)
 
@@ -235,16 +235,38 @@ final class KeyboardViewModelTests: XCTestCase {
         harness.model.deactivate()
     }
 
-    func testMicWhileDisconnected_asksTheUserToOpenTheAppWhenItCannotBeOpened() {
+    func testMicWhileDisconnected_showsManualSetupWhenTheSystemRefusesToOpenTheApp() {
         let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
-        activate(harness.model, document: DocumentProxy(before: "Host"), openContainingApp: { _ in false })
+        var completions: [@MainActor (Bool) -> Void] = []
+        activate(harness.model, document: DocumentProxy(before: "Host"), openContainingApp: { _, completion in
+            completions.append(completion)
+        })
 
         harness.model.micTapped()
+        harness.model.micTapped()
+        XCTAssertEqual(completions.count, 1)
+        XCTAssertEqual(harness.model.handoff.presentation, .waitingForApp)
+        completions.first?(false)
         XCTAssertEqual(harness.model.handoff.presentation, .openAppManually)
 
         // The poll must not flip it back to the connect prompt.
         harness.model.handoff.refresh()
         XCTAssertEqual(harness.model.handoff.presentation, .openAppManually)
+        harness.model.deactivate()
+    }
+
+    func testAppOpenRefusalFromPreviousAppearanceDoesNotChangeTheCurrentKeyboard() {
+        let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+        let document = DocumentProxy(before: "Host")
+        var complete: (@MainActor (Bool) -> Void)?
+        activate(harness.model, document: document, openContainingApp: { _, completion in complete = completion })
+        harness.model.micTapped()
+        harness.model.deactivate()
+        activate(harness.model, document: document)
+
+        complete?(false)
+
+        XCTAssertEqual(harness.model.handoff.presentation, .waitingForApp)
         harness.model.deactivate()
     }
 
@@ -793,7 +815,7 @@ final class KeyboardViewModelTests: XCTestCase {
         isSecureField: Bool = false,
         activeInputModeCount: Int = 0,
         handBack: (() -> Void)? = nil,
-        openContainingApp: ((URL) -> Bool)? = nil
+        openContainingApp: KeyboardViewModel.AppOpener? = nil
     ) {
         model.activate(
             hasFullAccess: true,

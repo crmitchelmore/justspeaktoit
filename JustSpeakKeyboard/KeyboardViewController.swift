@@ -58,9 +58,12 @@ final class KeyboardViewController: UIInputViewController {
             handBack: { [weak self] in
                 self?.advanceToNextInputMode()
             },
-            openContainingApp: { [weak self] url in
-                guard let self else { return false }
-                return ContainingAppOpener.open(url, from: self)
+            openContainingApp: { [weak self] url, completion in
+                guard let self else {
+                    completion(false)
+                    return
+                }
+                ContainingAppOpener.open(url, from: self, completion: completion)
             },
             insertText: { [weak self] text in
                 self?.textDocumentProxy.insertText(text)

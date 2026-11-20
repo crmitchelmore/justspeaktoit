@@ -1053,7 +1053,7 @@ sessions:
         title: "Keyboard: Connect or recover manually, then dictate on return"
         minutes: 4
         core: true
-        build: "TestFlight Just Speak to It Alpha that includes the keyboard Connect key"
+        build: "TestFlight Just Speak to It, first Alpha that includes the keyboard Connect recovery fix (#1845)"
         steps:
           - "Keyboard enabled with Allow Full Access on. In Just Speak, Settings \u203a Keyboard: if Instant Dictation is on, tap Turn Off Instant Dictation. Swipe home."
           - "In Notes switch to the Just Speak keyboard. Read the status line and the mic key's caption."

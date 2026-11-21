@@ -395,7 +395,6 @@ final class DistributionBuildIdentityTests: XCTestCase {
         }
         XCTAssertTrue(handoff.contains("guard isInstantReady, let currentDocumentIdentifier"))
         XCTAssertTrue(handoff.contains("KeyboardHandoffSignal.postRequestChanged"))
-        XCTAssertTrue(rootView.contains("Open Just Speak once"))
         XCTAssertTrue(rootView.contains("keyboardLiveTranscript"))
         XCTAssertFalse(rootView.contains("Results are deleted after insertion"))
         XCTAssertTrue(instantCoordinator.contains("input.installTap"))

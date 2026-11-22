@@ -97,6 +97,9 @@ jobs:
           # Only the fast phase may allocate before main CI has passed.
           REQUIRE_CI=true
           [ "$EVENT_NAME" = "push" ] && REQUIRE_CI=false
+          # Allocate immutable manifest tags via GitHub's Git Data API using
+          # github.token (contents: write) so green sources behind later
+          # workflow edits can still be tagged without extra permissions.
           node scripts/release-train.mjs allocate --source "$SOURCE" --rebuild "$REBUILD" --require-ci "$REQUIRE_CI"
   mac-direct:
     needs: allocate

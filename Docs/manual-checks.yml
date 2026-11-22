@@ -2,7 +2,7 @@
 # and the Manual QA results workflow. See Docs/manual-qa.md for the format.
 # Strict YAML subset: 2-space indents, double-quoted strings, integers, booleans.
 version: 1
-updated: "2026-11-19"
+updated: "2026-11-22"
 sessions:
   - id: "mac"
     device: "Mac"
@@ -759,6 +759,21 @@ sessions:
           - "With VoiceOver on, move through the sheet."
         expected: "Before anything is recorded the sheet names each provider, lists what it gets (audio, transcript text) and links its privacy policy. Not now records and sends nothing. After Allow, dictation works and the sheet never shows again for that provider. Withdraw removes it from the Privacy list and the next start asks again; Use on-device instead switches to Apple Speech without recording consent. VoiceOver reads the title, each provider and every button by name."
         final_gate: true
+      - id: "mac-voice-profile-creation"
+        issues:
+          - 1821
+        title: "Voice profiles: record, trim from History, import, consent and delete"
+        minutes: 6
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build that includes #1821"
+        steps:
+          - "Open Settings \u203a Voice Output \u203a My Voices and click Create Voice Profile\u2026."
+          - "With Record Script selected, read the prompted ~15 s sentences, observe the live level and clipping meter, and verify Save Profile stays disabled until the consent checkbox is checked."
+          - "Switch to From History, pick a recording with audio, play the VAD-trimmed clip preview, test Auto-fill Transcript and edit the transcript text, then check consent and save."
+          - "Export a full Data & Migration backup archive and inspect its contents; confirm PrivateVoiceProfiles and the clip WAV are absent."
+          - "Turn on VoiceOver and verify recording start/stop announcements, level meter updates and Escape dismissal on sheets, then delete the test profile."
+        expected: "Saving is blocked without consent and failing clips show clear rejection reasons. Trimmed History clips play accurately, transcripts are editable, exported archives exclude voice profiles, VoiceOver announces recording states and deletion removes the profile cleanly."
+        final_gate: false
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"

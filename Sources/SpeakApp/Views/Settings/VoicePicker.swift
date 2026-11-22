@@ -22,8 +22,18 @@ struct VoicePicker: View {
         let included = includedIDs
         LongListPicker(
             title: "Voice", items: VoiceChooserFilter.sortedVoices(voices), id: { $0.id }, selection: $selection,
-            searchText: { [$0.name, $0.provider.displayName] + $0.traits.map(\.rawValue) },
-            group: { $0.provider.displayName }, alwaysUsesSheet: true,
+            searchText: { [$0.name, $0.provider.displayName, $0.customGroupTitle ?? ""] + $0.traits.map(\.rawValue) },
+            group: { $0.pickerGroupTitle },
+            groupOrder: { lhs, rhs in
+                if lhs == VoiceProfilePickerCatalog.groupTitle && rhs != VoiceProfilePickerCatalog.groupTitle {
+                    return true
+                }
+                if rhs == VoiceProfilePickerCatalog.groupTitle && lhs != VoiceProfilePickerCatalog.groupTitle {
+                    return false
+                }
+                return lhs.localizedStandardCompare(rhs) == .orderedAscending
+            },
+            alwaysUsesSheet: true,
             includes: { included.contains($0.id) },
             controls: { AnyView(filters) },
             clearFilters: { filter = VoiceChooserFilter() },
@@ -40,7 +50,7 @@ struct VoicePicker: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(voice.name).font(.body)
-                    Text(voice.provider.displayName).font(.caption).foregroundStyle(.secondary)
+                    Text(voice.pickerGroupTitle).font(.caption).foregroundStyle(.secondary)
                     HStack(spacing: 6) {
                         ForEach(voice.traits.prefix(3), id: \.self) { trait in
                             Text(trait.rawValue.capitalized)
@@ -96,7 +106,10 @@ struct VoicePicker: View {
     }
 
     private func availability(_ voice: TTSVoice) -> ModelCredentialAvailability {
-        ModelCredentialResolver.availability(
+        if VoiceProfilePickerCatalog.isProfileVoiceIdentifier(voice.id) {
+            return .notRequired
+        }
+        return ModelCredentialResolver.availability(
             for: voice.id, purpose: .voiceOutput, storedAPIKeyIdentifiers: storedAPIKeyIdentifiers
         )
     }

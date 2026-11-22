@@ -54,6 +54,8 @@ struct VoiceOutputVoiceCard: View {
   @ObservedObject var composer: VoiceOutputComposer
   @EnvironmentObject private var tts: TextToSpeechManager
   @EnvironmentObject private var settings: AppSettings
+  @EnvironmentObject private var voiceProfiles: VoiceProfileManager
+  @State private var showingVoiceProfiles = false
 
   var body: some View {
     SpeakDensityCard(title: "Voice", systemImage: "person.wave.2", tint: .brandAccent) {
@@ -68,8 +70,12 @@ struct VoiceOutputVoiceCard: View {
               .foregroundStyle(.secondary)
           }
         } else {
+          let allOptions = VoiceCatalog.includingSelection(
+            self.composer.selectedVoice,
+            in: self.mergeVoices(self.voiceProfiles.myTTSVoices, with: self.composer.availableVoices)
+          )
           VoicePicker(
-            voices: VoiceCatalog.includingSelection(self.composer.selectedVoice, in: self.composer.availableVoices),
+            voices: allOptions,
             storedAPIKeyIdentifiers: self.settings.trackedAPIKeyIdentifiers,
             selection: self.$composer.selectedVoice,
             preview: { voiceID in Task { await self.tts.previewVoice(voiceID) } },
@@ -78,7 +84,8 @@ struct VoiceOutputVoiceCard: View {
 
           OpenRouterSpeechPickerButton(selectedVoice: self.$composer.selectedVoice)
 
-          if let voice = VoiceCatalog.voice(forID: self.composer.selectedVoice) {
+          if let voice = allOptions.first(where: { $0.id == self.composer.selectedVoice })
+            ?? VoiceCatalog.voice(forID: self.composer.selectedVoice) {
             HStack(spacing: 6) {
               ForEach(voice.traits.prefix(3), id: \.self) { trait in
                 Text(trait.rawValue.capitalized)
@@ -90,18 +97,36 @@ struct VoiceOutputVoiceCard: View {
             }
           }
 
-          Button {
-            Task {
-              await self.tts.previewVoice(self.composer.selectedVoice)
+          HStack(spacing: 8) {
+            Button {
+              Task {
+                await self.tts.previewVoice(self.composer.selectedVoice)
+              }
+            } label: {
+              Label("Preview Voice", systemImage: "play.circle")
             }
-          } label: {
-            Label("Preview Voice", systemImage: "play.circle")
+            .buttonStyle(.bordered)
+            .disabled(self.tts.isSynthesizing)
+
+            Button {
+              self.showingVoiceProfiles = true
+            } label: {
+              Label("Manage My Voices…", systemImage: "person.wave.2.fill")
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("voiceOutputManageProfilesButton")
           }
-          .buttonStyle(.bordered)
-          .disabled(self.tts.isSynthesizing)
         }
       }
     }
+    .sheet(isPresented: self.$showingVoiceProfiles) {
+      VoiceProfilesQuickSheet()
+    }
+  }
+
+  private func mergeVoices(_ primary: [TTSVoice], with secondary: [TTSVoice]) -> [TTSVoice] {
+    var seen = Set<String>()
+    return (primary + secondary).filter { seen.insert($0.id).inserted }
   }
 
   /// Names the providers whose voice listing failed, so a provider that has

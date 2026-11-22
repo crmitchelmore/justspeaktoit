@@ -530,6 +530,20 @@ final class KeyboardViewModelTests: XCTestCase {
         XCTAssertNil(harness.deliveryStore.openTarget())
     }
 
+    func testMicInSecureFieldDoesNotStartDirectCapture() {
+        let engine = FakeEngine()
+        let harness = makeHarness(engine: engine, policy: .enabled)
+        let document = DocumentProxy(before: "Host")
+        activate(harness.model, document: document, isSecureField: true)
+        XCTAssertEqual(harness.model.mode, .direct)
+
+        harness.model.micTapped()
+
+        XCTAssertTrue(engine.startedRunIDs.isEmpty)
+        XCTAssertEqual(document.text, "Host")
+        harness.model.deactivate()
+    }
+
     func testSecureField_isNeverAdvertisedAsADeliveryTarget() {
         let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
         let document = DocumentProxy(before: "")

@@ -52,6 +52,33 @@ Primary sources:
 - [Wispr Flow iPhone keyboard setup](https://docs.wisprflow.ai/articles/7453988911-set-up-the-flow-keyboard-on-iphone)
 - [Wispr Flow microphone session options](https://docs.wisprflow.ai/articles/3634682593-why-the-orange-dot-or-mic-indicator-stays-on-after-dictating-ios)
 
+## No-switch development probe (iOS 26+)
+
+Hex's [internal TestFlight implementation](https://github.com/anomalyco/hex/blob/3bb5e5702d8cdf0abf44f6de2af867beedd7b47b/ios/README.md)
+uses WebKit to capture audio after an explicit action and transcribes it on-device.
+Apple documents WebKit's media permission delegate, but does not grant custom
+keyboards microphone access in its keyboard documentation. This is not evidence
+that the route is supported in production or will pass review.
+
+For the Just Speak probe, generate a development project with
+`TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=1 tuist generate --no-open`
+and install a signed **Debug** build. In the app, grant microphone permission
+and use Apple's on-device SpeechTranscriber for the intended language once to
+prepare its assets. Enable the keyboard and Full Access. Choose **Local** on
+the keyboard; the **App** profile still uses handoff. The probe requires that
+the extension itself reports microphone permission as granted. Hex also reads
+the containing app's permission state, so verify this distinction on a cold
+launch before treating app-side setup as sufficient. The probe does not request
+permission, install assets, add audio to History, or send audio off-device.
+It starts capture on a tap, inserts only on successful Stop, and releases
+capture on Cancel or dismissal. Startup, capture and finalisation are bounded.
+
+Use [#661](https://github.com/crmitchelmore/justspeaktoit/issues/661) for physical
+device results. Force-quit the containing app after setup before testing in
+Notes and WhatsApp. Verify the mic indicator turns off on Stop, Cancel and
+dismissal, no text is written on Cancel or field change, and a fresh run
+works after interruption. No release train enables this probe.
+
 ## Runtime architecture
 
 1. The user enables Instant Dictation once in Just Speak. The app requests

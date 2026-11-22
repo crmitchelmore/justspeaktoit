@@ -57,15 +57,18 @@ final class KeyboardViewModel: ObservableObject {
     private var readContext: KeyboardProxyReader?
     private let corrections: KeyboardCorrectionObserver
 
-    convenience init() {
+    convenience init(
+        engine: (any KeyboardDictationEngineProtocol)? = nil,
+        capabilities: (@MainActor () -> DirectCaptureCapabilities)? = nil
+    ) {
         self.init(
-            engine: KeyboardDictationEngine(),
+            engine: engine ?? KeyboardDictationEngine(),
             handoff: KeyboardHandoffController(),
             handoffStore: .shared,
             preferences: .shared,
             deliveryStore: .shared,
             directCapturePolicy: Self.buildDirectCapturePolicy,
-            directCaptureCapabilities: {
+            directCaptureCapabilities: capabilities ?? {
                 DirectCaptureCapabilities(
                     microphonePermission: KeyboardDictationEngine.microphonePermission(),
                     speechRecognitionPermission: KeyboardDictationEngine.speechRecognitionPermission(),
@@ -125,11 +128,10 @@ final class KeyboardViewModel: ObservableObject {
     }
 
     private static var buildDirectCapturePolicy: KeyboardCapturePlanner.DirectCapturePolicy {
-        #if IOS_KEYBOARD_DIRECT_CAPTURE
-        .enabled
-        #else
-        .disabled
+        #if DEBUG && IOS_KEYBOARD_DIRECT_CAPTURE
+        if #available(iOS 26.0, *) { return .enabled }
         #endif
+        return .disabled
     }
 
     var isCapturing: Bool {
@@ -385,6 +387,7 @@ final class KeyboardViewModel: ObservableObject {
     func micTapped() {
         switch mode {
         case .direct:
+            guard !isSecureField else { return }
             direct.dispatch(.micTapped)
         case .handoff:
             switch handoff.presentation {

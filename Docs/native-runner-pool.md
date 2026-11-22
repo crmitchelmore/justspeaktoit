@@ -8,11 +8,11 @@ Every guarded job uses one expression (`scripts/tests/self-hosted-routing.test.m
 
 | Source | Route |
 | --- | --- |
-| `push` or `schedule` on `refs/heads/main` of this repository | Self-hosted pool automatically. No manual SHA. |
+| Owner-triggered `push` (`crmitchelmore` or `bravostation` for both `actor` and `triggering_actor`) on `refs/heads/main` of this repository | Self-hosted pool automatically. No manual SHA. |
 | Same-repository `pull_request` whose head equals `JSTI_NATIVE_APPROVED_SHA` | Self-hosted pool (per-SHA owner review). |
-| Any other PR, forks, `workflow_dispatch`, `workflow_run`, `workflow_call` from those, tags and other branches | Hosted fallback. |
+| Any other PR, forks, `schedule`, bot-triggered runs/reruns (`github-actions[bot]`, `dependabot[bot]`), `workflow_dispatch`, `workflow_run`, `workflow_call` from those, tags and other branches | Hosted fallback. |
 
-Merged `main` commits have already passed review and the required gates, which is what AGENTS.md permits ("main pushes and approved same-repo SHAs"). Dispatch stays hosted because any writer, including an agent session, can start it with arbitrary inputs.
+Merged `main` commits have already passed review and the required gates, which is what AGENTS.md permits ("main pushes and approved same-repo SHAs"). Owner-triggered `push` runs route automatically; `schedule` and bot-triggered runs/reruns (such as Dependabot merges or `auto-revert.yml` flake retries) stay on hosted runners because the retained host admission hook permits only owner actors (`crmitchelmore` and `bravostation`). Dispatch stays hosted because any writer, including an agent session, can start it with arbitrary inputs.
 
 Controls (repository variables, or `scripts/runner-admission/pool.sh`):
 
@@ -79,7 +79,7 @@ For an unapproved source, every native-eligible job falls back to hosted ARM (`m
 
 ## Self-hosted Linux pool (Omarchy)
 
-The same routing (a `main` push or schedule, or `JSTI_NATIVE_APPROVED_SHA` matching a same-repository PR head) routes these Linux jobs to `vars.JSTI_LINUX_RUNNER_LABELS`, default `["self-hosted","Linux","X64","omarchy-local"]`, and otherwise to their original hosted image: Paid Access Worker; Dependabot policy checks; desktop icon invariants; Linux desktop (GTK 4); and the pinned whisper.cpp runtime build. Fork PRs, `workflow_dispatch` and other events always stay hosted. Setting `JSTI_LINUX_RUNNER_LABELS` to a hosted label such as `["ubuntu-24.04"]` returns every Linux job to hosted runners without touching the Mac pool.
+The same routing (an owner-triggered `main` push, or `JSTI_NATIVE_APPROVED_SHA` matching a same-repository PR head) routes these Linux jobs to `vars.JSTI_LINUX_RUNNER_LABELS`, default `["self-hosted","Linux","X64","omarchy-local"]`, and otherwise to their original hosted image: Paid Access Worker; Dependabot policy checks; desktop icon invariants; Linux desktop (GTK 4); and the pinned whisper.cpp runtime build. Fork PRs, `schedule`, bot-triggered runs/reruns, `workflow_dispatch` and other events always stay hosted. Setting `JSTI_LINUX_RUNNER_LABELS` to a hosted label such as `["ubuntu-24.04"]` returns every Linux job to hosted runners without touching the Mac pool.
 
 The GTK and whisper runtime jobs run in their pinned Ubuntu containers, so the runner needs Docker access but no distribution packages. Those containers run as root against the runner's persistent `/__w` bind mount; each records the host owner first and restores it in a final `always()` step so later host jobs can clean the checkout. Host-level jobs need `git`, `python3` and outbound network; Node is installed by `actions/setup-node`.
 

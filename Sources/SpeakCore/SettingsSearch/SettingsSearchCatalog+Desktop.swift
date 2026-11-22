@@ -137,6 +137,16 @@ extension SettingsSearchCatalog {
             settingKeys: ["defaultTTSVoice", "ttsFavoriteVoices"], platforms: .linux
         ),
         SettingsSearchEntry(
+            id: "desktop.voiceProfiles", title: "My voices", section: .voiceOutput,
+            systemImage: "person.wave.2.fill",
+            summary: "Private reference voice profiles stored on this computer for Read Aloud.",
+            keywords: [
+                "voice profile", "voice profiles", "my voices", "voice creation", "voice clone",
+                "reference voice", "reference clip", "consent", "custom voice"
+            ],
+            platforms: [.windows, .linux]
+        ),
+        SettingsSearchEntry(
             id: "desktop.voiceProviderKey", title: "Voice provider key", section: .voiceOutput,
             systemImage: "key.fill",
             summary: "The API key the selected voice provider uses.",

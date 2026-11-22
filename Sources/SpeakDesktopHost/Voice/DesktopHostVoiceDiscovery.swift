@@ -33,6 +33,7 @@ package struct DesktopVoiceDiscoveryPresentation: Sendable {
     package let settings: DesktopVoiceOutputSettings
     package let inventory: XAIAccountVoiceInventory?
     package var accountInventory: VoiceAccountInventory?
+    package var voiceProfiles: [VoiceProfile] = []
 }
 
 package struct DesktopVoiceAccountProvidersPresentation: Sendable {
@@ -72,6 +73,17 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     package func currentVoiceSelection() throws -> DesktopSpeechSelection {
         let saved = voiceOutputSettings()
+        let profileEntry = saved.voiceID.flatMap {
+            VoiceProfilePickerCatalog.resolve(voiceID: $0, in: listVoiceProfiles())
+        }
+        if let profileEntry, VoiceProfilePickerCatalog.isProfileVoiceIdentifier(profileEntry.id) {
+            throw DesktopHostError(
+                message: VoiceProfilePickerCatalog.unavailableMessage(
+                    for: profileEntry.profileName,
+                    engineName: profileEntry.engineDisplayName
+                )
+            )
+        }
         let inventory: VoiceAccountInventory?
         if saved.voiceID?.hasPrefix(MistralTTSCatalog.voiceIDPrefix) == true {
             inventory = voiceDiscovery.inventories[.mistral]
@@ -247,6 +259,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         Platform.voiceDiscovery(.init(requestID: requestID, voices: voices,
             selected: voices.firstIndex { $0.id == settings.voiceID } ?? -1,
             message: message + (voiceDiscovery.warning.map { "\n" + $0 } ?? ""),
-            loading: loading, settings: settings, inventory: inventory))
+            loading: loading, settings: settings, inventory: inventory,
+            voiceProfiles: listVoiceProfiles()))
     }
 }

@@ -171,7 +171,12 @@ enum SpeakWindowsMain {
     private static func configureHotKey(_ holder: WindowsEventContext) async throws {
         var hotKey = await holder.controller.hotKeySettings()
         let context = holder.callbackContext
-        guard WindowsNative.configureVoiceOutput(await holder.controller.voiceOutputSettings(), context: context) else {
+        guard WindowsNative.configureVoiceOutput(
+            await holder.controller.voiceOutputSettings(),
+            context: context,
+            accountInventory: await holder.controller.selectedVoiceAccountInventory,
+            voiceProfiles: await holder.controller.listVoiceProfiles()
+        ) else {
             throw WindowsNativeError(message: "Could not configure Read aloud.")
         }
         if !WindowsNative.configureHotKey(hotKey, context: context) {

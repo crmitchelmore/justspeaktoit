@@ -49,8 +49,9 @@ struct VoiceChooserFilter {
             if let provider, voice.provider != provider { return false }
             if usableOnly && !Self.isUsable(availability(voice)) { return false }
             if let trait = gender.trait, !voice.traits.contains(trait) { return false }
-            let searchable = ([voice.name, voice.provider.displayName] + voice.traits.map(\.rawValue))
-                .joined(separator: " ").lowercased()
+            let searchable = (
+                [voice.name, voice.provider.displayName, voice.customGroupTitle ?? ""] + voice.traits.map(\.rawValue)
+            ).joined(separator: " ").lowercased()
             return terms.allSatisfy { searchable.contains($0) }
         }
         return Dictionary(grouping: matches, by: \.provider).map { provider, voices in

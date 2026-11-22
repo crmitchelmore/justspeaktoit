@@ -46,6 +46,8 @@ final class TextToSpeechManager: ObservableObject {
   /// Refuses, and asks for, read aloud through a provider the user has not
   /// allowed (issue #1805). Set by WireUp.
   var requireCloudSharingConsent: CloudSharingConsentCheck?
+  /// Supplies bound `My voices` entries from `VoiceProfileManager`.
+  var myVoicesProvider: (@MainActor () -> [TTSVoice])?
   private var playbackTask: Task<Void, Never>?
   private var synthesisID = UUID()
   private let openRouterOutput = OpenRouterSpeechOutput()
@@ -300,7 +302,9 @@ extension TextToSpeechManager {
   private func performSynthesis(
     text: String, voice: String?, useSSML: Bool?, requestID: UUID, purpose: SynthesisPurpose
   ) async throws -> TTSResult {
-    let effectiveVoice = migrateAndValidateVoiceID(voice ?? appSettings.defaultTTSVoice)
+    let requestedVoice = voice ?? appSettings.defaultTTSVoice
+    try ensureProfileVoiceExecutable(requestedVoice)
+    let effectiveVoice = migrateAndValidateVoiceID(requestedVoice)
     let provider = TTSProvider.from(voiceID: effectiveVoice)
     guard let client = clients[provider] else { throw TTSError.providerNotAvailable(provider) }
     try requireReadAloudConsent(for: provider)
@@ -419,6 +423,16 @@ extension TextToSpeechManager {
       }
       guard !Task.isCancelled, let self, self.audioPlayer === player else { return }
       self.isPlaying = self.audioPlayer?.isPlaying ?? false
+    }
+  }
+
+  private func ensureProfileVoiceExecutable(_ voiceID: String) throws {
+    let matchedMyVoice = myVoicesProvider?().first(where: { $0.id == voiceID })
+    let isKnownProvider = TTSProvider.knownVoiceIDPrefixes.contains(where: { voiceID.hasPrefix($0) })
+    if VoiceProfilePickerCatalog.isProfileVoiceIdentifier(voiceID) || (matchedMyVoice != nil && !isKnownProvider) {
+      throw TTSError.synthesisFailure(
+        VoiceProfilePickerCatalog.unavailableMessage(for: matchedMyVoice?.name)
+      )
     }
   }
 
@@ -635,6 +649,7 @@ extension TextToSpeechManager {
   func synthesizeForAutomation(
     text: String, voice: String, model: String?, overrides: AutomationSpeechSettings, format: AudioFormat
   ) async throws -> TTSResult {
+    try ensureProfileVoiceExecutable(voice)
     guard TTSProvider.knownVoiceIDPrefixes.contains(where: { voice.hasPrefix($0) }) else {
       throw TTSError.invalidVoice(voice)
     }

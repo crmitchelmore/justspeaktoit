@@ -162,9 +162,16 @@ function route(id, github, vars = {}) {
   return new Function('github', 'vars', 'fromJSON', `return (${expression});`)(github, vars, JSON.parse);
 }
 
-function routingContext(event = 'pull_request', repository = 'crmitchelmore/justspeaktoit', number = 1200) {
+function routingContext(
+  event = 'pull_request',
+  repository = 'crmitchelmore/justspeaktoit',
+  number = 1200,
+  actor = 'crmitchelmore',
+  triggeringActor = actor,
+) {
   return {
     event_name: event, ref: 'refs/heads/main', sha: 'merge-sha', repository: 'crmitchelmore/justspeaktoit',
+    actor, triggering_actor: triggeringActor,
     event: { number, pull_request: { head: { sha: 'head-sha', repo: { full_name: repository } } } },
   };
 }
@@ -200,10 +207,15 @@ test('native pool still requires the exact reviewed source and trusted event', (
     assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'stale-sha' }), fallback);
     assert.deepEqual(route(id, routingContext('pull_request', 'fork/repo'), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
       fallback, 'forks cannot enter the native pool');
-    // Merged main source is reviewed: it routes without a manual SHA.
+    // Merged main source is reviewed: owner-triggered pushes route without a manual SHA.
     assert.deepEqual(route(id, routingContext('push')), ['jsti-reviewed-local', 'macOS']);
     assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'stale-sha' }),
       ['jsti-reviewed-local', 'macOS']);
+    assert.deepEqual(route(id, routingContext('schedule')), fallback);
+    assert.deepEqual(
+      route(id, routingContext('push', 'crmitchelmore/justspeaktoit', 1200, 'crmitchelmore', 'github-actions[bot]')),
+      fallback,
+    );
     assert.deepEqual(route(id, routingContext('push'), { JSTI_SELF_HOSTED_MAIN: 'off' }), fallback);
     assert.deepEqual(route(id, { ...routingContext('push'), ref: 'refs/heads/feature' },
       { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }), fallback);

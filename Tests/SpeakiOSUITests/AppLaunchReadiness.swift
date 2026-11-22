@@ -26,8 +26,9 @@ extension XCUIApplication {
         if finishAppeared {
             // The sheet can exist before its presentation settles; a one-shot
             // isHittable read failed ~1s after a cold 51s launch (run 42302311943),
-            // and isHittable itself fails the test while the sheet is still
-            // off screen (run 42437254485). Wait for Skip to stop moving on screen.
+            // isHittable itself fails the test while the sheet is still off screen
+            // (run 42437254485), and a single cold-simulator AX query consumed ~8s
+            // inside a 15s wait (run 44883211487). Wait for Skip to stop moving.
             let window = self.windowFrame
             let settle = FrameSettleTracker()
             let idle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -39,7 +40,7 @@ extension XCUIApplication {
                         settle.isSettled(finish.snapshotFrame) && finish.isHittable(within: window)
                     )
             }, object: nil)
-            guard XCTWaiter.wait(for: [idle], timeout: 15) == .completed else {
+            guard XCTWaiter.wait(for: [idle], timeout: 30) == .completed else {
                 facts.emitFailure(.idleSkip)
                 XCTFail("Expected the actual idle onboarding Skip control")
                 throw AppLaunchTimeout()

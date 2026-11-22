@@ -17,9 +17,15 @@ function route(body, github, vars = {}) {
   return new Function('github', 'vars', 'fromJSON', `return (${expression});`)(github, vars, JSON.parse);
 }
 
-function context(event = 'pull_request', repository = 'crmitchelmore/justspeaktoit') {
+function context(
+  event = 'pull_request',
+  repository = 'crmitchelmore/justspeaktoit',
+  actor = 'crmitchelmore',
+  triggeringActor = actor,
+) {
   return {
     event_name: event, ref: 'refs/heads/main', sha: 'merge-sha', repository: 'crmitchelmore/justspeaktoit',
+    actor, triggering_actor: triggeringActor,
     event: { pull_request: { head: { sha: 'head-sha', repo: { full_name: repository } } } },
   };
 }
@@ -39,9 +45,18 @@ const macJobs = {
 
 function assertGuarded(body, pool, fallback, label) {
   const hosted = [fallback];
-  // Reviewed main source routes automatically: no manual SHA approval.
-  for (const event of ['push', 'schedule']) {
-    assert.deepEqual(route(body, context(event)), pool, `${label}: main ${event} uses the pool`);
+  // Owner-triggered main pushes route automatically: no manual SHA approval.
+  for (const actor of ['crmitchelmore', 'bravostation']) {
+    assert.deepEqual(route(body, context('push', 'crmitchelmore/justspeaktoit', actor)), pool,
+      `${label}: main push by ${actor} uses the pool`);
+  }
+  assert.deepEqual(route(body, context('schedule')), hosted,
+    `${label}: scheduled main runs stay hosted`);
+  assert.deepEqual(route(body, context('push', 'crmitchelmore/justspeaktoit', 'crmitchelmore', 'github-actions[bot]')),
+    hosted, `${label}: bot-triggered reruns stay hosted`);
+  for (const actor of ['dependabot[bot]', 'github-actions[bot]']) {
+    assert.deepEqual(route(body, context('push', 'crmitchelmore/justspeaktoit', actor)), hosted,
+      `${label}: main push by ${actor} stays hosted`);
   }
   assert.deepEqual(route(body, context('push'), { JSTI_SELF_HOSTED_MAIN: 'off' }), hosted,
     `${label}: JSTI_SELF_HOSTED_MAIN=off returns main to hosted`);
@@ -148,7 +163,9 @@ test('native benchmark never overwrites the shared home SwiftPM cache', () => {
 
 const guardPattern = /runs-on: \$\{\{ fromJSON\(\(\((.+?)\)\) && \(vars\.JSTI_(NATIVE|LINUX)_RUNNER_LABELS/;
 const canonicalGuard = "github.repository == 'crmitchelmore/justspeaktoit' && github.ref == 'refs/heads/main' && "
-  + "(github.event_name == 'push' || github.event_name == 'schedule') && vars.JSTI_SELF_HOSTED_MAIN != 'off') || "
+  + "github.event_name == 'push' && (github.actor == 'crmitchelmore' || github.actor == 'bravostation') && "
+  + "(github.triggering_actor == 'crmitchelmore' || github.triggering_actor == 'bravostation') && "
+  + "vars.JSTI_SELF_HOSTED_MAIN != 'off') || "
   + "(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && "
   + 'vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha';
 

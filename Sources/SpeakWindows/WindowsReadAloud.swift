@@ -25,10 +25,11 @@ extension WindowsNative {
 
     static func configureVoiceOutput(
         _ settings: WindowsVoiceOutputSettings, context: UnsafeMutableRawPointer,
-        accountInventory: VoiceAccountInventory?
+        accountInventory: VoiceAccountInventory?,
+        voiceProfiles: [VoiceProfile] = []
     ) -> Bool {
         voiceContext.set(context)
-        let presentation = settings.favoritePicker(accountInventory: accountInventory)
+        let presentation = settings.favoritePicker(accountInventory: accountInventory, voiceProfiles: voiceProfiles)
         let selected = presentation.selected
         let labels = (presentation.labels + presentation.identifiers).map { Array($0.utf8CString) }
         let pointers = labels.map { chars -> UnsafeMutablePointer<CChar> in
@@ -86,7 +87,8 @@ extension WindowsNative {
     static func voiceDiscovery(_ shown: DesktopVoiceDiscoveryPresentation) {
         guard let context = voiceContext.get(), WindowsHostPlatform.showVoiceAccountInventory(shown),
               configureVoiceOutput(shown.settings, context: context,
-                  accountInventory: shown.accountInventory ?? shown.inventory.map(VoiceAccountInventory.xai)) else {
+                  accountInventory: shown.accountInventory ?? shown.inventory.map(VoiceAccountInventory.xai),
+                  voiceProfiles: shown.voiceProfiles) else {
             update("The account voice listing or saved voice could not be shown."); return
         }
     }
@@ -156,7 +158,8 @@ func windowsVoicePickerEvent(
         await holder.controller.handleVoicePicker(voiceID: voiceID, action: action)
         if !WindowsNative.configureVoiceOutput(await holder.controller.voiceOutputSettings(),
             context: holder.callbackContext,
-            accountInventory: await holder.controller.selectedVoiceAccountInventory) {
+            accountInventory: await holder.controller.selectedVoiceAccountInventory,
+            voiceProfiles: await holder.controller.listVoiceProfiles()) {
             WindowsNative.update("The saved favorite voices could not be shown. Reopen Voice and try again.")
         }
     }
@@ -170,7 +173,9 @@ func voiceOutputEvent(_ index: Int32, _ context: UnsafeMutableRawPointer?) {
     holder.enqueueSettings {
         await holder.controller.selectVoiceOutput(voices[Int(index)])
         let saved = await holder.controller.voiceOutputSettings()
-        if !WindowsNative.configureVoiceOutput(saved, context: holder.callbackContext) {
+        if !WindowsNative.configureVoiceOutput(saved, context: holder.callbackContext,
+            accountInventory: await holder.controller.selectedVoiceAccountInventory,
+            voiceProfiles: await holder.controller.listVoiceProfiles()) {
             WindowsNative.update("The saved voice could not be shown. Reopen Voice and try again.")
         }
     }

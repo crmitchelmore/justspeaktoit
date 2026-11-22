@@ -34,6 +34,16 @@ extension SettingsSearchCatalog {
             settingKeys: ["ttsFavoriteVoices"], platforms: .macOS
         ),
         SettingsSearchEntry(
+            id: "voiceOutput.voiceProfiles", title: "My Voices", section: .voiceOutput,
+            systemImage: "person.wave.2.fill",
+            summary: "Create and manage private voice profiles for Read Aloud on this Mac.",
+            keywords: [
+                "voice profile", "voice profiles", "my voices", "voice creation", "voice clone",
+                "reference voice", "reference clip", "consent", "record voice", "custom voice"
+            ],
+            platforms: .macOS
+        ),
+        SettingsSearchEntry(
             id: "pronunciation.dictionary", title: "Pronunciation Dictionary", section: .pronunciation,
             systemImage: "text.book.closed",
             summary: "Teach voice output how to say words; entries also become keyterms.",

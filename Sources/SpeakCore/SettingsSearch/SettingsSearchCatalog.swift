@@ -93,7 +93,7 @@ public enum SettingsSearchCatalog {
         .general: ["preferences", "options"],
         .postProcessing: ["polish", "cleanup", "llm", "pre-processing"],
         .profiles: ["per-app", "app specific"],
-        .voiceOutput: ["tts", "text to speech", "read aloud"],
+        .voiceOutput: ["tts", "text to speech", "read aloud", "my voices", "voice profiles", "voice creation"],
         .apiKeys: ["credentials", "tokens", "providers"],
         .shortcuts: ["hotkeys", "keyboard shortcuts", "key bindings"],
         .permissions: ["privacy", "accessibility", "microphone access"],

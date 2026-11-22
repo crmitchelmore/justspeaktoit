@@ -60,7 +60,8 @@ extension WindowsNative {
         try await configureConfiguration(holder)
         guard configureVoiceOutput(await holder.controller.voiceOutputSettings(),
             context: holder.callbackContext,
-            accountInventory: await holder.controller.selectedVoiceAccountInventory) else {
+            accountInventory: await holder.controller.selectedVoiceAccountInventory,
+            voiceProfiles: await holder.controller.listVoiceProfiles()) else {
             throw WindowsNativeError(message: "Could not display the saved Voice quality and model.")
         }
         if action == 1 {

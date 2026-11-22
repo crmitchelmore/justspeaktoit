@@ -71,7 +71,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         Platform.voiceDiscovery(.init(requestID: context.epoch.uuidString, voices: voices,
             selected: voices.firstIndex { $0.id == settings.voiceID } ?? -1,
             message: message, loading: loading, settings: settings, inventory: inventory?.xai,
-            accountInventory: inventory))
+            accountInventory: inventory, voiceProfiles: listVoiceProfiles()))
     }
 
     package func refreshVoiceAccountDiscovery(

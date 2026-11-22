@@ -12,6 +12,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package nonisolated let directory: URL
     package let effects: any DesktopHostEffects<Platform>
     package nonisolated let store: DesktopRecordingStore
+    /// Per-device private voice profiles, isolated from History, sync and exports.
+    package nonisolated let voiceProfiles: VoiceProfileStore
     /// Inactive until the app entry point activates it for a real session.
     package nonisolated let telemetry: DesktopTelemetry
     let uploadStaging: SharedMultipartUploadStaging
@@ -227,6 +229,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         self.ownedDictationCapability = ownedDictationCapability
         self.shutdownGrace = shutdownGrace
         self.store = try DesktopRecordingStore(directory: directory.appendingPathComponent("History"))
+        self.voiceProfiles = VoiceProfileStore(directory: VoiceProfileStore.defaultDirectory(in: directory))
         self.telemetry = DesktopTelemetry(directory: directory)
         self.cloudSharing = DesktopCloudSharingConsentStore(directory: directory, write: effects.writeSettings)
         self.uploadStaging = Platform.uploadStaging(directory: directory.appendingPathComponent("Uploads"))

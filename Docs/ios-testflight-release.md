@@ -7,12 +7,11 @@ required `manifest` input. Release controllers allocate that immutable manifest;
 the worker does not accept manual version, keyboard-inclusion, or direct-capture
 inputs.
 
-The worker always sets `TUIST_IOS_KEYBOARD=1` and
-`TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0` on every train, so the keyboard uses
-Instant Dictation handoff and makes no microphone or Speech permission attempt
-inside the extension: Apple gives a custom keyboard no microphone access, even
-with Full Access. Physical acceptance is defined in
-[iOS keyboard verification](ios-keyboard-mvp-verification.md).
+The worker always sets `TUIST_IOS_KEYBOARD=1` and keeps the legacy native capture
+flag `TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0`. Compatible Alpha sources additionally
+enable the iOS 26+ [WebKit Local preview](ios-keyboard-instant-dictation.md#no-switch-alpha-preview-ios-26).
+Stable, the App profile and older systems use Instant Dictation handoff.
+Neither path asks for permissions inside the keyboard.
 
 Alpha builds also carry two preview targets for owner review: the Apple Watch
 app with its complication (`TUIST_WATCH_APP=1`) and the Share extension
@@ -184,7 +183,7 @@ equivalent identity and entitlement checks before archiving.
    **Keyboard** › **Keyboards**, grant Full Access, and complete the app's
    current Instant Dictation setup.
 3. In Notes, WhatsApp, and the other required matrix hosts, select the keyboard
-   and start dictation. The extension must not present microphone or Speech
+   and start dictation with the App profile. The extension must not present microphone or Speech
    permission. Treat such a prompt as a failure.
 4. Confirm the containing app records through the iPhone microphone, the keyboard
    shows the ready/request state truthfully, and the nonce-matched result returns
@@ -196,8 +195,8 @@ equivalent identity and entitlement checks before archiving.
    [physical shipping matrix](ios-keyboard-mvp-verification.md#physical-shipping-matrix).
 
 The supported path is keyboard → containing app microphone/transcription →
-nonce-scoped App Group result → document-proxy insertion. The retained direct
-code is a historical experiment and is not part of normal release verification.
+nonce-scoped App Group result → document-proxy insertion. Separately, verify
+the Alpha Local preview after force-quitting Just Speak on physical iOS 26+.
 
 ## Build-based rollback
 

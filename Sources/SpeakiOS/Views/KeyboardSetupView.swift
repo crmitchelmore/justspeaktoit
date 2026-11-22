@@ -26,8 +26,8 @@ public struct KeyboardSetupView: View {
                         .font(.title2.bold())
                     Text(
                         directCaptureEnabled
-                            ? "Tap the mic key and your words stream into the text field as you speak — "
-                                + "no app switching. Use the globe key to return to the system keyboard for typing."
+                            ? "This Alpha can try on-device dictation in the keyboard's Local profile. "
+                                + "Tap the mic, speak, and tap again to insert."
                             : "Tap the mic key to dictate through Just Speak's Instant Dictation handoff — "
                                 + "without leaving the app you're typing in."
                     )
@@ -51,8 +51,8 @@ public struct KeyboardSetupView: View {
                     number: 3,
                     title: "Tap the mic and speak",
                     detail: directCaptureEnabled
-                        ? "In any text field, hold the globe key, pick Just Speak, and tap the mic. "
-                            + "Allow microphone and speech recognition when asked the first time."
+                        ? "Allow the microphone in Just Speak and dictate once using on-device SpeechTranscriber. "
+                            + "Then pick Just Speak and Local in the keyboard and tap the mic."
                         : "Enable Instant Dictation below, then hold the globe key in any text field, "
                             + "pick Just Speak, and tap the mic."
                 )
@@ -137,10 +137,8 @@ public struct KeyboardSetupView: View {
 
             Section("Why Full Access?") {
                 Label(
-                    directCaptureEnabled
-                        ? "Lets the keyboard run the microphone and Apple speech recognition"
-                        : "Lets the keyboard exchange private dictation state with Just Speak",
-                    systemImage: directCaptureEnabled ? "mic.fill" : "arrow.left.arrow.right"
+                    "Lets the keyboard exchange private dictation state with Just Speak",
+                    systemImage: "arrow.left.arrow.right"
                 )
                 Label(
                     "Shares your language choice and dictation state with the app",
@@ -154,7 +152,7 @@ public struct KeyboardSetupView: View {
                     "The keyboard reads bounded text immediately before and after the cursor only to place "
                         + "dictated words safely, and never stores or transmits that context. "
                         + (directCaptureEnabled
-                            ? "It records only while the mic key is active and prefers on-device Apple speech."
+                            ? "The Local preview requests no new permissions and transcribes only on-device."
                             : "Recording runs in Just Speak through Instant Dictation, not in the keyboard.")
                 )
                 .font(.caption)

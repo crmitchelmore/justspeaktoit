@@ -52,7 +52,7 @@ Primary sources:
 - [Wispr Flow iPhone keyboard setup](https://docs.wisprflow.ai/articles/7453988911-set-up-the-flow-keyboard-on-iphone)
 - [Wispr Flow microphone session options](https://docs.wisprflow.ai/articles/3634682593-why-the-orange-dot-or-mic-indicator-stays-on-after-dictating-ios)
 
-## No-switch development probe (iOS 26+)
+## No-switch Alpha preview (iOS 26+)
 
 Hex's [internal TestFlight implementation](https://github.com/anomalyco/hex/blob/3bb5e5702d8cdf0abf44f6de2af867beedd7b47b/ios/README.md)
 uses WebKit to capture audio after an explicit action and transcribes it on-device.
@@ -60,7 +60,7 @@ Apple documents WebKit's media permission delegate, but does not grant custom
 keyboards microphone access in its keyboard documentation. This is not evidence
 that the route is supported in production or will pass review.
 
-For the Just Speak probe, generate a development project with
+Use the first TestFlight Alpha containing the preview, or generate a development project with
 `TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=1 tuist generate --no-open`
 and install a signed **Debug** build. In the app, grant microphone permission
 and use Apple's on-device SpeechTranscriber for the intended language once to
@@ -77,7 +77,7 @@ Use [#661](https://github.com/crmitchelmore/justspeaktoit/issues/661) for physic
 device results. Force-quit the containing app after setup before testing in
 Notes and WhatsApp. Verify the mic indicator turns off on Stop, Cancel and
 dismissal, no text is written on Cancel or field change, and a fresh run
-works after interruption. No release train enables this probe.
+works after interruption. Stable does not compile or enable this preview.
 
 ## Runtime architecture
 

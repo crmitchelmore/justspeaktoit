@@ -447,7 +447,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("iCloud container mismatch"))
         XCTAssertTrue(workflow.contains("$IOS_CLOUD_CONTAINER"))
         XCTAssertTrue(workflow.contains("TUIST_IOS_KEYBOARD: \"1\""))
-        // #1577: every train ships the hand-off keyboard; no build carries direct capture.
+        // The historical native capture path stays off even in Alpha.
         XCTAssertFalse(workflow.contains("echo \"TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=1\" >> \"$GITHUB_ENV\""))
         XCTAssertTrue(workflow.contains("echo \"TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0\" >> \"$GITHUB_ENV\""))
         XCTAssertTrue(workflow.contains("Keyboard feature is off, but JustSpeakKeyboard.appex was embedded"))

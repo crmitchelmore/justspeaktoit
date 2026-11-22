@@ -42,13 +42,23 @@ class KeyboardPurposeStringsTests(unittest.TestCase):
         self.assertIn('python3 scripts/verify-keyboard-purpose-strings.py "$KEYBOARD_PATH/Info.plist"', workflow)
         self.assertNotIn("Handoff-only keyboard unexpectedly declares", workflow)
 
-    def test_release_workflow_ships_handoff_keyboard_on_every_train(self):
+    def test_release_workflow_enables_web_capture_only_for_compatible_alpha(self):
         workflow = (ROOT / ".github/workflows/release-ios.yml").read_text()
         policy = workflow.split("- name: Select keyboard capture policy", 1)[1].split("- name:", 1)[0]
-        self.assertIn("TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0", policy)
-        self.assertNotIn("TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=1", policy)
-        self.assertNotIn("RELEASE_TRAIN", policy)
-        self.assertNotIn('TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "', workflow.split("jobs:", 1)[0])
+        script = textwrap.dedent(policy.split("run: |", 1)[1])
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            (base / "Project.swift").write_text("// historical source\n")
+            env_file = base / "env"
+            for train, source, expected in (("alpha", ROOT, "1"), ("stable", ROOT, "0"), ("alpha", base, "0")):
+                with self.subTest(train=train, source=source):
+                    env_file.write_text("")
+                    subprocess.run(["bash", "-e", "-c", script], cwd=source, check=True,
+                                   env={**os.environ, "RELEASE_TRAIN": train, "GITHUB_ENV": str(env_file)})
+                    self.assertEqual(dict(line.split("=", 1) for line in env_file.read_text().splitlines()), {
+                        "TUIST_IOS_KEYBOARD_DIRECT_CAPTURE": "0",
+                        "TUIST_IOS_KEYBOARD_WEB_CAPTURE": expected,
+                    })
 
     def run_preview_target_policy(self, train, source=ROOT):
         workflow = (ROOT / ".github/workflows/release-ios.yml").read_text()

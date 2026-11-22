@@ -1,4 +1,4 @@
-#if DEBUG && IOS_KEYBOARD_DIRECT_CAPTURE
+#if (DEBUG && IOS_KEYBOARD_DIRECT_CAPTURE) || IOS_KEYBOARD_WEB_CAPTURE
 @available(iOS 26.0, *)
 extension KeyboardWebDictationEngine {
     static let capturePage = """

@@ -13,12 +13,11 @@ final class KeyboardViewController: UIInputViewController {
     private var heightConstraint: NSLayoutConstraint?
 
     private func makeModel() -> KeyboardViewModel {
-        #if DEBUG && IOS_KEYBOARD_DIRECT_CAPTURE
+        #if (DEBUG && IOS_KEYBOARD_DIRECT_CAPTURE) || IOS_KEYBOARD_WEB_CAPTURE
         if #available(iOS 26.0, *) {
             return KeyboardViewModel(engine: KeyboardWebDictationEngine(host: { [weak self] in self?.view })) {
-                let microphonePermission = KeyboardDictationEngine.microphonePermission()
-                return KeyboardViewModel.DirectCaptureCapabilities(
-                    microphonePermission: microphonePermission == .granted ? .granted : .denied,
+                KeyboardViewModel.DirectCaptureCapabilities(
+                    microphonePermission: KeyboardWebDictationEngine.hasMicrophonePermission ? .granted : .denied,
                     speechRecognitionPermission: .granted,
                     speechRecognizerAvailable: { _ in true }
                 )

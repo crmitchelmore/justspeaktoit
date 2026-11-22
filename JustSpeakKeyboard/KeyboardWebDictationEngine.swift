@@ -1,11 +1,10 @@
-#if DEBUG && IOS_KEYBOARD_DIRECT_CAPTURE
+#if (DEBUG && IOS_KEYBOARD_DIRECT_CAPTURE) || IOS_KEYBOARD_WEB_CAPTURE
 import AVFoundation
 import os
 import SpeakCore
 import UIKit
 import WebKit
 
-/// Development-only probe: capture starts on an explicit tap and stays on-device.
 @available(iOS 26.0, *)
 @MainActor
 final class KeyboardWebDictationEngine: NSObject, KeyboardDictationEngineProtocol,
@@ -29,10 +28,14 @@ final class KeyboardWebDictationEngine: NSObject, KeyboardDictationEngineProtoco
         self.host = host
     }
 
+    static var hasMicrophonePermission: Bool {
+        AVAudioApplication.shared.recordPermission == .granted
+    }
+
     func start(runID: UUID, localeIdentifier: String) {
         guard activeRunID == nil else { return }
         activeRunID = runID
-        guard AVAudioApplication.shared.recordPermission == .granted,
+        guard Self.hasMicrophonePermission,
               os_proc_available_memory() >= 32 * 1_024 * 1_024, host() != nil else {
             fail(.microphoneUnavailable, reason: "Microphone, view or memory unavailable", runID: runID)
             return
@@ -170,7 +173,7 @@ final class KeyboardWebDictationEngine: NSObject, KeyboardDictationEngineProtoco
         guard webView === self.webView, activeRunID != nil, type == .microphone,
               frame.isMainFrame, Self.isCaptureOrigin(origin),
               os_proc_available_memory() >= 24 * 1_024 * 1_024,
-              AVAudioApplication.shared.recordPermission == .granted else { return .deny }
+              Self.hasMicrophonePermission else { return .deny }
         return .grant
     }
 

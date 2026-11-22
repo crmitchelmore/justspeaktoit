@@ -251,7 +251,7 @@ jobs:
           install-tuist: "true"
 
       - name: Build Keyboard Extension, hand-off shape (unsigned)
-        # The shape every release ships: no in-extension capture engine, and
+        # The Stable shape: no in-extension capture engine, and
         # therefore no AVFoundation or Speech linked into the appex (#991).
         env:
           TUIST_IOS_KEYBOARD: "1"
@@ -259,14 +259,13 @@ jobs:
         run: scripts/ci/xcode-unsigned-build.sh JustSpeakKeyboard generic/platform=iOS
 
       - name: Build Keyboard Extension, direct-capture shape (unsigned)
-        # The direct-capture shape only exists behind two flags, so its `#if
-        # IOS_KEYBOARD_DIRECT_CAPTURE` branches and its file-based Info.plist
-        # compile nowhere else. Build them here so the flagged code cannot rot.
-        # Build only: the hand-off shape already runs the flow tests in the
-        # Build iOS Library job, and this leg exists to catch compile rot.
+        # Compile the same WebKit path as TestFlight without enabling the
+        # historical native microphone engine.
         env:
           TUIST_IOS_KEYBOARD: "1"
-          TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "1"
+          TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"
+          TUIST_IOS_KEYBOARD_WEB_CAPTURE: "1"
+          TUIST_RELEASE_TRAIN: alpha
         run: scripts/ci/xcode-unsigned-build.sh JustSpeakKeyboard generic/platform=iOS
 
       - name: Build watchOS App (feature-flagged)

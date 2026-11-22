@@ -351,9 +351,8 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.match(watch, /TUIST_WATCH_APP: "1"\n\s+TUIST_IOS_KEYBOARD: "1"\n\s+TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"/);
   assert.match(watch, /scripts\/ci\/xcode-unsigned-build\.sh JustSpeakWatchApp generic\/platform=watchOS\n/);
   assert.match(watch, /scripts\/ci\/xcode-unsigned-build\.sh --no-generate SpeakiOS generic\/platform=iOS\n/);
-  for (const shape of ['0', '1']) {
-    assert.match(devices, new RegExp(`TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "${shape}"\\n\\s+run: scripts/ci/xcode-unsigned-build\\.sh JustSpeakKeyboard generic/platform=iOS\\n`));
-  }
+  assert.match(devices, /TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"\n\s+run: scripts\/ci\/xcode-unsigned-build\.sh JustSpeakKeyboard generic\/platform=iOS\n/);
+  assert.match(devices, /TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"\n\s+TUIST_IOS_KEYBOARD_WEB_CAPTURE: "1"\n\s+TUIST_RELEASE_TRAIN: alpha\n\s+run: scripts\/ci\/xcode-unsigned-build\.sh JustSpeakKeyboard generic\/platform=iOS\n/);
 });
 
 test('iOS selection prefers an available Pro before starting preparation', () => {

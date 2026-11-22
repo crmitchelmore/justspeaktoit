@@ -1063,6 +1063,22 @@ sessions:
           - "Force-quit Just Speak, return to Notes, and repeat from the Just Speak keyboard."
         expected: "Connect either opens Just Speak with a \"Keyboard connected\" sheet or gives the manual setup steps without changing the text field. After either path, recording starts on return and the words insert once. Record which path iOS used before and after the force-quit."
         final_gate: true
+      - id: "ios-keyboard-alpha-cold-capture"
+        issues:
+          - 661
+        title: "Keyboard Local preview: dictate after force-quitting Just Speak"
+        minutes: 8
+        core: false
+        build: "First TestFlight Just Speak to It Alpha with the WebKit keyboard preview"
+        prerequisites:
+          - "Physical iOS or iPadOS 26 or newer. Enable the Alpha keyboard and Allow Full Access."
+          - "Grant the microphone in Just Speak and dictate once using on-device SpeechTranscriber in the language you will test."
+        steps:
+          - "Force-quit Just Speak. In Notes select Just Speak Alpha and the Local profile, tap the mic, say \"cold start notes\", then tap Stop & Insert."
+          - "Repeat in WhatsApp. Repeat on an iPad if available."
+          - "In Notes start again, then cancel. Repeat and dismiss the keyboard instead."
+        expected: "Notes and WhatsApp stay in front and each result inserts exactly once. Cancel and dismissal insert nothing. The microphone indicator goes out after Stop, Cancel and dismissal. No permission prompt appears in the keyboard. Report the exact status and whether Just Speak opened if any attempt falls back."
+        final_gate: false
       - id: "iphone-keyboard-background-repeat"
         issues:
           - 1469

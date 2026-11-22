@@ -128,7 +128,7 @@ final class KeyboardViewModel: ObservableObject {
     }
 
     private static var buildDirectCapturePolicy: KeyboardCapturePlanner.DirectCapturePolicy {
-        #if DEBUG && IOS_KEYBOARD_DIRECT_CAPTURE
+        #if (DEBUG && IOS_KEYBOARD_DIRECT_CAPTURE) || IOS_KEYBOARD_WEB_CAPTURE
         if #available(iOS 26.0, *) { return .enabled }
         #endif
         return .disabled

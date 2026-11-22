@@ -15,8 +15,7 @@ concurrency:
 env:
   GH_TOKEN: ${{ github.token }}
   APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
-  # The extension ships on every train, always as Instant Dictation hand-off
-  # (see "Select keyboard capture policy").
+  # The extension ships on every train; only Alpha can opt into WebKit capture.
   TUIST_IOS_KEYBOARD: "1"
   # #1119: the iPhone syncs through the train's shared container. Current
   # sources always carry it; this keeps frozen sources from before that
@@ -41,13 +40,16 @@ jobs:
           MANIFEST: ${{ inputs.manifest }}
         run: node scripts/release-train.mjs configure --tag "$MANIFEST" --surface ios
 
-      # Every train ships the hand-off keyboard. Apple's open-access rules
-      # give a custom keyboard no microphone, even with Full Access
-      # ("Configuring open access for a custom keyboard"), so the Alpha
-      # direct-capture build (#1547) only ever failed to record. The flagged
-      # shape still compiles in CI for the #661 experiment.
+      # Never enable the old native microphone engine (#1547). The WebKit
+      # experiment (#661) is separate and only available in newer Alpha sources.
       - name: Select keyboard capture policy
-        run: echo "TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0" >> "$GITHUB_ENV"
+        run: |
+          echo "TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0" >> "$GITHUB_ENV"
+          web=0
+          if [ "$RELEASE_TRAIN" = "alpha" ] && grep -q TUIST_IOS_KEYBOARD_WEB_CAPTURE Project.swift; then
+            web=1
+          fi
+          echo "TUIST_IOS_KEYBOARD_WEB_CAPTURE=$web" >> "$GITHUB_ENV"
 
       # Alpha TestFlight carries the built-but-unreviewed watch app (with its
       # complication) and Share extension for owner review; Stable never does.
@@ -278,6 +280,7 @@ jobs:
             echo "### Keyboard rollout policy"
             echo "- Extension included: $TUIST_IOS_KEYBOARD"
             echo "- Direct capture enabled: $TUIST_IOS_KEYBOARD_DIRECT_CAPTURE"
+            echo "- Alpha keyboard WebKit capture enabled: $TUIST_IOS_KEYBOARD_WEB_CAPTURE"
             echo "- Commit: $GITHUB_SHA"
             echo "### Alpha preview targets"
             echo "- Watch app included: $TUIST_WATCH_APP${WATCH_APP_REASON:+ (reason: $WATCH_APP_REASON)}"
@@ -481,6 +484,16 @@ jobs:
             [ "$KEYBOARD_VERSION" = "$VERSION" ] || { echo "Keyboard version mismatch: expected '$VERSION', got '$KEYBOARD_VERSION'"; exit 1; }
             [ "$KEYBOARD_BUILD" = "$BUILD_NUMBER" ] || { echo "Keyboard build mismatch: expected '$BUILD_NUMBER', got '$KEYBOARD_BUILD'"; exit 1; }
             python3 scripts/verify-keyboard-purpose-strings.py "$KEYBOARD_PATH/Info.plist"
+            KEYBOARD_EXECUTABLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$KEYBOARD_PATH/Info.plist")
+            KEYBOARD_STRINGS=$(strings "$KEYBOARD_PATH/$KEYBOARD_EXECUTABLE")
+            WEB_CAPTURE_PRESENT=0
+            if grep -Fq 'keyboard.justspeaktoit.invalid' <<<"$KEYBOARD_STRINGS"; then
+              WEB_CAPTURE_PRESENT=1
+            fi
+            [ "$WEB_CAPTURE_PRESENT" = "$TUIST_IOS_KEYBOARD_WEB_CAPTURE" ] || {
+              echo "::error::Archived keyboard does not match the selected WebKit capture policy."
+              exit 1
+            }
           else
             [ ! -e "$KEYBOARD_PATH" ] || {
               echo "::error::Keyboard feature is off, but JustSpeakKeyboard.appex was embedded in the archive."

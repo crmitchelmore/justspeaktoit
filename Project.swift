@@ -99,6 +99,8 @@ let iosKeyboardDirectCaptureFlag = (
     ProcessInfo.processInfo.environment["TUIST_IOS_KEYBOARD_DIRECT_CAPTURE"] ?? ""
 ).lowercased()
 let isIOSKeyboardDirectCaptureEnabled = ["1", "true", "yes"].contains(iosKeyboardDirectCaptureFlag)
+let isIOSKeyboardWebCaptureEnabled = isAlphaBuild
+    && ProcessInfo.processInfo.environment["TUIST_IOS_KEYBOARD_WEB_CAPTURE"] == "1"
 // `TUIST_WATCH_APP=1 tuist generate` includes the Apple Watch companion app
 // and defines `WATCH_APP_FEATURE`, which gates the iPhone-side
 // WatchConnectivity receiver (see SpeakiOSApp/FeatureFlags.swift). Off by
@@ -134,6 +136,9 @@ if isIOSKeyboardEnabled, isIOSKeyboardDirectCaptureEnabled {
     iosActiveCompilationConditions.append("IOS_KEYBOARD_DIRECT_CAPTURE")
     iosTestSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] =
         "$(inherited) IOS_KEYBOARD_FEATURE IOS_KEYBOARD_DIRECT_CAPTURE"
+}
+if isIOSKeyboardEnabled, isIOSKeyboardWebCaptureEnabled {
+    iosActiveCompilationConditions.append("IOS_KEYBOARD_WEB_CAPTURE")
 }
 if isWatchAppEnabled {
     iosActiveCompilationConditions.append("WATCH_APP_FEATURE")
@@ -218,8 +223,13 @@ var iosKeyboardSettings: [String: SettingValue] = [
     "MARKETING_VERSION": "\(version)",
     "SKIP_INSTALL": "YES"
 ]
-if isIOSKeyboardDirectCaptureEnabled {
-    iosKeyboardSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) IOS_KEYBOARD_DIRECT_CAPTURE"
+let keyboardCaptureConditions = [
+    isIOSKeyboardDirectCaptureEnabled ? "IOS_KEYBOARD_DIRECT_CAPTURE" : nil,
+    isIOSKeyboardWebCaptureEnabled ? "IOS_KEYBOARD_WEB_CAPTURE" : nil
+].compactMap { $0 }
+if !keyboardCaptureConditions.isEmpty {
+    iosKeyboardSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] =
+        .string("$(inherited) " + keyboardCaptureConditions.joined(separator: " "))
 }
 
 // The extension target compiles KeyboardDictationEngine.swift in every

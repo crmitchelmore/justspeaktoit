@@ -19,11 +19,10 @@ enum FeatureFlags {
     /// Whether this build permits microphone capture inside the keyboard
     /// extension. The keyboard can ship independently in handoff-only mode.
     static var iOSKeyboardDirectCaptureEnabled: Bool {
-        #if IOS_KEYBOARD_DIRECT_CAPTURE
-        true
-        #else
-        false
+        #if (DEBUG && IOS_KEYBOARD_DIRECT_CAPTURE) || IOS_KEYBOARD_WEB_CAPTURE
+        if #available(iOS 26.0, *) { return true }
         #endif
+        return false
     }
 
     /// Whether the Apple Watch companion app (and the iPhone-side

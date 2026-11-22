@@ -29,6 +29,29 @@ function manifestFor(tag) {
     if(manifest.tag !== tag || git('rev-parse',`${tag}^{commit}`) !== manifest.source) throw Error('Manifest/tag source mismatch');
     return manifest;
 }
+function createAnnotatedTag(tag, source, manifest) {
+    const message = JSON.stringify(manifest, null, 2) + '\n';
+    const date = new Date(manifest.createdAt).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const tagObject = JSON.parse(gh('api', '--method', 'POST', `repos/${repo}/git/tags`, '--input', save('git-tag.json', {
+        tag,
+        message,
+        object: source,
+        type: 'commit',
+        tagger: {
+            name: 'github-actions[bot]',
+            email: 'github-actions[bot]@users.noreply.github.com',
+            date
+        }
+    })));
+    if (!/^[a-f0-9]{40}$/.test(tagObject?.sha ?? '')) throw Error(`Failed to create annotated tag object for ${tag}`);
+    gh('api', '--method', 'POST', `repos/${repo}/git/refs`, '--input', save('git-ref.json', {
+        ref: `refs/tags/${tag}`,
+        sha: tagObject.sha
+    }));
+    git('fetch', '--no-tags', 'origin', `refs/tags/${tag}:refs/tags/${tag}`);
+    const verified = manifestFor(tag);
+    if (verified.source !== source || verified.tag !== tag) throw Error(`Fetched tag ${tag} failed verification`);
+}
 function upload(tag, name, value, clobber=false) {
     gh('release','upload',tag,save(name,value),'--repo',repo,...(clobber?['--clobber']:[]));
 }
@@ -136,8 +159,7 @@ if(command === 'allocate' || command === 'prepare') {
     }
     validateManifest(manifest);
     if(train === 'stable' && selected.includes('mac-direct')) assertStableVersionAdvance(versions.mac, all.filter(r=>!r.draft && !r.prerelease && /^mac-v\d+\.\d+\.\d+$/.test(r.tag_name)).map(r=>r.tag_name.slice(5)));
-    git('config','user.name','github-actions[bot]'); git('config','user.email','github-actions[bot]@users.noreply.github.com');
-    git('tag','-a',tag,source,'-F',save('allocation.json',manifest)); git('push','origin',`refs/tags/${tag}`);
+    createAnnotatedTag(tag, source, manifest);
     ensureRelease(manifest,all);
     output('tag',tag); output('source',source);
 } else if(command === 'configure') {

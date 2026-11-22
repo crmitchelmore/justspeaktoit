@@ -29,22 +29,38 @@ import path from 'node:path';
 const root=process.env.FIXTURE_ROOT, args=process.argv.slice(2), tool=path.basename(process.argv[1]);
 fs.appendFileSync(path.join(root,'commands.jsonl'),JSON.stringify({tool,args})+'\\n');
 const manifests=JSON.parse(fs.readFileSync(path.join(root,'manifests.json'),'utf8'));
+const createdTagsPath=path.join(root,'created-tags.json');
+const createdTags=fs.existsSync(createdTagsPath)?JSON.parse(fs.readFileSync(createdTagsPath,'utf8')):{};
 const preparing=process.env.EXPECT_PREPARE==='1';
 const result=value=>process.stdout.write(typeof value==='string'?value:JSON.stringify(value));
 if(tool==='git') {
- if(args[0]==='for-each-ref') result(manifests[args.at(-1).split('/').at(-1)]);
+ const tag=args.at(-1).split('/').at(-1);
+ if(args[0]==='for-each-ref') result(createdTags[tag] ?? manifests[tag]);
  else if(args[0]==='rev-parse') result('${source}');
  else if(preparing && args[0]==='tag' && args[1]==='--list') result(Object.keys(manifests).filter(t=>t.startsWith('stable-candidate-')).join('\\n'));
- else if(preparing && args[0]==='tag' && args[1]==='-a') fs.copyFileSync(args[args.indexOf('-F')+1],path.join(root,'prepared-manifest.json'));
+ else if(preparing && args[0]==='fetch' && args[1]==='--no-tags') {}
  else if(preparing && args[0]==='show') result('lock');
  else if(preparing && args[0]==='rev-list') result('${baseline}');
- else if(preparing && ['config','push','log','ls-tree'].includes(args[0])) {}
+ else if(preparing && ['config','log','ls-tree'].includes(args[0])) {}
  else if(args[0]!=='merge-base') throw Error('Unexpected git mutation: '+args.join(' '));
 } else if(args[0]==='api') {
+ const methodIndex=args.indexOf('--method');
+ const method=methodIndex<0?'GET':args[methodIndex+1];
+ const endpoint=methodIndex<0?args[1]:args[methodIndex+2];
  if(args.includes('--paginate')) result([Object.keys(manifests).map(tag_name=>({tag_name,assets:tag_name.startsWith('alpha-')?[{name:'ios-receipt.json',id:'ios-alpha-receipt'}]:[]}))]);
- else if(args[1].includes('/actions/workflows/ci.yml/runs')) result({workflow_runs:[{id:7,run_number:7,run_attempt:1,html_url:'https://example.test/ci',status:'completed',conclusion:'success',head_repository:{full_name:'owner/repo'}}]});
+ else if(preparing && method==='POST' && endpoint==='repos/owner/repo/git/tags') {
+  const payload=JSON.parse(fs.readFileSync(args[args.indexOf('--input')+1],'utf8'));
+  fs.writeFileSync(path.join(root,'prepared-manifest.json'),payload.message);
+  createdTags[payload.tag]=payload.message;
+  fs.writeFileSync(createdTagsPath,JSON.stringify(createdTags));
+  result({sha:'${source}'});
+ } else if(preparing && method==='POST' && endpoint==='repos/owner/repo/git/refs') {
+  const payload=JSON.parse(fs.readFileSync(args[args.indexOf('--input')+1],'utf8'));
+  if(!payload.ref?.startsWith('refs/tags/') || payload.sha!=='${source}') throw Error('Invalid git ref payload');
+  result({ref:payload.ref,object:{sha:payload.sha}});
+ } else if(args[1].includes('/actions/workflows/ci.yml/runs')) result({workflow_runs:[{id:7,run_number:7,run_attempt:1,html_url:'https://example.test/ci',status:'completed',conclusion:'success',head_repository:{full_name:'owner/repo'}}]});
  else if(preparing && args[1].endsWith('/releases/assets/ios-alpha-receipt')) result(fs.readFileSync(path.join(root,'assets','ios-receipt.json'),'utf8'));
- else throw Error('Unexpected API request');
+ else throw Error('Unexpected API request: '+args.join(' '));
 } else if(args[0]==='release' && args[1]==='download') {
  const dest=args[args.indexOf('--dir')+1];
  for(const name of fs.readdirSync(path.join(root,'assets'))) fs.copyFileSync(path.join(root,'assets',name),path.join(dest,name));
@@ -77,7 +93,7 @@ test('iOS-only preparation freezes scope without Mac version, receipt or desktop
 test('iOS-only preparation refuses an unverified Alpha before allocating a candidate',t=>{
  const f=fixture(t,{prepare:true,receiptStatus:'processing'}), result=f.runPrepare();
  assert.notEqual(result.status,0); assert.match(result.stderr,/Selected Alpha is not verified: ios/);
- assert.ok(f.commands().every(c=>!c.args.includes('-a') && !c.args.includes('create')));
+ assert.ok(f.commands().every(c=>!c.args.includes('-a') && !c.args.includes('push') && !c.args.some(a=>a.endsWith('/git/tags') || a.endsWith('/git/refs')) && !c.args.includes('create')));
 });
 test('iOS-only publication refuses a candidate superseded for the same iOS version',t=>{
  const f=fixture(t,{newer:true,newerIosVersion:'3.2.0'}), result=f.run();

@@ -56,4 +56,28 @@ final class AppSettingsPersistence {
   func strings(_ key: ApplicationPreferenceKey) -> [String] {
     defaults.array(forKey: key.rawValue) as? [String] ?? []
   }
+
+  func storeRaw<T>(_ value: T, key: String) {
+    guard !isSuppressed else { return }
+    switch value {
+    case let boolValue as Bool:
+      defaults.set(boolValue, forKey: key)
+    case let stringValue as String:
+      defaults.set(stringValue, forKey: key)
+    case let doubleValue as Double:
+      defaults.set(doubleValue, forKey: key)
+    case let arrayValue as [String]:
+      defaults.set(arrayValue, forKey: key)
+    default:
+      defaults.set(value, forKey: key)
+    }
+  }
+
+  func rawFlag(_ key: String, default fallback: Bool) -> Bool {
+    defaults.object(forKey: key) as? Bool ?? fallback
+  }
+
+  func rawString(_ key: String, default fallback: String = "") -> String {
+    defaults.string(forKey: key) ?? fallback
+  }
 }

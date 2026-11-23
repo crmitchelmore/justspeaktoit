@@ -1,15 +1,45 @@
 import Foundation
 
-/// Account-discovery capabilities, projected from existing canonical provider metadata.
+/// Account-discovery capabilities, projected from existing canonical provider metadata
+/// and desktop local voice studio backends.
 public struct VoiceAccountProvider: Hashable, Identifiable, Sendable {
-    private let provider: LiveTranscriptionProviderID
+    private enum Backing: Hashable, Sendable {
+        case cloud(LiveTranscriptionProviderID)
+        case studio(VoiceStudioKind)
+    }
+
+    private let backing: Backing
     public static let xai = Self(.xai)
     public static let mistral = Self(.mistral)
     public static let soniox = Self(.soniox)
+    public static let voicebox = Self(studioKind: .voicebox)
+    public static let voiceStudio = Self(studioKind: .voiceStudio)
+    public static let gptSoVITS = Self(studioKind: .gptSoVITS)
     public static let all = [xai, mistral, soniox]
+    public static let studioProviders = [voicebox, voiceStudio, gptSoVITS]
+    public static let desktopProviders = all + studioProviders
 
-    public var id: String { provider.rawValue }
-    public var displayName: String { provider.displayName }
+    public var studioKind: VoiceStudioKind? {
+        if case .studio(let kind) = backing { return kind }
+        return nil
+    }
+
+    public var isStudio: Bool { studioKind != nil }
+
+    public var id: String {
+        switch backing {
+        case .cloud(let provider): provider.rawValue
+        case .studio(let kind): kind.rawValue
+        }
+    }
+
+    public var displayName: String {
+        switch backing {
+        case .cloud(let provider): provider.displayName
+        case .studio(let kind): kind.displayName
+        }
+    }
+
     public var hasDocumentedPresets: Bool { !documentedPresets.isEmpty }
     public var documentedPresets: [DesktopSpeechVoice] {
         if self == .xai { return XAITTSCatalog.voices.map(DesktopSpeechVoice.xai) }
@@ -22,15 +52,20 @@ public struct VoiceAccountProvider: Hashable, Identifiable, Sendable {
     }
 
     public var modelIdentifier: String {
-        if self == .soniox { return SonioxTTSCatalog.defaultModel.rawValue }
-        if self == .mistral { return MistralTTSCatalog.defaultModel.desktopModelIdentifier }
-        return XAITTSCatalog.providerIdentifier
+        switch backing {
+        case .cloud(.soniox): return SonioxTTSCatalog.defaultModel.rawValue
+        case .cloud(.mistral): return MistralTTSCatalog.defaultModel.desktopModelIdentifier
+        case .cloud: return XAITTSCatalog.providerIdentifier
+        case .studio(let kind): return kind.rawValue
+        }
     }
 
-    private init(_ provider: LiveTranscriptionProviderID) { self.provider = provider }
+    private init(_ provider: LiveTranscriptionProviderID) { self.backing = .cloud(provider) }
+
+    public init(studioKind: VoiceStudioKind) { self.backing = .studio(studioKind) }
 
     public init(id: String) throws {
-        guard let value = Self.all.first(where: { $0.id == id }) else {
+        guard let value = Self.desktopProviders.first(where: { $0.id == id }) else {
             throw VoiceOutputCredentialError.unavailable
         }
         self = value

@@ -119,6 +119,7 @@ extension TTSProvider {
     case .mistral: return .indigo
     case .speechmatics: return .cyan
     case .xai: return .black
+    case .voiceStudio: return .teal
     case .system: return .gray
     }
   }
@@ -137,6 +138,7 @@ extension TTSProvider {
     case .mistral: return "waveform.circle"
     case .speechmatics: return "waveform.and.magnifyingglass"
     case .xai: return "waveform.badge.mic"
+    case .voiceStudio: return "waveform.and.mic"
     case .system: return "speaker.wave.2"
     }
   }
@@ -155,7 +157,7 @@ extension TTSProvider {
     case .mistral: return "https://console.mistral.ai"
     case .speechmatics: return "https://www.speechmatics.com"
     case .xai: return "https://console.x.ai"
-    case .system: return ""
+    case .voiceStudio, .system: return ""
     }
   }
 

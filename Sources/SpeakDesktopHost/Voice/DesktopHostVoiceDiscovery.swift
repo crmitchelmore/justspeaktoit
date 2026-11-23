@@ -76,7 +76,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let profileEntry = saved.voiceID.flatMap {
             VoiceProfilePickerCatalog.resolve(voiceID: $0, in: listVoiceProfiles())
         }
-        if let profileEntry, VoiceProfilePickerCatalog.isProfileVoiceIdentifier(profileEntry.id) {
+        if let profileEntry,
+           VoiceProfilePickerCatalog.isProfileVoiceIdentifier(profileEntry.id),
+           VoiceStudioVoice.kind(forCanonicalID: profileEntry.id) == nil {
             throw DesktopHostError(
                 message: VoiceProfilePickerCatalog.unavailableMessage(
                     for: profileEntry.profileName,
@@ -89,7 +91,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             inventory = voiceDiscovery.inventories[.mistral]
         } else { inventory = selectedVoiceAccountInventory }
         do {
-            let selection = try saved.synthesisSelection(accountInventory: inventory)
+            let selection = try saved.synthesisSelection(
+                accountInventory: inventory,
+                studioConfiguration: voiceStudioConfiguration
+            )
             if !DesktopSpeechVoice.voices.contains(selection.voice), voiceAccountWorkers > 0 {
                 throw VoiceOutputCredentialError.busy
             }

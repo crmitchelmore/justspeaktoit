@@ -100,3 +100,15 @@ API breakage: enumelement AnalyticsDistributionChannel.googlePlay has been added
 # Windows and Linux report product analytics with the shared taxonomy (#1624).
 API breakage: enumelement AnalyticsPlatform.windows has been added as a new enum case
 API breakage: enumelement AnalyticsPlatform.linux has been added as a new enum case
+# Local voice studios (#1823): add studio voice/inventory variants and canonical
+# preference keys. Existing cases, raw values and signatures are unchanged; all
+# in-repository clients are rebuilt together.
+API breakage: enumelement DesktopSpeechVoice.studio has been added as a new enum case
+API breakage: enumelement VoiceAccountInventory.studio has been added as a new enum case
+API breakage: enumelement ApplicationPreferenceKey.voiceStudioEnabled has been added as a new enum case
+API breakage: enumelement ApplicationPreferenceKey.voiceStudioKind has been added as a new enum case
+API breakage: enumelement ApplicationPreferenceKey.voiceStudioBaseURL has been added as a new enum case
+API breakage: enumelement ApplicationPreferenceKey.voiceStudioGPTSoVITSReferenceAudioPath has been added as a new enum case
+API breakage: enumelement ApplicationPreferenceKey.voiceStudioGPTSoVITSReferencePromptText has been added as a new enum case
+API breakage: enumelement ApplicationPreferenceKey.voiceStudioGPTSoVITSPromptLanguage has been added as a new enum case
+API breakage: enumelement ApplicationPreferenceKey.voiceStudioGPTSoVITSTextLanguage has been added as a new enum case

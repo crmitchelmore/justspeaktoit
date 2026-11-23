@@ -94,5 +94,12 @@ public enum ApplicationPreferenceKey: String, CaseIterable, Sendable {
     case simpleModelChoices
     case rememberedLocalTranscriptionSource
     case rememberedRemoteTranscriptionMode
+    case voiceStudioEnabled
+    case voiceStudioKind
+    case voiceStudioBaseURL
+    case voiceStudioGPTSoVITSReferenceAudioPath
+    case voiceStudioGPTSoVITSReferencePromptText
+    case voiceStudioGPTSoVITSPromptLanguage
+    case voiceStudioGPTSoVITSTextLanguage
     case analyticsEnabled
 }

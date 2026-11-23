@@ -57,7 +57,7 @@ public enum VoiceSynthesisPricing {
         case .groq(let voice): return voice.model.costPerThousandCharacters
         case .speechmatics: return SpeechmaticsTTSAPI.estimatedCostPerThousandCharacters
         case .openai(let model, _): return model.costPerThousandCharacters
-        case .openaiRealtime: return nil
+        case .openaiRealtime, .studio: return nil
         case .elevenlabs: return ElevenLabsTTSAPI.estimatedCostPerThousandCharacters
         case .deepgram(let voice):
             if voice.model == DeepgramSpeechCatalog.flux { return nil }

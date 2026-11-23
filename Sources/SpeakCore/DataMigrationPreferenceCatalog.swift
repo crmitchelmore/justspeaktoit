@@ -123,7 +123,8 @@ public enum DataMigrationPreferenceCatalog {
              .shortenErrorDisplay, .showCompactHUD, .showHUD, .showLiveTranscriptInHUD,
              .showSidebarShortcutHints, .showStatusBarIconInDockOnly, .silenceDetectionEnabled,
              .simpleModelChoices, .skipPostProcessingWithLivePolish, .streamingInsertionEnabled,
-             .ttsAutoPlay, .ttsSaveToDirectory, .ttsUseSSML, .voiceCommandsEnabled, .warmMicrophoneOnKeyPress:
+             .ttsAutoPlay, .ttsSaveToDirectory, .ttsUseSSML, .voiceCommandsEnabled,
+             .voiceStudioEnabled, .warmMicrophoneOnKeyPress:
             return .boolean
         case .autoCorrectionsPromotionThreshold, .deepgramStopGracePeriod, .doubleTapWindow,
              .historyFlushInterval, .holdThreshold, .livePolishDebounceMs, .livePolishMinDeltaChars,
@@ -143,7 +144,10 @@ public enum DataMigrationPreferenceCatalog {
              .ttsLanguage, .sonioxTTSRegion, .mistralTTSModel, .ttsQuality, .ttsOutputFormat, .hudSizePreference,
              .speedMode, .livePolishModel, .clipboardInsertionTriggers, .recordingSoundProfile,
              .assemblyAIKeyterms, .transcriptionKeywords, .accessibilityInsertionMode,
-             .rememberedLocalTranscriptionSource, .rememberedRemoteTranscriptionMode:
+             .rememberedLocalTranscriptionSource, .rememberedRemoteTranscriptionMode,
+             .voiceStudioKind, .voiceStudioBaseURL, .voiceStudioGPTSoVITSReferenceAudioPath,
+             .voiceStudioGPTSoVITSReferencePromptText, .voiceStudioGPTSoVITSPromptLanguage,
+             .voiceStudioGPTSoVITSTextLanguage:
             return .text
         }
     }

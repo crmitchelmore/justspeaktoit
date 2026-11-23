@@ -17,6 +17,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
     /// Explicitly chosen Realtime API voice (a documented realtime voice id).
     case openaiRealtime(String)
     case elevenlabs(ElevenLabsTTSModels.Model, ElevenLabsTTSVoice)
+    case studio(VoiceStudioVoice)
 
     public var id: String {
         switch self {
@@ -33,6 +34,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .openai(_, let voice): voice.providerVoiceID
         case .openaiRealtime(let voice): OpenAIRealtimeSpeech.voiceIDPrefix + voice
         case .elevenlabs(_, let voice): voice.providerVoiceID
+        case .studio(let voice): voice.id
         }
     }
 
@@ -52,6 +54,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .openaiRealtime(let voice):
             OpenAIRealtimeSpeech.voices.first { $0.id == voice }?.name ?? voice
         case .elevenlabs(_, let voice): voice.displayName
+        case .studio(let voice): voice.name
         }
     }
 
@@ -70,6 +73,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .openai(let model, _): model.desktopModelIdentifier
         case .openaiRealtime: OpenAIRealtimeSpeech.catalogID
         case .elevenlabs(let model, _): model.desktopModelIdentifier
+        case .studio(let voice): voice.modelIdentifier
         }
     }
 
@@ -93,6 +97,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
                 } ?? "")
         case .openaiRealtime: "\(name) — OpenAI \(OpenAIRealtimeSpeech.displayName)"
         case .elevenlabs(let model, let voice): "\(voice.displayName) — \(model.displayName)"
+        case .studio(let voice): voice.label
         }
     }
 
@@ -109,6 +114,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .speechmatics: SpeechmaticsTTSCatalog.credentialIdentifier
         case .openai, .openaiRealtime: OpenAITTSCatalog.credentialIdentifier
         case .elevenlabs: ElevenLabsTTSCatalog.credentialIdentifier
+        case .studio(let voice): voice.studioKind.apiKeyCredentialIdentifier
         }
     }
 
@@ -125,6 +131,7 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         case .openai: .openai
         case .openaiRealtime: .openaiRealtime
         case .elevenlabs: .naturalSpeech
+        case .studio(let voice): voice.capabilities
         }
     }
 
@@ -219,7 +226,9 @@ public enum DesktopSpeechVoice: Hashable, Sendable {
         }
         return .deepgram(DeepgramSpeechCatalog.resolvedSelection(modelID: modelID, voiceID: voiceID).voice)
     }
+}
 
+extension DesktopSpeechVoice {
     private static func cartesiaSelection(model: String?, identifier: String?) throws -> Self? {
         guard model == CartesiaTTSCatalog.providerIdentifier
             || model?.hasPrefix(CartesiaTTSCatalog.voiceIDPrefix) == true

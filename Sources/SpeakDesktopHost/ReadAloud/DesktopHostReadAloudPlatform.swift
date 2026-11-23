@@ -66,9 +66,7 @@ package extension DesktopHostReadAloudPlatform {
         credential: @Sendable () async throws -> String
     ) async throws -> Data {
         try await DesktopSpeechSynthesis().synthesize(
-            source, voice: selection.voice, options: selection.options,
-            accountInventory: selection.accountInventory, sonioxRegion: selection.sonioxRegion,
-            language: selection.language, credential: credential
+            source, selection: selection, credential: credential
         )
     }
 

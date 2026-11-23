@@ -249,6 +249,19 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     }
 
     /// The key for a request that is about to send text to the voice's provider;
+    /// it stops cloud AI providers unless allowed, while local voice studios skip cloud consent.
+    package nonisolated static func readVoiceSynthesisKey(
+        effects: any DesktopHostEffects<Platform>,
+        voice: DesktopSpeechVoice,
+        consent: DesktopCloudSharingConsentStore
+    ) async throws -> String {
+        if case .studio = voice {
+            return try await readVoiceSynthesisKey(effects: effects, name: voice.apiKeyIdentifier)
+        }
+        return try await readVoiceSynthesisKey(effects: effects, name: voice.apiKeyIdentifier, consent: consent)
+    }
+
+    /// The key for a request that is about to send text to the voice's provider;
     /// it stops first if the user has not allowed that provider.
     package nonisolated static func readVoiceSynthesisKey(
         effects: any DesktopHostEffects<Platform>, name: String, consent: DesktopCloudSharingConsentStore

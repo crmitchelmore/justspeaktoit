@@ -5,6 +5,9 @@ import SpeakDesktop
 extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package var selectedVoiceAccountInventory: VoiceAccountInventory? {
         guard let identifier = voiceOutputSettings().voiceID else { return nil }
+        if let studioKind = VoiceStudioVoice.kind(forCanonicalID: identifier) {
+            return voiceDiscovery.inventories[VoiceAccountProvider(studioKind: studioKind)]
+        }
         return VoiceAccountProvider.all.first(where: { identifier.hasPrefix($0.id + "/") })
             .flatMap { voiceDiscovery.inventories[$0] }
     }

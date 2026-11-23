@@ -57,6 +57,7 @@ public enum DesktopSettingsSearch {
         case "Post-processing": return .postProcessing
         case "Keyboard": return .keyboard
         case "Corrections": return .corrections
+        case "Voice Output": return .voiceOutput
         default: return .general
         }
     }

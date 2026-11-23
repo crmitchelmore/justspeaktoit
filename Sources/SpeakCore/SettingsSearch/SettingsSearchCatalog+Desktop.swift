@@ -147,6 +147,17 @@ extension SettingsSearchCatalog {
             platforms: [.windows, .linux]
         ),
         SettingsSearchEntry(
+            id: "desktop.voiceStudio", title: "Local Voice Studio", section: .voiceOutput,
+            systemImage: "waveform.and.mic",
+            summary: "Connect Voicebox, VoiceStudio or GPT-SoVITS for local Read Aloud synthesis.",
+            keywords: [
+                "voicebox", "voicestudio", "gpt-sovits", "local tts", "self-hosted", "voice cloning",
+                "reference audio", "test connection", "studio api key"
+            ],
+            settingKeys: VoiceStudioPreference.allSettingKeys,
+            platforms: [.windows, .linux]
+        ),
+        SettingsSearchEntry(
             id: "desktop.voiceProviderKey", title: "Voice provider key", section: .voiceOutput,
             systemImage: "key.fill",
             summary: "The API key the selected voice provider uses.",

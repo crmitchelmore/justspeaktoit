@@ -107,6 +107,7 @@ struct DashboardTTSProvidersCard: View {
     case .mistral: return .indigo
     case .speechmatics: return .cyan
     case .xai: return .primary
+    case .voiceStudio: return .teal
     case .system: return .gray
     }
   }

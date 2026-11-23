@@ -170,6 +170,27 @@ extension DesktopConfiguration {
               }), defaultValue: AnyCodable(.string(RecordingFeedbackDefaults.profile.rawValue))),
         .init(key: ApplicationPreferenceKey.recordingSoundVolume.rawValue, title: "Recording sound volume (0 to 1)",
               group: "General", kind: .number(0...1),
-              defaultValue: AnyCodable(.double(RecordingFeedbackDefaults.volume)))
+              defaultValue: AnyCodable(.double(RecordingFeedbackDefaults.volume))),
+        .init(key: VoiceStudioPreference.enabledKey, title: "Enable local voice studio for Read Aloud",
+              group: "Voice Output", kind: .boolean, defaultValue: AnyCodable(.bool(false))),
+        .init(key: VoiceStudioPreference.kindKey, title: "Local voice studio backend",
+              group: "Voice Output",
+              kind: .choice(VoiceStudioKind.allCases.map { Choice(value: $0.rawValue, title: $0.displayName) }),
+              defaultValue: AnyCodable(.string(VoiceStudioKind.voicebox.rawValue))),
+        .init(key: VoiceStudioPreference.baseURLKey, title: "Local voice studio URL (blank uses studio default)",
+              group: "Voice Output", kind: .text, defaultValue: AnyCodable(.string(""))),
+        .init(key: VoiceStudioPreference.gptSoVITSReferenceAudioPathKey,
+              title: "GPT-SoVITS reference audio clip path",
+              group: "Voice Output", kind: .text, defaultValue: AnyCodable(.string(""))),
+        .init(key: VoiceStudioPreference.gptSoVITSReferencePromptTextKey,
+              title: "GPT-SoVITS reference prompt text",
+              group: "Voice Output", kind: .text, defaultValue: AnyCodable(.string(""))),
+        .init(key: VoiceStudioPreference.gptSoVITSReferencePromptLanguageKey,
+              title: "GPT-SoVITS reference prompt language",
+              group: "Voice Output", kind: .text,
+              defaultValue: AnyCodable(.string(VoiceStudioPreference.defaultGPTSoVITSLanguage))),
+        .init(key: VoiceStudioPreference.gptSoVITSTextLanguageKey, title: "GPT-SoVITS output language",
+              group: "Voice Output", kind: .text,
+              defaultValue: AnyCodable(.string(VoiceStudioPreference.defaultGPTSoVITSLanguage)))
     ]
 }

@@ -137,7 +137,7 @@ public enum VoiceCatalogAndroidExport {
         case .groq: return ("groq", "Groq")
         case .speechmatics: return ("speechmatics", "Speechmatics")
         case .elevenlabs: return ("elevenlabs", "ElevenLabs")
-        case .mistral, .openai, .openaiRealtime: return nil
+        case .mistral, .openai, .openaiRealtime, .studio: return nil
         }
     }
 
@@ -233,7 +233,7 @@ public enum VoiceCatalogAndroidExport {
                     fallbackStatuses: dialogueFallbackStatuses
                 )
             }
-        case .mistral, .openai, .openaiRealtime:
+        case .mistral, .openai, .openaiRealtime, .studio:
             return nil
         }
         return Voice(

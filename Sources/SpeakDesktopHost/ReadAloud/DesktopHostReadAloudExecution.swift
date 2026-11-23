@@ -21,7 +21,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let selection: DesktopSpeechSelection
         do {
             selection = try currentVoiceSelection()
-            try requireCloudSharing([DesktopHostCloudSharing.voice(selection.voice)])
+            if let consentRequest = DesktopHostCloudSharing.voice(selection.voice) {
+                try requireCloudSharing([consentRequest])
+            }
         } catch {
             update("Read aloud failed: \(error.localizedDescription)"); return
         }
@@ -117,7 +119,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         } else {
             let wav = try await Platform.synthesizeVoiceOutput(source, selection: selection) {
                 try await Self.readVoiceSynthesisKey(
-                    effects: effects, name: selection.voice.apiKeyIdentifier, consent: consent)
+                    effects: effects, voice: selection.voice, consent: consent)
             }
             try await DesktopVoicePlaybackFile.play(
                 VoiceGeneratedAudio(validating: wav, sampleRate: selection.sampleRate),

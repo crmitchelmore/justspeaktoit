@@ -42,13 +42,17 @@ struct LongListPickerItems<Item, ID: Hashable> {
         query: String,
         searchText: (Item) -> [String],
         group: ((Item) -> String)?,
+        groupOrder: ((String, String) -> Bool)? = nil,
         includes: (Item) -> Bool = { _ in true }
     ) -> [Group] {
         let matches = matches(query: query, searchText: searchText, includes: includes)
             .filter { id($0) != selection }
         guard let group else { return matches.isEmpty ? [] : [Group(title: "", items: matches)] }
-        return Dictionary(grouping: matches, by: group).map { Group(title: $0.key, items: $0.value) }
-            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        let grouped = Dictionary(grouping: matches, by: group).map { Group(title: $0.key, items: $0.value) }
+        if let groupOrder {
+            return grouped.sorted { groupOrder($0.title, $1.title) }
+        }
+        return grouped.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
 
     private func matches(
@@ -70,6 +74,7 @@ struct LongListPicker<Item, ID: Hashable, Row: View>: View {
     @Binding var selection: ID
     let searchText: (Item) -> [String]
     var group: ((Item) -> String)?
+    var groupOrder: ((String, String) -> Bool)?
     var threshold = LongListPickerPolicy.threshold
     var alwaysUsesSheet = false
     var includes: (Item) -> Bool = { _ in true }
@@ -108,7 +113,7 @@ struct LongListPicker<Item, ID: Hashable, Row: View>: View {
             .sheet(isPresented: $showsChooser) {
                 LongListChooserSheet(
                     title: title, items: items, id: id, selection: $selection,
-                    searchText: searchText, group: group, includes: includes,
+                    searchText: searchText, group: group, groupOrder: groupOrder, includes: includes,
                     controls: controls, clearFilters: clearFilters, accessory: accessory,
                     footer: { _ in EmptyView() }, row: row
                 )
@@ -132,6 +137,7 @@ struct LongListChooserSheet<Item, ID: Hashable, Row: View, Footer: View>: View {
     @Binding var selection: ID
     let searchText: (Item) -> [String]
     var group: ((Item) -> String)?
+    var groupOrder: ((String, String) -> Bool)?
     var includes: (Item) -> Bool = { _ in true }
     var filtersCurrentSelection = false
     var controls: () -> AnyView = { AnyView(EmptyView()) }
@@ -146,7 +152,10 @@ struct LongListChooserSheet<Item, ID: Hashable, Row: View, Footer: View>: View {
     private var catalog: LongListPickerItems<Item, ID> { LongListPickerItems(items: items, id: id) }
 
     private var groups: [LongListPickerItems<Item, ID>.Group] {
-        catalog.groups(selection: selection, query: query, searchText: searchText, group: group, includes: includes)
+        catalog.groups(
+            selection: selection, query: query, searchText: searchText,
+            group: group, groupOrder: groupOrder, includes: includes
+        )
     }
 
     var body: some View {

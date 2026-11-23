@@ -6,6 +6,7 @@ import SwiftUI
 struct VoiceOutputView: View {
   @EnvironmentObject private var tts: TextToSpeechManager
   @EnvironmentObject private var settings: AppSettings
+  @EnvironmentObject private var voiceProfiles: VoiceProfileManager
   @Environment(\.appVisualDensity) private var density
   @StateObject private var composer = VoiceOutputComposer()
 
@@ -26,6 +27,11 @@ struct VoiceOutputView: View {
     .task {
       composer.selectedVoice = settings.defaultTTSVoice
       await composer.loadAvailableVoices(from: tts, defaultVoice: settings.defaultTTSVoice)
+    }
+    .onReceive(voiceProfiles.$profiles) { _ in
+      Task {
+        await composer.loadAvailableVoices(from: tts, defaultVoice: settings.defaultTTSVoice)
+      }
     }
     .onChange(of: composer.selectedVoice) { _, _ in
       composer.updateEstimatedCost(using: tts)

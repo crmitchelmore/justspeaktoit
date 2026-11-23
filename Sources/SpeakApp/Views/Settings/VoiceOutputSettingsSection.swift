@@ -6,6 +6,7 @@ import SwiftUI
 struct VoiceOutputSettingsSection: View, AppSettingsBindingProviding {
   @EnvironmentObject var environment: AppEnvironment
   @EnvironmentObject var settings: AppSettings
+  @EnvironmentObject var voiceProfiles: VoiceProfileManager
   /// Voices only a keyed account lists — Mistral publishes no presets.
   @State private var accountListedVoices: [TTSVoice] = []
 
@@ -17,9 +18,13 @@ struct VoiceOutputSettingsSection: View, AppSettingsBindingProviding {
   /// keys' accounts list, so a Mistral voice can be made the default here and
   /// not only chosen ad hoc in Voice Output.
   private var defaultVoicePickerOptions: [TTSVoice] {
-    VoiceCatalog.includingSelection(
+    var seen = Set<String>()
+    let combined = (voiceProfiles.myTTSVoices + VoiceCatalog.allVoices + accountListedVoices).filter {
+      seen.insert($0.id).inserted
+    }
+    return VoiceCatalog.includingSelection(
       settings.defaultTTSVoice,
-      in: VoiceCatalog.allVoices + accountListedVoices
+      in: combined
     )
   }
 
@@ -91,6 +96,8 @@ struct VoiceOutputSettingsSection: View, AppSettingsBindingProviding {
       .task {
         accountListedVoices = await environment.tts.accountListedVoices()
       }
+
+      VoiceProfilesSettingsCard()
 
       SettingsCard(title: "Audio Quality & Performance", systemImage: "waveform.circle", tint: Color.green) {
         VStack(alignment: .leading, spacing: 16) {

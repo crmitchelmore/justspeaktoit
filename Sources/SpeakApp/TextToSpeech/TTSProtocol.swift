@@ -166,9 +166,30 @@ struct TTSVoice: Identifiable, Hashable, Codable {
   let provider: TTSProvider
   let traits: [VoiceTrait]
   let previewURL: URL?
+  let customGroupTitle: String?
+
+  init(
+    id: String,
+    name: String,
+    provider: TTSProvider,
+    traits: [VoiceTrait],
+    previewURL: URL?,
+    customGroupTitle: String? = nil
+  ) {
+    self.id = id
+    self.name = name
+    self.provider = provider
+    self.traits = traits
+    self.previewURL = previewURL
+    self.customGroupTitle = customGroupTitle
+  }
+
+  var pickerGroupTitle: String {
+    customGroupTitle ?? provider.displayName
+  }
 
   var displayName: String {
-    "\(name) (\(provider.displayName))"
+    customGroupTitle != nil ? name : "\(name) (\(provider.displayName))"
   }
 
   enum VoiceTrait: String, Codable, Hashable {

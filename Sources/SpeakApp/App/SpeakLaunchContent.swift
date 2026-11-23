@@ -43,6 +43,7 @@ struct SpeakLaunchContent: View {
             .environmentObject(environment.personalLexicon)
             .environmentObject(environment.audioDevices)
             .environmentObject(environment.tts)
+            .environmentObject(environment.voiceProfiles)
             .environmentObject(environment.shortcuts)
             .environmentObject(environment.recordingControl)
             .onAppear { mainContentAppeared(environment) }

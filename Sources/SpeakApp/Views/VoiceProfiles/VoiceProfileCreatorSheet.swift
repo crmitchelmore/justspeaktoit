@@ -55,6 +55,7 @@ struct VoiceProfileCreatorSheet: View {
             && stagedClips.count <= VoiceProfile.maximumClips
             && stagedClips.allSatisfy(\.qualityReport.passed)
             && consentAccepted
+            && !recorder.isStarting
             && !recorder.isRecording
     }
 
@@ -109,6 +110,9 @@ struct VoiceProfileCreatorSheet: View {
             allowsMultipleSelection: false
         ) { result in
             handleImportedFile(result)
+        }
+        .onDisappear {
+            Task { await recorder.cancelRecording() }
         }
     }
 }
@@ -261,6 +265,8 @@ private extension VoiceProfileCreatorSheet {
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             do {
                 let staged = try voiceProfiles.prepareClipFromFile(at: url, targetFormat: .pcm24k)
                 appendClip(staged)

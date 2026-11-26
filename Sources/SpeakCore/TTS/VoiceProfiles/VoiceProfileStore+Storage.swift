@@ -1,5 +1,47 @@
 import Foundation
 
+struct VoiceProfileStorePendingRemoteBinding: Codable, Equatable {
+    let engineID: String
+    let remoteVoiceID: String
+    let providerDisplayName: String
+}
+
+struct VoiceProfileStorePendingDeletion: Codable, Equatable {
+    let profileID: UUID
+    let profileName: String
+    let remoteBindings: [VoiceProfileStorePendingRemoteBinding]
+}
+
+struct VoiceProfileStoreDocument: Codable {
+    var schemaVersion = 1
+    var profiles: [VoiceProfile] = []
+    var pendingDeletions: [VoiceProfileStorePendingDeletion] = []
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case profiles
+        case pendingDeletions
+    }
+
+    init(
+        schemaVersion: Int = 1,
+        profiles: [VoiceProfile] = [],
+        pendingDeletions: [VoiceProfileStorePendingDeletion] = []
+    ) {
+        self.schemaVersion = schemaVersion
+        self.profiles = profiles
+        self.pendingDeletions = pendingDeletions
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        profiles = try container.decodeIfPresent([VoiceProfile].self, forKey: .profiles) ?? []
+        pendingDeletions =
+            try container.decodeIfPresent([VoiceProfileStorePendingDeletion].self, forKey: .pendingDeletions) ?? []
+    }
+}
+
 extension VoiceProfileStore {
     func prepareClip(
         input: ClipInput,
@@ -62,6 +104,55 @@ extension VoiceProfileStore {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(StoreDocument.self, from: data)
+    }
+
+    func preparePendingDeletion(
+        id: UUID,
+        in document: inout StoreDocument
+    ) throws -> PendingDeletion {
+        if let existing = document.pendingDeletions.first(where: { $0.profileID == id }) {
+            return existing
+        }
+        guard let index = document.profiles.firstIndex(where: { $0.id == id }) else {
+            throw VoiceProfileStoreError.profileNotFound(id)
+        }
+        let removed = document.profiles.remove(at: index)
+        let pending = PendingDeletion(
+            profileID: removed.id,
+            profileName: removed.name,
+            remoteBindings: removed.remoteBindings.map {
+                PendingRemoteBinding(
+                    engineID: $0.engineID,
+                    remoteVoiceID: $0.remoteVoiceID,
+                    providerDisplayName: $0.providerDisplayName
+                )
+            }
+        )
+        document.pendingDeletions.append(pending)
+        document = try saveDocument(document)
+        return pending
+    }
+
+    func finalizePendingDeletion(
+        _ pending: PendingDeletion,
+        in document: inout StoreDocument
+    ) throws -> DeletionResult {
+        document.pendingDeletions.removeAll { $0.profileID == pending.profileID }
+        try saveDocument(document)
+        let remote = pending.remoteBindings.map {
+            VoiceProfileRemoteBinding(
+                profileID: pending.profileID,
+                profileName: pending.profileName,
+                engineID: $0.engineID,
+                remoteVoiceID: $0.remoteVoiceID,
+                providerDisplayName: $0.providerDisplayName
+            )
+        }
+        return DeletionResult(
+            deletedProfileID: pending.profileID,
+            deletedProfileName: pending.profileName,
+            remoteBindings: remote
+        )
     }
 
     @discardableResult

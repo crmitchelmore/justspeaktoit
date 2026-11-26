@@ -235,15 +235,9 @@ final class VoiceProfileMacTests: XCTestCase {
     }
 }
 
-private extension VoiceProfileMacTests {
-    struct ManagerSpies {
-        let manager: TextToSpeechManager
-        let systemSpy: SpyTTSClient
-        let openAISpy: SpyTTSClient
-    }
-
+extension VoiceProfileMacTests {
     @MainActor
-    func makeTTSManagerWithSpies(defaults: UserDefaults, suite: String) -> ManagerSpies {
+    private func makeTTSManagerWithSpies(defaults: UserDefaults, suite: String) -> ManagerSpies {
         let settings = AppSettings(defaults: defaults)
         settings.ttsAutoPlay = false
         settings.ttsSaveToDirectory = false
@@ -368,6 +362,12 @@ private final class IsolatedSupportFileManager: FileManager, @unchecked Sendable
     ) -> [URL] {
         directory == .applicationSupportDirectory ? [root] : super.urls(for: directory, in: domainMask)
     }
+}
+
+private struct ManagerSpies {
+    let manager: TextToSpeechManager
+    let systemSpy: SpyTTSClient
+    let openAISpy: SpyTTSClient
 }
 
 private actor SpyTTSClient: TextToSpeechClient {

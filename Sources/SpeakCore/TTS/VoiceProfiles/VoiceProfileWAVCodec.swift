@@ -76,6 +76,7 @@ public enum VoiceProfileWAVCodec {
     }
 
     public static func decodeWAV(_ data: Data) throws -> VoiceProfilePCMBuffer {
+        let data = data.startIndex == 0 ? data : Data(data)
         guard data.count <= maximumInputBytes else {
             throw VoiceProfileWAVCodecError.fileTooLarge(maximumInputBytes)
         }

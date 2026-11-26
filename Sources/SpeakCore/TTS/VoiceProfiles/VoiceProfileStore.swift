@@ -89,10 +89,9 @@ public final class VoiceProfileStore: @unchecked Sendable {
         }
     }
 
-    struct StoreDocument: Codable {
-        var schemaVersion = 1
-        var profiles: [VoiceProfile] = []
-    }
+    typealias PendingRemoteBinding = VoiceProfileStorePendingRemoteBinding
+    typealias PendingDeletion = VoiceProfileStorePendingDeletion
+    typealias StoreDocument = VoiceProfileStoreDocument
 
     public let rootDirectory: URL
     let lock = NSLock()
@@ -168,20 +167,26 @@ public final class VoiceProfileStore: @unchecked Sendable {
 
         return try lock.withLock {
             try ensurePrivateContainer()
+            var document = try loadDocument()
+            let duplicate = document.profiles.contains { $0.id == profile.id }
+                || document.pendingDeletions.contains { $0.profileID == profile.id }
+            guard !duplicate else {
+                throw VoiceProfileStoreError.storageFailure("A voice profile with this identifier already exists.")
+            }
             let folder = try profileDirectory(for: profile.id)
+            let folderExisted = fileManager.fileExists(atPath: folder.path)
             try createPrivateDirectory(folder)
             do {
                 for entry in prepared {
                     let clipFile = folder.appendingPathComponent(entry.clip.filename, isDirectory: false)
                     try writePrivateFile(entry.wavData, to: clipFile)
                 }
-                var document = try loadDocument()
                 let insertionIndex = document.profiles.count
                 document.profiles.append(profile)
                 let persisted = try saveDocument(document)
                 return persisted.profiles[insertionIndex]
             } catch {
-                try? fileManager.removeItem(at: folder)
+                if !folderExisted { try? fileManager.removeItem(at: folder) }
                 throw error
             }
         }
@@ -300,13 +305,13 @@ extension VoiceProfileStore {
         from profileID: UUID,
         now: Date = Date()
     ) throws -> VoiceProfile {
-        var removedEmbedding: URL?
-        let updated = try lock.withLock {
+        try lock.withLock {
             var document = try loadDocument()
             guard let index = document.profiles.firstIndex(where: { $0.id == profileID }) else {
                 throw VoiceProfileStoreError.profileNotFound(profileID)
             }
             var profile = document.profiles[index]
+            var removedEmbedding: URL?
             if let oldBinding = profile.engineBindings.removeValue(forKey: engineID),
                let path = oldBinding.localEmbeddingPath {
                 removedEmbedding = try? safePath(profileID: profileID, relativePath: path)
@@ -314,35 +319,24 @@ extension VoiceProfileStore {
             profile.updatedAt = now
             document.profiles[index] = profile
             let persisted = try saveDocument(document)
+            if let removedEmbedding {
+                try? fileManager.removeItem(at: removedEmbedding)
+            }
             return persisted.profiles[index]
         }
-        if let removedEmbedding {
-            try? fileManager.removeItem(at: removedEmbedding)
-        }
-        return updated
     }
 
     /// Removes the profile, all clips, all local embeddings and bindings, returning any remote clones.
     public func deleteProfile(id: UUID) throws -> DeletionResult {
         try lock.withLock {
-            var document = try loadDocument()
-            guard let index = document.profiles.firstIndex(where: { $0.id == id }) else {
-                throw VoiceProfileStoreError.profileNotFound(id)
-            }
-            let removed = document.profiles.remove(at: index)
-            let remote = removed.remoteBindings
             try ensurePrivateContainer()
-            try saveDocument(document)
-
+            var document = try loadDocument()
+            let pending = try preparePendingDeletion(id: id, in: &document)
             let folder = try profileDirectory(for: id)
             if fileManager.fileExists(atPath: folder.path) {
                 try fileManager.removeItem(at: folder)
             }
-            return DeletionResult(
-                deletedProfileID: removed.id,
-                deletedProfileName: removed.name,
-                remoteBindings: remote
-            )
+            return try finalizePendingDeletion(pending, in: &document)
         }
     }
 }

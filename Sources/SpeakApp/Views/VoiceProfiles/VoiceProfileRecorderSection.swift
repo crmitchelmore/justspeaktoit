@@ -9,6 +9,7 @@ struct VoiceProfileRecorderSection: View {
     let onClipCaptured: (VoiceProfileStagedClip) -> Void
 
     @State private var selectedScriptID = VoiceProfilePromptCatalog.scripts[0].id
+    @State private var activeCaptureScriptText: String?
     @State private var statusMessage: String?
 
     private var selectedScript: VoiceProfilePromptScript {
@@ -24,6 +25,7 @@ struct VoiceProfileRecorderSection: View {
                 }
             }
             .pickerStyle(.menu)
+            .disabled(recorder.isStarting || recorder.isRecording)
             .accessibilityIdentifier("voiceProfilePromptScriptPicker")
 
             VStack(alignment: .leading, spacing: 6) {
@@ -56,14 +58,15 @@ struct VoiceProfileRecorderSection: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(recorder.isRecording ? .red : .brandAccent)
-                .disabled(!recorder.isRecording && isAtClipLimit)
+                .disabled(recorder.isStarting || (!recorder.isRecording && isAtClipLimit))
                 .accessibilityLabel(recorder.isRecording ? "Stop voice sample recording" : "Record voice sample")
                 .accessibilityValue(recorder.isRecording ? "Recording" : "Idle")
                 .accessibilityAddTraits(recorder.isRecording ? .isButton : [.isButton, .startsMediaSession])
                 .accessibilityIdentifier("voiceProfileRecordButton")
 
-                if recorder.isRecording {
+                if recorder.isStarting || recorder.isRecording {
                     Button("Cancel Recording", role: .cancel) {
+                        activeCaptureScriptText = nil
                         Task { await recorder.cancelRecording() }
                     }
                     .buttonStyle(.bordered)
@@ -127,18 +130,26 @@ struct VoiceProfileRecorderSection: View {
     private func toggleRecording() async {
         statusMessage = nil
         if recorder.isRecording {
+            let scriptText = activeCaptureScriptText ?? selectedScript.fullText
+            activeCaptureScriptText = nil
             if let buffer = await recorder.stopRecording(targetFormat: .pcm24k) {
-                let staged = voiceProfiles.stageRecordedClip(buffer, transcript: selectedScript.fullText)
+                let staged = voiceProfiles.stageRecordedClip(buffer, transcript: scriptText)
                 onClipCaptured(staged)
             }
             return
         }
+        let scriptText = selectedScript.fullText
+        activeCaptureScriptText = scriptText
         do {
             try await recorder.startRecording { buffer in
-                let staged = voiceProfiles.stageRecordedClip(buffer, transcript: selectedScript.fullText)
+                activeCaptureScriptText = nil
+                let staged = voiceProfiles.stageRecordedClip(buffer, transcript: scriptText)
                 onClipCaptured(staged)
             }
+        } catch is CancellationError {
+            activeCaptureScriptText = nil
         } catch {
+            activeCaptureScriptText = nil
             statusMessage = error.localizedDescription
         }
     }

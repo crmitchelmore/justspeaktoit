@@ -59,6 +59,12 @@ struct VoiceProfileHistoryPickerSection: View {
                 candidatePreview(candidateClip)
             }
         }
+        .onDisappear {
+            if let previewURL = candidateClip?.previewURL {
+                try? FileManager.default.removeItem(at: previewURL)
+            }
+            candidateClip = nil
+        }
     }
 
     private func candidatePreview(_ clip: VoiceProfileStagedClip) -> some View {
@@ -82,9 +88,10 @@ struct VoiceProfileHistoryPickerSection: View {
                 }
             }
             Button("Add Trimmed Clip") {
-                onClipPrepared(clip)
+                let accepted = clip
                 candidateClip = nil
                 selectedItemID = nil
+                onClipPrepared(accepted)
             }
             .buttonStyle(.borderedProminent)
             .disabled(isAtClipLimit)

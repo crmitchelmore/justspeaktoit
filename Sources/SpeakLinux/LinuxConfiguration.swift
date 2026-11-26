@@ -65,7 +65,8 @@ extension LinuxWindow {
         try await holder.controller.performConfigurationEditorAction(action, values: values, editorID: editorID)
         try await configureConfiguration(holder)
         voiceOutput(await holder.controller.voiceOutputSettings(),
-            accountInventory: await holder.controller.selectedVoiceAccountInventory)
+            accountInventory: await holder.controller.selectedVoiceAccountInventory,
+            voiceProfiles: await holder.controller.listVoiceProfiles())
         if action == 1 { postProcessing(await holder.controller.postProcessingOptions()) }
     }
 }

@@ -133,8 +133,42 @@ final class DesktopHostVoiceProfilesTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(prepared.pcmBuffer.durationSeconds, 10.0)
         XCTAssertLessThanOrEqual(prepared.pcmBuffer.durationSeconds, 20.0)
         XCTAssertTrue(prepared.qualityReport.passed, "\(prepared.qualityReport.rejectionReasons)")
-        XCTAssertEqual(prepared.suggestedTranscript, "Clean sample from history")
+        XCTAssertEqual(prepared.suggestedTranscript, "")
         XCTAssertNotNil(prepared.trimResult)
+    }
+
+    func testPrepareFromHistory_PreservesVerbatimTranscriptWhenUntrimmed() async throws {
+        await controller.markReadyForSelfTest()
+        let buffer = Self.makeSpeechBuffer(duration: 12.0, sampleRate: 16_000, fundamentalHz: 145, withPauses: true)
+        let wavData = try VoiceProfileWAVCodec.encodeWAV(buffer, format: .pcm16k)
+
+        let recordID = UUID()
+        let audioFilename = "\(recordID.uuidString).wav"
+        let storeDirectory = await controller.store.directory
+        try wavData.write(to: storeDirectory.appendingPathComponent(audioFilename), options: .atomic)
+        var record = DesktopRecordingStore.Record(
+            id: recordID,
+            audioFilename: audioFilename,
+            modelIdentifier: ModelCatalog.defaultBatchTranscriptionModel
+        )
+        record.result = TranscriptionResult(
+            text: "Verbatim raw speech.",
+            segments: [],
+            confidence: nil,
+            duration: 12.0,
+            modelIdentifier: ModelCatalog.defaultBatchTranscriptionModel,
+            cost: nil,
+            rawPayload: nil,
+            debugInfo: nil
+        )
+        record.processedText = "Rewritten cleanup speech."
+        try await controller.store.save(record)
+
+        let prepared = try await controller.prepareVoiceProfileClipFromHistory(
+            recordID: recordID,
+            targetFormat: .pcm16k
+        )
+        XCTAssertEqual(prepared.suggestedTranscript, "Verbatim raw speech.")
     }
 
     func testPrepareFromFile_SupportsWAVAndPlatformConverterAndTranscribes() async throws {
@@ -207,8 +241,10 @@ final class DesktopHostVoiceProfilesTests: XCTestCase {
         let remaining = await controller.listVoiceProfiles()
         XCTAssertTrue(remaining.isEmpty)
     }
+}
 
-    private func assertUnconsentedProfileRejected(clip: VoiceProfileStore.ClipInput) async throws {
+private extension DesktopHostVoiceProfilesTests {
+    func assertUnconsentedProfileRejected(clip: VoiceProfileStore.ClipInput) async throws {
         do {
             _ = try await controller.createVoiceProfile(
                 name: "Unconsented", language: "en", clips: [clip], consent: nil
@@ -219,7 +255,7 @@ final class DesktopHostVoiceProfilesTests: XCTestCase {
         }
     }
 
-    private func bindDemoEngines(to profileID: UUID) async throws -> [MyVoicePickerEntry] {
+    func bindDemoEngines(to profileID: UUID) async throws -> [MyVoicePickerEntry] {
         let localBinding = VoiceProfileEngineBinding(
             engineID: "local/tts/demo",
             engineDisplayName: "Local Demo Engine",
@@ -237,7 +273,7 @@ final class DesktopHostVoiceProfilesTests: XCTestCase {
         return entries
     }
 
-    private func assertSelectedProfileFailsClosed(expectedName: String) async throws {
+    func assertSelectedProfileFailsClosed(expectedName: String) async throws {
         do {
             _ = try await controller.currentVoiceSelection()
             XCTFail("Expected unbound/unimplemented profile engine to refuse synthesis")
@@ -247,7 +283,7 @@ final class DesktopHostVoiceProfilesTests: XCTestCase {
         XCTAssertTrue(FakeSpeech.shared.spoken.isEmpty)
     }
 
-    private static func makeSpeechBuffer(
+    static func makeSpeechBuffer(
         duration: Double,
         sampleRate: Int,
         fundamentalHz: Double = 140.0,

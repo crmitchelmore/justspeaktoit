@@ -10,6 +10,11 @@ final class VoiceProfileAudioPortableTests: XCTestCase {
         XCTAssertEqual(decoded24.sampleRate, 24_000)
         XCTAssertEqual(decoded24.samples.count, source24k.samples.count)
 
+        let sliced = (Data(repeating: 0xAA, count: 16) + wav24).dropFirst(16)
+        let decodedSlice = try VoiceProfileWAVCodec.decodeWAV(sliced)
+        XCTAssertEqual(decodedSlice.sampleRate, 24_000)
+        XCTAssertEqual(decodedSlice.samples.count, source24k.samples.count)
+
         let wav16 = try VoiceProfileWAVCodec.encodeWAV(source24k, format: .pcm16k)
         let decoded16 = try VoiceProfileWAVCodec.decodeWAV(wav16)
         XCTAssertEqual(decoded16.sampleRate, 16_000)

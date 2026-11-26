@@ -41,8 +41,12 @@ extension DesktopHostController {
             originalDurationSeconds: trimResult.originalDurationSeconds,
             qualityReport: report
         )
-        let transcript = (record.displayText ?? record.originalText ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let wasTrimmed = trimResult.startTimeSeconds > 0.25
+            || (trimResult.originalDurationSeconds - trimResult.endTimeSeconds) > 0.25
+        let verbatimTranscript = [record.originalText, record.displayText]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? ""
+        let transcript = wasTrimmed ? "" : verbatimTranscript
         return VoiceProfilePreparedClip(
             pcmBuffer: resampled,
             qualityReport: report,

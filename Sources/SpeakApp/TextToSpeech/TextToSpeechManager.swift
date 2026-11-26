@@ -429,7 +429,8 @@ extension TextToSpeechManager {
   private func ensureProfileVoiceExecutable(_ voiceID: String) throws {
     let matchedMyVoice = myVoicesProvider?().first(where: { $0.id == voiceID })
     let isKnownProvider = TTSProvider.knownVoiceIDPrefixes.contains(where: { voiceID.hasPrefix($0) })
-    if VoiceProfilePickerCatalog.isProfileVoiceIdentifier(voiceID) || (matchedMyVoice != nil && !isKnownProvider) {
+    if !isKnownProvider,
+       VoiceProfilePickerCatalog.isProfileVoiceIdentifier(voiceID) || matchedMyVoice != nil {
       throw TTSError.synthesisFailure(
         VoiceProfilePickerCatalog.unavailableMessage(for: matchedMyVoice?.name)
       )

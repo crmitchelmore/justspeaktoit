@@ -95,6 +95,7 @@ private final class VoiceProfileCaptureAccumulator: @unchecked Sendable {
 /// Captures a guided voice-profile microphone clip with live level and clipping telemetry.
 @MainActor
 final class VoiceProfileRecorder: ObservableObject {
+    @Published private(set) var isStarting = false
     @Published private(set) var isRecording = false
     @Published private(set) var elapsedSeconds: TimeInterval = 0
     @Published private(set) var level: Float = 0
@@ -113,6 +114,7 @@ final class VoiceProfileRecorder: ObservableObject {
     private var meterTask: Task<Void, Never>?
     private var lastClipAnnouncementAt: Date = .distantPast
     private var onAutoStop: ((VoiceProfilePCMBuffer) -> Void)?
+    private var startGeneration: UInt64 = 0
 
     init(
         permissionsManager: PermissionsManager,
@@ -125,10 +127,17 @@ final class VoiceProfileRecorder: ObservableObject {
     }
 
     func startRecording(onAutoStop: ((VoiceProfilePCMBuffer) -> Void)? = nil) async throws {
-        guard !isRecording else { throw VoiceProfileAudioAdapterError.alreadyRecording }
+        guard !isRecording, !isStarting else { throw VoiceProfileAudioAdapterError.alreadyRecording }
+        startGeneration &+= 1
+        let generation = startGeneration
+        isStarting = true
         errorMessage = nil
+        defer {
+            if startGeneration == generation { isStarting = false }
+        }
 
         let permission = await permissionsManager.ensureGranted(.microphone)
+        guard startGeneration == generation, !Task.isCancelled else { throw CancellationError() }
         guard permission.isGranted else {
             let error = VoiceProfileAudioAdapterError.microphonePermissionDenied
             errorMessage = error.localizedDescription
@@ -137,32 +146,12 @@ final class VoiceProfileRecorder: ObservableObject {
         }
 
         let session = await audioDeviceManager.beginUsingPreferredInput()
-        let engine = AVAudioEngine()
-        let inputNode = engine.inputNode
-        let hardwareFormat = inputNode.outputFormat(forBus: 0)
-        guard audioInputFormatIsUsable(hardwareFormat) else {
+        guard startGeneration == generation, !Task.isCancelled else {
             await audioDeviceManager.endUsingPreferredInput(session: session)
-            let error = VoiceProfileAudioAdapterError.audioInputUnavailable
-            errorMessage = error.localizedDescription
-            accessibilityAnnouncer("No usable microphone input is available.")
-            throw error
+            throw CancellationError()
         }
 
-        let captureAccumulator = VoiceProfileCaptureAccumulator(sampleRate: Int(hardwareFormat.sampleRate.rounded()))
-        do {
-            try inputNode.installTapSafely(onBus: 0, bufferSize: 2_048, format: hardwareFormat) { buffer, _ in
-                captureAccumulator.append(buffer: buffer)
-            }
-            try await startAudioEngineAfterInputDeviceSettles(engine)
-        } catch {
-            inputNode.removeTap(onBus: 0)
-            engine.stop()
-            await audioDeviceManager.endUsingPreferredInput(session: session)
-            errorMessage = error.localizedDescription
-            accessibilityAnnouncer("Could not start voice profile recording.")
-            throw error
-        }
-
+        let (engine, captureAccumulator) = try await beginEngineCapture(session: session, generation: generation)
         self.audioEngine = engine
         self.accumulator = captureAccumulator
         self.inputSession = session
@@ -182,13 +171,65 @@ final class VoiceProfileRecorder: ObservableObject {
         let raw = await tearDownCapture()
         accessibilityAnnouncer("Recording voice sample stopped.")
         guard !raw.samples.isEmpty else { return nil }
-        return VoiceProfileWAVCodec.resample(raw, to: targetFormat)
+        return Self.cappedToMaximumDuration(VoiceProfileWAVCodec.resample(raw, to: targetFormat))
     }
 
     func cancelRecording() async {
-        guard isRecording else { return }
-        _ = await tearDownCapture()
+        let wasActive = isStarting || isRecording
+        startGeneration &+= 1
+        isStarting = false
+        guard wasActive else { return }
+        if isRecording || audioEngine != nil || inputSession != nil {
+            _ = await tearDownCapture()
+        }
         accessibilityAnnouncer("Recording voice sample cancelled.")
+    }
+
+    static func cappedToMaximumDuration(_ buffer: VoiceProfilePCMBuffer) -> VoiceProfilePCMBuffer {
+        guard buffer.sampleRate > 0 else { return buffer }
+        let maximumSamples = Int((VoiceProfile.maximumClipDuration * Double(buffer.sampleRate)).rounded(.down))
+        guard maximumSamples > 0, buffer.samples.count > maximumSamples else { return buffer }
+        return VoiceProfilePCMBuffer(
+            samples: Array(buffer.samples.prefix(maximumSamples)),
+            sampleRate: buffer.sampleRate
+        )
+    }
+
+    private func beginEngineCapture(
+        session: AudioInputDeviceManager.SessionContext,
+        generation: UInt64
+    ) async throws -> (AVAudioEngine, VoiceProfileCaptureAccumulator) {
+        let engine = AVAudioEngine()
+        let inputNode = engine.inputNode
+        let hardwareFormat = inputNode.outputFormat(forBus: 0)
+        guard audioInputFormatIsUsable(hardwareFormat) else {
+            await audioDeviceManager.endUsingPreferredInput(session: session)
+            guard startGeneration == generation, !Task.isCancelled else { throw CancellationError() }
+            let error = VoiceProfileAudioAdapterError.audioInputUnavailable
+            errorMessage = error.localizedDescription
+            accessibilityAnnouncer("No usable microphone input is available.")
+            throw error
+        }
+
+        let captureAccumulator = VoiceProfileCaptureAccumulator(sampleRate: Int(hardwareFormat.sampleRate.rounded()))
+        do {
+            try inputNode.installTapSafely(onBus: 0, bufferSize: 2_048, format: hardwareFormat) { buffer, _ in
+                captureAccumulator.append(buffer: buffer)
+            }
+            try await startAudioEngineAfterInputDeviceSettles(engine)
+            guard startGeneration == generation, !Task.isCancelled else { throw CancellationError() }
+            return (engine, captureAccumulator)
+        } catch {
+            inputNode.removeTap(onBus: 0)
+            engine.stop()
+            await audioDeviceManager.endUsingPreferredInput(session: session)
+            if error is CancellationError || startGeneration != generation || Task.isCancelled {
+                throw CancellationError()
+            }
+            errorMessage = error.localizedDescription
+            accessibilityAnnouncer("Could not start voice profile recording.")
+            throw error
+        }
     }
 
     private func startMeterLoop() {

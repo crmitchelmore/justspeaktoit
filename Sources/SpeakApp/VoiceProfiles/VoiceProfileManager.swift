@@ -167,8 +167,12 @@ final class VoiceProfileManager: ObservableObject {
             trimResult.originalDurationSeconds
         )
         let previewURL = try? VoiceProfileAudioAdapter.writeTemporaryPreviewWAV(for: resampled)
-        let transcript = (item.postProcessedTranscription ?? item.rawTranscription ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let wasTrimmed = trimResult.startTimeSeconds > 0.25
+            || (trimResult.originalDurationSeconds - trimResult.endTimeSeconds) > 0.25
+        let verbatimTranscript = [item.rawTranscription, item.postProcessedTranscription]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? ""
+        let transcript = wasTrimmed ? "" : verbatimTranscript
         return VoiceProfileStagedClip(
             pcmBuffer: resampled,
             transcript: transcript,

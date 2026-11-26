@@ -297,12 +297,22 @@ public struct VoiceProfile: Identifiable, Codable, Equatable, Hashable, Sendable
     ) throws {
         switch target {
         case .localEmbedding(let path):
-            guard isSafeRelativePath(path) else {
+            let validPrefix = (engineID.hasPrefix("local/tts/") && engineID.count > "local/tts/".count)
+                || (engineID.hasPrefix("studio/") && engineID.count > "studio/".count)
+            guard validPrefix, isSafeRelativePath(path) else {
                 throw VoiceProfileValidationError.invalidEngineBinding(engineID)
             }
         case .remoteVoice(let voiceID, _):
-            guard !voiceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let trimmedVoice = voiceID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedVoice.isEmpty else {
                 throw VoiceProfileValidationError.invalidEngineBinding(engineID)
+            }
+            if trimmedVoice.contains("/") {
+                let expectedPrefix = "\(engineID.lowercased())/"
+                guard trimmedVoice.lowercased().hasPrefix(expectedPrefix),
+                      trimmedVoice.count > expectedPrefix.count else {
+                    throw VoiceProfileValidationError.invalidEngineBinding(engineID)
+                }
             }
         }
     }

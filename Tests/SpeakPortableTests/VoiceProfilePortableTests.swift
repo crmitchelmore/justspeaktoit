@@ -1,6 +1,7 @@
 import Foundation
-import SpeakCore
 import XCTest
+
+@testable import SpeakCore
 
 final class VoiceProfilePortableTests: XCTestCase {
     private var temporaryRoot: URL!
@@ -189,7 +190,7 @@ final class VoiceProfilePortableTests: XCTestCase {
     }
 }
 
-private extension VoiceProfilePortableTests {
+extension VoiceProfilePortableTests {
     static func makeClip() -> VoiceProfileClip {
         let clipID = UUID()
         return VoiceProfileClip(

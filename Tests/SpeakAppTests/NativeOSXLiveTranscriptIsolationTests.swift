@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 
 @testable import SpeakApp
@@ -100,6 +101,31 @@ final class NativeOSXLiveTranscriptIsolationTests: XCTestCase {
     XCTAssertEqual(events.errorCount, 1)
   }
 
+  func testExternalAudioFeed_routesBuffersToReplacementRequestAfterRestart() throws {
+    let feed = SystemAudioLiveFeed(source: .system)
+    let box = NativeSpeechRequestBox<BufferSinkDouble>()
+    let firstSink = BufferSinkDouble()
+    let secondSink = BufferSinkDouble()
+    let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1))
+    let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16))
+    buffer.frameLength = 16
+
+    box.request = firstSink
+    feed.attach { [weak box] pcmBuffer in box?.append(pcmBuffer) }
+    feed.send(buffer)
+    XCTAssertEqual(firstSink.appendedCount, 1)
+
+    box.request = secondSink
+    feed.send(buffer)
+    XCTAssertEqual(firstSink.appendedCount, 1)
+    XCTAssertEqual(secondSink.appendedCount, 1)
+
+    let taken = box.take()
+    XCTAssertTrue(taken === secondSink)
+    feed.send(buffer)
+    XCTAssertEqual(secondSink.appendedCount, 1)
+  }
+
   private func makeLifecycle() -> RecognitionTestContext {
     RecognitionTestContext(
       lifecycle: NativeSpeechRecognitionTaskLifecycle(),
@@ -138,4 +164,17 @@ private struct RecognitionTestContext {
 private final class RecognitionEvents {
   var results: [String] = []
   var errorCount = 0
+}
+
+private final class BufferSinkDouble: NativeSpeechBufferSink, @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+
+  var appendedCount: Int {
+    lock.withLock { count }
+  }
+
+  func append(_ audioPCMBuffer: AVAudioPCMBuffer) {
+    lock.withLock { count += 1 }
+  }
 }

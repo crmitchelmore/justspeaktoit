@@ -23,7 +23,8 @@ public extension ApplicationHistoryItem {
             postProcessingPrompt: self.postProcessingPrompt,
             diagnosticContext: self.diagnosticContext,
             latency: self.latency,
-            desktopHistory: self.desktopHistory
+            desktopHistory: self.desktopHistory,
+            captureSource: self.captureSource
         )
     }
 
@@ -57,5 +58,6 @@ public extension ApplicationHistoryItem {
             latency: record.latency,
             desktopHistory: record.desktopHistory
         )
+        self.captureSource = record.captureSource
     }
 }

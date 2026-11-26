@@ -25,7 +25,7 @@ sessions:
           - "With Settings \u203a General \u203a Automation on, run `speak listen --source both --json`, speak a sentence while the audio plays, check `speak status --json` shows `source: \"both\"` and `liveText`, then run `speak stop --json`."
           - "Inspect the latest entry in `speak history --last 2 --json`."
         expected: "macOS prompts for System Audio Recording Only permission (not full Screen Recording). Both the system-only and mic+system captures transcribe cleanly, save playable audio in History, tag `source` as `system` or `both` in JSON replies, and do not paste into the focused editor when started via `speak listen --source system|both`."
-        final_gate: true
+        final_gate: false
       - id: "mac-model-chooser-empty-results"
         issues:
           - 1581

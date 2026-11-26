@@ -23,6 +23,7 @@ actor AudioFileManager {
   private nonisolated let systemMeterLock = NSLock()
   private nonisolated(unsafe) var systemMeterProvider: (@Sendable () -> (level: Float, peakDecibels: Float)?)?
   var activeSystemCapture: AnyObject?
+  var systemCaptureGeneration: UUID?
   private var currentRecordingID: UUID?
   private var currentRecordingStart: Date?
   var currentRecordingOwner: AudioRecordingOwner?

@@ -84,7 +84,10 @@ final class SharedClientAudioProcessor: @unchecked Sendable {
     }
     setRunning(true, onConversionFailure: onConversionFailure)
     return { [weak self] buffer in
-      self?.handleAudioTap(buffer, outputFormat: targetFormat, client: client)
+      self?.queue.async { [weak self] in
+        guard let self, self.isRunning else { return }
+        self.convertAndSend(buffer, to: targetFormat, client: client)
+      }
     }
   }
 

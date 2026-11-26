@@ -11,33 +11,49 @@ extension AudioFileManager {
         guard #available(macOS 14.2, *) else {
             throw SystemAudioCaptureError.unsupportedOS
         }
-        let directory: URL
-        if let preflightDirectory {
-            directory = preflightDirectory
-        } else {
-            directory = await MainActor.run { appSettings.recordingsDirectory }
-        }
-        let controller = SystemAudioCaptureController()
-        let feed = liveFeed ?? SystemAudioLiveFeed(source: source)
-        let started = try await controller.start(
-            source: source,
-            in: directory,
-            liveFeed: feed,
-            audioDeviceManager: audioDeviceManager,
-            permissionsManager: permissionsManager
-        )
-        activeSystemCapture = controller
-        setSystemMeterProvider { [weak controller] in controller?.currentMeterReading() }
-        currentRecordingURL = started.url
+        let generation = UUID()
+        systemCaptureGeneration = generation
         currentRecordingOwner = owner
-        if owner != .dictation { lifecycleHandler?(.auxiliaryStarted) }
-        return started
+        do {
+            let directory: URL
+            if let preflightDirectory {
+                directory = preflightDirectory
+            } else {
+                directory = await MainActor.run { appSettings.recordingsDirectory }
+            }
+            guard systemCaptureGeneration == generation, !Task.isCancelled else { throw CancellationError() }
+            let controller = SystemAudioCaptureController()
+            let feed = liveFeed ?? SystemAudioLiveFeed(source: source)
+            let started = try await controller.start(
+                source: source,
+                in: directory,
+                liveFeed: feed,
+                audioDeviceManager: audioDeviceManager,
+                permissionsManager: permissionsManager
+            )
+            guard systemCaptureGeneration == generation, !Task.isCancelled else {
+                await controller.cancel(deleteFile: true)
+                throw CancellationError()
+            }
+            activeSystemCapture = controller
+            setSystemMeterProvider { [weak controller] in controller?.currentMeterReading() }
+            currentRecordingURL = started.url
+            if owner != .dictation { lifecycleHandler?(.auxiliaryStarted) }
+            return started
+        } catch {
+            if systemCaptureGeneration == generation {
+                systemCaptureGeneration = nil
+                currentRecordingOwner = nil
+            }
+            throw error
+        }
     }
 
     func stopSystemAudioCaptureIfActive() async throws -> RecordingSummary? {
         guard #available(macOS 14.2, *),
               let controller = activeSystemCapture as? SystemAudioCaptureController else { return nil }
         let owner = currentRecordingOwner
+        systemCaptureGeneration = nil
         activeSystemCapture = nil
         setSystemMeterProvider(nil)
         currentRecordingURL = nil
@@ -48,8 +64,13 @@ extension AudioFileManager {
     }
 
     func cancelSystemAudioCaptureIfActive(deleteFile: Bool) async -> (handled: Bool, keptURL: URL?) {
+        let hadPendingStart = systemCaptureGeneration != nil
+        systemCaptureGeneration = nil
         guard #available(macOS 14.2, *),
-              let controller = activeSystemCapture as? SystemAudioCaptureController else { return (false, nil) }
+              let controller = activeSystemCapture as? SystemAudioCaptureController else {
+            if hadPendingStart { currentRecordingOwner = nil }
+            return (hadPendingStart, nil)
+        }
         let owner = currentRecordingOwner
         let url = currentRecordingURL
         activeSystemCapture = nil

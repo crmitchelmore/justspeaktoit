@@ -138,13 +138,15 @@ final class SessionDelivery {
     for session: ActiveSession,
     host: SessionCompletionHost
   ) async {
-    let focusedElement = outcome.target?.focusedElement ?? Self.focusedElement()
-    let appName = outcome.target?.applicationName
-      ?? NSWorkspace.shared.frontmostApplication?.localizedName
+    let didInsertText = session.outputMethod != .none
+    let focusedElement = didInsertText ? (outcome.target?.focusedElement ?? Self.focusedElement()) : nil
+    let appName = didInsertText
+      ? (outcome.target?.applicationName ?? NSWorkspace.shared.frontmostApplication?.localizedName)
+      : nil
     // A warning means delivery proceeded without proving the current field.
     // Do not associate Voice Edit/correction tracking with the stale capture
     // or with an automation system-audio capture that did not insert text.
-    if outcome.warning == nil, session.outputMethod != .none {
+    if outcome.warning == nil, didInsertText {
       self.text.autoCorrectionTracker.startMonitoring(
         insertedText: finalText,
         element: focusedElement,
@@ -152,11 +154,12 @@ final class SessionDelivery {
       )
     }
 
-    session.outputDelivered = Date()
-
-    session.events.append(
-      HistoryEvent(kind: .outputDelivered, description: "Output delivered successfully")
-    )
+    if didInsertText {
+      session.outputDelivered = Date()
+      session.events.append(
+        HistoryEvent(kind: .outputDelivered, description: "Output delivered successfully")
+      )
+    }
     let deliveryNote = Self.deliveryNote(for: outcome, destination: appName, on: session)
     session.destination = appName
     session.lexiconContext = PersonalLexiconContext.inferred(for: finalText, destination: appName)

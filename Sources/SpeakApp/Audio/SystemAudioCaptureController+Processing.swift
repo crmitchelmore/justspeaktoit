@@ -163,6 +163,7 @@ extension SystemAudioCaptureController {
             do {
                 try audioFile.write(from: buffer)
             } catch {
+                if writeError == nil { writeError = error }
                 logger.error("Failed writing system audio buffer: \(error.localizedDescription, privacy: .public)")
             }
         }

@@ -17,6 +17,7 @@ final class SystemAudioCaptureController: @unchecked Sendable {
         let url: URL?
         let id: UUID?
         let startedAt: Date?
+        let writeError: Error?
     }
 
     static let canonicalSampleRate: Double = 48_000
@@ -39,6 +40,7 @@ final class SystemAudioCaptureController: @unchecked Sendable {
     var mixer: SystemAudioMixer?
     var audioFile: AVAudioFile?
     var liveFeed: SystemAudioLiveFeed?
+    var writeError: Error?
     private var recordingID: UUID?
     private var recordingURL: URL?
     private var startedAt: Date?
@@ -94,6 +96,7 @@ final class SystemAudioCaptureController: @unchecked Sendable {
                 self.audioFile = file
                 self.mixer = mixer
                 self.liveFeed = liveFeed
+                self.writeError = nil
                 self.recordingID = id
                 self.recordingURL = fileURL
                 self.startedAt = Date()
@@ -130,7 +133,10 @@ final class SystemAudioCaptureController: @unchecked Sendable {
             self.liveFeed = nil
             self.audioFile = nil
             self.mixer = nil
-            let result = StoppedCapture(url: self.recordingURL, id: self.recordingID, startedAt: self.startedAt)
+            let result = StoppedCapture(
+                url: self.recordingURL, id: self.recordingID, startedAt: self.startedAt, writeError: self.writeError
+            )
+            self.writeError = nil
             self.recordingURL = nil
             self.recordingID = nil
             self.startedAt = nil
@@ -139,6 +145,9 @@ final class SystemAudioCaptureController: @unchecked Sendable {
 
         await releaseInputSessionIfNeeded()
 
+        if let writeError = stopped.writeError {
+            throw writeError
+        }
         guard let url = stopped.url, let id = stopped.id, let start = stopped.startedAt else {
             throw AudioFileManagerError.noActiveRecording
         }

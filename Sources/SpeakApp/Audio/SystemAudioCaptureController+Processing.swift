@@ -102,4 +102,70 @@ extension SystemAudioCaptureController {
             AudioHardwareDestroyProcessTap(handles.tap)
         }
     }
+
+    func startMicrophoneMix(canonicalFormat: AVAudioFormat) async throws {
+        let engine = AVAudioEngine()
+        let inputNode = engine.inputNode
+        inputNode.removeTap(onBus: 0)
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        guard audioInputFormatIsUsable(inputFormat),
+              let converter = AVAudioConverter(from: inputFormat, to: canonicalFormat) else {
+            throw TranscriptionManagerError.noUsableAudioInput
+        }
+        micConverter = converter
+        micEngine = engine
+        try inputNode.installTapSafely(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+            guard let self else { return }
+            let samples = self.convertToCanonicalSamples(
+                buffer,
+                canonicalFormat: canonicalFormat,
+                using: converter
+            )
+            guard !samples.isEmpty else { return }
+            self.enqueueMicrophoneSamples(samples)
+        }
+        try await startAudioEngineAfterInputDeviceSettles(engine)
+    }
+
+    func enqueueSystemSamples(_ samples: [Float]) {
+        writerQueue.async { [weak self] in
+            guard let self, let mixed = self.mixer?.pushSystem(samples), !mixed.isEmpty else { return }
+            self.writeAndForwardLocked(mixed)
+        }
+    }
+
+    func enqueueMicrophoneSamples(_ samples: [Float]) {
+        writerQueue.async { [weak self] in
+            guard let self, let mixed = self.mixer?.pushMicrophone(samples), !mixed.isEmpty else { return }
+            self.writeAndForwardLocked(mixed)
+        }
+    }
+
+    func writeAndForwardLocked(_ samples: [Float]) {
+        guard !samples.isEmpty,
+              let canonicalFormat,
+              let buffer = AVAudioPCMBuffer(
+                  pcmFormat: canonicalFormat,
+                  frameCapacity: AVAudioFrameCount(samples.count)
+              ),
+              let channel = buffer.floatChannelData?[0] else {
+            return
+        }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { pointer in
+            guard let base = pointer.baseAddress else { return }
+            channel.update(from: base, count: samples.count)
+        }
+
+        updateMeter(samples: samples)
+
+        if let audioFile {
+            do {
+                try audioFile.write(from: buffer)
+            } catch {
+                logger.error("Failed writing system audio buffer: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        liveFeed?.send(buffer)
+    }
 }

@@ -112,27 +112,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         throw CancellationError()
       }
       if AppleLocalModels.isSpeechAnalyzerModel(model), analyzerFallbackAllowed {
-        logger.warning(
-          "SpeechAnalyzer failed (\(error.localizedDescription, privacy: .public)); using legacy Apple Speech")
-        let nativeController = controllers.native
-        nativeController.configure(
-          language: currentLanguage,
-          model: AppleLocalModels.legacySpeechModelID
-        )
-        let fallbackRun = activate(nativeController)
-        do {
-          try await awaitStartup(fallbackRun)
-          freshness.recordSuccessfulStart()
-          return
-        } catch {
-          if error is CancellationError || Task.isCancelled || fallbackRun.startTask.isCancelled {
-            await stop(fallbackRun)
-            throw CancellationError()
-          }
-          release(fallbackRun)
-          freshness.markStale()
-          throw error
-        }
+        try await startLegacyAppleSpeechFallback(originalError: error)
+        return
       }
       release(run)
       freshness.markStale()
@@ -166,29 +147,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   func controller(for model: String) -> any LiveTranscriptionController {
     if let controllerOverride { return controllerOverride(model) }
     return controllers.controller(for: model)
-  }
-
-  private func resolveController(
-    for model: String,
-    externalAudioFeed: SystemAudioLiveFeed?,
-    analyzerFallbackAllowed: Bool
-  ) throws -> (any LiveTranscriptionController, String) {
-    var selected = controller(for: model)
-    var effectiveModel = model
-    if let externalAudioFeed {
-      if !(selected is ExternalAudioFeedAccepting) {
-        if AppleLocalModels.isSpeechAnalyzerModel(model), analyzerFallbackAllowed {
-          selected = controllers.native
-          effectiveModel = AppleLocalModels.legacySpeechModelID
-        } else {
-          throw TranscriptionManagerError.systemAudioUnsupportedForLiveModel(model)
-        }
-      }
-      (selected as? ExternalAudioFeedAccepting)?.setExternalAudioFeed(externalAudioFeed)
-    } else {
-      (selected as? ExternalAudioFeedAccepting)?.setExternalAudioFeed(nil)
-    }
-    return (selected, effectiveModel)
   }
 
   private func applyDelegateAndConfiguration() {
@@ -304,5 +262,51 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   @MainActor
   func markControllersStale() {
     freshness.markStale()
+  }
+}
+
+private extension SwitchingLiveTranscriber {
+  func resolveController(
+    for model: String,
+    externalAudioFeed: SystemAudioLiveFeed?,
+    analyzerFallbackAllowed: Bool
+  ) throws -> (any LiveTranscriptionController, String) {
+    var selected = controller(for: model)
+    var effectiveModel = model
+    if let externalAudioFeed {
+      if !(selected is ExternalAudioFeedAccepting) {
+        if AppleLocalModels.isSpeechAnalyzerModel(model), analyzerFallbackAllowed {
+          selected = controllers.native
+          effectiveModel = AppleLocalModels.legacySpeechModelID
+        } else {
+          throw TranscriptionManagerError.systemAudioUnsupportedForLiveModel(model)
+        }
+      }
+      (selected as? ExternalAudioFeedAccepting)?.setExternalAudioFeed(externalAudioFeed)
+    } else {
+      (selected as? ExternalAudioFeedAccepting)?.setExternalAudioFeed(nil)
+    }
+    return (selected, effectiveModel)
+  }
+
+  func startLegacyAppleSpeechFallback(originalError: Error) async throws {
+    logger.warning(
+      "SpeechAnalyzer failed (\(originalError.localizedDescription, privacy: .public)); using legacy Apple Speech"
+    )
+    let nativeController = controllers.native
+    nativeController.configure(language: currentLanguage, model: AppleLocalModels.legacySpeechModelID)
+    let fallbackRun = activate(nativeController)
+    do {
+      try await awaitStartup(fallbackRun)
+      freshness.recordSuccessfulStart()
+    } catch {
+      if error is CancellationError || Task.isCancelled || fallbackRun.startTask.isCancelled {
+        await stop(fallbackRun)
+        throw CancellationError()
+      }
+      release(fallbackRun)
+      freshness.markStale()
+      throw error
+    }
   }
 }

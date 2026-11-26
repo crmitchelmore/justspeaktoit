@@ -339,7 +339,9 @@ actor AudioFileManager {
     }
     return keptURL
   }
+}
 
+extension AudioFileManager {
   /// Metadata-only listing for recording management. Listed durations are zero;
   /// neither cleanup caller needs to open or decode the user's audio files.
   func listRecordings() async -> [RecordingSummary] {

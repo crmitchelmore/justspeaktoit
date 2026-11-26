@@ -151,7 +151,8 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController, Ext
 
   private func attachAudioInput(sessionContext: AudioInputDeviceManager.SessionContext?) async throws {
     if let externalAudioFeed {
-      externalAudioFeed.attach { [weak self] buffer in self?.request?.append(buffer) }
+      let recognitionRequest = request
+      externalAudioFeed.attach { buffer in recognitionRequest?.append(buffer) }
       return
     }
     audioEngine = LiveInputEngines.shared.makeEngine()

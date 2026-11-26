@@ -57,7 +57,8 @@ extension HistoryRecord {
             originPlatform: try values.decodeIfPresent(String.self, forKey: .originPlatform) ?? "macos",
             errorMessage: try values.decodeIfPresent(String.self, forKey: .errorMessage),
             requestContext: try? values.decodeIfPresent(RequestDiagnosticContext.self, forKey: .requestContext),
-            requestFailure: try? values.decodeIfPresent(RequestDiagnosticContext.Failure.self, forKey: .requestFailure)
+            requestFailure: try? values.decodeIfPresent(RequestDiagnosticContext.Failure.self, forKey: .requestFailure),
+            captureSource: try? values.decodeIfPresent(AudioCaptureSource.self, forKey: .captureSource)
         )
     }
 

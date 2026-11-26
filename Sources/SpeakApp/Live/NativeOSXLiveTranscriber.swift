@@ -84,7 +84,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController, Ext
   private var audioEngine = AVAudioEngine()
   private var externalAudioFeed: SystemAudioLiveFeed?
   private let recognitionTaskLifecycle = NativeSpeechRecognitionTaskLifecycle()
-  private var request: SFSpeechAudioBufferRecognitionRequest?
+  private let requestBox = NativeSpeechRequestBox<SFSpeechAudioBufferRecognitionRequest>()
   private var currentLocaleIdentifier: String?
   private var currentModel: String?
   private var latestResult: NativeSpeechRecognitionResult?
@@ -130,14 +130,14 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController, Ext
       throw TranscriptionManagerError.recognizerUnavailable
     }
     speechRecognizer = recognizer
-    request = makeRecognitionRequest(for: recognizer)
+    requestBox.request = makeRecognitionRequest(for: recognizer)
     try await attachAudioInput(sessionContext: sessionContext)
 
     latestResult = nil
     hasFinished = false
     committedText = ""
     lastFormattedString = ""
-    guard request != nil else {
+    guard requestBox.request != nil else {
       stopAudioEngineIfOwned()
       if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
       throw TranscriptionManagerError.recognizerUnavailable
@@ -153,8 +153,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController, Ext
     guard isRunning else { return }
     // Retire the run before teardown: cancel() can still deliver queued events.
     let finishingRequest = await MainActor.run { () -> SFSpeechAudioBufferRecognitionRequest? in
-      let pending = self.request
-      self.request = nil
+      let pending = self.requestBox.take()
       self.recognitionTaskLifecycle.retire()
       return pending
     }
@@ -248,7 +247,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController, Ext
   /// rather than clearing it.
   @MainActor
   private func startRecognitionTask(with recognizer: SFSpeechRecognizer) {
-    guard let activeRequest = request else { return }
+    guard let activeRequest = requestBox.request else { return }
     recognitionTaskLifecycle.start(
       factory: { callback in
         recognizer.recognitionTask(with: activeRequest) { result, error in
@@ -321,7 +320,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController, Ext
     // so anything the cancelled task still delivers fails the identity check in
     // `NativeSpeechRecognitionTaskLifecycle` and is discarded. The replacement
     // request below feeds the next task, which mints its own token.
-    request = makeRecognitionRequest(for: recognizer)
+    requestBox.request = makeRecognitionRequest(for: recognizer)
     latestResult = nil
     lastFormattedString = ""
 
@@ -332,8 +331,8 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController, Ext
 private extension NativeOSXLiveTranscriber {
   func attachAudioInput(sessionContext: AudioInputDeviceManager.SessionContext?) async throws {
     if let externalAudioFeed {
-      let recognitionRequest = request
-      externalAudioFeed.attach { buffer in recognitionRequest?.append(buffer) }
+      let box = requestBox
+      externalAudioFeed.attach { [weak box] buffer in box?.append(buffer) }
       return
     }
     audioEngine = LiveInputEngines.shared.makeEngine()
@@ -346,8 +345,9 @@ private extension NativeOSXLiveTranscriber {
       throw TranscriptionManagerError.noUsableAudioInput
     }
     do {
-      try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-        self?.request?.append(buffer)
+      let box = requestBox
+      try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: format) { [weak box] buffer, _ in
+        box?.append(buffer)
       }
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
     } catch {

@@ -126,6 +126,28 @@ final class HistoryRecordTests: XCTestCase {
         XCTAssertNil(ApplicationHistoryItem(historyRecord: record))
     }
 
+    func testCaptureSource_RoundTripsThroughHistoryRecordAndDecodesUnknownOrMissingAsNil() throws {
+        var item = HistoryRecordFixtures.minimalMac()
+        XCTAssertNil(item.historyRecord.captureSource)
+
+        for source in AudioCaptureSource.allCases {
+            item.captureSource = source
+            let data = try JSONEncoder().encode(item.historyRecord)
+            let decoded = try JSONDecoder().decode(HistoryRecord.self, from: data)
+            XCTAssertEqual(decoded.captureSource, source)
+            let restored = try XCTUnwrap(ApplicationHistoryItem(historyRecord: decoded))
+            XCTAssertEqual(restored, item)
+            XCTAssertEqual(restored.captureSource, source)
+        }
+
+        let legacyData = try JSONEncoder().encode(HistoryRecordFixtures.minimalMac().historyRecord)
+        var object = try self.object(legacyData)
+        object["captureSource"] = "future_source"
+        let unknown = try JSONDecoder().decode(HistoryRecord.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(unknown.captureSource)
+        XCTAssertEqual(unknown.id, item.id)
+    }
+
     private func fixture(_ name: String) throws -> Data {
         let url = try XCTUnwrap(Bundle.module.url(
             forResource: name, withExtension: "json", subdirectory: "Fixtures/HistoryRecord"

@@ -34,6 +34,7 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
     public let wordCount: Int?
     public let originPlatform: String
     public let errorMessage: String?
+    public let captureSource: AudioCaptureSource?
 
     /// The one initialiser; every field but the duration has a default.
     /// `HistoryRecord+SourceCompatibility.swift` keeps the shorter published
@@ -65,7 +66,8 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
         originPlatform: String = "macos",
         errorMessage: String? = nil,
         requestContext: RequestDiagnosticContext? = nil,
-        requestFailure: RequestDiagnosticContext.Failure? = nil
+        requestFailure: RequestDiagnosticContext.Failure? = nil,
+        captureSource: AudioCaptureSource? = nil
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.id = id
@@ -97,6 +99,7 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
         self.wordCount = wordCount
         self.originPlatform = originPlatform
         self.errorMessage = errorMessage
+        self.captureSource = captureSource
     }
 
     public func hash(into hasher: inout Hasher) {
@@ -171,7 +174,8 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
             wordCount: self.wordCount,
             originPlatform: self.originPlatform,
             errorMessage: errorMessage,
-            requestContext: self.requestContext, requestFailure: self.requestFailure
+            requestContext: self.requestContext, requestFailure: self.requestFailure,
+            captureSource: self.captureSource
         )
     }
 
@@ -191,7 +195,8 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
             source: self.source, postProcessingPrompt: self.postProcessingPrompt,
             diagnosticContext: self.diagnosticContext, latency: self.latency, desktopHistory: self.desktopHistory,
             model: self.model, wordCount: self.wordCount, originPlatform: self.originPlatform,
-            errorMessage: self.errorMessage, requestContext: self.requestContext, requestFailure: self.requestFailure
+            errorMessage: self.errorMessage, requestContext: self.requestContext, requestFailure: self.requestFailure,
+            captureSource: self.captureSource
         )
     }
 
@@ -224,5 +229,6 @@ public struct HistoryRecord: Codable, Identifiable, Hashable, Sendable {
         case wordCount
         case originPlatform
         case errorMessage
+        case captureSource
     }
 }

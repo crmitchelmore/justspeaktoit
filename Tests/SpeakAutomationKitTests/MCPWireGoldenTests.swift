@@ -54,7 +54,9 @@ final class MCPWireGoldenTests: XCTestCase {
             + #"":"Return the most recent transcriptions, newest first.","inputSchema":{"properties":{"limit":{"desc"#
             + #"ription":"How many entries to return (default 10).","maximum":200,"minimum":1,"type":"integer"}},"ty"#
             + #"pe":"object"},"name":"get_history"},{"description":"Start a dictation session in the app. Idempotent"#
-            + #" per call id.","inputSchema":{"properties":{},"type":"object"},"name":"start_dictation"},{"descripti"#
+            + #" per call id.","inputSchema":{"properties":{"source":{"description":"Audio source to capture: mic (d"#
+            + #"efault), system, or both (macOS 14.2+).","enum":["mic","system","both"],"type":"string"}},"type":"ob"#
+            + #"ject"},"name":"start_dictation"},{"descripti"#
             + #"on":"Stop the active dictation session and return its transcript.","inputSchema":{"properties":{},"t"#
             + #"ype":"object"},"name":"stop_dictation"},{"description":"Speak text aloud with the app's voices, or s"#
             + #"ave it as an audio file. Returns once playback finishes and the file is complete.","inputSchema":{"p"#

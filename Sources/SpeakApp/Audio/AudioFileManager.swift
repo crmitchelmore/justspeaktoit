@@ -57,46 +57,6 @@ actor AudioFileManager {
     self.captureSource = captureSource
   }
 
-  /// One meter update: the normalized level (0.0 to 1.0) and the peak input
-  /// power in dBFS. Nil when no recorder is running.
-  nonisolated func getCurrentMeterReading() -> (level: Float, peakDecibels: Float)? {
-    systemMeterLock.lock()
-    let provider = systemMeterProvider
-    systemMeterLock.unlock()
-    if let reading = provider?() {
-      return reading
-    }
-    return meter.reading()
-  }
-
-  nonisolated func setSystemMeterProvider(
-    _ provider: (@Sendable () -> (level: Float, peakDecibels: Float)?)?
-  ) {
-    systemMeterLock.lock()
-    systemMeterProvider = provider
-    systemMeterLock.unlock()
-  }
-
-  // MARK: - Pre-warming (issue #663)
-
-  func setRecordingLifecycleHandler(
-    _ handler: (@Sendable (AudioRecordingLifecycleEvent) -> Void)?
-  ) {
-    self.lifecycleHandler = handler
-  }
-
-  /// Reconciles the staged recorder and its state as one actor-owned operation.
-  /// Keeping both together prevents auxiliary recording flows from invalidating
-  /// the recorder while a separate coordinator still believes it is ready.
-  func reconcileWarmRecorder(for context: CaptureWarmContext, enabled: Bool) {
-    guard captureSource == nil else { return }
-    warmStage.reconcile(with: context, enabled: enabled, captureIdle: isIdle)
-  }
-
-  func invalidateWarmRecorder() {
-    warmStage.reset()
-  }
-
   /// No recording is running, starting or being torn down.
   private var isIdle: Bool {
     recorder == nil && activeSystemCapture == nil && currentRecordingURL == nil
@@ -342,6 +302,46 @@ actor AudioFileManager {
 }
 
 extension AudioFileManager {
+  /// One meter update: the normalized level (0.0 to 1.0) and the peak input
+  /// power in dBFS. Nil when no recorder is running.
+  nonisolated func getCurrentMeterReading() -> (level: Float, peakDecibels: Float)? {
+    systemMeterLock.lock()
+    let provider = systemMeterProvider
+    systemMeterLock.unlock()
+    if let reading = provider?() {
+      return reading
+    }
+    return meter.reading()
+  }
+
+  nonisolated func setSystemMeterProvider(
+    _ provider: (@Sendable () -> (level: Float, peakDecibels: Float)?)?
+  ) {
+    systemMeterLock.lock()
+    systemMeterProvider = provider
+    systemMeterLock.unlock()
+  }
+
+  // MARK: - Pre-warming (issue #663)
+
+  func setRecordingLifecycleHandler(
+    _ handler: (@Sendable (AudioRecordingLifecycleEvent) -> Void)?
+  ) {
+    self.lifecycleHandler = handler
+  }
+
+  /// Reconciles the staged recorder and its state as one actor-owned operation.
+  /// Keeping both together prevents auxiliary recording flows from invalidating
+  /// the recorder while a separate coordinator still believes it is ready.
+  func reconcileWarmRecorder(for context: CaptureWarmContext, enabled: Bool) {
+    guard captureSource == nil else { return }
+    warmStage.reconcile(with: context, enabled: enabled, captureIdle: isIdle)
+  }
+
+  func invalidateWarmRecorder() {
+    warmStage.reset()
+  }
+
   /// Metadata-only listing for recording management. Listed durations are zero;
   /// neither cleanup caller needs to open or decode the user's audio files.
   func listRecordings() async -> [RecordingSummary] {

@@ -172,7 +172,7 @@ final class SessionStartPipelineTests: XCTestCase {
     }
 
     func testStart_withoutCloudConsentAsksBeforeCaptureAndTakesNothing() async {
-        let harness = makeHarness(source: CoreJourneyRecordingSource())
+        let harness = makeHarness(source: StubRecordingSource())
         let request = CloudSharingRequest(
             provider: CloudSharingProviderCatalogue.resolve(id: "deepgram", fallbackName: "Deepgram"),
             kinds: [.audio]
@@ -190,7 +190,7 @@ final class SessionStartPipelineTests: XCTestCase {
     }
 
     func testStart_bringsCaptureUpAndArmsTheRuntime() async {
-        let harness = makeHarness(source: CoreJourneyRecordingSource())
+        let harness = makeHarness(source: StubRecordingSource())
 
         let outcome = await harness.pipeline.start(.init(trigger: .uiButton))
 
@@ -230,5 +230,24 @@ private struct CaptureRefused: LocalizedError {
 private struct FailingSource: RecordingCaptureSource {
     func start(in directory: URL) async throws -> RecordingStart { throw CaptureRefused() }
     func stop() async throws -> RecordingSummary { throw CaptureRefused() }
+    func cancel(deleteFile: Bool) async {}
+}
+
+private struct StubRecordingSource: RecordingCaptureSource {
+    func start(in directory: URL) async throws -> RecordingStart {
+        let url = directory.appendingPathComponent("stub-\(UUID().uuidString).m4a")
+        return RecordingStart(url: url, usedWarmRecorder: false)
+    }
+
+    func stop() async throws -> RecordingSummary {
+        RecordingSummary(
+            id: UUID(),
+            url: URL(fileURLWithPath: "/dev/null"),
+            startedAt: Date(),
+            duration: 1,
+            fileSize: 1
+        )
+    }
+
     func cancel(deleteFile: Bool) async {}
 }

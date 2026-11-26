@@ -120,6 +120,8 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
     public var quality: String?, language: String?
     /// `get_configuration` filters and `set_configuration` changes: see `AutomationConfiguration`.
     public var keys: [String]?, prefix: String?, changes: [String: AnyCodable]?, dryRun: Bool?
+    /// `start_dictation` audio source (`mic`, `system`, or `both`); nil defaults to `mic`.
+    public var source: String?
 
     public init(
         schemaVersion: Int = AutomationSchema.currentVersion,
@@ -173,6 +175,7 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
         if self.command != .awaitTranscript, self.captureID != nil || self.sinceID != nil {
             throw AutomationError(code: .invalidArgument, message: "Capture cursors require await_transcript.")
         }
+        try self.validateAudioSource()
         try self.validateSpeechFields()
         try self.validateConfigurationFields()
         switch self.command {
@@ -208,6 +211,20 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
         return min(max(limit, 1), AutomationLimits.maxHistoryLimit)
     }
 
+    private func validateAudioSource() throws {
+        guard let source = self.source else { return }
+        guard self.command == .startDictation else {
+            throw AutomationError(code: .invalidArgument, message: "Audio source is only valid for start_dictation.")
+        }
+        guard AudioCaptureSource(rawValue: source.lowercased()) != nil else {
+            let valid = AudioCaptureSource.allCases.map(\.rawValue).joined(separator: ", ")
+            throw AutomationError(
+                code: .invalidArgument,
+                message: "Unknown audio source \"\(source)\". Use one of: \(valid)."
+            )
+        }
+    }
+
     private func validateOptionalIdentifier(_ value: String?, label: String) throws {
         guard let value else { return }
         guard !value.isEmpty, value.count <= AutomationLimits.maxIdentifierLength else {
@@ -228,6 +245,7 @@ public struct AutomationHistoryEntry: Codable, Sendable, Equatable {
     public let model: String?
     public let durationSeconds: TimeInterval?
     public let wordCount: Int
+    public var source: String?
 
     public init(
         id: String,
@@ -243,6 +261,25 @@ public struct AutomationHistoryEntry: Codable, Sendable, Equatable {
         self.model = model
         self.durationSeconds = durationSeconds
         self.wordCount = wordCount
+        self.source = nil
+    }
+
+    public init(
+        id: String,
+        text: String,
+        createdAt: Date,
+        model: String?,
+        durationSeconds: TimeInterval?,
+        wordCount: Int,
+        source: String?
+    ) {
+        self.id = id
+        self.text = text
+        self.createdAt = createdAt
+        self.model = model
+        self.durationSeconds = durationSeconds
+        self.wordCount = wordCount
+        self.source = source
     }
 }
 
@@ -265,6 +302,10 @@ public struct AutomationResult: Codable, Sendable, Equatable {
     public var voice: String?, path: String?, notice: String?, voices: [AutomationVoice]?
     /// `get_configuration` and `set_configuration`: see `AutomationConfiguration`.
     public var configuration: AnyCodable?
+    /// Audio source for an active or completed capture (`mic`, `system`, or `both`).
+    public var source: String?
+    /// Latest live preview transcript while a streaming session is active (`status`).
+    public var liveText: String?
 
     public init(
         text: String? = nil,

@@ -36,6 +36,7 @@ protocol SessionStartHost: SessionStartConsentHost {
 final class SessionStartPipeline {
   struct Request {
     var trigger: SessionTriggerSource
+    var captureSource: AudioCaptureSource = .mic
     var preRollBuffers: [AVAudioPCMBuffer] = []
     var triggerTiming: SessionTriggerTiming = .nonHotKey()
     var primedInput: PrimedLiveInputReservation?
@@ -98,26 +99,20 @@ final class SessionStartPipeline {
     owners.captureWarmer.sessionWillBegin()
 
     // Per-app dictation profile: resolve the frontmost app and apply its
-    // overrides for this session only. Applied before the API-key check so the
-    // check sees the profile's provider. Reverted whenever `activeSession`
-    // returns to nil; the rejections below revert explicitly because no
-    // session was created yet.
+    // overrides for this session only (reverted when activeSession clears).
     owners.profileApplier.begin(
-      settings: settings,
-      postProcessing: postProcessing,
+      settings: settings, postProcessing: postProcessing,
       profiles: capture.profiles.profiles,
       frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     )
 
     let admission = SessionStartAdmission(
-      settings: settings,
-      capture: capture,
-      transcription: transcription,
-      hud: hud,
-      ownership: owners.captureOwnership,
-      retirement: owners.retirement
+      settings: settings, capture: capture, transcription: transcription,
+      hud: hud, ownership: owners.captureOwnership, retirement: owners.retirement
     )
-    if let rejection = await admission.rejection(for: request.trigger, host: host) {
+    if let rejection = await admission.rejection(
+      for: request.trigger, captureSource: request.captureSource, host: host
+    ) {
       return rejection
     }
 
@@ -135,6 +130,7 @@ final class SessionStartPipeline {
       gesture: request.trigger.historyGesture,
       hotKeyDescription: settings.selectedHotKey.displayString,
       trigger: request.trigger,
+      captureSource: request.captureSource,
       triggerTiming: request.triggerTiming
     )
     session.outputTarget = TextOutputTarget.capture()
@@ -159,23 +155,25 @@ final class SessionStartPipeline {
   ) async -> HandsFreeCaptureStartOutcome {
     // Claim the recorder staged while idle. Returns nil — and the cold path
     // runs — whenever the environment moved since it was staged.
-    let warmContext = owners.captureWarmer.claimWarmContext()
+    let warmContext = request.captureSource == .mic ? owners.captureWarmer.claimWarmContext() : nil
     let liveInputPreparation = await makeLiveInputPreparation(primed: request.primedInput, warmedInput: warmedInput)
+    let systemLiveFeed = request.captureSource.includesSystemAudio
+      ? SystemAudioLiveFeed(source: request.captureSource) : nil
 
     do {
-      // Issue #641: the start cue is played by the sequencer *after* capture is
-      // proven live (and, in streaming modes, after the audio tap is running),
-      // so the user is never invited to speak into a microphone that isn't
-      // listening yet. The pre-warm path (issue #663) runs inside the same
-      // step — a claimed staged recorder still has to prove it is capturing.
-      let startStream = makeStartStreamStep(for: session, request: request, host: host)
-      let prepareStream = await makePrepareStreamStep(using: liveInputPreparation, primed: request.primedInput)
+      let startStream = makeStartStreamStep(
+        for: session, request: request, externalAudioFeed: systemLiveFeed, host: host
+      )
+      let prepareStream = request.captureSource.includesSystemAudio
+        ? nil : await makePrepareStreamStep(using: liveInputPreparation, primed: request.primedInput)
       let hudDuringStart = beginStartingHUD(for: request, buildsInputNode: prepareStream != nil)
       let sequencer = RecordingStartSequencer(
         isSessionCurrent: { [weak host] in host?.activeSession === session },
         prepareStream: prepareStream,
         discardPreparedStream: { await liveInputPreparation.finish(startFailed: true) },
-        startCapture: makeStartCaptureStep(for: session, warmContext: warmContext, hud: hudDuringStart, host: host),
+        startCapture: makeStartCaptureStep(
+          for: session, warmContext: warmContext, liveFeed: systemLiveFeed, hud: hudDuringStart, host: host
+        ),
         discardCapture: { [weak self] in await self?.discardStartedCapture() },
         startStream: startStream,
         discardStream: { [transcription] in transcription.cancelLiveTranscription() },
@@ -185,28 +183,21 @@ final class SessionStartPipeline {
       await liveInputPreparation.finish()
       Self.recordStartTimeline(timeline, for: session, logger: logger)
       await recordKeyDownLatency(
-        for: session,
-        primedInput: request.primedInput,
+        for: session, primedInput: request.primedInput,
         inputWarmedAhead: prepareStream != nil && warmedInput != nil && liveInputPreparation === warmedInput
       )
       return .started
     } catch is RecordingStartAbort {
       await liveInputPreparation.finish(startFailed: true)
       hud.cancelAwaitingAudio()
-      // Not a failure: the session ended while startup was suspended, and the
-      // sequencer has already torn down whatever it brought up. Touching the
-      // shared failure path here would clobber the session that replaced it.
       logger.info("Recording start abandoned: the session ended before capture was ready")
       return .rejected(.captureFailed)
     } catch {
       await liveInputPreparation.finish(startFailed: true)
       guard host.sessionProcessingShouldContinue(session) else { return .rejected(.captureFailed) }
       session.errors.append(
-        HistoryError(
-          phase: .recording,
-          message: "Failed to start recording",
-          debugDescription: error.localizedDescription
-        )
+        HistoryError(phase: .recording, message: "Failed to start recording",
+                     debugDescription: error.localizedDescription)
       )
       host.failStartedSession(message: error.localizedDescription)
       return .rejected(HandsFreeDictationMachine.Failure(error))
@@ -217,6 +208,7 @@ final class SessionStartPipeline {
   private func makeStartStreamStep(
     for session: ActiveSession,
     request: Request,
+    externalAudioFeed: SystemAudioLiveFeed?,
     host: SessionStartHost
   ) -> RecordingStartSequencer.Step? {
     guard host.isStreamingTranscriptionMode else { return nil }
@@ -229,6 +221,7 @@ final class SessionStartPipeline {
         preRollBuffers: preRollBuffers,
         analyzerFallbackAllowed: analyzerFallbackAllowed,
         primedInput: primedCapture,
+        externalAudioFeed: externalAudioFeed,
         onDiagnostic: { [weak host] receipt in
           MainManager.retainBatchDiagnostic(receipt, for: session, activeSession: host?.activeSession)
         }
@@ -242,6 +235,7 @@ final class SessionStartPipeline {
   private func makeStartCaptureStep(
     for session: ActiveSession,
     warmContext: CaptureWarmContext?,
+    liveFeed: SystemAudioLiveFeed?,
     hud presentation: HUDDuringStart,
     host: SessionStartHost
   ) -> RecordingStartSequencer.Step {
@@ -252,7 +246,8 @@ final class SessionStartPipeline {
       // actor never waits for the main thread on its way to `record()`.
       let preflight = await audioFiles.makeStartPreflight()
       async let startedRecording = audioFiles.startRecording(
-        warmContext: warmContext, owner: .dictation, preflight: preflight
+        warmContext: warmContext, owner: .dictation, preflight: preflight,
+        source: session.captureSource, liveFeed: liveFeed
       )
       if presentation.presentsWhileOpening {
         self.presentStartingHUD()

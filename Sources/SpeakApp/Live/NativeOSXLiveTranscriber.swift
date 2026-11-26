@@ -73,7 +73,7 @@ final class NativeSpeechRecognitionTaskLifecycle {
   }
 }
 
-final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
+final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController, ExternalAudioFeedAccepting {
   weak var delegate: LiveTranscriptionSessionDelegate?
   private(set) var isRunning: Bool = false
 
@@ -82,6 +82,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   private let audioDeviceManager: AudioInputDeviceManager
   private var speechRecognizer: SFSpeechRecognizer?
   private var audioEngine = AVAudioEngine()
+  private var externalAudioFeed: SystemAudioLiveFeed?
   private let recognitionTaskLifecycle = NativeSpeechRecognitionTaskLifecycle()
   private var request: SFSpeechAudioBufferRecognitionRequest?
   private var currentLocaleIdentifier: String?
@@ -111,37 +112,55 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     currentModel = model
   }
 
+  func setExternalAudioFeed(_ feed: SystemAudioLiveFeed?) {
+    externalAudioFeed = feed
+  }
+
   func start() async throws {
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.permissionsMissing
     }
-
-    let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
-
+    let sessionContext: AudioInputDeviceManager.SessionContext? = externalAudioFeed == nil
+      ? await audioDeviceManager.beginUsingPreferredInput()
+      : nil
     let localeIdentifier = currentLocaleIdentifier ?? appSettings.resolvedPreferredLocaleIdentifier
 
-    // Checked before claiming an engine: the claimed engine can be the key-down
-    // primer's running one, and an unavailable recognizer would strand it open.
     guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier)) else {
-      await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
+      if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
       throw TranscriptionManagerError.recognizerUnavailable
     }
     speechRecognizer = recognizer
-
-    // Bind a fresh engine to the now-selected default input device. Reusing a
-    // long-lived engine across device changes leaves it pointing at a stale HAL
-    // device and `start()` then fails with kAudioHardwareBadDeviceError.
-    audioEngine = LiveInputEngines.shared.makeEngine()
-
     request = makeRecognitionRequest(for: recognizer)
+    try await attachAudioInput(sessionContext: sessionContext)
 
+    latestResult = nil
+    hasFinished = false
+    committedText = ""
+    lastFormattedString = ""
+    guard request != nil else {
+      stopAudioEngineIfOwned()
+      if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
+      throw TranscriptionManagerError.recognizerUnavailable
+    }
+    await MainActor.run {
+      self.activeInputSession = sessionContext
+      self.isRunning = true
+      self.startRecognitionTask(with: recognizer)
+    }
+  }
+
+  private func attachAudioInput(sessionContext: AudioInputDeviceManager.SessionContext?) async throws {
+    if let externalAudioFeed {
+      externalAudioFeed.attach { [weak self] buffer in self?.request?.append(buffer) }
+      return
+    }
+    audioEngine = LiveInputEngines.shared.makeEngine()
     let inputNode = audioEngine.inputNode
     inputNode.removeTap(onBus: 0)
     let format = inputNode.outputFormat(forBus: 0)
     guard audioInputFormatIsUsable(format) else {
-      // The claimed engine may already be running (the key-down primer's).
       audioEngine.stop()
-      await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
+      if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
       throw TranscriptionManagerError.noUsableAudioInput
     }
     do {
@@ -150,29 +169,16 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
       }
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
     } catch {
-      audioEngine.stop()
-      audioEngine.inputNode.removeTap(onBus: 0)
-      await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
+      stopAudioEngineIfOwned()
+      if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
       throw error
     }
+  }
 
-    latestResult = nil
-    hasFinished = false
-    committedText = ""
-    lastFormattedString = ""
-    guard request != nil else {
-      audioEngine.stop()
-      audioEngine.inputNode.removeTap(onBus: 0)
-      await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
-      throw TranscriptionManagerError.recognizerUnavailable
-    }
-    await MainActor.run {
-      // Publish session state before starting recognition so final/error
-      // callbacks (all main-actor ordered) observe a fully started session.
-      self.activeInputSession = sessionContext
-      self.isRunning = true
-      self.startRecognitionTask(with: recognizer)
-    }
+  private func stopAudioEngineIfOwned() {
+    guard externalAudioFeed == nil else { return }
+    audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
   }
 
   func stop() async {
@@ -185,8 +191,13 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
       return pending
     }
     finishingRequest?.endAudio()
-    audioEngine.stop()
-    audioEngine.inputNode.removeTap(onBus: 0)
+    if let feed = externalAudioFeed {
+      feed.close()
+      externalAudioFeed = nil
+    } else {
+      audioEngine.stop()
+      audioEngine.inputNode.removeTap(onBus: 0)
+    }
     isRunning = false
 
     // Always ensure the delegate is called so the continuation in
@@ -360,24 +371,12 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
   }
 
   private func ensurePermissions() async -> Bool {
-    let microphone = await permissionsManager.ensureGranted(.microphone)
+    if externalAudioFeed?.source.includesMicrophone != false {
+      let microphone = await permissionsManager.ensureGranted(.microphone)
+      guard microphone.isGranted else { return false }
+    }
     let speech = await permissionsManager.ensureGranted(.speechRecognition)
-    return microphone.isGranted && speech.isGranted
-  }
-}
-
-final class UnsupportedLocalLiveTranscriber: LiveTranscriptionController {
-  weak var delegate: LiveTranscriptionSessionDelegate?
-  private(set) var isRunning: Bool = false
-
-  func configure(language: String?, model: String) {}
-
-  func start() async throws {
-    throw TranscriptionManagerError.localLiveStreamingUnsupported
-  }
-
-  func stop() async {
-    isRunning = false
+    return speech.isGranted
   }
 }
 

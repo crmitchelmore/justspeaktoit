@@ -41,6 +41,8 @@ public struct CLIPlan: Equatable {
     public var language: String?
     /// `speak config get|set`: see `CommandLineParser+Configuration`.
     public var keys: [String]?, prefix: String?, changes: [String: AnyCodable]?, dryRun: Bool?
+    /// `speak listen --source mic|system|both`.
+    public var source: String?
 
     public init(
         command: AutomationCommand,
@@ -89,7 +91,7 @@ public enum CommandLineParser {
     USAGE
       speak transcribe <file> [--json] [--timeout <seconds>]
       speak await --capture-id <uuid> [--since-id <uuid>] [--timeout <seconds>] [--json]
-      speak listen [--json]
+      speak listen [--source mic|system|both] [--json]
       speak stop [--json]
       speak history [--last <n>] [--json]
       speak say [<text>... | -f <file> | -] [-o <file>] [--play] [--json]
@@ -234,6 +236,7 @@ public enum CommandLineParser {
         case language = "--language"
         case prefix = "--prefix"
         case dryRun = "--dry-run"
+        case source = "--source"
 
         init?(token: String) {
             switch token {
@@ -283,13 +286,27 @@ public enum CommandLineParser {
         case .sinceID:
             plan.sinceID = value
         case .last:
-            guard let count = Int(value), count >= 1, count <= AutomationLimits.maxHistoryLimit else {
-                throw CLIUsageError(
-                    message: "--last must be between 1 and \(AutomationLimits.maxHistoryLimit)."
-                )
-            }
-            plan.limit = count
+            try self.applyLast(value, to: &plan)
+        case .source:
+            try self.applySource(value, to: &plan)
         }
+    }
+
+    private static func applyLast(_ value: String, to plan: inout CLIPlan) throws {
+        guard let count = Int(value), count >= 1, count <= AutomationLimits.maxHistoryLimit else {
+            throw CLIUsageError(
+                message: "--last must be between 1 and \(AutomationLimits.maxHistoryLimit)."
+            )
+        }
+        plan.limit = count
+    }
+
+    private static func applySource(_ value: String, to plan: inout CLIPlan) throws {
+        guard let parsed = AudioCaptureSource(rawValue: value.lowercased()) else {
+            let valid = AudioCaptureSource.allCases.map(\.rawValue).joined(separator: ", ")
+            throw CLIUsageError(message: "--source must be one of: \(valid) (got \"\(value)\").")
+        }
+        plan.source = parsed.rawValue
     }
 
     /// The app resolves paths in its own working directory, so relative paths are

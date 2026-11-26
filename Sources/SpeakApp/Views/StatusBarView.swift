@@ -214,6 +214,7 @@ final class StatusBarController {
     toggleItem.target = self
     toggleItem.setAccessibilityIdentifier("statusBarToggleRecordingItem")
     menu.addItem(toggleItem)
+    addSystemAudioMenuItems(to: menu)
 
     let reconnectItem = NSMenuItem(
       title: "Reconnect Hotkey",
@@ -324,6 +325,13 @@ final class StatusBarController {
       return StatusAppearance(
         label: "Needs Attention", compactSymbol: "exclamationmark.triangle.fill", tint: .systemRed)
     }
+  }
+
+  var isMainManagerBusy: Bool { mainManager.isBusy }
+
+  func startRecording(captureSource: AudioCaptureSource) {
+    guard !mainManager.isBusy else { return }
+    mainManager.toggleRecordingFromUI(captureSource: captureSource)
   }
 
   @objc private func toggleRecording() {

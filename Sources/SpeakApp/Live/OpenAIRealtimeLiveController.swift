@@ -14,7 +14,7 @@ import os.log
 /// per-model `postStopFinalizeBudget` for the final completed event.
 @MainActor
 // swiftlint:disable:next type_body_length
-final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController {
+final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController, ExternalAudioFeedAccepting {
   weak var delegate: LiveTranscriptionSessionDelegate?
   private(set) var isRunning: Bool = false
 
@@ -25,6 +25,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
   private var transcriber: OpenAIRealtimeLiveTranscriber?
   private var currentModel: String?
   private var currentLanguage: String?
+  private var externalAudioFeed: SystemAudioLiveFeed?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var audioEngine = AVAudioEngine()
   private let logger = SpeakLogger.logger(category: "OpenAIRealtimeLiveController")
@@ -67,37 +68,19 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
     logger.info("Configured OpenAI Realtime with model: \(model)")
   }
 
+  func setExternalAudioFeed(_ feed: SystemAudioLiveFeed?) {
+    externalAudioFeed = feed
+  }
+
   // swiftlint:disable:next function_body_length
   func start() async throws {
-    guard await ensurePermissions() else {
-      throw TranscriptionManagerError.microphonePermissionMissing
-    }
-
+    try await ensureMicrophonePermissionIfNeeded()
     let apiKey = try await openAIAPIKey()
-
-    let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
-    activeInputSession = sessionContext
-    audioEngine = LiveInputEngines.shared.makeEngine()
-
-    transcriber = nil
-    targetFormat = nil
-    finalsByItem = [:]
-    itemOrder = []
-    currentDeltasByItem = [:]
-    preStopCompletedItemIDs = []
-    streamingStartTime = nil
-    hasFinished = false
-    stopContinuation = nil
-    isRunning = false
+    await preparePreferredInputIfNeeded()
+    resetSessionState()
 
     do {
-      let inputNode = audioEngine.inputNode
-      inputNode.removeTap(onBus: 0)
-      let inputFormat = inputNode.outputFormat(forBus: 0)
-      guard audioInputFormatIsUsable(inputFormat) else {
-        throw TranscriptionManagerError.noUsableAudioInput
-      }
-
+      let inputFormat = try prepareInputFormatIfNeeded()
       guard let outputFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16,
         sampleRate: targetSampleRate,
@@ -147,7 +130,6 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
             self.delegate?.liveTranscriber(self, didFail: error)
           }
         }
-
       )
 
       guard let transcriber else { throw OpenAIRealtimeError.encodingFailed }
@@ -160,19 +142,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
           self.delegate?.liveTranscriber(self, didFail: error)
         }
       }
-      let processor = audioProcessor
-      let log = logger
-      try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
-        processor.handleAudioTap(
-          buffer,
-          inputFormat: inputFormat,
-          outputFormat: outputFormat,
-          transcriber: transcriber,
-          logger: log
-        )
-      }
-
-      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+      try await attachAudioInput(inputFormat: inputFormat, outputFormat: outputFormat, transcriber: transcriber)
       isRunning = true
       streamingStartTime = Date()
     } catch {
@@ -181,13 +151,89 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
     }
   }
 
+  private func ensureMicrophonePermissionIfNeeded() async throws {
+    guard externalAudioFeed?.source.includesMicrophone != false else { return }
+    guard await ensurePermissions() else {
+      throw TranscriptionManagerError.microphonePermissionMissing
+    }
+  }
+
+  private func preparePreferredInputIfNeeded() async {
+    guard externalAudioFeed == nil else { return }
+    let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
+    activeInputSession = sessionContext
+    audioEngine = LiveInputEngines.shared.makeEngine()
+  }
+
+  private func resetSessionState() {
+    transcriber = nil
+    targetFormat = nil
+    finalsByItem = [:]
+    itemOrder = []
+    currentDeltasByItem = [:]
+    preStopCompletedItemIDs = []
+    streamingStartTime = nil
+    hasFinished = false
+    stopContinuation = nil
+    isRunning = false
+  }
+
+  private func prepareInputFormatIfNeeded() throws -> AVAudioFormat? {
+    guard externalAudioFeed == nil else { return nil }
+    let inputNode = audioEngine.inputNode
+    inputNode.removeTap(onBus: 0)
+    let format = inputNode.outputFormat(forBus: 0)
+    guard audioInputFormatIsUsable(format) else {
+      throw TranscriptionManagerError.noUsableAudioInput
+    }
+    return format
+  }
+
+  private func attachAudioInput(
+    inputFormat: AVAudioFormat?,
+    outputFormat: AVAudioFormat,
+    transcriber: OpenAIRealtimeLiveTranscriber
+  ) async throws {
+    let processor = audioProcessor
+    let log = logger
+    if let externalAudioFeed {
+      externalAudioFeed.attach { buffer in
+        processor.handleAudioTap(
+          buffer,
+          inputFormat: buffer.format,
+          outputFormat: outputFormat,
+          transcriber: transcriber,
+          logger: log
+        )
+      }
+      return
+    }
+    guard let inputFormat else { return }
+    let inputNode = audioEngine.inputNode
+    try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
+      processor.handleAudioTap(
+        buffer,
+        inputFormat: inputFormat,
+        outputFormat: outputFormat,
+        transcriber: transcriber,
+        logger: log
+      )
+    }
+    try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+  }
+
   func stop() async {
     guard isRunning else { return }
     guard !hasFinished else { return }
     hasFinished = true
 
-    audioEngine.stop()
-    audioEngine.inputNode.removeTap(onBus: 0)
+    if let feed = externalAudioFeed {
+      feed.close()
+      externalAudioFeed = nil
+    } else {
+      audioEngine.stop()
+      audioEngine.inputNode.removeTap(onBus: 0)
+    }
     isRunning = false
 
     // Snapshot which item ids have already finalised before stop. Any
@@ -327,8 +373,13 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
   // MARK: - Cleanup
 
   private func cleanupAfterFailedStart() async {
-    audioEngine.stop()
-    audioEngine.inputNode.removeTap(onBus: 0)
+    if let feed = externalAudioFeed {
+      feed.close()
+      externalAudioFeed = nil
+    } else {
+      audioEngine.stop()
+      audioEngine.inputNode.removeTap(onBus: 0)
+    }
     isRunning = false
     audioProcessor.setRunning(false)
     transcriber?.stop()

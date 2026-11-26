@@ -91,6 +91,7 @@ final class ActiveSession {
   /// runtime needs the exact source: hands-free captures own their own stop
   /// rules, so level-based auto-stop must keep away from them.
   let trigger: SessionTriggerSource
+  let captureSource: AudioCaptureSource
   let hotKeyDescription: String
   var recordingSummary: RecordingSummary?
   var transcriptionResult: TranscriptionResult?
@@ -170,10 +171,12 @@ final class ActiveSession {
     gesture: HistoryTrigger.HotKeyGesture,
     hotKeyDescription: String,
     trigger: SessionTriggerSource = .uiButton,
+    captureSource: AudioCaptureSource = .mic,
     triggerTiming: SessionTriggerTiming = .nonHotKey()
   ) {
     self.gesture = gesture
     self.trigger = trigger
+    self.captureSource = captureSource
     self.hotKeyDescription = hotKeyDescription
     self.triggerTiming = triggerTiming
     self.recordingStarted = triggerTiming.occurredAt
@@ -232,7 +235,7 @@ final class ActiveSession {
       outputDelivered: outputDelivered
     )
     let latency = self.latencyMetrics
-    return HistoryItem(
+    var item = HistoryItem(
       id: id,
       createdAt: createdAt,
       updatedAt: updatedAt,
@@ -254,5 +257,7 @@ final class ActiveSession {
       diagnosticContext: diagnosticContext,
       latency: latency.hasAnyInterval ? latency : nil
     )
+    item.captureSource = captureSource
+    return item
   }
 }

@@ -26,6 +26,7 @@ public struct ApplicationHistoryItem: Codable, Identifiable, Hashable, Sendable 
     public let diagnosticContext: ApplicationHistoryDiagnosticContext?
     public let latency: SessionLatencyMetrics?
     public let desktopHistory: AnyCodable?
+    public var captureSource: AudioCaptureSource?
 
     public init(
         id: UUID = UUID(), createdAt: Date = Date(), updatedAt: Date = Date(), modelsUsed: [String],
@@ -62,5 +63,6 @@ public struct ApplicationHistoryItem: Codable, Identifiable, Hashable, Sendable 
         self.diagnosticContext = diagnosticContext
         self.latency = latency
         self.desktopHistory = desktopHistory
+        self.captureSource = nil
     }
 }

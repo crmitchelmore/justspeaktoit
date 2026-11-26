@@ -52,7 +52,16 @@ extension MCPRequestHandler {
         MCPToolDefinition(
             name: AutomationCommand.startDictation.rawValue,
             description: "Start a dictation session in the app. Idempotent per call id.",
-            inputSchema: ["type": "object", "properties": [:]]
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "source": [
+                        "type": "string",
+                        "enum": .array(AudioCaptureSource.allCases.map { .string($0.rawValue) }),
+                        "description": "Audio source to capture: mic (default), system, or both (macOS 14.2+)."
+                    ]
+                ]
+            ]
         ),
         MCPToolDefinition(
             name: AutomationCommand.stopDictation.rawValue,

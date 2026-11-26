@@ -43,6 +43,14 @@ public protocol AutomationSpeechHost: AutomationCommandHost {
     func automationVoices() async throws -> [AutomationVoice]
 }
 
+/// System-audio and mixed capture for `speak listen --source system|both`.
+/// Separate from `AutomationCommandHost` so platforms opt in; hosts that do not
+/// conform still handle default/mic starts and reject system audio with
+/// `unsupported_command`.
+public protocol AutomationCaptureSourceHost: AutomationCommandHost {
+    func automationStartDictation(source: AudioCaptureSource) async throws -> AutomationResult
+}
+
 /// Maps one validated automation request onto an `AutomationCommandHost`.
 public enum AutomationCommandDispatcher {
     private static func speechHost(_ host: some AutomationCommandHost) throws -> any AutomationSpeechHost {
@@ -89,6 +97,32 @@ public enum AutomationCommandDispatcher {
             (request.changes ?? [:]).mapValues(\.storage), dryRun: request.dryRun ?? false)
     }
 
+    private static func startDictationResult(
+        for request: AutomationRequest,
+        host: some AutomationCommandHost
+    ) async throws -> AutomationResult {
+        guard let rawSource = request.source else {
+            return try await host.automationStartDictation()
+        }
+        guard let source = AudioCaptureSource(rawValue: rawSource.lowercased()) else {
+            let valid = AudioCaptureSource.allCases.map(\.rawValue).joined(separator: ", ")
+            throw AutomationError(
+                code: .invalidArgument,
+                message: "Unknown audio source \"\(rawSource)\". Use one of: \(valid)."
+            )
+        }
+        if let sourceHost = host as? any AutomationCaptureSourceHost {
+            return try await sourceHost.automationStartDictation(source: source)
+        }
+        if source == .mic {
+            return try await host.automationStartDictation()
+        }
+        throw AutomationError(
+            code: .unsupportedCommand,
+            message: "System audio capture is not supported on this platform."
+        )
+    }
+
     public static func response(
         to request: AutomationRequest,
         host: some AutomationCommandHost
@@ -108,7 +142,7 @@ public enum AutomationCommandDispatcher {
             case .transcribeFile:
                 result = try await host.automationTranscribeFile(at: AutomationRequestPolicy.audioFile(for: request))
             case .startDictation:
-                result = try await host.automationStartDictation()
+                result = try await Self.startDictationResult(for: request, host: host)
             case .stopDictation:
                 result = try await host.automationStopDictation()
             case .speakText, .listVoices:

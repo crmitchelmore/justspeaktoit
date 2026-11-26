@@ -11,6 +11,7 @@ enum TranscriptionManagerError: LocalizedError, Equatable {
   case localLiveStreamingStartupTimedOut
   case invalidLocalStreamingSource(String)
   case noUsableAudioInput
+  case systemAudioUnsupportedForLiveModel(String)
 
   var errorDescription: String? {
     switch self {
@@ -36,6 +37,9 @@ enum TranscriptionManagerError: LocalizedError, Equatable {
         "Choose or download a local streaming model in Settings."
     case .noUsableAudioInput:
       return "The selected microphone is unavailable. Pick a different input device in Settings and try again."
+    case .systemAudioUnsupportedForLiveModel(let model):
+      return "System audio live capture is not supported with \(model). " +
+        "Switch to a cloud streaming provider, Apple Speech, or a batch/local model."
     }
   }
 }

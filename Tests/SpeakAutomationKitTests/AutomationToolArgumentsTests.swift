@@ -40,6 +40,7 @@ final class AutomationToolArgumentsTests: XCTestCase {
 
     func testSameInputs_buildTheSameArgumentsFromMCPAndCLI() throws {
         let rows: [Row] = [
+            Row(.startDictation, #"{"source":"system"}"#, ["listen", "--source", "system"]),
             Row(.history, #"{"limit":3}"#, ["history", "--last", "3"]),
             Row(.transcribeFile, #"{"path":"/srv/a.m4a","timeout_seconds":12.5}"#,
                 ["transcribe", "/srv/a.m4a", "--timeout", "12.5"]),

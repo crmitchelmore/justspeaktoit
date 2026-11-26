@@ -275,9 +275,11 @@ extension MainManager: SessionStartHost {
     // Start live text insertion if enabled. The experimental streaming mode
     // patches partials into allowlisted apps via ranged AX replacement; other
     // apps (or with the setting off) keep today's behaviour.
+    // Skip live text insertion for system audio captures so meeting/media
+    // transcripts never type into whichever window happens to be focused.
     let useRangedStreaming = streamingInsertionEligible
       && StreamingInsertionAllowlist.allows(session.outputTarget)
-    if liveInsertionEnabled || useRangedStreaming {
+    if !session.captureSource.includesSystemAudio, liveInsertionEnabled || useRangedStreaming {
       text.liveTextInserter.begin(
         target: session.outputTarget,
         strategy: useRangedStreaming ? .rangedStreaming : .fullValue
@@ -314,6 +316,7 @@ extension MainManager: SessionStartHost {
   @discardableResult
   func startSession(
     trigger: SessionTriggerSource,
+    captureSource: AudioCaptureSource = .mic,
     preRollBuffers: [AVAudioPCMBuffer] = [],
     triggerTiming: SessionTriggerTiming = .nonHotKey(),
     primedInput: PrimedLiveInputReservation? = nil
@@ -321,6 +324,7 @@ extension MainManager: SessionStartHost {
     await startPipeline.start(
       SessionStartPipeline.Request(
         trigger: trigger,
+        captureSource: captureSource,
         preRollBuffers: preRollBuffers,
         triggerTiming: triggerTiming,
         primedInput: primedInput

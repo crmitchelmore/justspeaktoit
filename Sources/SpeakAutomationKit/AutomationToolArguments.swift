@@ -24,6 +24,7 @@ public struct AutomationToolArguments: Codable, Equatable, Sendable {
     public var prefix: String?
     public var changes: [String: AnyCodable]?
     public var dryRun: Bool?
+    public var source: String?
 
     public init() {}
 
@@ -39,6 +40,7 @@ public struct AutomationToolArguments: Codable, Equatable, Sendable {
         case timeoutSeconds = "timeout_seconds"
         case keys, prefix, changes
         case dryRun = "dry_run"
+        case source
     }
 
     /// Decodes in the order the arguments were always checked, so the first
@@ -69,6 +71,7 @@ public struct AutomationToolArguments: Codable, Equatable, Sendable {
         self.prefix = try fields.argument(String.self, .prefix, "must be a string")
         self.changes = try fields.argument([String: AnyCodable].self, .changes, "must be an object")
         self.dryRun = try fields.argument(Bool.self, .dryRun, "must be a boolean")
+        self.source = try fields.argument(String.self, .source, "must be a string")
     }
 
     /// Copies every argument given onto `request`, leaving the rest unchanged.
@@ -76,7 +79,7 @@ public struct AutomationToolArguments: Codable, Equatable, Sendable {
         let strings: [(KeyPath<Self, String?>, WritableKeyPath<AutomationRequest, String?>)] = [
             (\.path, \.path), (\.captureID, \.captureID), (\.sinceID, \.sinceID), (\.text, \.text),
             (\.voice, \.voice), (\.provider, \.provider), (\.model, \.model), (\.quality, \.quality),
-            (\.language, \.language), (\.prefix, \.prefix)
+            (\.language, \.language), (\.prefix, \.prefix), (\.source, \.source)
         ]
         for (argument, field) in strings { if let value = self[keyPath: argument] { request[keyPath: field] = value } }
         let numbers: [(KeyPath<Self, Double?>, WritableKeyPath<AutomationRequest, Double?>)] = [

@@ -70,6 +70,24 @@ final class SharedClientAudioProcessor: @unchecked Sendable {
     }
   }
 
+  /// Prepares conversion for an external PCM buffer stream (system audio or
+  /// mic+system mix) instead of installing an `AVAudioEngine` input tap.
+  func prepareExternalSource(
+    sampleRate: Int,
+    client: StreamingTranscriptionClient,
+    onConversionFailure: @escaping @Sendable (Error) -> Void
+  ) throws -> (@Sendable (AVAudioPCMBuffer) -> Void) {
+    guard let targetFormat = AVAudioFormat(
+      commonFormat: .pcmFormatInt16, sampleRate: Double(sampleRate), channels: 1, interleaved: true
+    ) else {
+      throw TranscriptionManagerError.noUsableAudioInput
+    }
+    setRunning(true, onConversionFailure: onConversionFailure)
+    return { [weak self] buffer in
+      self?.handleAudioTap(buffer, outputFormat: targetFormat, client: client)
+    }
+  }
+
   private func handleAudioTap(
     _ buffer: AVAudioPCMBuffer, outputFormat: AVAudioFormat, client: StreamingTranscriptionClient
   ) {

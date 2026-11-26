@@ -15,7 +15,7 @@ directly between them:
 
 | Verb | Shortcuts action | CLI | MCP tool |
 | --- | --- | --- | --- |
-| listen | Start Dictation | `speak listen` | `start_dictation` |
+| listen | Start Dictation | `speak listen [--source mic\|system\|both]` | `start_dictation` |
 | await (local Mac) | — | `speak await --capture-id <uuid>` | `await_transcript` |
 | status | — | `speak status` | `status` |
 | stop | Stop Dictation | `speak stop` | `stop_dictation` |
@@ -34,8 +34,16 @@ Use the `captureID` returned by `speak listen --json` or active `speak status --
 then register before stopping that capture through the UI/hotkey or a separate command:
 
 ```sh
+speak listen --source system --json
+speak status --json
 speak await --capture-id <capture-uuid> --timeout 60 --json
 ```
+
+On macOS 14.2+, `speak listen --source mic|system|both` (and MCP `start_dictation`
+with `source`) captures microphone audio (default), system audio via CoreAudio
+Process Tap (`system`), or a mix of both (`both`). Active `status --json` replies
+include additive `source` and `liveText` fields while streaming; `stop`, `await`,
+and `history` entries include `source` without breaking `schemaVersion: 1`.
 
 MCP arguments are `capture_id`, optional `since_id`, and `timeout_seconds`.
 Default timeout is 60 seconds; the finite allowed range is greater than zero through

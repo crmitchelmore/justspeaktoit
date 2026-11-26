@@ -11,7 +11,7 @@ import SpeakCore
 /// existing session and provider pipelines so an automation session behaves
 /// exactly like a hotkey session.
 @MainActor
-final class AppAutomationHandler: AutomationCommandHandling, AutomationSpeechHost {
+final class AppAutomationHandler: AutomationCommandHandling, AutomationSpeechHost, AutomationCaptureSourceHost {
     let main: MainManager
     private let history: HistoryManager
     private let transcription: TranscriptionManager
@@ -62,11 +62,19 @@ final class AppAutomationHandler: AutomationCommandHandling, AutomationSpeechHos
     // MARK: - AutomationCommandHost
 
     func automationStatus() async -> AutomationResult {
-        AutomationResult(
+        var result = AutomationResult(
             sessionActive: self.main.activeSession != nil,
             appVersion: self.appVersion,
             captureID: self.main.activeSession.flatMap { $0.isLocalAutomationCapture ? $0.id.uuidString : nil }
         )
+        if let active = self.main.activeSession {
+            result.source = active.captureSource.rawValue
+            let preview = self.main.livePreview
+            if !preview.isEmpty {
+                result.liveText = preview
+            }
+        }
+        return result
     }
 
     /// Reads the whole persisted history, not the loaded page.
@@ -86,7 +94,8 @@ final class AppAutomationHandler: AutomationCommandHandling, AutomationSpeechHos
                 createdAt: item.createdAt,
                 model: item.modelUsages.first?.modelIdentifier ?? item.modelsUsed.first,
                 durationSeconds: item.recordingDuration,
-                wordCount: AutomationHistoryEntry.wordCount(of: text)
+                wordCount: AutomationHistoryEntry.wordCount(of: text),
+                source: item.captureSource?.rawValue
             )
         }
     }
@@ -106,6 +115,10 @@ final class AppAutomationHandler: AutomationCommandHandling, AutomationSpeechHos
     }
 
     func automationStartDictation() async throws -> AutomationResult {
+        try await self.automationStartDictation(source: .mic)
+    }
+
+    func automationStartDictation(source: AudioCaptureSource) async throws -> AutomationResult {
         guard self.main.activeSession == nil, !self.main.isEndingSession else {
             throw AutomationError.dictationAlreadyRunning
         }
@@ -113,14 +126,16 @@ final class AppAutomationHandler: AutomationCommandHandling, AutomationSpeechHos
         // Permission and provider setup can legitimately exceed five seconds; the
         // server's request deadline reports that delay while the idempotent command
         // continues and can be collected by retrying the same request id.
-        let outcome = await self.main.startSession(trigger: .automation)
+        let outcome = await self.main.startSession(trigger: .automation, captureSource: source)
         guard outcome == .started, self.main.activeSession != nil else {
             throw AutomationError(
                 code: .transcriptionFailed,
                 message: Self.failureMessage(from: self.main.state) ?? "Dictation could not be started."
             )
         }
-        return AutomationResult(sessionActive: true, captureID: self.main.activeSession?.id.uuidString)
+        var result = AutomationResult(sessionActive: true, captureID: self.main.activeSession?.id.uuidString)
+        result.source = source.rawValue
+        return result
     }
 
     private static func failureMessage(from state: MainManager.State) -> String? {
@@ -133,28 +148,33 @@ final class AppAutomationHandler: AutomationCommandHandling, AutomationSpeechHos
             throw AutomationError.noDictationRunning
         }
         let sessionID = session.id
+        let captureSource = session.captureSource
         await self.main.endSession(trigger: .automation)
 
         switch self.main.state {
         case .completed(let item):
-            return AutomationResult(
+            var result = AutomationResult(
                 text: Self.transcript(of: item),
                 model: item.modelUsages.first?.modelIdentifier ?? item.modelsUsed.first,
                 durationSeconds: item.recordingDuration,
                 sessionActive: false
             )
+            result.source = (item.captureSource ?? captureSource).rawValue
+            return result
         case .failed(let message):
             throw AutomationError(code: .transcriptionFailed, message: message)
         default:
             // Delivery can still be in flight. Only this session's own item counts —
             // the newest history entry may belong to an earlier session.
             let item = self.history.allItems.first { $0.id == sessionID }
-            return AutomationResult(
+            var result = AutomationResult(
                 text: item.map(Self.transcript(of:)) ?? "",
                 model: item?.modelUsages.first?.modelIdentifier ?? item?.modelsUsed.first,
                 durationSeconds: item?.recordingDuration,
                 sessionActive: self.main.activeSession != nil
             )
+            result.source = (item?.captureSource ?? captureSource).rawValue
+            return result
         }
     }
 

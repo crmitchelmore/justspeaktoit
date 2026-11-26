@@ -80,7 +80,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   func start(
     preRollBuffers: [AVAudioPCMBuffer],
     analyzerFallbackAllowed: Bool = true,
-    primedInput: PrimedLiveInput? = nil
+    primedInput: PrimedLiveInput? = nil,
+    externalAudioFeed: SystemAudioLiveFeed? = nil
   ) async throws {
     if let activeRun {
       await stop(activeRun)
@@ -94,9 +95,23 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       resetControllers()
     }
 
-    let controller = controller(for: model)
+    var controller = controller(for: model)
+    var effectiveModel = model
+    if let externalAudioFeed {
+      if !(controller is ExternalAudioFeedAccepting) {
+        if AppleLocalModels.isSpeechAnalyzerModel(model), analyzerFallbackAllowed {
+          controller = controllers.native
+          effectiveModel = AppleLocalModels.legacySpeechModelID
+        } else {
+          throw TranscriptionManagerError.systemAudioUnsupportedForLiveModel(model)
+        }
+      }
+      (controller as? ExternalAudioFeedAccepting)?.setExternalAudioFeed(externalAudioFeed)
+    } else {
+      (controller as? ExternalAudioFeedAccepting)?.setExternalAudioFeed(nil)
+    }
     controller.delegate = delegate
-    controller.configure(language: currentLanguage, model: model)
+    controller.configure(language: currentLanguage, model: effectiveModel)
     let run = activate(controller, preRollBuffers: preRollBuffers, primedInput: primedInput)
     do {
       try await awaitStartup(run)

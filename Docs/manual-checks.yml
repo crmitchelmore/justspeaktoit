@@ -12,6 +12,20 @@ sessions:
       - "Settings \u203a General: Accessibility Insertion = Insert at Cursor; Stream text while dictating (experimental) = on; post-processing off."
       - "A Streaming model with a working key is selected. Use made-up sentences only."
     items:
+      - id: "mac-system-audio-capture"
+        issues:
+          - 1854
+        title: "System audio capture: record system and mic + system audio via menu bar and speak CLI"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Mac (macOS 14.2+), an Alpha build with system audio capture"
+        steps:
+          - "Play spoken audio in a browser or meeting app (for example a short podcast clip)."
+          - "From the menu bar choose Record System Audio, let 10 seconds play, then click Stop Recording and check History."
+          - "With Settings \u203a General \u203a Automation on, run `speak listen --source both --json`, speak a sentence while the audio plays, check `speak status --json` shows `source: \"both\"` and `liveText`, then run `speak stop --json`."
+          - "Inspect the latest entry in `speak history --last 2 --json`."
+        expected: "macOS prompts for System Audio Recording Only permission (not full Screen Recording). Both the system-only and mic+system captures transcribe cleanly, save playable audio in History, tag `source` as `system` or `both` in JSON replies, and do not paste into the focused editor when started via `speak listen --source system|both`."
+        final_gate: true
       - id: "mac-model-chooser-empty-results"
         issues:
           - 1581

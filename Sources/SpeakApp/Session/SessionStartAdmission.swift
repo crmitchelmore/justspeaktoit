@@ -18,7 +18,11 @@ struct SessionStartAdmission {
   /// Checks that must pass before a session exists. Returns the rejection
   /// after undoing the profile and warm-capture hand-off, or nil when the
   /// start may proceed with `.dictation` capture reserved.
-  func rejection(for trigger: SessionTriggerSource, host: SessionStartHost) async -> HandsFreeCaptureStartOutcome? {
+  func rejection(
+    for trigger: SessionTriggerSource,
+    captureSource: AudioCaptureSource = .mic,
+    host: SessionStartHost
+  ) async -> HandsFreeCaptureStartOutcome? {
     if trigger == .handsFree,
       !HandsFreeDictationPolicy.supportsCapture(
         modelID: settings.liveTranscriptionModel,
@@ -40,7 +44,7 @@ struct SessionStartAdmission {
       return abandonStart(.rejected(.captureFailed))
     }
 
-    if capture.audioFiles.requiresPhysicalInput && capture.devices.devices.isEmpty {
+    if captureSource.includesMicrophone, capture.audioFiles.requiresPhysicalInput && capture.devices.devices.isEmpty {
       let rejection = abandonStart(.rejected(.audioUnavailable))
       showStartFailure(
         "No microphone connected. Plug in a USB or Bluetooth microphone and try again.",

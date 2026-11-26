@@ -215,6 +215,26 @@ final class StatusBarController {
     toggleItem.setAccessibilityIdentifier("statusBarToggleRecordingItem")
     menu.addItem(toggleItem)
 
+    if #available(macOS 14.2, *), !mainManager.isBusy {
+      let systemItem = NSMenuItem(
+        title: "Record System Audio",
+        action: #selector(startSystemAudioRecording),
+        keyEquivalent: ""
+      )
+      systemItem.target = self
+      systemItem.setAccessibilityIdentifier("statusBarRecordSystemAudioItem")
+      menu.addItem(systemItem)
+
+      let bothItem = NSMenuItem(
+        title: "Record Mic + System Audio",
+        action: #selector(startBothAudioRecording),
+        keyEquivalent: ""
+      )
+      bothItem.target = self
+      bothItem.setAccessibilityIdentifier("statusBarRecordBothAudioItem")
+      menu.addItem(bothItem)
+    }
+
     let reconnectItem = NSMenuItem(
       title: "Reconnect Hotkey",
       action: #selector(reconnectHotKey),
@@ -330,6 +350,16 @@ final class StatusBarController {
     if case .processing = mainManager.state { return }
     if case .delivering = mainManager.state { return }
     mainManager.toggleRecordingFromUI()
+  }
+
+  @objc private func startSystemAudioRecording() {
+    guard !mainManager.isBusy else { return }
+    mainManager.toggleRecordingFromUI(captureSource: .system)
+  }
+
+  @objc private func startBothAudioRecording() {
+    guard !mainManager.isBusy else { return }
+    mainManager.toggleRecordingFromUI(captureSource: .both)
   }
 
   @objc private func applyDeliveryRemedy() {

@@ -7,7 +7,7 @@ extension CommandLineParser {
     /// exactly the arguments the command's MCP tool advertises.
     static let options: [AutomationCommand: Set<Option>] = [
         .awaitTranscript: [.json, .timeout, .captureID, .sinceID],
-        .startDictation: [.json],
+        .startDictation: [.json, .source],
         .stopDictation: [.json],
         .history: [.json, .last],
         .status: [.json],
@@ -49,6 +49,7 @@ extension CommandLineParser.Option {
         case .language: .language
         case .prefix: .prefix
         case .dryRun: .dryRun
+        case .source: .source
         }
     }
 }
@@ -76,6 +77,7 @@ extension CLIPlan {
             arguments.prefix = self.prefix
             arguments.changes = self.changes
             arguments.dryRun = self.dryRun
+            arguments.source = self.source
             return arguments
         }
         set {
@@ -97,6 +99,7 @@ extension CLIPlan {
             self.prefix = newValue.prefix
             self.changes = newValue.changes
             self.dryRun = newValue.dryRun
+            self.source = newValue.source
         }
     }
 }

@@ -30,7 +30,24 @@ final class CLIBehaviourTests: XCTestCase {
     func testListen_matchesIssueInvocation() throws {
         let plan = try XCTUnwrap(self.plan(from: ["listen"]))
         XCTAssertEqual(plan.command, .startDictation)
+        XCTAssertNil(plan.source)
         XCTAssertFalse(plan.json)
+    }
+
+    func testListen_withSystemSource_setsCaptureSource() throws {
+        let plan = try XCTUnwrap(self.plan(from: ["listen", "--source", "system", "--json"]))
+        XCTAssertEqual(plan.command, .startDictation)
+        XCTAssertEqual(plan.source, "system")
+        XCTAssertTrue(plan.json)
+        XCTAssertEqual(plan.request(id: "req-1").source, "system")
+    }
+
+    func testListen_withInvalidSource_exitsWithUsageCode() throws {
+        let client = StubAutomationClient(result: AutomationResult())
+        let output = try self.output(self.runner(client).run(arguments: ["listen", "--source", "line-in"]))
+        XCTAssertEqual(output.exitCode, CLIExitCode.usage)
+        XCTAssertTrue(output.stderr.contains("--source"))
+        XCTAssertTrue(client.sentRequests.isEmpty)
     }
 
     func testHistory_lastAndJSON_matchesIssueInvocation() throws {

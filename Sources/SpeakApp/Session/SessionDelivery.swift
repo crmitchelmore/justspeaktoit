@@ -58,6 +58,10 @@ final class SessionDelivery {
   private func insertFinalText(
     _ finalText: String, for session: ActiveSession, host: SessionCompletionHost
   ) async -> DeliveryOutcome? {
+    if session.captureSource.includesSystemAudio, session.trigger == .automation {
+      session.outputMethod = .none
+      return DeliveryOutcome(target: nil)
+    }
     var liveFinalizationResult: LiveTextInserter.FinalizationResult = .deferred
     let liveTextInserter = self.text.liveTextInserter
     let usedStreamingInsertion = liveTextInserter.isActive && liveTextInserter.strategy == .rangedStreaming

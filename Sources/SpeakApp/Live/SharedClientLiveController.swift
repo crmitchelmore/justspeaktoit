@@ -5,7 +5,7 @@ import SpeakCore
 /// macOS capture/PCM conversion for shared StreamingTranscriptionClient providers.
 /// Provider transport and parsing stay in SpeakCore, shared with iOS.
 @MainActor
-final class SharedClientLiveController: NSObject, LiveTranscriptionController {
+final class SharedClientLiveController: NSObject, LiveTranscriptionController, ExternalAudioFeedAccepting {
   weak var delegate: LiveTranscriptionSessionDelegate?
   private(set) var isRunning = false
 
@@ -16,6 +16,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
 
   private var currentLanguage: String?
   private var currentModel: String?
+  private var externalAudioFeed: SystemAudioLiveFeed?
   private var client: StreamingTranscriptionClient?
   private var audioEngine = AVAudioEngine()
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
@@ -65,6 +66,10 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     currentModel = model
   }
 
+  func setExternalAudioFeed(_ feed: SystemAudioLiveFeed?) {
+    externalAudioFeed = feed
+  }
+
   func start() async throws {
     guard !isRunning, !isStarting, !isStopping else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
     isStarting = true
@@ -81,10 +86,10 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     let client = try await makeClient(
       route: route, keyIdentifier: keyIdentifier, language: language, options: options
     )
-    if startCaptureAudio == nil {
+    if startCaptureAudio == nil, externalAudioFeed == nil {
       activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
+      audioEngine = LiveInputEngines.shared.makeEngine()
     }
-    audioEngine = LiveInputEngines.shared.makeEngine()
     let active = SharedClientControllerRun(
       shape: client.finalShape, modelIdentifier: route.modelID,
       hasExplicitBoundaries: client is UtteranceBoundaryStreamingClient
@@ -121,8 +126,13 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     let owner = boundaryDeliveryOwner
     isStopping = true
     defer { isStopping = false }
-    audioEngine.stop()
-    if startCaptureAudio == nil { audioEngine.inputNode.removeTap(onBus: 0) }
+    if let feed = externalAudioFeed {
+      feed.close()
+      externalAudioFeed = nil
+    } else {
+      audioEngine.stop()
+      if startCaptureAudio == nil { audioEngine.inputNode.removeTap(onBus: 0) }
+    }
     audioProcessor.drainConverterTail(to: activeClient)
     audioProcessor.setRunning(false)
     await applyLiveStopGrace(hostStopDelay)
@@ -217,8 +227,13 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   }
 
   private func cleanupAfterFailedStart() async {
-    audioEngine.stop()
-    if startCaptureAudio == nil { audioEngine.inputNode.removeTap(onBus: 0) }
+    if let feed = externalAudioFeed {
+      feed.close()
+      externalAudioFeed = nil
+    } else {
+      audioEngine.stop()
+      if startCaptureAudio == nil { audioEngine.inputNode.removeTap(onBus: 0) }
+    }
     audioProcessor.setRunning(false)
     run?.cancel()
     client?.cancel()
@@ -242,9 +257,11 @@ private extension SharedClientLiveController {
   ) async throws -> StreamingTranscriptionClient {
     if let clientFactory { return clientFactory() }
     if let configuredClientFactory { return try await configuredClientFactory(route, language, options) }
-    let permission = await permissionsManager.ensureGranted(.microphone)
-    try Task.checkCancellation()
-    guard permission.isGranted else { throw TranscriptionManagerError.microphonePermissionMissing }
+    if externalAudioFeed?.source.includesMicrophone != false {
+      let permission = await permissionsManager.ensureGranted(.microphone)
+      try Task.checkCancellation()
+      guard permission.isGranted else { throw TranscriptionManagerError.microphonePermissionMissing }
+    }
     let apiKey = try await loadAPIKey(identifier: keyIdentifier)
     try Task.checkCancellation()
     guard let created = LiveTranscriptionClientFactory.makeClient(
@@ -364,6 +381,13 @@ extension SharedClientLiveController {
     if let startCaptureAudio {
       observeConversionFailureReporter?(reportFailure)
       return try await startCaptureAudio()
+    }
+    if let externalAudioFeed {
+      let sink = try audioProcessor.prepareExternalSource(
+        sampleRate: sampleRate, client: client, onConversionFailure: reportFailure
+      )
+      externalAudioFeed.attach(sink)
+      return
     }
     try audioProcessor.installTap(
       on: audioEngine.inputNode, sampleRate: sampleRate, client: client, onConversionFailure: reportFailure

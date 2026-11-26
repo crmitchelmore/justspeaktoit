@@ -53,12 +53,16 @@ final class AutomationTranscriptWaiter {
                     let entry = AutomationHistoryEntry(
                         id: item.id.uuidString, text: text, createdAt: item.createdAt,
                         model: item.modelUsages.first?.modelIdentifier ?? item.modelsUsed.first,
-                        durationSeconds: item.recordingDuration, wordCount: AutomationHistoryEntry.wordCount(of: text)
+                        durationSeconds: item.recordingDuration,
+                        wordCount: AutomationHistoryEntry.wordCount(of: text),
+                        source: item.captureSource?.rawValue
                     )
-                    self?.finish(token, result: .success(AutomationResult(
+                    var result = AutomationResult(
                         text: text, model: entry.model, durationSeconds: entry.durationSeconds,
                         sessionActive: false, captureID: capture.uuidString, entry: entry
-                    )))
+                    )
+                    result.source = entry.source
+                    self?.finish(token, result: .success(result))
                 }
                 self.waits[token] = (observer, continuation)
                 self.didSubscribe?()

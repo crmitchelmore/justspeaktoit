@@ -222,6 +222,9 @@ public struct CLIRunner {
             let text = result.text ?? ""
             return text.isEmpty ? "" : text + "\n"
         case .startDictation:
+            if let source = result.source, source != AudioCaptureSource.mic.rawValue {
+                return "Dictation started (\(source)).\n"
+            }
             return "Dictation started.\n"
         case .speakText:
             return result.path.map { "Saved speech to \($0).\n" } ?? ""

@@ -82,6 +82,8 @@
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Just Speak to It records your voice to turn it into text. Audio is sent to the transcription provider you choose in Settings, or stays on this Mac when you choose an on-device model.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Just Speak to It captures system audio so you can transcribe meetings and media alongside or instead of your microphone.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>com.justspeaktoit.transcript</string>

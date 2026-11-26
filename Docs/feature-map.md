@@ -137,6 +137,7 @@ The flags live in `Project.swift`; release selection is in
 | F49 | Appearance settings | Yes | Yes | Yes | Yes | Yes | | |
 | F50 | Keyboard / IME surface | N/A | Yes | N/A | N/A | Yes | | iOS gives manual setup steps if Connect is refused; Android can opt in to live Cloud. |
 | F51 | Consent before sharing with cloud AI providers | Yes | Yes | Yes | Yes | Yes | | Asked once per provider and data kind, per device; withdraw in Privacy settings. |
+| F52 | System audio capture | Yes | N/A | No | No | N/A | #1854 | macOS 14.2+ CoreAudio Process Tap (`system` or `both`), menu bar and `speak listen --source`. |
 
 ## Features
 
@@ -599,6 +600,15 @@ The flags live in `Project.swift`; release selection is in
 - **Refs:** `Sources/SpeakCore/App/CloudSharingConsent.swift`, `Sources/SpeakCore/AppleUI/CloudSharingConsentSheet.swift`, `Sources/SpeakApp/Session/MainManager+CloudSharingConsent.swift`, `Sources/SpeakApp/Settings/AppSettings+CloudSharing.swift`, `Sources/SpeakiOS/Services/IOSCloudSharingConsentPrompt.swift`, `Sources/SpeakiOS/Views/IOSCloudSharingConsentPresenter.swift`, `android/app/src/main/java/com/justspeaktoit/android/cloud/CloudSharingConsent.kt`, `android/app/src/main/java/com/justspeaktoit/android/dictation/CloudSharingGate.kt`, `android/app/src/main/java/com/justspeaktoit/android/ui/CloudSharingViews.kt`, `Sources/SpeakDesktop/Shell/DesktopCloudSharingConsentStore.swift`, `Sources/SpeakDesktopHost/Controller/DesktopHostCloudSharing.swift`, `Sources/CWindowsSupport/include/CloudSharing.h`, `Sources/CWindowsSupport/WindowsCloudSharing.cpp`, `Sources/CLinuxSupport/LinuxCloudSharing.c`
 - **Sunset:** none
 - **Nuances:** Consent is per device: it lives under the `cloudSharingConsent` key (UserDefaults on Apple, SharedPreferences on Android, the same JSON on both) and is never synced, exported or imported, so a transferred configuration asks again. Android reads the copy, kinds and provider list from `cloud_catalog.json` (`CloudCatalogAndroidExport`), never a hand-kept list. A provider missing from `CloudSharingProviderCatalogue` still needs consent: it is shown by name without a policy link, so add new providers to the catalogue. The platform speech services (Apple Speech, Android `SpeechRecognizer`) are covered by the OS's own permission and disclosure and are not gated here. Journey and UI test fixtures pre-allow their providers. Windows and Linux keep it in `cloud-sharing-consent.json` beside the settings (the same JSON, never exported, migrated or synced); an unreadable file allows nothing. `DesktopHostConnectionPreWarming` sends no content and is not gated. Host tests build controllers with `DesktopHostController.consented`; consent tests construct the controller directly.
+
+### F52 System audio capture
+- **Platforms:** macOS Yes · iOS N/A · Windows No · Linux No · Android N/A
+- **Excluded:** iOS (OS: iOS apps cannot tap arbitrary other apps' system audio); Android (OS: AudioPlaybackCapture requires a MediaProjection screen-capture prompt and apps opt out).
+- **Gaps:** Windows, Linux #1854 (WASAPI loopback and PulseAudio/PipeWire monitor capture).
+- **How:** Captures system/meeting audio (`system`) or mixes it with the microphone (`both`) through the existing transcription pipeline (live streaming cloud providers, Apple Speech, and batch/local models). Exposes `AudioCaptureSource` (`mic`, `system`, `both`) over the automation protocol (`speak listen --source mic|system|both` and MCP `start_dictation`), tags active `status` (`source`, `liveText`), `stop`, `await` and `history` entries with the capture source, and offers menu bar actions on macOS 14.2+. Uses CoreAudio Process Tap excluding Just Speak's own PID so cues and voice output never feed back, and skips auto-pasting into the focused window for automation-started system captures.
+- **Refs:** `Sources/SpeakCore/Audio/AudioCaptureSource.swift`, `Sources/SpeakCore/Audio/SystemAudioMixer.swift`, `Sources/SpeakCore/Automation/AutomationCommandDispatch.swift`, `Sources/SpeakApp/Audio/SystemAudioCaptureController.swift`, `Sources/SpeakApp/Audio/SystemAudioTapHardware.swift`, `Sources/SpeakApp/Audio/SystemAudioLiveFeed.swift`, `Sources/SpeakApp/Transport/AppAutomationHandler.swift`
+- **Sunset:** none
+- **Nuances:** Requires macOS 14.2 or later and the System Audio Recording Only permission (`NSAudioCaptureUsageDescription`). System-only (`system`) captures do not require a physical microphone or microphone permission. Local streaming models that own their own audio engine (WhisperKit, FluidAudio, sherpa-onnx) reject live system audio and direct the user to a cloud streaming provider, Apple Speech, or batch/local mode.
 
 ## Companion surfaces
 

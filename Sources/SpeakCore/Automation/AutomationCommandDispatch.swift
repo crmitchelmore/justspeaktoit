@@ -43,6 +43,14 @@ public protocol AutomationSpeechHost: AutomationCommandHost {
     func automationVoices() async throws -> [AutomationVoice]
 }
 
+/// System-audio and mixed capture for `speak listen --source system|both`.
+/// Separate from `AutomationCommandHost` so platforms opt in; hosts that do not
+/// conform still handle default/mic starts and reject system audio with
+/// `unsupported_command`.
+public protocol AutomationCaptureSourceHost: AutomationCommandHost {
+    func automationStartDictation(source: AudioCaptureSource) async throws -> AutomationResult
+}
+
 /// Maps one validated automation request onto an `AutomationCommandHost`.
 public enum AutomationCommandDispatcher {
     private static func speechHost(_ host: some AutomationCommandHost) throws -> any AutomationSpeechHost {
@@ -108,7 +116,27 @@ public enum AutomationCommandDispatcher {
             case .transcribeFile:
                 result = try await host.automationTranscribeFile(at: AutomationRequestPolicy.audioFile(for: request))
             case .startDictation:
-                result = try await host.automationStartDictation()
+                if let rawSource = request.source {
+                    guard let source = AudioCaptureSource(rawValue: rawSource.lowercased()) else {
+                        let valid = AudioCaptureSource.allCases.map(\.rawValue).joined(separator: ", ")
+                        throw AutomationError(
+                            code: .invalidArgument,
+                            message: "Unknown audio source \"\(rawSource)\". Use one of: \(valid)."
+                        )
+                    }
+                    if let sourceHost = host as? any AutomationCaptureSourceHost {
+                        result = try await sourceHost.automationStartDictation(source: source)
+                    } else if source == .mic {
+                        result = try await host.automationStartDictation()
+                    } else {
+                        throw AutomationError(
+                            code: .unsupportedCommand,
+                            message: "System audio capture is not supported on this platform."
+                        )
+                    }
+                } else {
+                    result = try await host.automationStartDictation()
+                }
             case .stopDictation:
                 result = try await host.automationStopDictation()
             case .speakText, .listVoices:

@@ -78,7 +78,7 @@ final class SystemAudioCaptureController: @unchecked Sendable {
         if source.includesMicrophone {
             let status = await permissionsManager.ensureGranted(.microphone)
             guard status.isGranted else {
-                throw AudioFileManagerError.microphonePermissionDenied
+                throw AudioFileManagerError.microphonePermissionMissing
             }
             self.activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
             self.audioDeviceManager = audioDeviceManager

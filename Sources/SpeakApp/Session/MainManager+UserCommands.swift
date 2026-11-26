@@ -3,7 +3,11 @@ import Foundation
 
 /// Start, stop, cancel and retry requests from the UI, the Escape key and Shortcuts.
 extension MainManager {
-  func toggleRecordingFromUI(captureSource: AudioCaptureSource = .mic) {
+  func toggleRecordingFromUI() {
+    toggleRecordingFromUI(captureSource: .mic)
+  }
+
+  func toggleRecordingFromUI(captureSource: AudioCaptureSource) {
     guard !isEndingSession else { return }
     if activeSession == nil {
       let triggerTiming = SessionTriggerTiming.nonHotKey()

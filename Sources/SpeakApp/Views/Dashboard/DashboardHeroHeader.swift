@@ -52,6 +52,8 @@ struct DashboardHeroHeader: View {
       .accessibilityValue(recordButtonAccessibility.value)
       .accessibilityHint(recordButtonAccessibility.hint)
       .accessibilityAddTraits(recordButtonAccessibility.traits)
+
+      compactSystemAudioMenu
     } below: {
       if let preview = livePreviewText, !preview.isEmpty {
         Label(preview, systemImage: "waveform")
@@ -70,33 +72,37 @@ struct DashboardHeroHeader: View {
         + "Check permissions, monitor usage, and dive into your latest sessions.",
       palette: .dashboard
     ) {
-      Button(action: recording.toggle) {
-        recordButtonLabel
-          .padding(.horizontal, 32)
-          .padding(.vertical, 18)
-          .background(
-            Capsule()
-              .fill(recordButtonBackground)
-          )
-          .overlay(
-            Capsule()
-              .stroke(SpeakTextStyle.onTintStroke, lineWidth: 1)
-          )
-          .foregroundStyle(SpeakTextStyle.onTint)
+      HStack(spacing: 12) {
+        Button(action: recording.toggle) {
+          recordButtonLabel
+            .padding(.horizontal, 32)
+            .padding(.vertical, 18)
+            .background(
+              Capsule()
+                .fill(recordButtonBackground)
+            )
+            .overlay(
+              Capsule()
+                .stroke(SpeakTextStyle.onTintStroke, lineWidth: 1)
+            )
+            .foregroundStyle(SpeakTextStyle.onTint)
+        }
+        .buttonStyle(.plain)
+        .contentShape(Capsule())
+        .keyboardShortcut(.space, modifiers: [.command])
+        .disabled(isBusy)
+        .speakTooltip(
+          "Start a new recording instantly or stop the current one—Speak keeps you informed every step of the way."
+        )
+        .accessibilityLabel(recordButtonAccessibility.label)
+        .accessibilityValue(recordButtonAccessibility.value)
+        .accessibilityHint(recordButtonAccessibility.hint)
+        .accessibilityAddTraits(recordButtonAccessibility.traits)
+        .shadow(color: Color.black.opacity(0.25), radius: 18, x: 0, y: 12)
+        .animation(.easeInOut(duration: 0.2), value: recording.state)
+
+        normalSystemAudioMenu
       }
-      .buttonStyle(.plain)
-      .contentShape(Capsule())
-      .keyboardShortcut(.space, modifiers: [.command])
-      .disabled(isBusy)
-      .speakTooltip(
-        "Start a new recording instantly or stop the current one—Speak keeps you informed every step of the way."
-      )
-      .accessibilityLabel(recordButtonAccessibility.label)
-      .accessibilityValue(recordButtonAccessibility.value)
-      .accessibilityHint(recordButtonAccessibility.hint)
-      .accessibilityAddTraits(recordButtonAccessibility.traits)
-      .shadow(color: Color.black.opacity(0.25), radius: 18, x: 0, y: 12)
-      .animation(.easeInOut(duration: 0.2), value: recording.state)
     } content: {
       if let preview = livePreviewText, !preview.isEmpty {
         VStack(alignment: .leading, spacing: 6) {
@@ -221,5 +227,70 @@ struct DashboardHeroHeader: View {
 
   private var isBusy: Bool {
     recording.isBusy
+  }
+}
+
+private extension DashboardHeroHeader {
+  @ViewBuilder
+  var normalSystemAudioMenu: some View {
+    if #available(macOS 14.2, *), !recording.isRecording {
+      Menu {
+        systemAudioMenuButtons
+      } label: {
+        HStack(spacing: 8) {
+          Image(systemName: "speaker.wave.2.fill")
+            .font(.subheadline.weight(.semibold))
+          Text("System Audio")
+            .font(.subheadline.weight(.semibold))
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(Capsule().fill(SpeakTextStyle.onTintFill))
+        .overlay(Capsule().stroke(SpeakTextStyle.onTintStroke, lineWidth: 1))
+        .foregroundStyle(SpeakTextStyle.onTint)
+      }
+      .menuStyle(.borderlessButton)
+      .fixedSize()
+      .disabled(isBusy)
+      .speakTooltip("Capture system audio alone or mixed with your microphone.")
+      .accessibilityLabel("Record System Audio")
+      .accessibilityIdentifier("dashboardSystemAudioButton")
+      .accessibilityHint("Choose System Audio Only or Mic + System Audio to start recording.")
+    }
+  }
+
+  @ViewBuilder
+  var compactSystemAudioMenu: some View {
+    if #available(macOS 14.2, *), !recording.isRecording {
+      Menu {
+        systemAudioMenuButtons
+      } label: {
+        Image(systemName: "speaker.wave.2.fill")
+      }
+      .menuStyle(.borderedButton)
+      .controlSize(.small)
+      .fixedSize()
+      .disabled(isBusy)
+      .accessibilityLabel("Record System Audio")
+      .accessibilityIdentifier("dashboardCompactSystemAudioButton")
+      .accessibilityHint("Choose System Audio Only or Mic + System Audio to start recording.")
+    }
+  }
+
+  @ViewBuilder
+  var systemAudioMenuButtons: some View {
+    Button {
+      recording.toggle(source: .system)
+    } label: {
+      Label("System Audio Only", systemImage: "speaker.wave.2.fill")
+    }
+    .accessibilityIdentifier("dashboardRecordSystemAudioOption")
+
+    Button {
+      recording.toggle(source: .both)
+    } label: {
+      Label("Mic + System Audio", systemImage: "waveform.and.mic")
+    }
+    .accessibilityIdentifier("dashboardRecordBothAudioOption")
   }
 }

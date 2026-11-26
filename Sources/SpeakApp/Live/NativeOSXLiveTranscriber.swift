@@ -149,39 +149,6 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController, Ext
     }
   }
 
-  private func attachAudioInput(sessionContext: AudioInputDeviceManager.SessionContext?) async throws {
-    if let externalAudioFeed {
-      let recognitionRequest = request
-      externalAudioFeed.attach { buffer in recognitionRequest?.append(buffer) }
-      return
-    }
-    audioEngine = LiveInputEngines.shared.makeEngine()
-    let inputNode = audioEngine.inputNode
-    inputNode.removeTap(onBus: 0)
-    let format = inputNode.outputFormat(forBus: 0)
-    guard audioInputFormatIsUsable(format) else {
-      audioEngine.stop()
-      if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
-      throw TranscriptionManagerError.noUsableAudioInput
-    }
-    do {
-      try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-        self?.request?.append(buffer)
-      }
-      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
-    } catch {
-      stopAudioEngineIfOwned()
-      if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
-      throw error
-    }
-  }
-
-  private func stopAudioEngineIfOwned() {
-    guard externalAudioFeed == nil else { return }
-    audioEngine.stop()
-    audioEngine.inputNode.removeTap(onBus: 0)
-  }
-
   func stop() async {
     guard isRunning else { return }
     // Retire the run before teardown: cancel() can still deliver queued events.
@@ -360,8 +327,43 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController, Ext
 
     startRecognitionTask(with: recognizer)
   }
+}
 
-  private func makeRecognitionRequest(for recognizer: SFSpeechRecognizer) -> SFSpeechAudioBufferRecognitionRequest {
+private extension NativeOSXLiveTranscriber {
+  func attachAudioInput(sessionContext: AudioInputDeviceManager.SessionContext?) async throws {
+    if let externalAudioFeed {
+      let recognitionRequest = request
+      externalAudioFeed.attach { buffer in recognitionRequest?.append(buffer) }
+      return
+    }
+    audioEngine = LiveInputEngines.shared.makeEngine()
+    let inputNode = audioEngine.inputNode
+    inputNode.removeTap(onBus: 0)
+    let format = inputNode.outputFormat(forBus: 0)
+    guard audioInputFormatIsUsable(format) else {
+      audioEngine.stop()
+      if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
+      throw TranscriptionManagerError.noUsableAudioInput
+    }
+    do {
+      try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        self?.request?.append(buffer)
+      }
+      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+    } catch {
+      stopAudioEngineIfOwned()
+      if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
+      throw error
+    }
+  }
+
+  func stopAudioEngineIfOwned() {
+    guard externalAudioFeed == nil else { return }
+    audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
+  }
+
+  func makeRecognitionRequest(for recognizer: SFSpeechRecognizer) -> SFSpeechAudioBufferRecognitionRequest {
     let request = SFSpeechAudioBufferRecognitionRequest()
     request.shouldReportPartialResults = true
     request.taskHint = .dictation
@@ -371,7 +373,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController, Ext
     return request
   }
 
-  private func ensurePermissions() async -> Bool {
+  func ensurePermissions() async -> Bool {
     if externalAudioFeed?.source.includesMicrophone != false {
       let microphone = await permissionsManager.ensureGranted(.microphone)
       guard microphone.isGranted else { return false }

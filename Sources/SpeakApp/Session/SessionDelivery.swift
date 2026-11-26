@@ -142,8 +142,9 @@ final class SessionDelivery {
     let appName = outcome.target?.applicationName
       ?? NSWorkspace.shared.frontmostApplication?.localizedName
     // A warning means delivery proceeded without proving the current field.
-    // Do not associate Voice Edit/correction tracking with the stale capture.
-    if outcome.warning == nil {
+    // Do not associate Voice Edit/correction tracking with the stale capture
+    // or with an automation system-audio capture that did not insert text.
+    if outcome.warning == nil, session.outputMethod != .none {
       self.text.autoCorrectionTracker.startMonitoring(
         insertedText: finalText,
         element: focusedElement,

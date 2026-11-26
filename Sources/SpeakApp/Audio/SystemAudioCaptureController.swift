@@ -4,33 +4,6 @@ import Foundation
 import SpeakCore
 import os.log
 
-enum SystemAudioCaptureError: LocalizedError, Equatable {
-    case unsupportedOS
-    case processTapFailed(OSStatus)
-    case aggregateDeviceFailed(OSStatus)
-    case ioProcFailed(OSStatus)
-    case invalidTapFormat
-    case fileCreationFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .unsupportedOS:
-            "System audio capture requires macOS 14.2 or later."
-        case .processTapFailed(let status):
-            "Could not create a system audio tap (OSStatus \(status)). "
-                + "Allow Just Speak to It in System Settings → Privacy & Security → System Audio Recording Only."
-        case .aggregateDeviceFailed(let status):
-            "Could not create the system audio capture device (OSStatus \(status))."
-        case .ioProcFailed(let status):
-            "Could not start system audio capture (OSStatus \(status))."
-        case .invalidTapFormat:
-            "The system audio tap reported an unusable audio format."
-        case .fileCreationFailed:
-            "Could not create the system audio recording file."
-        }
-    }
-}
-
 /// Captures macOS system audio (and optionally mixes the microphone) via a
 /// CoreAudio Process Tap (macOS 14.2+).
 ///
@@ -40,6 +13,12 @@ enum SystemAudioCaptureError: LocalizedError, Equatable {
 /// live streaming transcription.
 @available(macOS 14.2, *)
 final class SystemAudioCaptureController: @unchecked Sendable {
+    private struct StoppedCapture {
+        let url: URL?
+        let id: UUID?
+        let startedAt: Date?
+    }
+
     static let canonicalSampleRate: Double = 48_000
 
     private let logger = Logger(subsystem: "com.github.speakapp", category: "SystemAudioCapture")
@@ -143,7 +122,7 @@ final class SystemAudioCaptureController: @unchecked Sendable {
     func stop() async throws -> RecordingSummary {
         stopCaptureHardware()
 
-        let (summaryURL, summaryID, summaryStart) = writerQueue.sync { () -> (URL?, UUID?, Date?) in
+        let stopped = writerQueue.sync { () -> StoppedCapture in
             if let remaining = self.mixer?.flush(), !remaining.isEmpty {
                 self.writeAndForwardLocked(remaining)
             }
@@ -151,7 +130,7 @@ final class SystemAudioCaptureController: @unchecked Sendable {
             self.liveFeed = nil
             self.audioFile = nil
             self.mixer = nil
-            let result = (self.recordingURL, self.recordingID, self.startedAt)
+            let result = StoppedCapture(url: self.recordingURL, id: self.recordingID, startedAt: self.startedAt)
             self.recordingURL = nil
             self.recordingID = nil
             self.startedAt = nil
@@ -160,7 +139,7 @@ final class SystemAudioCaptureController: @unchecked Sendable {
 
         await releaseInputSessionIfNeeded()
 
-        guard let url = summaryURL, let id = summaryID, let start = summaryStart else {
+        guard let url = stopped.url, let id = stopped.id, let start = stopped.startedAt else {
             throw AudioFileManagerError.noActiveRecording
         }
         return AudioRecorderFactory.summary(
@@ -178,6 +157,7 @@ final class SystemAudioCaptureController: @unchecked Sendable {
     // MARK: - CoreAudio Process Tap
 
     private func startCoreAudioTap(mixer: SystemAudioMixer, canonicalFormat: AVAudioFormat) throws {
+        _ = mixer
         let created = try SystemAudioTapHardware.createGlobalTapExcludingSelf()
         self.tapID = created.tapID
         self.aggregateDeviceID = created.aggregateDeviceID
@@ -198,8 +178,7 @@ final class SystemAudioCaptureController: @unchecked Sendable {
                 inInputData,
                 tapFormat: created.tapFormat,
                 canonicalFormat: canonicalFormat,
-                converter: converter,
-                mixer: mixer
+                converter: converter
             )
         }
         guard ioStatus == noErr, let createdIOProcID else {
@@ -210,42 +189,6 @@ final class SystemAudioCaptureController: @unchecked Sendable {
         let startStatus = AudioDeviceStart(created.aggregateDeviceID, createdIOProcID)
         guard startStatus == noErr else {
             throw SystemAudioCaptureError.ioProcFailed(startStatus)
-        }
-    }
-
-    private func handleTapInput(
-        _ inputData: UnsafePointer<AudioBufferList>,
-        tapFormat: AVAudioFormat,
-        canonicalFormat: AVAudioFormat,
-        converter: AVAudioConverter,
-        mixer: SystemAudioMixer
-    ) {
-        let bufferList = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
-        guard let firstBuffer = bufferList.first, firstBuffer.mDataByteSize > 0 else { return }
-        let bytesPerFrame = Int(tapFormat.streamDescription.pointee.mBytesPerFrame)
-        guard bytesPerFrame > 0 else { return }
-        let frameCount = AVAudioFrameCount(Int(firstBuffer.mDataByteSize) / bytesPerFrame)
-        guard frameCount > 0,
-              let pcmBuffer = AVAudioPCMBuffer(pcmFormat: tapFormat, frameCapacity: frameCount) else {
-            return
-        }
-        pcmBuffer.frameLength = frameCount
-        let destination = UnsafeMutableAudioBufferListPointer(
-            UnsafeMutablePointer(mutating: pcmBuffer.audioBufferList)
-        )
-        let copyCount = min(bufferList.count, destination.count)
-        for index in 0..<copyCount {
-            guard let src = bufferList[index].mData, let dst = destination[index].mData else { continue }
-            let byteCount = min(Int(bufferList[index].mDataByteSize), Int(destination[index].mDataByteSize))
-            memcpy(dst, src, byteCount)
-            destination[index].mDataByteSize = UInt32(byteCount)
-        }
-
-        let samples = convertToCanonicalSamples(pcmBuffer, canonicalFormat: canonicalFormat, using: converter)
-        guard !samples.isEmpty else { return }
-        let mixed = mixer.pushSystem(samples)
-        if !mixed.isEmpty {
-            enqueueMixed(mixed)
         }
     }
 
@@ -270,51 +213,24 @@ final class SystemAudioCaptureController: @unchecked Sendable {
                 using: converter
             )
             guard !samples.isEmpty else { return }
-            let mixed = mixer.pushMicrophone(samples)
-            if !mixed.isEmpty {
-                self.enqueueMixed(mixed)
-            }
+            self.enqueueMicrophoneSamples(samples)
         }
         try await startAudioEngineAfterInputDeviceSettles(engine)
     }
 
-    // MARK: - Conversion, Writing & Metering
+    // MARK: - Writing & Metering
 
-    private func convertToCanonicalSamples(
-        _ buffer: AVAudioPCMBuffer,
-        canonicalFormat: AVAudioFormat,
-        using converter: AVAudioConverter
-    ) -> [Float] {
-        guard buffer.frameLength > 0 else { return [] }
-        if buffer.format == canonicalFormat, let channel = buffer.floatChannelData?[0] {
-            return Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+    func enqueueSystemSamples(_ samples: [Float]) {
+        writerQueue.async { [weak self] in
+            guard let self, let mixed = self.mixer?.pushSystem(samples), !mixed.isEmpty else { return }
+            self.writeAndForwardLocked(mixed)
         }
-        let ratio = canonicalFormat.sampleRate / max(1, buffer.format.sampleRate)
-        let capacity = AVAudioFrameCount(max(1, Int(ceil(Double(buffer.frameLength) * ratio)) + 16))
-        guard let output = AVAudioPCMBuffer(pcmFormat: canonicalFormat, frameCapacity: capacity) else {
-            return []
-        }
-        var consumed = false
-        var error: NSError?
-        let status = converter.convert(to: output, error: &error) { _, outStatus in
-            if consumed {
-                outStatus.pointee = .noDataNow
-                return nil
-            }
-            consumed = true
-            outStatus.pointee = .haveData
-            return buffer
-        }
-        guard error == nil, status != .error, output.frameLength > 0,
-              let channel = output.floatChannelData?[0] else {
-            return []
-        }
-        return Array(UnsafeBufferPointer(start: channel, count: Int(output.frameLength)))
     }
 
-    private func enqueueMixed(_ samples: [Float]) {
+    func enqueueMicrophoneSamples(_ samples: [Float]) {
         writerQueue.async { [weak self] in
-            self?.writeAndForwardLocked(samples)
+            guard let self, let mixed = self.mixer?.pushMicrophone(samples), !mixed.isEmpty else { return }
+            self.writeAndForwardLocked(mixed)
         }
     }
 
@@ -346,58 +262,47 @@ final class SystemAudioCaptureController: @unchecked Sendable {
         liveFeed?.send(buffer)
     }
 
-    private func updateMeter(samples: [Float]) {
-        var peak: Float = 0
-        var sumSquares: Float = 0
-        for sample in samples {
-            let magnitude = abs(sample)
-            if magnitude > peak { peak = magnitude }
-            sumSquares += sample * sample
-        }
-        let rms = sqrt(sumSquares / Float(max(1, samples.count)))
-        let peakDB = peak > 0.000_001 ? 20 * log10(peak) : -160
-        let normalized = min(1.0, max(0.0, (rms * 4.0)))
+    func recordMeter(level: Float, peakDecibels: Float) {
         meterLock.lock()
-        latestLevel = normalized
-        latestPeakDecibels = peakDB
+        latestLevel = level
+        latestPeakDecibels = peakDecibels
         meterLock.unlock()
     }
 
     // MARK: - Teardown
 
-    private func stopCaptureHardware() {
+    struct HardwareHandles {
+        let micEngine: AVAudioEngine?
+        let ioProc: AudioDeviceIOProcID?
+        let aggregateDevice: AudioObjectID
+        let tap: AudioObjectID
+    }
+
+    func resetMeterStopped() {
         meterLock.lock()
         isCapturing = false
         latestLevel = 0
         latestPeakDecibels = -160
         meterLock.unlock()
-
-        if let engine = micEngine {
-            engine.stop()
-            engine.inputNode.removeTap(onBus: 0)
-            micEngine = nil
-        }
-        micConverter = nil
-
-        if let ioProcID, aggregateDeviceID != AudioObjectID(kAudioObjectUnknown) {
-            AudioDeviceStop(aggregateDeviceID, ioProcID)
-            AudioDeviceDestroyIOProcID(aggregateDeviceID, ioProcID)
-        }
-        self.ioProcID = nil
-
-        if aggregateDeviceID != AudioObjectID(kAudioObjectUnknown) {
-            AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
-            aggregateDeviceID = AudioObjectID(kAudioObjectUnknown)
-        }
-
-        if tapID != AudioObjectID(kAudioObjectUnknown) {
-            AudioHardwareDestroyProcessTap(tapID)
-            tapID = AudioObjectID(kAudioObjectUnknown)
-        }
-        tapConverter = nil
     }
 
-    private func teardown(deleteFile: Bool) async {
+    func clearHardwareHandles() -> HardwareHandles {
+        let handles = HardwareHandles(
+            micEngine: micEngine,
+            ioProc: ioProcID,
+            aggregateDevice: aggregateDeviceID,
+            tap: tapID
+        )
+        micEngine = nil
+        micConverter = nil
+        ioProcID = nil
+        aggregateDeviceID = AudioObjectID(kAudioObjectUnknown)
+        tapID = AudioObjectID(kAudioObjectUnknown)
+        tapConverter = nil
+        return handles
+    }
+
+    func teardown(deleteFile: Bool) async {
         stopCaptureHardware()
         let urlToDelete: URL? = writerQueue.sync {
             self.liveFeed?.close()

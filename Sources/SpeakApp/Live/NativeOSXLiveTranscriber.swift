@@ -120,74 +120,65 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController, Ext
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.permissionsMissing
     }
-
     let sessionContext: AudioInputDeviceManager.SessionContext? = externalAudioFeed == nil
       ? await audioDeviceManager.beginUsingPreferredInput()
       : nil
-
     let localeIdentifier = currentLocaleIdentifier ?? appSettings.resolvedPreferredLocaleIdentifier
 
-    // Checked before claiming an engine: the claimed engine can be the key-down
-    // primer's running one, and an unavailable recognizer would strand it open.
     guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier)) else {
       if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
       throw TranscriptionManagerError.recognizerUnavailable
     }
     speechRecognizer = recognizer
-
     request = makeRecognitionRequest(for: recognizer)
-
-    if let externalAudioFeed {
-      externalAudioFeed.attach { [weak self] buffer in
-        self?.request?.append(buffer)
-      }
-    } else {
-      // Bind a fresh engine to the now-selected default input device. Reusing a
-      // long-lived engine across device changes leaves it pointing at a stale HAL
-      // device and `start()` then fails with kAudioHardwareBadDeviceError.
-      audioEngine = LiveInputEngines.shared.makeEngine()
-
-      let inputNode = audioEngine.inputNode
-      inputNode.removeTap(onBus: 0)
-      let format = inputNode.outputFormat(forBus: 0)
-      guard audioInputFormatIsUsable(format) else {
-        // The claimed engine may already be running (the key-down primer's).
-        audioEngine.stop()
-        if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
-        throw TranscriptionManagerError.noUsableAudioInput
-      }
-      do {
-        try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-          self?.request?.append(buffer)
-        }
-        try await startAudioEngineAfterInputDeviceSettles(audioEngine)
-      } catch {
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
-        throw error
-      }
-    }
+    try await attachAudioInput(sessionContext: sessionContext)
 
     latestResult = nil
     hasFinished = false
     committedText = ""
     lastFormattedString = ""
     guard request != nil else {
-      if externalAudioFeed == nil {
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-      }
+      stopAudioEngineIfOwned()
       if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
       throw TranscriptionManagerError.recognizerUnavailable
     }
     await MainActor.run {
-      // Publish session state before starting recognition so final/error
-      // callbacks (all main-actor ordered) observe a fully started session.
       self.activeInputSession = sessionContext
       self.isRunning = true
       self.startRecognitionTask(with: recognizer)
     }
+  }
+
+  private func attachAudioInput(sessionContext: AudioInputDeviceManager.SessionContext?) async throws {
+    if let externalAudioFeed {
+      externalAudioFeed.attach { [weak self] buffer in self?.request?.append(buffer) }
+      return
+    }
+    audioEngine = LiveInputEngines.shared.makeEngine()
+    let inputNode = audioEngine.inputNode
+    inputNode.removeTap(onBus: 0)
+    let format = inputNode.outputFormat(forBus: 0)
+    guard audioInputFormatIsUsable(format) else {
+      audioEngine.stop()
+      if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
+      throw TranscriptionManagerError.noUsableAudioInput
+    }
+    do {
+      try inputNode.installTapSafely(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        self?.request?.append(buffer)
+      }
+      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+    } catch {
+      stopAudioEngineIfOwned()
+      if let sessionContext { await audioDeviceManager.endUsingPreferredInput(session: sessionContext) }
+      throw error
+    }
+  }
+
+  private func stopAudioEngineIfOwned() {
+    guard externalAudioFeed == nil else { return }
+    audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
   }
 
   func stop() async {
@@ -386,21 +377,6 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController, Ext
     }
     let speech = await permissionsManager.ensureGranted(.speechRecognition)
     return speech.isGranted
-  }
-}
-
-final class UnsupportedLocalLiveTranscriber: LiveTranscriptionController {
-  weak var delegate: LiveTranscriptionSessionDelegate?
-  private(set) var isRunning: Bool = false
-
-  func configure(language: String?, model: String) {}
-
-  func start() async throws {
-    throw TranscriptionManagerError.localLiveStreamingUnsupported
-  }
-
-  func stop() async {
-    isRunning = false
   }
 }
 

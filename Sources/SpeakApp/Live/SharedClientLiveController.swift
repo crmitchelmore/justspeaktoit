@@ -126,13 +126,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController, E
     let owner = boundaryDeliveryOwner
     isStopping = true
     defer { isStopping = false }
-    if let feed = externalAudioFeed {
-      feed.close()
-      externalAudioFeed = nil
-    } else {
-      audioEngine.stop()
-      if startCaptureAudio == nil { audioEngine.inputNode.removeTap(onBus: 0) }
-    }
+    stopAudioCapture()
     audioProcessor.drainConverterTail(to: activeClient)
     audioProcessor.setRunning(false)
     await applyLiveStopGrace(hostStopDelay)
@@ -226,7 +220,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController, E
     }
   }
 
-  private func cleanupAfterFailedStart() async {
+  private func stopAudioCapture() {
     if let feed = externalAudioFeed {
       feed.close()
       externalAudioFeed = nil
@@ -234,6 +228,10 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController, E
       audioEngine.stop()
       if startCaptureAudio == nil { audioEngine.inputNode.removeTap(onBus: 0) }
     }
+  }
+
+  private func cleanupAfterFailedStart() async {
+    stopAudioCapture()
     audioProcessor.setRunning(false)
     run?.cancel()
     client?.cancel()

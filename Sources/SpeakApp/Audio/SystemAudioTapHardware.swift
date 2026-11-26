@@ -2,6 +2,33 @@ import AVFoundation
 import CoreAudio
 import Foundation
 
+enum SystemAudioCaptureError: LocalizedError, Equatable {
+    case unsupportedOS
+    case processTapFailed(OSStatus)
+    case aggregateDeviceFailed(OSStatus)
+    case ioProcFailed(OSStatus)
+    case invalidTapFormat
+    case fileCreationFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedOS:
+            "System audio capture requires macOS 14.2 or later."
+        case .processTapFailed(let status):
+            "Could not create a system audio tap (OSStatus \(status)). "
+                + "Allow Just Speak to It in System Settings → Privacy & Security → System Audio Recording Only."
+        case .aggregateDeviceFailed(let status):
+            "Could not create the system audio capture device (OSStatus \(status))."
+        case .ioProcFailed(let status):
+            "Could not start system audio capture (OSStatus \(status))."
+        case .invalidTapFormat:
+            "The system audio tap reported an unusable audio format."
+        case .fileCreationFailed:
+            "Could not create the system audio recording file."
+        }
+    }
+}
+
 /// Low-level CoreAudio Process Tap helpers used by `SystemAudioCaptureController`.
 @available(macOS 14.2, *)
 enum SystemAudioTapHardware {

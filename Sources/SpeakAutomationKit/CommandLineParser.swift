@@ -286,19 +286,27 @@ public enum CommandLineParser {
         case .sinceID:
             plan.sinceID = value
         case .last:
-            guard let count = Int(value), count >= 1, count <= AutomationLimits.maxHistoryLimit else {
-                throw CLIUsageError(
-                    message: "--last must be between 1 and \(AutomationLimits.maxHistoryLimit)."
-                )
-            }
-            plan.limit = count
+            try self.applyLast(value, to: &plan)
         case .source:
-            guard let parsed = AudioCaptureSource(rawValue: value.lowercased()) else {
-                let valid = AudioCaptureSource.allCases.map(\.rawValue).joined(separator: ", ")
-                throw CLIUsageError(message: "--source must be one of: \(valid) (got \"\(value)\").")
-            }
-            plan.source = parsed.rawValue
+            try self.applySource(value, to: &plan)
         }
+    }
+
+    private static func applyLast(_ value: String, to plan: inout CLIPlan) throws {
+        guard let count = Int(value), count >= 1, count <= AutomationLimits.maxHistoryLimit else {
+            throw CLIUsageError(
+                message: "--last must be between 1 and \(AutomationLimits.maxHistoryLimit)."
+            )
+        }
+        plan.limit = count
+    }
+
+    private static func applySource(_ value: String, to plan: inout CLIPlan) throws {
+        guard let parsed = AudioCaptureSource(rawValue: value.lowercased()) else {
+            let valid = AudioCaptureSource.allCases.map(\.rawValue).joined(separator: ", ")
+            throw CLIUsageError(message: "--source must be one of: \(valid) (got \"\(value)\").")
+        }
+        plan.source = parsed.rawValue
     }
 
     /// The app resolves paths in its own working directory, so relative paths are

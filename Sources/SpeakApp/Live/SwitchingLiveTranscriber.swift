@@ -95,21 +95,11 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       resetControllers()
     }
 
-    var controller = controller(for: model)
-    var effectiveModel = model
-    if let externalAudioFeed {
-      if !(controller is ExternalAudioFeedAccepting) {
-        if AppleLocalModels.isSpeechAnalyzerModel(model), analyzerFallbackAllowed {
-          controller = controllers.native
-          effectiveModel = AppleLocalModels.legacySpeechModelID
-        } else {
-          throw TranscriptionManagerError.systemAudioUnsupportedForLiveModel(model)
-        }
-      }
-      (controller as? ExternalAudioFeedAccepting)?.setExternalAudioFeed(externalAudioFeed)
-    } else {
-      (controller as? ExternalAudioFeedAccepting)?.setExternalAudioFeed(nil)
-    }
+    let (controller, effectiveModel) = try resolveController(
+      for: model,
+      externalAudioFeed: externalAudioFeed,
+      analyzerFallbackAllowed: analyzerFallbackAllowed
+    )
     controller.delegate = delegate
     controller.configure(language: currentLanguage, model: effectiveModel)
     let run = activate(controller, preRollBuffers: preRollBuffers, primedInput: primedInput)
@@ -176,6 +166,29 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   func controller(for model: String) -> any LiveTranscriptionController {
     if let controllerOverride { return controllerOverride(model) }
     return controllers.controller(for: model)
+  }
+
+  private func resolveController(
+    for model: String,
+    externalAudioFeed: SystemAudioLiveFeed?,
+    analyzerFallbackAllowed: Bool
+  ) throws -> (any LiveTranscriptionController, String) {
+    var selected = controller(for: model)
+    var effectiveModel = model
+    if let externalAudioFeed {
+      if !(selected is ExternalAudioFeedAccepting) {
+        if AppleLocalModels.isSpeechAnalyzerModel(model), analyzerFallbackAllowed {
+          selected = controllers.native
+          effectiveModel = AppleLocalModels.legacySpeechModelID
+        } else {
+          throw TranscriptionManagerError.systemAudioUnsupportedForLiveModel(model)
+        }
+      }
+      (selected as? ExternalAudioFeedAccepting)?.setExternalAudioFeed(externalAudioFeed)
+    } else {
+      (selected as? ExternalAudioFeedAccepting)?.setExternalAudioFeed(nil)
+    }
+    return (selected, effectiveModel)
   }
 
   private func applyDelegateAndConfiguration() {

@@ -22,21 +22,21 @@ actor AudioFileManager {
   private nonisolated let meter = RecorderMeter()
   private nonisolated let systemMeterLock = NSLock()
   private nonisolated(unsafe) var systemMeterProvider: (@Sendable () -> (level: Float, peakDecibels: Float)?)?
-  private var activeSystemCapture: AnyObject?
+  var activeSystemCapture: AnyObject?
   private var currentRecordingID: UUID?
   private var currentRecordingStart: Date?
-  private var currentRecordingOwner: AudioRecordingOwner?
+  var currentRecordingOwner: AudioRecordingOwner?
   /// Where the active recording lands. A claimed warm recorder still reports
   /// the staging path in `AVAudioRecorder.url`, so the actor tracks the real
   /// destination itself.
-  private var currentRecordingURL: URL?
+  var currentRecordingURL: URL?
   /// Reserves the recorder across permission and input-device awaits. Without
   /// this, actor reentrancy can admit a second start or stage a new warm
   /// recorder while the first start is still configuring its input session.
   private var isStartingRecording = false
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var warmStage = CaptureWarmStage()
-  private var lifecycleHandler: (@Sendable (AudioRecordingLifecycleEvent) -> Void)?
+  var lifecycleHandler: (@Sendable (AudioRecordingLifecycleEvent) -> Void)?
   private let logger = Logger(subsystem: "com.github.speakapp", category: "AudioFileManager")
 
   /// Identifier for the encoder settings every recording uses.
@@ -69,7 +69,7 @@ actor AudioFileManager {
     return meter.reading()
   }
 
-  private nonisolated func setSystemMeterProvider(
+  nonisolated func setSystemMeterProvider(
     _ provider: (@Sendable () -> (level: Float, peakDecibels: Float)?)?
   ) {
     systemMeterLock.lock()
@@ -137,10 +137,7 @@ actor AudioFileManager {
       await endPreflightInput(preflight)
       warmStage.recordingBeganWithoutClaim()
       return try await startSystemAudioCapture(
-        source: source,
-        owner: owner,
-        directory: preflight?.recordingsDirectory,
-        liveFeed: liveFeed
+        source: source, owner: owner, directory: preflight?.recordingsDirectory, liveFeed: liveFeed
       )
     }
 
@@ -239,49 +236,8 @@ actor AudioFileManager {
     }
   }
 
-  private func startSystemAudioCapture(
-    source: AudioCaptureSource,
-    owner: AudioRecordingOwner,
-    directory preflightDirectory: URL?,
-    liveFeed: SystemAudioLiveFeed?
-  ) async throws -> RecordingStart {
-    guard #available(macOS 14.2, *) else {
-      throw SystemAudioCaptureError.unsupportedOS
-    }
-    let directory: URL
-    if let preflightDirectory {
-      directory = preflightDirectory
-    } else {
-      directory = await MainActor.run { appSettings.recordingsDirectory }
-    }
-    let controller = SystemAudioCaptureController()
-    let feed = liveFeed ?? SystemAudioLiveFeed(source: source)
-    let started = try await controller.start(
-      source: source,
-      in: directory,
-      liveFeed: feed,
-      audioDeviceManager: audioDeviceManager,
-      permissionsManager: permissionsManager
-    )
-    activeSystemCapture = controller
-    setSystemMeterProvider { [weak controller] in controller?.currentMeterReading() }
-    currentRecordingURL = started.url
-    currentRecordingOwner = owner
-    if owner != .dictation { lifecycleHandler?(.auxiliaryStarted) }
-    return started
-  }
-
   func stopRecording() async throws -> RecordingSummary {
-    if #available(macOS 14.2, *), let systemCapture = activeSystemCapture as? SystemAudioCaptureController {
-      let owner = currentRecordingOwner
-      activeSystemCapture = nil
-      setSystemMeterProvider(nil)
-      currentRecordingURL = nil
-      currentRecordingOwner = nil
-      let summary = try await systemCapture.stop()
-      if let owner, owner != .dictation { lifecycleHandler?(.auxiliaryEnded) }
-      return summary
-    }
+    if let summary = try await stopSystemAudioCaptureIfActive() { return summary }
     if let captureSource {
       guard currentRecordingURL != nil, let generation = captureSourceGeneration,
             sourceTeardownCount == 0 else { throw AudioFileManagerError.noActiveRecording }
@@ -341,17 +297,8 @@ actor AudioFileManager {
     if let expectedOwner, let currentOwner = currentRecordingOwner, currentOwner != expectedOwner {
       return nil
     }
-    if #available(macOS 14.2, *), let systemCapture = activeSystemCapture as? SystemAudioCaptureController {
-      let owner = currentRecordingOwner
-      let url = currentRecordingURL
-      activeSystemCapture = nil
-      setSystemMeterProvider(nil)
-      currentRecordingURL = nil
-      currentRecordingOwner = nil
-      await systemCapture.cancel(deleteFile: deleteFile)
-      if url != nil, let owner, owner != .dictation { lifecycleHandler?(.auxiliaryEnded) }
-      return deleteFile ? nil : RecordingFiles.keptRecording(at: url)
-    }
+    let systemCancel = await cancelSystemAudioCaptureIfActive(deleteFile: deleteFile)
+    if systemCancel.handled { return systemCancel.keptURL }
     if let captureSource {
       let owner = currentRecordingOwner
       let url = currentRecordingURL

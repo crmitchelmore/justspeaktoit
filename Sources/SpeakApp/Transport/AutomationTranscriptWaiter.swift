@@ -50,18 +50,7 @@ final class AutomationTranscriptWaiter {
                             code: .transcriptionFailed, message: "Capture contained no transcript.")))
                         return
                     }
-                    let entry = AutomationHistoryEntry(
-                        id: item.id.uuidString, text: text, createdAt: item.createdAt,
-                        model: item.modelUsages.first?.modelIdentifier ?? item.modelsUsed.first,
-                        durationSeconds: item.recordingDuration,
-                        wordCount: AutomationHistoryEntry.wordCount(of: text),
-                        source: item.captureSource?.rawValue
-                    )
-                    var result = AutomationResult(
-                        text: text, model: entry.model, durationSeconds: entry.durationSeconds,
-                        sessionActive: false, captureID: capture.uuidString, entry: entry
-                    )
-                    result.source = entry.source
+                    let result = Self.makeResult(for: item, capture: capture, text: text)
                     self?.finish(token, result: .success(result))
                 }
                 self.waits[token] = (observer, continuation)
@@ -101,6 +90,22 @@ final class AutomationTranscriptWaiter {
                 self?.preparing.removeValue(forKey: token)?.resume(throwing: CancellationError())
             }
         }
+    }
+
+    private static func makeResult(for item: HistoryItem, capture: UUID, text: String) -> AutomationResult {
+        let entry = AutomationHistoryEntry(
+            id: item.id.uuidString, text: text, createdAt: item.createdAt,
+            model: item.modelUsages.first?.modelIdentifier ?? item.modelsUsed.first,
+            durationSeconds: item.recordingDuration,
+            wordCount: AutomationHistoryEntry.wordCount(of: text),
+            source: item.captureSource?.rawValue
+        )
+        var result = AutomationResult(
+            text: text, model: entry.model, durationSeconds: entry.durationSeconds,
+            sessionActive: false, captureID: capture.uuidString, entry: entry
+        )
+        result.source = entry.source
+        return result
     }
 
     private func finish(_ token: UUID, result: Result<AutomationResult, Error>) {

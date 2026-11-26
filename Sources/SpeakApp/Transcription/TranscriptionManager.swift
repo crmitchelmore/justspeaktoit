@@ -95,10 +95,8 @@ final class TranscriptionManager: ObservableObject {
   }
 
   func startLiveTranscription(
-    preRollBuffers: [AVAudioPCMBuffer],
-    analyzerFallbackAllowed: Bool = true,
-    primedInput: PrimedLiveInput? = nil,
-    externalAudioFeed: SystemAudioLiveFeed? = nil,
+    preRollBuffers: [AVAudioPCMBuffer], analyzerFallbackAllowed: Bool = true,
+    primedInput: PrimedLiveInput? = nil, externalAudioFeed: SystemAudioLiveFeed? = nil,
     onDiagnostic: ((TranscriptionDiagnosticReceipt) -> Void)?
   ) async throws {
         guard !isLiveTranscribing, startupGeneration == nil else {

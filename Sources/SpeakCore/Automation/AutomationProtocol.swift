@@ -175,21 +175,7 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
         if self.command != .awaitTranscript, self.captureID != nil || self.sinceID != nil {
             throw AutomationError(code: .invalidArgument, message: "Capture cursors require await_transcript.")
         }
-        if let source = self.source {
-            guard self.command == .startDictation else {
-                throw AutomationError(
-                    code: .invalidArgument,
-                    message: "Audio source is only valid for start_dictation."
-                )
-            }
-            guard AudioCaptureSource(rawValue: source.lowercased()) != nil else {
-                let valid = AudioCaptureSource.allCases.map(\.rawValue).joined(separator: ", ")
-                throw AutomationError(
-                    code: .invalidArgument,
-                    message: "Unknown audio source \"\(source)\". Use one of: \(valid)."
-                )
-            }
-        }
+        try self.validateAudioSource()
         try self.validateSpeechFields()
         try self.validateConfigurationFields()
         switch self.command {
@@ -223,6 +209,20 @@ public struct AutomationRequest: Codable, Sendable, Equatable {
     public var resolvedLimit: Int {
         guard let limit else { return AutomationLimits.defaultHistoryLimit }
         return min(max(limit, 1), AutomationLimits.maxHistoryLimit)
+    }
+
+    private func validateAudioSource() throws {
+        guard let source = self.source else { return }
+        guard self.command == .startDictation else {
+            throw AutomationError(code: .invalidArgument, message: "Audio source is only valid for start_dictation.")
+        }
+        guard AudioCaptureSource(rawValue: source.lowercased()) != nil else {
+            let valid = AudioCaptureSource.allCases.map(\.rawValue).joined(separator: ", ")
+            throw AutomationError(
+                code: .invalidArgument,
+                message: "Unknown audio source \"\(source)\". Use one of: \(valid)."
+            )
+        }
     }
 
     private func validateOptionalIdentifier(_ value: String?, label: String) throws {

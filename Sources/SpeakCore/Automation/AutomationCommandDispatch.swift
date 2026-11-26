@@ -97,6 +97,32 @@ public enum AutomationCommandDispatcher {
             (request.changes ?? [:]).mapValues(\.storage), dryRun: request.dryRun ?? false)
     }
 
+    private static func startDictationResult(
+        for request: AutomationRequest,
+        host: some AutomationCommandHost
+    ) async throws -> AutomationResult {
+        guard let rawSource = request.source else {
+            return try await host.automationStartDictation()
+        }
+        guard let source = AudioCaptureSource(rawValue: rawSource.lowercased()) else {
+            let valid = AudioCaptureSource.allCases.map(\.rawValue).joined(separator: ", ")
+            throw AutomationError(
+                code: .invalidArgument,
+                message: "Unknown audio source \"\(rawSource)\". Use one of: \(valid)."
+            )
+        }
+        if let sourceHost = host as? any AutomationCaptureSourceHost {
+            return try await sourceHost.automationStartDictation(source: source)
+        }
+        if source == .mic {
+            return try await host.automationStartDictation()
+        }
+        throw AutomationError(
+            code: .unsupportedCommand,
+            message: "System audio capture is not supported on this platform."
+        )
+    }
+
     public static func response(
         to request: AutomationRequest,
         host: some AutomationCommandHost
@@ -116,27 +142,7 @@ public enum AutomationCommandDispatcher {
             case .transcribeFile:
                 result = try await host.automationTranscribeFile(at: AutomationRequestPolicy.audioFile(for: request))
             case .startDictation:
-                if let rawSource = request.source {
-                    guard let source = AudioCaptureSource(rawValue: rawSource.lowercased()) else {
-                        let valid = AudioCaptureSource.allCases.map(\.rawValue).joined(separator: ", ")
-                        throw AutomationError(
-                            code: .invalidArgument,
-                            message: "Unknown audio source \"\(rawSource)\". Use one of: \(valid)."
-                        )
-                    }
-                    if let sourceHost = host as? any AutomationCaptureSourceHost {
-                        result = try await sourceHost.automationStartDictation(source: source)
-                    } else if source == .mic {
-                        result = try await host.automationStartDictation()
-                    } else {
-                        throw AutomationError(
-                            code: .unsupportedCommand,
-                            message: "System audio capture is not supported on this platform."
-                        )
-                    }
-                } else {
-                    result = try await host.automationStartDictation()
-                }
+                result = try await Self.startDictationResult(for: request, host: host)
             case .stopDictation:
                 result = try await host.automationStopDictation()
             case .speakText, .listVoices:

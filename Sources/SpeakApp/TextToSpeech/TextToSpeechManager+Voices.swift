@@ -39,7 +39,10 @@ extension TextToSpeechManager {
     }
 
     voiceListing.failures = failures
-    return voices.isEmpty ? VoiceCatalog.systemVoices : voices
+    let baseVoices = voices.isEmpty ? VoiceCatalog.systemVoices : voices
+    let myVoices = myVoicesProvider?() ?? []
+    var seen = Set<String>()
+    return (myVoices + baseVoices).filter { seen.insert($0.id).inserted }
   }
 
   /// Voices a keyed account offers that no offline catalogue lists.

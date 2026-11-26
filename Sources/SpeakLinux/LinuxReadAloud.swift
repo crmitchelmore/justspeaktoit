@@ -38,7 +38,8 @@ extension LinuxHostPlatform {
     package static func voiceDiscovery(_ shown: DesktopVoiceDiscoveryPresentation) {
         if !showVoiceAccountInventory(shown) { update("The account voice listing could not be shown.") }
         LinuxWindow.voiceOutput(shown.settings,
-            accountInventory: shown.accountInventory ?? shown.inventory.map(VoiceAccountInventory.xai))
+            accountInventory: shown.accountInventory ?? shown.inventory.map(VoiceAccountInventory.xai),
+            voiceProfiles: shown.voiceProfiles)
     }
 }
 
@@ -69,8 +70,12 @@ extension LinuxWindow {
         voiceOutput(settings, accountInventory: inventory.map(VoiceAccountInventory.xai))
     }
 
-    static func voiceOutput(_ settings: LinuxVoiceOutputSettings, accountInventory: VoiceAccountInventory?) {
-        let presentation = settings.favoritePicker(accountInventory: accountInventory)
+    static func voiceOutput(
+        _ settings: LinuxVoiceOutputSettings,
+        accountInventory: VoiceAccountInventory?,
+        voiceProfiles: [VoiceProfile] = []
+    ) {
+        let presentation = settings.favoritePicker(accountInventory: accountInventory, voiceProfiles: voiceProfiles)
         let strings = DesktopNativeStrings()
         let names: [UnsafePointer<CChar>?] = presentation.labels.map { strings.add($0) }
         let identifiers: [UnsafePointer<CChar>?] = presentation.identifiers.map { strings.add($0) }
@@ -133,7 +138,8 @@ func linuxVoicePickerEvent(_ action: Int32, _ identifier: UnsafePointer<CChar>?,
     holder.enqueueSettings {
         await holder.controller.handleVoicePicker(voiceID: voiceID, action: action)
         LinuxWindow.voiceOutput(await holder.controller.voiceOutputSettings(),
-            accountInventory: await holder.controller.selectedVoiceAccountInventory)
+            accountInventory: await holder.controller.selectedVoiceAccountInventory,
+            voiceProfiles: await holder.controller.listVoiceProfiles())
     }
 }
 
@@ -190,7 +196,9 @@ extension LinuxEventContext {
         let controller = controller
         enqueueSettings {
             await controller.selectVoiceOutput(voices[index])
-            LinuxWindow.voiceOutput(await controller.voiceOutputSettings())
+            LinuxWindow.voiceOutput(await controller.voiceOutputSettings(),
+                accountInventory: await controller.selectedVoiceAccountInventory,
+                voiceProfiles: await controller.listVoiceProfiles())
         }
     }
 }

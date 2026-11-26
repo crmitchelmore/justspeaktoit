@@ -29,6 +29,7 @@ final class AppEnvironment: ObservableObject {
   let transcription: TranscriptionManager
   let postProcessing: PostProcessingManager
   let tts: TextToSpeechManager
+  let voiceProfiles: VoiceProfileManager
   let secureStorage: SecureAppStorage
   let openRouter: OpenRouterAPIClient
   let paidAccess: PaidAccessManager
@@ -112,6 +113,7 @@ final class AppEnvironment: ObservableObject {
     transcription: TranscriptionManager,
     postProcessing: PostProcessingManager,
     tts: TextToSpeechManager,
+    voiceProfiles: VoiceProfileManager,
     secureStorage: SecureAppStorage,
     openRouter: OpenRouterAPIClient,
     paidAccess: PaidAccessManager,
@@ -137,6 +139,7 @@ final class AppEnvironment: ObservableObject {
     self.transcription = transcription
     self.postProcessing = postProcessing
     self.tts = tts
+    self.voiceProfiles = voiceProfiles
     self.secureStorage = secureStorage
     self.openRouter = openRouter
     self.paidAccess = paidAccess
@@ -252,21 +255,14 @@ enum WireUp {
     let personalLexicon = PersonalLexiconService(store: personalLexiconStore)
     let pronunciationManager = PronunciationManager(defaults: defaults)
     let postProcessing = PostProcessingManager(
-      client: routedClient,
-      settings: settings,
-      personalLexicon: personalLexicon
+      client: routedClient, settings: settings, personalLexicon: personalLexicon
     )
     let tts = buildTTSManager(
-      settings: settings,
-      secureStorage: secureStorage,
-      pronunciation: pronunciationManager,
-      defaults: defaults
+      settings: settings, secureStorage: secureStorage, pronunciation: pronunciationManager, defaults: defaults
     )
+    let voiceProfiles = buildVoiceProfileManager(fileManager: fileManager, tts: tts, transcription: transcription)
     let livePolish = LivePolishManager(client: openRouter, settings: settings)
-    let liveTextInserter = LiveTextInserter(
-      permissionsManager: permissions,
-      appSettings: settings
-    )
+    let liveTextInserter = LiveTextInserter(permissionsManager: permissions, appSettings: settings)
     let textProcessor = TranscriptionTextProcessor(appSettings: settings)
     let autoCorrectionStore = AutoCorrectionStore(fileManager: fileManager)
     let autoCorrectionTracker = AutoCorrectionTracker(
@@ -307,6 +303,7 @@ enum WireUp {
       transcription: transcription,
       postProcessing: postProcessing,
       tts: tts,
+      voiceProfiles: voiceProfiles,
       secureStorage: secureStorage,
       openRouter: openRouter,
       paidAccess: paidAccess,

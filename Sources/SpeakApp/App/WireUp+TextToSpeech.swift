@@ -32,4 +32,20 @@ extension WireUp {
       defaults: defaults
     )
   }
+
+  static func buildVoiceProfileManager(
+    fileManager: FileManager,
+    tts: TextToSpeechManager,
+    transcription: TranscriptionManager
+  ) -> VoiceProfileManager {
+    let voiceProfiles = VoiceProfileManager(fileManager: fileManager)
+    tts.myVoicesProvider = { [weak voiceProfiles] in voiceProfiles?.myTTSVoices ?? [] }
+    voiceProfiles.transcribeFile = { [weak transcription] url in
+      guard let transcription else {
+        throw VoiceProfileStoreError.storageFailure("Transcription is not available right now.")
+      }
+      return try await transcription.transcribeFile(at: url).text
+    }
+    return voiceProfiles
+  }
 }

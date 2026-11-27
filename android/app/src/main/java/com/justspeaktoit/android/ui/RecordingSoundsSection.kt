@@ -9,6 +9,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.rememberSliderState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -90,10 +91,14 @@ internal fun RecordingSoundsSection(
             Text(volumeLabel, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
             Text(percent, style = MaterialTheme.typography.bodyMedium)
         }
-        Slider(
+        val volumeState = rememberSliderState(
             value = choice.volume,
+            trackRange = RecordingSoundSettings.VOLUME_RANGE,
+        )
+        volumeState.value = choice.volume
+        Slider(
+            state = volumeState,
             onValueChange = { onChange(choice.copy(volume = it)) },
-            valueRange = RecordingSoundSettings.VOLUME_RANGE,
             onValueChangeFinished = onPreview,
             modifier = Modifier
                 .fillMaxWidth()

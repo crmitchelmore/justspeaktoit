@@ -7,17 +7,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.TextObfuscationMode
+import androidx.compose.material3.OutlinedSecureTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
@@ -28,7 +27,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.justspeaktoit.android.R
 import com.justspeaktoit.android.cloud.BalanceAccount
@@ -71,9 +69,9 @@ internal fun KeyRow(
     azureEndpoint: String = "",
 ) {
     // The entered key is held only in this composable until saved; saved keys are never read back.
-    var draft by remember(provider, saved) { mutableStateOf("") }
+    val draft = remember(provider, saved) { TextFieldState() }
     val regional = rememberRegionalKeyDraft(provider, saved)
-    val credential = regional.credential(draft)
+    val credential = regional.credential(draft.text.toString())
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(provider.displayName, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
@@ -94,12 +92,10 @@ internal fun KeyRow(
             )
         }
         RegionalKeyFields(provider, regional, azureEndpoint, actions)
-        OutlinedTextField(
-            value = draft,
-            onValueChange = { draft = it },
+        OutlinedSecureTextField(
+            state = draft,
             label = { Text(stringResource(R.string.settings_key_label, provider.displayName)) },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
+            textObfuscationMode = TextObfuscationMode.Hidden,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
             modifier = Modifier.fillMaxWidth(),
         )
@@ -107,7 +103,7 @@ internal fun KeyRow(
             Button(
                 onClick = {
                     credential?.let { actions.onSaveKey(provider, it) }
-                    draft = ""
+                    draft.edit { replace(0, length, "") }
                 },
                 enabled = credential != null) {
                 Text(stringResource(R.string.action_save))

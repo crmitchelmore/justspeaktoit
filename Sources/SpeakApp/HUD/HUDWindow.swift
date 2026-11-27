@@ -10,12 +10,14 @@ final class HUDWindowPresenter: NSObject {
 
   private let manager: HUDManager
   private let windowController: HUDWindowController
+  private let backgroundWindowController: BackgroundHUDWindowController
   private var cancellable: AnyCancellable?
   private var presentedTimer: Timer?
 
   init(manager: HUDManager, settings: AppSettings) {
     self.manager = manager
     self.windowController = HUDWindowController(manager: manager, settings: settings)
+    self.backgroundWindowController = BackgroundHUDWindowController(manager: manager)
     super.init()
     manager.defersAnnouncementsUntilPresented = true
     observeSnapshot()
@@ -24,17 +26,25 @@ final class HUDWindowPresenter: NSObject {
   private func observeSnapshot() {
     cancellable = manager.$snapshot
       .map(\.phase.isVisible)
-      .removeDuplicates()
+      .combineLatest(manager.$presentationMode)
+      .removeDuplicates { lhs, rhs in lhs.0 == rhs.0 && lhs.1 == rhs.1 }
       .receive(on: RunLoop.main)
-      .sink { [weak self] isVisible in
+      .sink { [weak self] isVisible, mode in
         guard let self else { return }
         if isVisible {
-          self.windowController.present()
+          if mode.isBackgroundPill {
+            self.windowController.dismiss()
+            self.backgroundWindowController.present()
+          } else {
+            self.backgroundWindowController.dismiss()
+            self.windowController.present()
+          }
           self.schedulePresentedNotification()
         } else {
           self.presentedTimer?.invalidate()
           self.presentedTimer = nil
           self.windowController.dismiss()
+          self.backgroundWindowController.dismiss()
           self.manager.hudWindowDidDismiss()
         }
       }

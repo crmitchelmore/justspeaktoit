@@ -5,13 +5,14 @@ import { pathToFileURL } from 'node:url';
 // A skipped conditional job is acceptable only when path detection says so.
 // A pull request with a trusted pre-pr record (same repository, not
 // Dependabot) skips every build and test: they run on main after the merge.
-// Untrusted pull requests (Dependabot, forks) run the Workers package; Lint
+// Untrusted pull requests (Dependabot, forks) run Android for affected paths, the Workers package, Lint
 // unless only docs, the website, Android or Workers changed; and, for Swift
 // changes, the portable Linux graph and one macOS job. Every other macOS gate
 // runs only on merge batches, main and `ci:full` pull requests.
 // The macOS lanes are reusable workflows (ci-*.yml); each lane job fails when
 // any job inside it does, so the gate checks lanes, not their jobs.
 export const gateJobs = {
+  android: ['android'],
   workers: ['paid-access-worker'],
   apple: ['lint'],
   swift: ['macos-debug', 'portable-linux'],
@@ -30,13 +31,13 @@ export function assessCIGates(needs, event) {
   requireSuccess('pre-pr-evidence');
   const outputs = needs['release-paths']?.outputs ?? {};
   // `api` selects the pull-request API step inside build-macos; it must be explicit.
-  for (const flag of ['apple', 'swift', 'api', 'full', 'workers']) {
+  for (const flag of ['apple', 'swift', 'api', 'full', 'workers', 'android']) {
     if (!['true', 'false'].includes(outputs[flag])) errors.push(`release-paths: missing or invalid ${flag} output`);
   }
   if (event !== 'pull_request' && outputs.full !== 'true') errors.push('release-paths: batches and main must run every gate');
   for (const [flag, ids] of Object.entries(gateJobs)) {
-    // Pushes (merge batches and main) must run every gate even if path detection is misconfigured.
-    const required = event !== 'pull_request' || outputs[flag] !== 'false';
+    // Android runs in its own workflow on main. Pushes must run all other gates.
+    const required = outputs[flag] !== 'false' || (event !== 'pull_request' && flag !== 'android');
     for (const id of ids) {
       if (required || needs[id]?.result !== 'skipped') requireSuccess(id);
     }

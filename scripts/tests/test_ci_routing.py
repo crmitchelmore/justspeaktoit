@@ -146,7 +146,7 @@ class WorkflowCopyTests(unittest.TestCase):
     def test_workflow_lists_equal_routing_json(self):
         self.assertEqual(routing.drift(), [])
         self.assertEqual({(t['file'], t['list'].strip()) for _, t, _ in routing.workflow_lists()}, {
-            ('.github/workflows/ci.yml', f'{name}:') for name in ('apple', 'swift', 'api', 'ios')} | {
+            ('.github/workflows/ci.yml', f'{name}:') for name in ('apple', 'swift', 'api', 'ios', 'android')} | {
             ('.github/workflows/android.yml', 'paths:')})
 
     def test_drift_names_the_route_and_write_repairs_it(self):

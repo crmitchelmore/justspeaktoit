@@ -67,7 +67,7 @@
       "workflows": [{"file": ".github/workflows/ci.yml", "list": "            ios:"}]
     },
     "android": {
-      "description": "The Android workflow on main (pre-pr runs it before the merge): the app, its workflow and the shared Swift definitions its parity tests read.",
+      "description": "The Android build before merge and the Android workflow on main: the app, its workflow and the shared Swift definitions its parity tests read.",
       "paths": [
         "android/**",
         ".github/workflows/android.yml",
@@ -77,7 +77,8 @@
         "Sources/SpeakCore/ProviderCredentialCatalogue.swift",
         "Sources/SpeakCore/OpenAITranscriptionModels.swift"
       ],
-      "workflows": [{"file": ".github/workflows/android.yml", "after": "  push:", "list": "    paths:"}]
+      "workflows": [{"file": ".github/workflows/android.yml", "after": "  push:", "list": "    paths:"},
+        {"file": ".github/workflows/ci.yml", "list": "            android:"}]
     },
     "windows": {
       "description": "pre-pr only: the Windows Swift type check (linux.yml runs it in CI).",

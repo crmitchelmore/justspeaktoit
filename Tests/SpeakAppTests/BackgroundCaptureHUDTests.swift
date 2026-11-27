@@ -55,4 +55,24 @@ final class BackgroundCaptureHUDTests: XCTestCase {
     XCTAssertEqual(BackgroundCaptureHUDView.elapsedLabel(for: 42.9), "0:42")
     XCTAssertEqual(BackgroundCaptureHUDView.elapsedLabel(for: 725), "12:05")
   }
+
+  func testCancelRecordingWithEscape_ignoresSystemAndBothCaptures() {
+    let environment = WireUp.bootstrap(options: makeWireUpTestOptions())
+    environment.settings.cancelRecordingOnEscape = true
+
+    for source: AudioCaptureSource in [.system, .both] {
+      let session = ActiveSession(gesture: .automation, hotKeyDescription: "Fn", trigger: .automation,
+                                  captureSource: source)
+      environment.main.activeSession = session
+      environment.main.state = .recording
+
+      environment.main.cancelRecordingWithEscape()
+
+      XCTAssertEqual(environment.main.state, .recording, "Escape must not cancel \(source.rawValue) capture")
+      XCTAssertTrue(environment.main.activeSession === session)
+    }
+
+    environment.main.activeSession = nil
+    environment.main.state = .idle
+  }
 }

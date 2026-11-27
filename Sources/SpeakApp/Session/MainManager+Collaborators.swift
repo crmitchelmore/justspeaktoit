@@ -62,11 +62,11 @@ extension MainManager {
           )
         },
         isRecording: { [weak self] in self?.state == .recording },
-        // Hands-free captures end on the speech detector's own silence hold.
-        // Two owners of the same stop race each other, and the loser then
-        // reports a failed session after every utterance.
+        // Hands-free captures own their own silence hold, and system-audio /
+        // call-audio captures span long meetings with natural pauses, so
+        // dictation silence auto-stop must stay away from both.
         silenceStopEligible: { [weak self] in
-          self?.activeSession.map { $0.trigger != .handsFree } ?? false
+          self?.activeSession.map { $0.trigger != .handsFree && !$0.captureSource.includesSystemAudio } ?? false
         },
         updateAudioLevel: { [hudManager] in hudManager.updateAudioLevel($0) },
         markAudioLive: { [hudManager] in _ = hudManager.markAudioLive() },

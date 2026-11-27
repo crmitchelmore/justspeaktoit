@@ -137,7 +137,7 @@ def discover(directory, marker, name, statistics):
 def collect_reports(args):
     statistics = {"entriesScanned": 0, "reportsRead": 0, "oversized": 0,
                   "invalid": 0, "identityRejected": 0, "discoveryTruncated": False}
-    directory = Path.home() / "Library/Logs/DiagnosticReports"
+    directory = Path(os.environ.get("VERIFY_LAUNCH_REPORTS_DIR") or Path.home() / "Library/Logs/DiagnosticReports")
     deadline = time.monotonic() + max(0, min(args.wait, 10))
     seen = set()
     reports = []

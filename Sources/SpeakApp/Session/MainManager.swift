@@ -238,8 +238,13 @@ final class MainManager: ObservableObject {
     gestureRouter.register(on: capture.hotKeys)
 
     // Escape has to arrive from whichever app is being dictated into, but only while there
-    // is a recording to cancel — outside that window Speak reads no system-wide key presses.
-    capture.hotKeys.trackRecordingState($state.map { $0 == .recording })
+    // is a foreground microphone recording to cancel — background system/call audio captures
+    // must not be cancelled when the user presses Escape in another app.
+    capture.hotKeys.trackRecordingState(
+      $state.map { [weak self] state in
+        state == .recording && self?.activeSession?.captureSource.includesSystemAudio != true
+      }
+    )
 
     #if DEBUG
     capture.hotKeys.startMonitoring(requestPermission: !CoreJourneyLaunchProfile.isRequested)

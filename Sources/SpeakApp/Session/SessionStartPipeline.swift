@@ -250,7 +250,7 @@ final class SessionStartPipeline {
         source: session.captureSource, liveFeed: liveFeed
       )
       if presentation.presentsWhileOpening {
-        self.presentStartingHUD()
+        self.presentStartingHUD(for: session.captureSource)
       }
       let recording = try await startedRecording
       // The stop could have landed while `startRecording()` was suspended.

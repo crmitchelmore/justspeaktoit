@@ -1,4 +1,5 @@
 import Combine
+import SpeakCore
 import XCTest
 
 @testable import SpeakApp
@@ -87,5 +88,26 @@ final class RecordingControlModelTests: XCTestCase {
     environment.main.state = .idle
     XCTAssertFalse(model.isRecording)
     XCTAssertFalse(model.isBusy)
+  }
+
+  func testToggleSource_forwardsRequestedAudioCaptureSource() {
+    let owner = FakeSessionOwner()
+    var requestedSources: [AudioCaptureSource] = []
+    let model = RecordingControlModel(
+      statePublisher: owner.$state,
+      toggle: { owner.toggleFromUI() },
+      toggleSource: { source in
+        requestedSources.append(source)
+        owner.toggleFromUI()
+      }
+    )
+
+    model.toggle(source: .system)
+    XCTAssertEqual(requestedSources, [.system])
+    XCTAssertTrue(model.isRecording)
+
+    model.toggle(source: .both)
+    XCTAssertEqual(requestedSources, [.system, .both])
+    XCTAssertFalse(model.isRecording)
   }
 }

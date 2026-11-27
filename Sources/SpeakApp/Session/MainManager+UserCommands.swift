@@ -62,7 +62,8 @@ extension MainManager {
   }
 
   func cancelRecordingWithEscape() {
-    guard appSettings.cancelRecordingOnEscape, state == .recording, activeSession != nil else { return }
+    guard appSettings.cancelRecordingOnEscape, state == .recording,
+          let session = activeSession, !session.captureSource.includesSystemAudio else { return }
     logger.info("Cancelling recording via Escape key")
     cancelRecordingByUser(reason: "Cancelled by user (Escape)")
   }

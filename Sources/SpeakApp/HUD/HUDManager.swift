@@ -33,6 +33,10 @@ final class HUDManager: ObservableObject {
 
   /// Whether the HUD is in expanded mode showing full transcript
   @Published var isExpanded: Bool = false
+  /// Whether the active HUD uses the standard overlay or the subtle background pill.
+  @Published var presentationMode: HUDPresentationMode = .standard
+  /// Invoked when the user clicks Stop in the subtle background capture pill.
+  var onStopRequested: (@MainActor () -> Void)?
 
   @Published private(set) var snapshot: Snapshot = .hidden
   /// When the current phase's clock started, or `nil` for the phases that show
@@ -80,33 +84,6 @@ final class HUDManager: ObservableObject {
     self.accessibilityAnnouncementPoster = accessibilityAnnouncementPoster
   }
 
-  static func accessibilityAnnouncement(
-    for phase: HUDPhase,
-    subheadline: String?
-  ) -> String? {
-    let detail = subheadline.map { ". \($0)" } ?? ""
-    switch phase {
-    case .armed:
-      return "Hands-free dictation armed\(detail)"
-    case .recording:
-      return "Recording started\(detail)"
-    case .transcribing:
-      return "Transcribing\(detail)"
-    case .postProcessing:
-      return "Post-processing\(detail)"
-    case .delivering:
-      return "Delivering transcription\(detail)"
-    case .editing:
-      return "Editing\(detail)"
-    case .success(let message):
-      return "Success. \(message)"
-    case .failure(let message):
-      return "Failed. \(message)"
-    case .hidden:
-      return nil
-    }
-  }
-
   /// Begins the recording phase. When a dictation profile is active for the
   /// session, its name is surfaced in the HUD subheadline.
   ///
@@ -114,6 +91,7 @@ final class HUDManager: ObservableObject {
   ///   clock held at zero, and start the clock only when `markAudioLive()`
   ///   reports the microphone is delivering audio.
   func beginRecording(profileName: String? = nil, awaitingAudio: Bool = false) {
+    presentationMode = .standard
     // Set initial expansion state based on user preference
     switch appSettings.hudSizePreference {
     case .compact:
@@ -142,6 +120,7 @@ final class HUDManager: ObservableObject {
   /// Shows the armed indicator for hands-free dictation. The HUD stays up
   /// between utterances so "armed but silent" is never mistaken for "off".
   func beginArmed(subheadline: String = "Hands-free dictation is armed") {
+    presentationMode = .standard
     transition(
       .armed,
       headline: "Listening for speech",
@@ -200,6 +179,7 @@ final class HUDManager: ObservableObject {
   /// Voice-edit mode: a distinct "Editing" state reused across its listening, rewriting, and
   /// applying stages (the subheadline tells them apart).
   func beginEditing(subheadline: String) {
+    presentationMode = .standard
     transition(.editing, headline: "Editing", subheadline: subheadline)
   }
 
@@ -263,6 +243,7 @@ final class HUDManager: ObservableObject {
     sessionStart = nil
     isAwaitingAudio = false
     awaitingAudioSubheadline = nil
+    presentationMode = .standard
     snapshot = .hidden
     if pendingAccessibilityAnnouncement != nil {
       // Shown and hidden before the panel appeared: nothing was on screen.
@@ -276,7 +257,7 @@ final class HUDManager: ObservableObject {
     captureHealth = health
   }
 
-  private func transition(
+  func transition(
     _ phase: HUDPhase,
     headline: String,
     subheadline: String?,
@@ -339,6 +320,34 @@ final class HUDManager: ObservableObject {
       .announcement: announcement,
       .priority: NSAccessibilityPriorityLevel.high.rawValue
     ])
+  }
+}
+
+// MARK: - Accessibility announcements
+
+extension HUDManager {
+  static func accessibilityAnnouncement(for phase: HUDPhase, subheadline: String?) -> String? {
+    let detail = subheadline.map { ". \($0)" } ?? ""
+    switch phase {
+    case .armed:
+      return "Hands-free dictation armed\(detail)"
+    case .recording:
+      return "Recording started\(detail)"
+    case .transcribing:
+      return "Transcribing\(detail)"
+    case .postProcessing:
+      return "Post-processing\(detail)"
+    case .delivering:
+      return "Delivering transcription\(detail)"
+    case .editing:
+      return "Editing\(detail)"
+    case .success(let message):
+      return "Success. \(message)"
+    case .failure(let message):
+      return "Failed. \(message)"
+    case .hidden:
+      return nil
+    }
   }
 }
 

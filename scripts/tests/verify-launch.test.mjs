@@ -33,8 +33,7 @@ birth=subprocess.check_output(["ps","-p",sys.argv[1],"-o","lstart="],text=True).
 print(datetime.strptime(birth,"%a %b %d %H:%M:%S %Y").astimezone().isoformat())' "$$")"
 ${executable}
 `, { mode: 0o755 });
-  const home = join(directory, 'home');
-  const reports = join(home, 'Library', 'Logs', 'DiagnosticReports');
+  const reports = join(directory, 'DiagnosticReports');
   mkdirSync(reports, { recursive: true });
   const diagnostics = join(directory, 'diagnostics');
   const scratch = join(directory, 'scratch');
@@ -89,7 +88,7 @@ echo "${unrelated.pid}"
   }
   const result = spawnSync('bash', [script, app], {
     encoding: 'utf8', timeout: 60000,
-    env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, HOME: home,
+    env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, VERIFY_LAUNCH_REPORTS_DIR: reports,
       TMPDIR: scratch, REPORT_WRITER: writer,
       VERIFY_LAUNCH_TIMEOUT: options.timeout ?? '0',
       // Candidates expected to die get a wide launch window: the fixture's own startup (python, ps)
@@ -138,7 +137,7 @@ test('rejects a crashed candidate despite another matching process being alive',
 
 test('retains only fresh crash reports belonging to the failed Alpha child', t => {
   const result = fixture(t, `
-reports="$HOME/Library/Logs/DiagnosticReports"
+reports="$VERIFY_LAUNCH_REPORTS_DIR"
 python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToItAlpha-own.ips"
 printf '{"pid":999999,"exception":{"type":"unrelated"}}' > "$reports/JustSpeakToItAlpha-other.ips"
 python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToItAlpha-own.crash"
@@ -162,7 +161,7 @@ pid=$$
 path="$0"
 # Capture occurs before exit; only delivery of this synthetic report is delayed.
 export FIXTURE_CAPTURE_TIME="$(python3 -c 'from datetime import datetime; print(datetime.now().astimezone().isoformat())')"
-(sleep 2.25; python3 "$REPORT_WRITER" "$pid" "$path" "$HOME/Library/Logs/DiagnosticReports/JustSpeakToIt-delayed.ips") &
+(sleep 2.25; python3 "$REPORT_WRITER" "$pid" "$path" "$VERIFY_LAUNCH_REPORTS_DIR/JustSpeakToIt-delayed.ips") &
 exit 42
 `, { wait: '5' }); // polling starts at the death, so it must outlast the 2.25 s delivery
   assert.equal(result.status, 1);
@@ -200,7 +199,7 @@ test('bounds captured stdout and console excerpts', t => {
 
 test('limits report count and rejects oversized, malformed and symlinked evidence', t => {
   const result = fixture(t, `
-reports="$HOME/Library/Logs/DiagnosticReports"
+reports="$VERIFY_LAUNCH_REPORTS_DIR"
 for index in 1 2 3 4; do
   python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToIt-$index.ips"
 done
@@ -262,7 +261,7 @@ echo "PRIVATE_SIGNING_SENTINEL"
 echo "-----BEGIN PRIVATE KEY-----"
 echo "secret-key-body"
 echo "-----END PRIVATE KEY-----"
-python3 "$REPORT_WRITER" "$$" "$0" "$HOME/Library/Logs/DiagnosticReports/JustSpeakToIt-own.ips"
+python3 "$REPORT_WRITER" "$$" "$0" "$VERIFY_LAUNCH_REPORTS_DIR/JustSpeakToIt-own.ips"
 exit 42
 `, { logScript: 'echo "PRIVATE_SIGNING_SENTINEL"' });
   const evidence = readdirSync(result.diagnostics).map(name =>
@@ -277,7 +276,7 @@ exit 42
 
 test('rejects a reused PID or mismatched executable despite matching report names', t => {
   const result = fixture(t, `
-reports="$HOME/Library/Logs/DiagnosticReports"
+reports="$VERIFY_LAUNCH_REPORTS_DIR"
 python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToIt-reused.ips" future
 python3 "$REPORT_WRITER" "$$" "/wrong/executable" "$reports/JustSpeakToIt-wrong.ips"
 exit 42
@@ -289,7 +288,7 @@ exit 42
 
 test('accepts native Apple path redaction only with matching bundle and process identity', t => {
   const result = fixture(t, `
-reports="$HOME/Library/Logs/DiagnosticReports"
+reports="$VERIFY_LAUNCH_REPORTS_DIR"
 python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToIt-redacted.ips" redacted
 python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToIt-wrong-identity.ips" wrong-identity
 exit 42
@@ -301,7 +300,7 @@ exit 42
 
 test('retains only the owned redacted report when timestamp initialization is delayed', t => {
   const result = fixture(t, `
-reports="$HOME/Library/Logs/DiagnosticReports"
+reports="$VERIFY_LAUNCH_REPORTS_DIR"
 python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToIt-redacted.ips" redacted
 python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToIt-wrong-identity.ips" wrong-identity
 exit 42
@@ -315,8 +314,7 @@ exit 42
 test('bounds report discovery and total reads before parsing a directory flood', t => {
   const directory = mkdtempSync(join(tmpdir(), 'launch-flood-test-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const home = join(directory, 'home');
-  const reports = join(home, 'Library', 'Logs', 'DiagnosticReports');
+  const reports = join(directory, 'DiagnosticReports');
   mkdirSync(reports, { recursive: true });
   const marker = join(directory, 'marker');
   writeFileSync(marker, '');
@@ -335,7 +333,7 @@ test('bounds report discovery and total reads before parsing a directory flood',
     '--stdout', stdout, '--output', diagnostics,
     '--start-ns', '0', '--end-ns', '1000000000', '--wait', '1'], {
     encoding: 'utf8', timeout: 60000,
-    env: { ...process.env, HOME: home, PATH: `${directory}:${process.env.PATH}` },
+    env: { ...process.env, VERIFY_LAUNCH_REPORTS_DIR: reports, PATH: `${directory}:${process.env.PATH}` },
   });
   assert.equal(result.error, undefined, result.error?.message);
   assert.equal(result.status, 0, result.stderr);

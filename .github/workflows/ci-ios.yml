@@ -50,6 +50,8 @@ jobs:
         with:
           name: ios-test-products-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ios-test-products.tar.gz
+          # The tarball is already gzip-compressed.
+          compression-level: 0
           retention-days: 7
           if-no-files-found: error
       - name: Upload simulator compilation log

@@ -526,7 +526,7 @@ test('every tracked tooling test is discovered by make test-tooling', () => {
   }
 });
 
-const flags = ['apple', 'swift', 'api', 'full', 'workers'];
+const flags = ['apple', 'swift', 'api', 'full', 'workers', 'android'];
 const allOutputs = value => Object.fromEntries(flags.map(flag => [flag, value]));
 const gateFlags = Object.fromEntries(Object.entries(gateJobs).flatMap(([flag, ids]) => ids.map(id => [id, flag])));
 
@@ -535,9 +535,9 @@ function passing() {
     .map(id => [id, { result: 'success', outputs: allOutputs('true') }]));
 }
 
-function pullRequest({ apple = 'true', swift = 'true', workers = 'true' } = {}) {
+function pullRequest({ android = 'false', apple = 'true', swift = 'true', workers = 'true' } = {}) {
   const needs = passing();
-  needs['release-paths'].outputs = { apple, swift, api: swift, full: 'false', workers };
+  needs['release-paths'].outputs = { android, apple, swift, api: swift, full: 'false', workers };
   for (const [id, flag] of Object.entries(gateFlags)) {
     if (needs['release-paths'].outputs[flag] === 'false') needs[id].result = 'skipped';
   }
@@ -568,7 +568,7 @@ for (const id of Object.keys(passing())) {
 test('an untrusted Swift pull request needs Lint, the Linux graph and one macOS job only', () => {
   const needs = pullRequest();
   assert.deepEqual(assessCIGates(needs, 'pull_request'), []);
-  const macos = Object.entries(gateFlags).filter(([id, flag]) => !['full', 'workers'].includes(flag) && !['lint', 'portable-linux'].includes(id));
+  const macos = Object.entries(gateFlags).filter(([id, flag]) => !['full', 'workers', 'android'].includes(flag) && !['lint', 'portable-linux'].includes(id));
   assert.deepEqual(macos.map(([id]) => id), ['macos-debug']);
   for (const id of ['lint', 'macos-debug', 'portable-linux']) {
     const failed = pullRequest();
@@ -577,8 +577,27 @@ test('an untrusted Swift pull request needs Lint, the Linux graph and one macOS 
   }
 });
 
-test('docs, website, Android and Workers-only pull requests skip every gate but Workers', () => {
+test('docs, website and Workers-only pull requests skip every gate but Workers', () => {
   assert.deepEqual(assessCIGates(pullRequest({ apple: 'false', swift: 'false' }), 'pull_request'), []);
+});
+
+test('Android dependency PRs cannot pass with a missing, skipped or failed Android build', () => {
+  const needs = pullRequest({ android: 'true', apple: 'false', swift: 'false' });
+  assert.deepEqual(assessCIGates(needs, 'pull_request'), []);
+  for (const result of [undefined, 'skipped', 'failure', 'cancelled']) {
+    needs.android.result = result;
+    assert.ok(assessCIGates(needs, 'pull_request').length > 0);
+  }
+  delete needs['release-paths'].outputs.android;
+  assert.ok(assessCIGates(needs, 'pull_request').length > 0);
+  const main = passing();
+  main.android.result = 'skipped';
+  main['release-paths'].outputs.android = 'false';
+  assert.deepEqual(assessCIGates(main, 'push'), [], 'android.yml owns Android builds on main');
+  assert.match(jobBodies['release-paths'], /android: \$\{\{ github.event_name != 'pull_request' && 'false' \|\| steps.filter.outputs.android \}\}/);
+  assert.match(jobBodies.android, /runs-on: ubuntu-24.04/);
+  assert.match(jobBodies.android, /cache-read-only: true/);
+  assert.match(jobBodies.android, /run: scripts\/ci-android.sh/);
 });
 
 test('workers-only untrusted pull requests may skip everything but Workers and the record', () => {

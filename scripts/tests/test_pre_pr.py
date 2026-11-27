@@ -213,6 +213,7 @@ class CIParityTests(unittest.TestCase):
         self.assertIn('run: scripts/ci-android.sh', precheck)
         for action in re.findall(r'uses: (actions/setup-java@\S+|gradle/actions/setup-gradle@\S+)', android):
             self.assertIn(action, precheck)
+            self.assertIn(action, self.ci)
 
     def test_plan_needs_no_history(self):
         # CI's Lint job runs these tests in a shallow checkout without origin/main.

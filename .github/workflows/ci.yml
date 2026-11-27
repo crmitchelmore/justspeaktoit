@@ -10,7 +10,7 @@ name: CI
 # pre-pr already ran Lint, the portable Linux graph, the affected macOS tests
 # and the API check on that tree, so CI checks only the record (seconds, no
 # build). Dependabot and fork pull requests, which carry no trusted record,
-# run Lint, the Workers package, the portable SwiftPM graph and ONE macOS job.
+# run the Workers package and hosted checks for affected Android, tooling and Swift inputs.
 # `ci:full` pull requests, `merge-batch/*` pull requests and main run every
 # gate. A red main is fixed forward, then auto-reverted (auto-revert.yml).
 # A batch is tested once, through its pull request; pushing its branch does
@@ -61,7 +61,12 @@ jobs:
     if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !startsWith(github.event.pull_request.user.login, 'dependabot') && !contains(github.event.pull_request.labels.*.name, 'ci:full') && !startsWith(github.head_ref, 'merge-batch/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
+      # Android has its own path-triggered main workflow. On PRs require an explicit filter result.
+      android: ${{ github.event_name != 'pull_request' && 'false' || steps.filter.outputs.android }}
       apple: ${{ steps.select.outputs.apple }}
       swift: ${{ steps.select.outputs.swift }}
       ios: ${{ steps.select.outputs.ios }}
@@ -77,7 +82,7 @@ jobs:
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
-          # These lists are the swift, api and ios routes in
+          # These lists are the swift, api, ios and android routes in
           # scripts/ci/routing.json; edit them there and run
           # `python3 scripts/ci/routing.py --write`.
           filters: |
@@ -112,6 +117,14 @@ jobs:
               - 'Sources/SpeakWatchCore/**'
               - 'scripts/ci/check-api-compatibility.sh'
               - 'scripts/ci/api-breakage-allowlist.txt'
+            android:
+              - 'android/**'
+              - '.github/workflows/android.yml'
+              - 'Sources/SpeakCore/TranscriptCleanupPolicy.swift'
+              - 'Sources/SpeakCore/ModelCatalog.swift'
+              - 'Sources/SpeakCore/ModelRetirements.swift'
+              - 'Sources/SpeakCore/ProviderCredentialCatalogue.swift'
+              - 'Sources/SpeakCore/OpenAITranscriptionModels.swift'
             ios:
               - 'Package.swift'
               - 'Package.resolved'
@@ -273,6 +286,27 @@ jobs:
       - name: Lint and tooling tests (make ci-lint)
         run: make ci-lint
 
+  android:
+    name: Build & Test (Android PR)
+    needs: release-paths
+    if: needs.release-paths.outputs.android == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          validate-wrappers: true
+          cache-read-only: true
+      - name: Unit tests, lint and debug build
+        run: scripts/ci-android.sh
+
   # The portable SwiftPM graph (SpeakCore portable kernel, SpeakSync,
   # SpeakDesktop*, SpeakAutomationKit, CLI and Linux adapters) builds and
   # tests on Ubuntu, so most shared-source coverage never waits for macOS.
@@ -368,8 +402,8 @@ jobs:
             gh issue create --title "$title" --label "$label" --body "$body"
           fi
 
-  # The single required check. A gate may skip only on a pull request whose
-  # path detection excluded it; batches and main must run every gate.
+  # The single required check. Path detection selects each PR build. Android's separate workflow
+  # owns its main builds. The other main CI gates must all pass.
   gate:
     name: CI Gate
     runs-on: ubuntu-latest
@@ -386,6 +420,7 @@ jobs:
       - release-paths
       - macos-debug
       - portable-linux
+      - android
       - lint
       - paid-access-worker
       - pre-pr-evidence
@@ -444,6 +479,9 @@ jobs:
           always() && env.TRUSTED_PR != 'true' && (
             needs.release-paths.result != 'success' ||
             needs.pre-pr-evidence.result != 'success' ||
+            (needs.release-paths.outputs.android != 'true' && needs.release-paths.outputs.android != 'false') ||
+            (needs.android.result != 'success' && !(
+              needs.release-paths.outputs.android == 'false' && needs.android.result == 'skipped')) ||
             (needs.release-paths.outputs.apple != 'true' && needs.release-paths.outputs.apple != 'false') ||
             (needs.release-paths.outputs.swift != 'true' && needs.release-paths.outputs.swift != 'false') ||
             (needs.release-paths.outputs.full != 'true' && needs.release-paths.outputs.full != 'false') ||

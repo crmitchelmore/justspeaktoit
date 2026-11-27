@@ -25,8 +25,8 @@ extension VoiceStudioAPI {
             status, context: context,
             budget: .init(limit: maxMetadataBytes, deadline: ContinuousClock.now.duration(to: deadline))
         )
-        guard let last = String(decoding: events.body, as: UTF8.self)
-            .split(whereSeparator: \.isNewline).last(where: { $0.hasPrefix("data:") }),
+        guard let stream = String(data: events.body, encoding: .utf8),
+            let last = stream.split(whereSeparator: \.isNewline).last(where: { $0.hasPrefix("data:") }),
             let event = try? JSONDecoder().decode(GenerationStatus.self, from: Data(last.dropFirst(5).utf8)),
             event.id == id, event.status == "completed" else {
             throw VoiceStudioError.invalidResponse(kind: .voicebox, detail: "Voicebox generation did not complete.")

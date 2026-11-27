@@ -243,9 +243,6 @@ extension VoiceStudioAPI {
                 detail = nestedMessage
             }
         }
-        if detail.isEmpty, let rawText = String(data: body, encoding: .utf8) {
-            detail = rawText
-        }
 
         detail = detail.replacingOccurrences(of: "\r", with: " ")
             .replacingOccurrences(of: "\n", with: " ")

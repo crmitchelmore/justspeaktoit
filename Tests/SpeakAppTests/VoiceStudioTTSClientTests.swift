@@ -11,6 +11,7 @@ final class VoiceStudioTTSClientTests: XCTestCase {
   private var session: URLSession!
   private var keychainService: String!
   private var storageToClean: SecureAppStorage?
+  private var identifierToClean: String?
 
   private struct TestContext {
     let settings: AppSettings
@@ -26,8 +27,8 @@ final class VoiceStudioTTSClientTests: XCTestCase {
   }
 
   override func tearDown() async throws {
-    if let storageToClean {
-      try? await storageToClean.removeSecret(identifier: VoiceStudioKind.voiceStudio.apiKeyCredentialIdentifier)
+    if let storageToClean, let identifierToClean {
+      try? await storageToClean.removeSecret(identifier: identifierToClean)
     }
     storageToClean = nil
     session.invalidateAndCancel()
@@ -173,7 +174,9 @@ final class VoiceStudioTTSClientTests: XCTestCase {
 
     storageToClean = context.storage
     let token = "studio-remote-secret-\(UUID().uuidString)"
-    try await context.storage.storeSecret(token, identifier: VoiceStudioKind.voiceStudio.apiKeyCredentialIdentifier)
+    let identifier = try context.settings.voiceStudioConfiguration.apiKeyCredentialIdentifier
+    identifierToClean = identifier
+    try await context.storage.storeSecret(token, identifier: identifier)
     let wavPayload = try Self.makePCM16MonoWAV(sampleRate: 24_000, frames: 960)
     StubURLProtocol.handler = { request in
       XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(token)")

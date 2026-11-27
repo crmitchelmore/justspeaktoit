@@ -20,12 +20,14 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let regionMatches = context.provider != .soniox
             || (voiceDiscovery.sonioxRegion != nil
                 && voiceDiscovery.sonioxRegion == (try? voiceOutputSettings().validatedSonioxRegion()))
-        return !closed && regionMatches && voiceDiscovery.modern && voiceDiscovery.context == context
+        let studioMatches = !context.provider.isStudio || voiceDiscovery.studioConfiguration == voiceStudioConfiguration
+        return !closed && studioMatches && regionMatches && voiceDiscovery.modern && voiceDiscovery.context == context
             && sameVoiceDialog(context.sessionID.uuidString)
     }
 
     package func selectVoiceAccountProvider(_ proposed: VoiceAccountCredentialContext) {
-        guard !closed, sameVoiceDialog(proposed.sessionID.uuidString),
+        guard !closed, availableVoiceAccountProviders.contains(proposed.provider),
+              sameVoiceDialog(proposed.sessionID.uuidString),
               voiceDiscovery.context?.epoch != proposed.epoch,
               !voiceDiscovery.retiredEpochs.contains(proposed.epoch) else { return }
         guard voiceDiscovery.retiredEpochs.count < 256 else {
@@ -35,6 +37,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         if let current = voiceDiscovery.context { voiceDiscovery.retiredEpochs.insert(current.epoch) }
         cancelVoiceProviderCredentialWork(voiceDiscovery.context)
         voiceDiscovery.context = proposed
+        voiceDiscovery.studioConfiguration = proposed.provider.isStudio ? voiceStudioConfiguration : nil
         voiceDiscovery.sonioxRegion = try? voiceOutputSettings().validatedSonioxRegion()
         voiceDiscovery.modern = true
         voiceDiscovery.listing = nil
@@ -44,6 +47,11 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceDiscovery.task?.cancel()
         cancelAccountVoiceWork()
         presentVoiceAccountProviders()
+        if proposed.provider.isStudio {
+            presentVoiceDiscovery("Test the studio connection or Refresh to list voices from its configured server.",
+                loading: voiceAccountWorkIsPending)
+            return
+        }
         let regionNotice = proposed.provider == .soniox
             ? "Soniox region: \(voiceDiscovery.sonioxRegion?.displayName ?? "unsupported stored region"). "
                 + "Change it in Voice Output preferences before opening this dialog. Use its matching project key. "
@@ -54,9 +62,14 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             loading: voiceAccountWorkIsPending)
     }
 
+    package var availableVoiceAccountProviders: [VoiceAccountProvider] {
+        let studio = voiceStudioConfiguration
+        return VoiceAccountProvider.all + (studio.enabled ? [.init(studioKind: studio.kind)] : [])
+    }
+
     package func presentVoiceAccountProviders() {
         guard !closed, let context = voiceDiscovery.context else { return }
-        Platform.voiceAccountProviders(.init(context: context, providers: VoiceAccountProvider.all,
+        Platform.voiceAccountProviders(.init(context: context, providers: availableVoiceAccountProviders,
             pending: voiceAccountWorkIsPending))
     }
 
@@ -86,8 +99,13 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             return
         }
         let region = voiceDiscovery.sonioxRegion ?? .unitedStates
+        let studio = voiceDiscovery.studioConfiguration
         let fetch: DesktopVoiceAccountFetcher = fetch ?? { context, key in
-            try await .fetch(provider: context.provider, context: context, sonioxRegion: region, credential: { key })
+            if let studio {
+                return try await .fetchStudio(configuration: studio, credential: { key })
+            }
+            return try await .fetch(provider: context.provider, context: context,
+                sonioxRegion: region, credential: { key })
         }
         presentVoiceDiscovery("Listing \(context.provider.displayName) account voices. Source text is not sent.",
             loading: true)
@@ -118,8 +136,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     private func fetchVoiceAccountInventory(
         _ context: VoiceAccountCredentialContext, region: SonioxTTSRegion, fetch: DesktopVoiceAccountFetcher
     ) async throws -> VoiceAccountInventory? {
-        let slot = try VoiceOutputCredentialSlot(provider: context.provider)
-        let key = try await readVoiceAccountKey(slot)
+        let slot = try VoiceOutputCredentialSlot(
+            provider: context.provider, studioConfiguration: voiceStudioConfiguration)
+        let key = try await readVoiceAccountKey(slot, optional: context.provider.isStudio)
         try Task.checkCancellation()
         guard voiceAccountContextIsCurrent(context) else { return nil }
         let inventory = try await fetch(context, key)
@@ -131,7 +150,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 || (inventory.soniox?.context == context && inventory.soniox?.region == region) else {
             throw VoiceAccountDiscoveryError.invalidInventory(context.provider)
         }
-        let currentKey = try await readVoiceAccountKey(slot)
+        let currentKey = try await readVoiceAccountKey(slot, optional: context.provider.isStudio)
         try Task.checkCancellation()
         guard voiceAccountContextIsCurrent(context) else { return nil }
         guard inventory.matchesCredential(currentKey) else {
@@ -159,7 +178,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 let voice = try DesktopSpeechVoice.resolved(
                     modelID: model, voiceID: identifier, accountInventory: inventory)
                 if let inventory {
-                    let key = try await self.readVoiceAccountKey(.init(provider: context.provider))
+                    let slot = try VoiceOutputCredentialSlot(provider: context.provider,
+                        studioConfiguration: self.voiceStudioConfiguration)
+                    let key = try await self.readVoiceAccountKey(slot, optional: context.provider.isStudio)
                     guard inventory.matchesCredential(key) else { throw VoiceOutputCredentialError.destinationChanged }
                 }
                 try Task.checkCancellation()
@@ -182,11 +203,14 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         }
     }
 
-    package func readVoiceAccountKey(_ slot: VoiceOutputCredentialSlot) async throws -> String {
+    package func readVoiceAccountKey(_ slot: VoiceOutputCredentialSlot, optional: Bool = false) async throws -> String {
         let effects = effects
         let read = Task.detached {
             try Task.checkCancellation()
-            do { return try slot.validatedKey(effects.apiKey(name: slot.identifier)) } catch {
+            do {
+                let value = try effects.apiKey(name: slot.identifier)
+                return optional && value.isEmpty ? "" : try slot.validatedKey(value)
+            } catch {
                 throw error as? VoiceOutputCredentialError ?? .readFailed
             }
         }
@@ -252,13 +276,19 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     /// it stops cloud AI providers unless allowed, while local voice studios skip cloud consent.
     package nonisolated static func readVoiceSynthesisKey(
         effects: any DesktopHostEffects<Platform>,
-        voice: DesktopSpeechVoice,
+        selection: DesktopSpeechSelection,
         consent: DesktopCloudSharingConsentStore
     ) async throws -> String {
-        if case .studio = voice {
-            return try await readVoiceSynthesisKey(effects: effects, name: voice.apiKeyIdentifier)
+        if case .studio = selection.voice {
+            guard let config = selection.studioConfiguration else { throw VoiceStudioError.disabled }
+            let key = try await readVoiceSynthesisKey(effects: effects, name: config.apiKeyCredentialIdentifier)
+            if let inventory = selection.accountInventory, !inventory.matchesCredential(key) {
+                throw VoiceOutputCredentialError.destinationChanged
+            }
+            return key
         }
-        return try await readVoiceSynthesisKey(effects: effects, name: voice.apiKeyIdentifier, consent: consent)
+        return try await readVoiceSynthesisKey(effects: effects, name: selection.voice.apiKeyIdentifier,
+            consent: consent)
     }
 
     /// The key for a request that is about to send text to the voice's provider;

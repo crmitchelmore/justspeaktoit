@@ -130,32 +130,22 @@ extension VoiceStudioAPI {
     }
 
     static func fetchVoiceStudioVoices(context: VoiceStudioRequestContext) async throws -> [VoiceStudioVoice] {
-        let primary = makeRequest(
-            url: context.endpoint.endpointURL(path: "v1/voices"),
-            method: "GET",
-            apiKey: context.apiKey,
-            timeout: 15
-        )
-        let response = try await performTransport(primary, context: context, budget: metadataBudget)
-        let status = response.http.statusCode
-        if (200..<300).contains(status) {
-            return try decodeVoiceList(response.body, kind: .voiceStudio, wrapperKeys: ["voices", "data", "items"])
-        }
-        if status == 404 {
-            let legacy = makeRequest(
-                url: context.endpoint.endpointURL(path: "voices"),
-                method: "GET",
-                apiKey: context.apiKey,
-                timeout: 15
+        var fallbacks = ["v1/voices", "voices"].makeIterator()
+        var path = "v1/audio/voices"
+        while true {
+            let request = makeRequest(
+                url: context.endpoint.endpointURL(path: path), method: "GET", apiKey: context.apiKey, timeout: 15
             )
-            let legacyResponse = try await performValidated(legacy, context: context, budget: metadataBudget)
-            return try decodeVoiceList(
-                legacyResponse.body,
-                kind: .voiceStudio,
-                wrapperKeys: ["voices", "data", "items"]
-            )
+            let response = try await performTransport(request, context: context, budget: metadataBudget)
+            let status = response.http.statusCode
+            if (200..<300).contains(status) {
+                return try decodeVoiceList(response.body, kind: .voiceStudio, wrapperKeys: ["voices", "data", "items"])
+            }
+            guard status == 404, let fallback = fallbacks.next() else {
+                throw statusError(kind: .voiceStudio, statusCode: status, body: response.body, apiKey: context.apiKey)
+            }
+            path = fallback
         }
-        throw statusError(kind: .voiceStudio, statusCode: status, body: response.body, apiKey: context.apiKey)
     }
 
     // MARK: - Synthesis
@@ -182,8 +172,9 @@ extension VoiceStudioAPI {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(payload)
 
+        let deadline = ContinuousClock.now.advanced(by: synthesisTimeout)
         let response = try await performValidated(request, context: context, budget: audioBudget)
-        return try await decodeOrFetchAudioResponse(response: response, context: context)
+        return try await decodeOrFetchAudioResponse(response: response, context: context, deadline: deadline)
     }
 
     static func synthesizeVoiceStudio(
@@ -193,7 +184,7 @@ extension VoiceStudioAPI {
         context: VoiceStudioRequestContext
     ) async throws -> VoiceStudioWAV.NormalizedAudio {
         var payload: [String: String] = [
-            "model": "voicestudio",
+            "model": "tts-1",
             "input": text,
             "voice": voice.remoteVoiceID,
             "response_format": "wav"
@@ -210,8 +201,9 @@ extension VoiceStudioAPI {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(payload)
 
+        let deadline = ContinuousClock.now.advanced(by: synthesisTimeout)
         let response = try await performValidated(request, context: context, budget: audioBudget)
-        return try await decodeOrFetchAudioResponse(response: response, context: context)
+        return try await decodeOrFetchAudioResponse(response: response, context: context, deadline: deadline)
     }
 
     static func synthesizeGPTSoVITS(
@@ -227,7 +219,8 @@ extension VoiceStudioAPI {
         let promptText = configuration.gptSoVITSReferencePromptText.trimmingCharacters(in: .whitespacesAndNewlines)
         let promptLang = normalizedLanguage(configuration.gptSoVITSReferencePromptLanguage)
             ?? VoiceStudioPreference.defaultGPTSoVITSLanguage
-        let textLang = normalizedLanguage(language ?? configuration.gptSoVITSTextLanguage)
+        let textLang = gptSoVITSLanguage(for: language)
+            ?? normalizedLanguage(configuration.gptSoVITSTextLanguage)
             ?? VoiceStudioPreference.defaultGPTSoVITSLanguage
 
         let bodyObject = GPTSoVITSSynthesisPayload(
@@ -252,9 +245,16 @@ extension VoiceStudioAPI {
         return try normalizeAudioBytes(response.body, kind: .gptSoVITS)
     }
 
+    static func gptSoVITSLanguage(for selection: String?) -> String? {
+        guard let primary = normalizedLanguage(selection)?.lowercased()
+            .split(whereSeparator: { $0 == "-" || $0 == "_" }).first else { return nil }
+        return VoiceStudioPreference.gptSoVITSSupportedLanguages.first { $0.code == primary }?.code
+    }
+
     static func decodeOrFetchAudioResponse(
         response: OpenRouterBoundedResponseTransport.Response,
-        context: VoiceStudioRequestContext
+        context: VoiceStudioRequestContext,
+        deadline: ContinuousClock.Instant
     ) async throws -> VoiceStudioWAV.NormalizedAudio {
         if startsWithRIFF(response.body) {
             return try normalizeAudioBytes(response.body, kind: context.kind)
@@ -265,21 +265,25 @@ extension VoiceStudioAPI {
             guard let json = try? JSONSerialization.jsonObject(with: response.body) as? [String: Any] else {
                 throw VoiceStudioError.invalidResponse(kind: context.kind, detail: "Malformed JSON audio payload.")
             }
+            if context.kind == .voicebox, json["status"] != nil, let id = idStringValue(json["id"]) {
+                return try await fetchVoiceboxGeneration(id: id, context: context, deadline: deadline)
+            }
             if let audioURLString = stringValue(json["audio_url"]) ?? stringValue(json["url"]) {
                 let resolvedURL = try context.endpoint.resolveSameOriginAudioURL(audioURLString, kind: context.kind)
                 let audioRequest = makeRequest(url: resolvedURL, method: "GET", apiKey: context.apiKey, timeout: 60)
-                let fetched = try await performValidated(audioRequest, context: context, budget: audioBudget)
+                let budget = VoiceStudioTransferBudget(
+                    limit: maxAudioBytes, deadline: ContinuousClock.now.duration(to: deadline)
+                )
+                let fetched = try await performValidated(audioRequest, context: context, budget: budget)
                 return try normalizeAudioBytes(fetched.body, kind: context.kind)
             }
             if let base64 = stringValue(json["audio_base64"]) ?? stringValue(json["audio"]),
                let decoded = Data(base64Encoded: base64) {
                 return try normalizeAudioBytes(decoded, kind: context.kind)
             }
-            if context.kind == .voicebox, let generationID = idStringValue(json["id"]) {
-                let audioURL = context.endpoint.endpointURL(path: "audio/\(generationID)")
-                let audioRequest = makeRequest(url: audioURL, method: "GET", apiKey: context.apiKey, timeout: 60)
-                let fetched = try await performValidated(audioRequest, context: context, budget: audioBudget)
-                return try normalizeAudioBytes(fetched.body, kind: context.kind)
+
+            if context.kind == .voicebox, let id = idStringValue(json["id"]) {
+                return try await fetchVoiceboxGeneration(id: id, context: context, deadline: deadline)
             }
             throw VoiceStudioError.invalidResponse(
                 kind: context.kind,

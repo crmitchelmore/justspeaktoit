@@ -86,8 +86,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         guard !closed else { return .failure(.closed) }
         let epoch = voiceCredentials.selectionEpoch, settings = voiceOutputSettings()
         let effects = effects, cached = selectedVoiceAccountInventory
+        let studio = voiceStudioConfiguration
         let lookup = Task.detached {
-            Self.lookupVoiceCredential(settings: settings, effects: effects, cached: cached)
+            Self.lookupVoiceCredential(settings: settings, effects: effects, cached: cached, studio: studio)
         }
         let result = await withTaskCancellationHandler { await lookup.value } onCancel: { lookup.cancel() }
         guard !closed else { return .failure(.closed) }
@@ -187,7 +188,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
     private nonisolated static func lookupVoiceCredential(
         settings: DesktopVoiceOutputSettings, effects: any DesktopHostEffects<Platform>,
-        cached: VoiceAccountInventory?
+        cached: VoiceAccountInventory?, studio: VoiceStudioConfiguration
     ) -> Result<(VoiceOutputCredentialSlot, Bool), VoiceOutputCredentialError> {
         guard !Task.isCancelled else { return .failure(.cancelled) }
         let voice: DesktopSpeechVoice
@@ -196,11 +197,12 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         } catch { return .failure(.unavailable) }
         let slot: VoiceOutputCredentialSlot
         do {
-            slot = try .init(voice: voice, accountInventory: cached)
+            slot = try .init(voice: voice, accountInventory: cached, studioConfiguration: studio)
         } catch { return .failure(.unavailable) }
         guard !Task.isCancelled else { return .failure(.cancelled) }
         do {
             let key = try effects.apiKey(name: slot.identifier)
+            if case .studio = voice { return .success((slot, !key.isEmpty)) }
             if !DesktopSpeechVoice.voices.contains(voice), cached?.matchesCredential(key) != true {
                 return .failure(.unavailable)
             }
@@ -214,7 +216,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let inventory = selectedVoiceAccountInventory
         let saved = voiceOutputSettings()
         let voice = try saved.storedVoice(accountInventory: inventory)
-        return try .init(voice: voice, accountInventory: inventory)
+        return try .init(voice: voice, accountInventory: inventory, studioConfiguration: voiceStudioConfiguration)
     }
 
     package func voiceCredentialFailure(_ error: VoiceOutputCredentialError)

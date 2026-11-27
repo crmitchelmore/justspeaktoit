@@ -121,7 +121,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             let prepared = try await prepareVoiceSynthesisSource(snapshot, selection: selection, ticket: ticket)
             let wav = try await synthesize(prepared, selection) {
                 try await Self.readVoiceSynthesisKey(
-                    effects: effects, voice: selection.voice, consent: consent)
+                    effects: effects, selection: selection, consent: consent)
             }
 
             try Task.checkCancellation()

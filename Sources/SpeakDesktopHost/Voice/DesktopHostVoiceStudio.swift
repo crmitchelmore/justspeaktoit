@@ -50,6 +50,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
 
         if previous.kind != configuration.kind
             || previous.resolvedBaseURLString != configuration.resolvedBaseURLString {
+            voiceCredentials.selectionEpoch = UUID()
             for kind in VoiceStudioKind.allCases {
                 voiceDiscovery.inventories[VoiceAccountProvider(studioKind: kind)] = nil
             }
@@ -67,14 +68,41 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 throw VoiceOutputCredentialError.invalidKey
             }
         }
-        try Platform.saveAPIKey(cleaned, name: kind.apiKeyCredentialIdentifier)
-        recordTrackedAPIKey(kind.apiKeyCredentialIdentifier, value: cleaned)
+        let config = voiceStudioConfiguration
+        guard config.kind == kind else { throw VoiceOutputCredentialError.destinationChanged }
+        let identifier = try config.apiKeyCredentialIdentifier
+        try Platform.saveAPIKey(cleaned, name: identifier)
+        recordTrackedAPIKey(identifier, value: cleaned)
         voiceDiscovery.inventories[VoiceAccountProvider(studioKind: kind)] = nil
     }
 
     package func hasVoiceStudioAPIKey(for kind: VoiceStudioKind) -> Bool {
-        let key = (try? effects.apiKey(name: kind.apiKeyCredentialIdentifier)) ?? ""
+        let config = voiceStudioConfiguration
+        guard config.kind == kind else { return false }
+        let key = (try? effects.apiKey(name: config.apiKeyCredentialIdentifier)) ?? ""
         return !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Probes the selected studio from the native picker, with the same dialog ownership as Refresh.
+    package func testSelectedStudioConnection(_ epoch: String) {
+        guard let context = voiceDiscovery.context, let config = voiceDiscovery.studioConfiguration,
+              UUID(uuidString: epoch) == context.epoch, voiceAccountContextIsCurrent(context),
+              !voiceAccountWorkIsPending else { return }
+        presentVoiceDiscovery("Testing the configured studio connection.", loading: true)
+        activeOperations += 1
+        voiceDiscovery.task = Task {
+            defer {
+                self.voiceDiscovery.task = nil
+                self.finishOperation()
+                self.settleVoiceAccountPresentation()
+            }
+            let result = await self.testVoiceStudioConnection(configuration: config)
+            guard !Task.isCancelled, self.voiceAccountContextIsCurrent(context) else { return }
+            switch result {
+            case .success(let connection): self.presentVoiceDiscovery(connection.detailMessage, loading: false)
+            case .failure(let error): self.presentVoiceDiscovery(error.localizedDescription, loading: false)
+            }
+        }
     }
 
     /// Probes the configured (or candidate) studio server and reports version, voice count, or readiness.
@@ -87,7 +115,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let rawKey = if let apiKeyOverride {
             apiKeyOverride
         } else {
-            (try? effects.apiKey(name: config.kind.apiKeyCredentialIdentifier)) ?? ""
+            (try? effects.apiKey(name: config.apiKeyCredentialIdentifier)) ?? ""
         }
         do {
             let result = try await VoiceStudioAPI.testConnection(
@@ -107,13 +135,19 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package func refreshVoiceStudioVoices(session: URLSession = .shared) async throws -> VoiceStudioVoiceInventory {
         let config = voiceStudioConfiguration
         guard config.enabled else { throw VoiceStudioError.disabled }
-        let apiKey = (try? effects.apiKey(name: config.kind.apiKeyCredentialIdentifier)) ?? ""
+        let apiKey = (try? effects.apiKey(name: config.apiKeyCredentialIdentifier)) ?? ""
         let inventory = try await VoiceStudioAPI.listVoices(
             configuration: config,
             apiKey: apiKey,
             session: session
         )
-        voiceDiscovery.inventories[VoiceAccountProvider(studioKind: inventory.kind)] = .studio(inventory)
+        try Task.checkCancellation()
+        let currentKey = try effects.apiKey(name: config.apiKeyCredentialIdentifier)
+        let account = VoiceAccountInventory.studio(inventory)
+        guard !closed, voiceStudioConfiguration == config, account.matchesCredential(currentKey) else {
+            throw VoiceOutputCredentialError.destinationChanged
+        }
+        voiceDiscovery.inventories[VoiceAccountProvider(studioKind: inventory.kind)] = account
         return inventory
     }
 }

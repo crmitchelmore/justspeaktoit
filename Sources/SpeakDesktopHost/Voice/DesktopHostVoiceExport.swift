@@ -89,7 +89,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                             snapshot, selection: selection, ticket: ticket)
                         return try await synthesize(prepared, selection) {
                             try await Self.readVoiceSynthesisKey(
-                                effects: effects, voice: selection.voice, consent: consent)
+                                effects: effects, selection: selection, consent: consent)
                         }
                     }
                     try Task.checkCancellation()

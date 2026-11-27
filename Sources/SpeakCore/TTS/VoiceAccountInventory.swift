@@ -57,8 +57,7 @@ public enum VoiceAccountInventory: Equatable, Sendable, CustomStringConvertible,
         case .xai(let inventory): inventory.matchesCredential(value)
         case .mistral(let inventory): inventory.matchesCredential(value)
         case .soniox(let inventory): inventory.matchesCredential(value)
-        case .studio(let inventory):
-            (try? VoiceStudioEndpointPolicy.validate(baseURLString: inventory.baseURL, apiKey: value)) != nil
+        case .studio(let inventory): inventory.matchesCredential(value)
         }
     }
 

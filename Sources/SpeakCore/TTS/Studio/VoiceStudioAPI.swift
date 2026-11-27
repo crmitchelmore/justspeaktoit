@@ -80,20 +80,20 @@ public enum VoiceStudioAPI {
             return VoiceStudioVoiceInventory(
                 kind: .voicebox,
                 baseURL: endpoint.sanitizedURLString,
-                voices: voices
+                voices: voices, credential: apiKey
             )
         case .voiceStudio:
             let voices = try await fetchVoiceStudioVoices(context: context)
             return VoiceStudioVoiceInventory(
                 kind: .voiceStudio,
                 baseURL: endpoint.sanitizedURLString,
-                voices: voices
+                voices: voices, credential: apiKey
             )
         case .gptSoVITS:
             return VoiceStudioVoiceInventory(
                 kind: .gptSoVITS,
                 baseURL: endpoint.sanitizedURLString,
-                voices: configuration.configuredStaticVoices()
+                voices: configuration.configuredStaticVoices(), credential: apiKey
             )
         }
     }

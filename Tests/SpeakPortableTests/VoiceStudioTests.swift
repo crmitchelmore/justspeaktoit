@@ -5,6 +5,36 @@ import XCTest
 final class VoiceStudioTests: XCTestCase {
     // MARK: - Endpoint Security Policy
 
+    func testCredentialsFollowStudioAndValidatedOrigin() throws {
+        var config = VoiceStudioConfiguration(kind: .voiceStudio, baseURLString: "https://studio.example/v1")
+        let original = try config.apiKeyCredentialIdentifier
+        config.baseURLString = "HTTPS://STUDIO.EXAMPLE:443/v2"
+        XCTAssertEqual(try config.apiKeyCredentialIdentifier, original)
+        for different in ["https://studio.example:444/v1", "https://other.example/v1"] {
+            config.baseURLString = different
+            XCTAssertNotEqual(try config.apiKeyCredentialIdentifier, original)
+        }
+        config.baseURLString = "https://studio.example"
+        config.kind = .voicebox
+        XCTAssertNotEqual(try config.apiKeyCredentialIdentifier, original)
+        config.baseURLString = "http://studio.example"
+        XCTAssertThrowsError(try config.apiKeyCredentialIdentifier)
+    }
+
+    func testNativeStudioKeyMessageAcceptsOnlyAnOriginScopedIdentifierForItsStudio() throws {
+        let config = VoiceStudioConfiguration(kind: .voicebox)
+        let id = UUID().uuidString
+        func decode(_ identifier: String) throws -> VoiceProviderCredentialMessage {
+            try .init(operation: "replace", purpose: "voice-output", providerID: config.kind.rawValue,
+                      identifier: identifier, sessionID: id, epoch: id, requestID: id, key: "synthetic")
+        }
+        let identifier = try config.apiKeyCredentialIdentifier
+        guard case .save(_, let request) = try decode(identifier) else { return XCTFail("Expected save") }
+        XCTAssertEqual(request.identifier, identifier)
+        XCTAssertThrowsError(try decode(config.kind.apiKeyCredentialIdentifier))
+        XCTAssertThrowsError(try decode(VoiceStudioConfiguration(kind: .voiceStudio).apiKeyCredentialIdentifier))
+    }
+
     func testEndpointPolicyAllowsLoopbackCleartextWithoutAPIKey() throws {
         let validLoopbacks = [
             "http://127.0.0.1:17493",

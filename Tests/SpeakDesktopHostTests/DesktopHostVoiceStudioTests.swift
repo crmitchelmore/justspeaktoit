@@ -55,7 +55,7 @@ final class DesktopHostVoiceStudioTests: XCTestCase {
         try await controller.saveVoiceStudioAPIKey(secret, for: .voicebox)
         let hasKey = await controller.hasVoiceStudioAPIKey(for: .voicebox)
         XCTAssertTrue(hasKey)
-        XCTAssertEqual(FakeLog.shared.key(VoiceStudioKind.voicebox.apiKeyCredentialIdentifier), secret)
+        XCTAssertEqual(try FakeLog.shared.key(VoiceStudioConfiguration().apiKeyCredentialIdentifier), secret)
 
         let safeConfig = VoiceStudioConfiguration(
             enabled: true,
@@ -63,6 +63,13 @@ final class DesktopHostVoiceStudioTests: XCTestCase {
             baseURLString: "https://remote-voice.example.com"
         )
         try await controller.saveVoiceStudioConfiguration(safeConfig)
+        let remoteHasKey = await controller.hasVoiceStudioAPIKey(for: .voicebox)
+        XCTAssertFalse(remoteHasKey)
+        let remoteProbe = await controller.testVoiceStudioConnection(session: session)
+        guard case .failure(.remoteHTTPSRequiresAPIKey(host: "remote-voice.example.com")) = remoteProbe else {
+            return XCTFail("A saved loopback key must not be sent to a different origin")
+        }
+        XCTAssertTrue(StubURLProtocol.recordedRequests.isEmpty)
         let storedJSON = try String(
             contentsOf: directory.appendingPathComponent("settings.json"),
             encoding: .utf8
@@ -94,6 +101,35 @@ final class DesktopHostVoiceStudioTests: XCTestCase {
 
         let automationList = try await controller.automationVoices()
         XCTAssertTrue(automationList.contains { $0.id == alice.id && $0.selected })
+    }
+
+    func testNativePickerListsAndSavesConfiguredStudioWithoutAKey() async throws {
+        let config = VoiceStudioConfiguration(enabled: true, kind: .gptSoVITS,
+            gptSoVITSReferenceAudioPath: "/clips/ref.wav", gptSoVITSReferencePromptText: "Hello")
+        try await controller.saveVoiceStudioConfiguration(config)
+        let providers = await controller.availableVoiceAccountProviders
+        XCTAssertEqual(providers, VoiceAccountProvider.all + [.gptSoVITS])
+
+        let sessionID = UUID(), epoch = UUID()
+        let identifier = VoiceStudioVoice.gptSoVITSDefaultVoice().id
+        func message(_ action: String, _ payload: String = "", _ token: UUID) throws -> DesktopVoiceSourceMessage {
+            try .init(action: 118, source: -1, text: payload, record: token.uuidString, path: action)
+        }
+        await controller.handleVoiceDiscovery(try message("account-open-modern", "", sessionID))
+        await controller.handleVoiceDiscovery(try message("account-provider", "studio/gpt-sovits\n" + epoch.uuidString,
+            sessionID))
+        XCTAssertEqual(try message("account-test-connection", "", epoch), .discoveryTestConnection(epoch.uuidString))
+        await controller.handleVoiceDiscovery(try message("account-refresh", "", epoch))
+        let refresh = await controller.voiceDiscovery.task
+        await refresh?.value
+        let offered = await controller.voiceDiscovery.offeredIDs
+        XCTAssertEqual(offered, [identifier])
+        await controller.handleVoiceDiscovery(try message("account-choose", identifier, epoch))
+        let pick = await controller.voiceDiscovery.task
+        await pick?.value
+        let saved = await controller.voiceOutputSettings()
+        XCTAssertEqual(saved.modelID, config.kind.rawValue)
+        XCTAssertEqual(saved.voiceID, identifier)
     }
 
     func testGenerationSucceedsWithoutCloudConsentAndFailsWhenStopped() async throws {

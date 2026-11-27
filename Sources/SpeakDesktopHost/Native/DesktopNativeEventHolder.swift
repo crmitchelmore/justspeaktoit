@@ -106,7 +106,7 @@ package extension DesktopNativeEventHolder {
                 }
             }
         case .discoveryOpen, .discoveryOpenModern, .discoveryRefresh,
-             .discoveryClose, .discoveryChoose, .discoveryProvider:
+             .discoveryClose, .discoveryChoose, .discoveryProvider, .discoveryTestConnection:
             enqueueSettings { await controller.handleVoiceDiscovery(message) }
         case .event(let event): submitHistoryPlayback(event)
         case .preferences(let options):

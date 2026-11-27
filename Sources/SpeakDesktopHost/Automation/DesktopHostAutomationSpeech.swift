@@ -147,14 +147,15 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let studioConfig = voiceStudioConfiguration
         guard studioConfig.enabled else { return ([], nil) }
         let studioKey = try? await Self.readVoiceSynthesisKey(
-            effects: effects, name: studioConfig.kind.apiKeyCredentialIdentifier
+            effects: effects, name: studioConfig.apiKeyCredentialIdentifier
         )
         let validEndpoint = (try? VoiceStudioEndpointPolicy.validate(
             baseURLString: studioConfig.resolvedBaseURLString, apiKey: studioKey
         )) != nil
-        guard validEndpoint else { return ([], nil) }
-        let voices = voiceDiscovery.inventories[VoiceAccountProvider(studioKind: studioConfig.kind)]?
-            .desktopVoices ?? studioConfig.configuredStaticVoices().map(DesktopSpeechVoice.studio)
+        guard validEndpoint, studioConfig == voiceStudioConfiguration else { return ([], nil) }
+        let inventory = configuredStudioInventory(for: studioConfig.kind)
+        if let inventory, !inventory.matchesCredential(studioKey ?? "") { return ([], nil) }
+        let voices = inventory?.desktopVoices ?? studioConfig.configuredStaticVoices().map(DesktopSpeechVoice.studio)
         return (voices, studioConfig.kind)
     }
 
@@ -204,7 +205,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             return voiceDiscovery.inventories[.mistral]
         }
         if let studioKind = VoiceStudioVoice.kind(forCanonicalID: voiceID) {
-            return voiceDiscovery.inventories[VoiceAccountProvider(studioKind: studioKind)]
+            return configuredStudioInventory(for: studioKind)
         }
         return selectedVoiceAccountInventory
     }
@@ -230,7 +231,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let prepared = try await prepareVoiceSynthesisSource(snapshot, selection: selection, ticket: ticket)
         let wav = try await Platform.synthesizeVoiceOutput(prepared, selection: selection) {
             try await Self.readVoiceSynthesisKey(
-                effects: effects, voice: selection.voice, consent: consent)
+                effects: effects, selection: selection, consent: consent)
         }
         try checkAutomationSpeech(ticket)
         return try VoiceGeneratedAudio(validating: wav, sampleRate: selection.sampleRate)

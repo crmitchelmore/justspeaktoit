@@ -45,6 +45,31 @@ final class VoiceStudioClientTests: XCTestCase {
         XCTAssertEqual(spoken.sampleRate, 24_000)
     }
 
+    func testFailedVoiceboxGenerationNeverDownloadsAudio() async throws {
+        let config = VoiceStudioConfiguration(enabled: true, kind: .voicebox)
+        let voice = VoiceStudioVoice(studioKind: .voicebox, remoteVoiceID: "alice-1", name: "Alice")
+        StubURLProtocol.handler = { request in
+            let url = try XCTUnwrap(request.url)
+            switch url.path {
+            case "/generate":
+                return try Self.jsonResponse(url: url, object: ["id": Self.generationID, "status": "generating"])
+            case "/generate/\(Self.generationID)/status":
+                return try Self.generationEvents(url: url, state: "failed")
+            default:
+                XCTFail("Unexpected Voicebox request: \(url.path)")
+                return .fail(URLError(.badURL))
+            }
+        }
+        do {
+            _ = try await VoiceStudioAPI.synthesize(
+                text: "Fail.", voice: voice, configuration: config, apiKey: nil, session: session
+            )
+            XCTFail("Expected generation failure")
+        } catch let error as VoiceStudioError {
+            guard case .invalidResponse(.voicebox, _) = error else { return XCTFail("Unexpected error: \(error)") }
+        }
+    }
+
     func testVoiceboxProfilePushRequiresExplicitConfirmation() async throws {
         let wavPayload = try VoiceStudioTestAudio.makePCM16MonoWAV(sampleRate: 24_000, frames: 1_200)
         let config = VoiceStudioConfiguration(enabled: true, kind: .voicebox)
@@ -77,7 +102,7 @@ final class VoiceStudioClientTests: XCTestCase {
         XCTAssertEqual(pushed.id, "studio/voicebox/pushed-2")
     }
 
-    func testVoiceStudioListFallbackAndSynthesisWithUsageCapture() async throws {
+    func testVoiceStudioDiscoveryAndSynthesisWithUsageCapture() async throws {
         let wavPayload = try VoiceStudioTestAudio.makePCM16MonoWAV(sampleRate: 24_000, frames: 960)
         let config = VoiceStudioConfiguration(enabled: true, kind: .voiceStudio)
         installVoiceStudioStub(wavPayload: wavPayload)
@@ -109,6 +134,29 @@ final class VoiceStudioClientTests: XCTestCase {
         XCTAssertNil(usage.estimatedCostUSD)
     }
 
+    func testVoiceStudioFallsBackOnNotFound() async throws {
+        let config = VoiceStudioConfiguration(enabled: true, kind: .voiceStudio)
+        StubURLProtocol.handler = { request in
+            let url = try XCTUnwrap(request.url)
+            switch url.path {
+            case "/v1/audio/voices", "/v1/voices":
+                return try Self.jsonResponse(url: url, object: [:], statusCode: 404)
+            case "/voices":
+                return try Self.jsonResponse(url: url, object: [["voice_id": "legacy-voice"]])
+            default:
+                return .fail(URLError(.badURL))
+            }
+        }
+        let inventory = try await VoiceStudioAPI.listVoices(configuration: config, apiKey: nil, session: session)
+        XCTAssertEqual(inventory.voices.map(\.remoteVoiceID), ["legacy-voice"])
+    }
+
+    func testGPTSoVITSLanguageUsesSupportedCatalogSelections() {
+        XCTAssertEqual(VoiceStudioAPI.gptSoVITSLanguage(for: "en_US"), "en")
+        XCTAssertEqual(VoiceStudioAPI.gptSoVITSLanguage(for: "zh-Hant-TW"), "zh")
+        XCTAssertNil(VoiceStudioAPI.gptSoVITSLanguage(for: "fr_FR"))
+    }
+
     func testGPTSoVITSHealthReadinessAndTTSSynthesis() async throws {
         let wavPayload = try VoiceStudioTestAudio.makePCM16MonoWAV(sampleRate: 32_000, frames: 1_600)
         let incompleteConfig = VoiceStudioConfiguration(enabled: true, kind: .gptSoVITS)
@@ -134,7 +182,8 @@ final class VoiceStudioClientTests: XCTestCase {
             voiceID: "studio/gpt-sovits/reference"
         )
         let selection = try DesktopSpeechSelection(
-            voice: voice, options: VoiceSynthesisOptions(), accountInventory: nil, studioConfiguration: readyConfig
+            voice: voice, options: VoiceSynthesisOptions(), accountInventory: nil,
+            language: "ja_JP", studioConfiguration: readyConfig
         )
         let source = try VoiceOutputSourceSnapshot(source: .typedText, text: "Speak with reference.")
         let outputWAV = try await DesktopSpeechSynthesis(session: session).synthesize(
@@ -162,6 +211,19 @@ final class VoiceStudioClientTests: XCTestCase {
         } catch let error as VoiceStudioError {
             XCTAssertTrue(error.localizedDescription.contains("VoiceStudio returned HTTP 500"))
             XCTAssertFalse(error.localizedDescription.contains(secretKey), "Secret leaked in error description")
+        }
+
+        let escapedKey = "credential/with/slashes"
+        StubURLProtocol.handler = { request in
+            try Self.jsonResponse(
+                url: XCTUnwrap(request.url), object: ["detail": [["input": escapedKey]]], statusCode: 422)
+        }
+        do {
+            _ = try await VoiceStudioAPI.testConnection(configuration: config, apiKey: escapedKey, session: session)
+            XCTFail("Expected HTTP 422 error")
+        } catch let error as VoiceStudioError {
+            XCTAssertEqual(error, .httpError(
+                kind: .voiceStudio, statusCode: 422, detail: "Request failed with status 422."))
         }
 
         StubURLProtocol.handler = { _ in .fail(URLError(.cannotConnectToHost)) }
@@ -210,6 +272,13 @@ private extension VoiceStudioClientTests {
                 )
                 XCTAssertEqual(body["profile_id"] as? String, "alice-1")
                 XCTAssertEqual(body["text"] as? String, "Hello from Voicebox.")
+                return try Self.jsonResponse(url: url, object: ["id": Self.generationID, "status": "generating"])
+            }
+            if url.path == "/generate/\(Self.generationID)/status" {
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "text/event-stream")
+                return try Self.generationEvents(url: url, state: "completed")
+            }
+            if url.path == "/audio/\(Self.generationID)" {
                 return try Self.wavResponse(url: url, data: wavPayload)
             }
             XCTFail("Unexpected Voicebox request: \(request.httpMethod ?? "?") \(url.path)")
@@ -223,13 +292,7 @@ private extension VoiceStudioClientTests {
             if url.path == "/health" {
                 return try Self.jsonResponse(url: url, object: ["version": "1.2.0"])
             }
-            if url.path == "/v1/voices" {
-                let http = try XCTUnwrap(
-                    HTTPURLResponse(url: url, statusCode: 404, httpVersion: nil, headerFields: [:])
-                )
-                return .respond(http, Data("Not Found".utf8))
-            }
-            if url.path == "/voices" {
+            if url.path == "/v1/audio/voices" {
                 return try Self.jsonResponse(url: url, object: [
                     "voices": [["voice_id": "narrator", "name": "Narrator", "language": "en"]]
                 ])
@@ -238,6 +301,7 @@ private extension VoiceStudioClientTests {
                 let body = try XCTUnwrap(
                     JSONSerialization.jsonObject(with: StubURLProtocol.body(of: request)) as? [String: Any]
                 )
+                XCTAssertEqual(body["model"] as? String, "tts-1")
                 XCTAssertEqual(body["voice"] as? String, "narrator")
                 XCTAssertEqual(body["input"] as? String, "Read aloud line.")
                 return try Self.wavResponse(url: url, data: wavPayload)
@@ -266,7 +330,7 @@ private extension VoiceStudioClientTests {
                 XCTAssertEqual(body["ref_audio_path"] as? String, "/tmp/ref.wav")
                 XCTAssertEqual(body["prompt_text"] as? String, "Reference words.")
                 XCTAssertEqual(body["prompt_lang"] as? String, "en")
-                XCTAssertEqual(body["text_lang"] as? String, "en")
+                XCTAssertEqual(body["text_lang"] as? String, "ja")
                 return try Self.wavResponse(url: url, data: wavPayload)
             }
             XCTFail("Unexpected GPT-SoVITS path: \(url.path)")
@@ -280,6 +344,18 @@ private extension VoiceStudioClientTests {
             url: url, statusCode: statusCode, httpVersion: nil, headerFields: ["Content-Type": "application/json"]
         ))
         return .respond(http, data)
+    }
+
+    static let generationID = "b162bbaa-c965-4169-9bfb-fced68e1f027"
+
+    static func generationEvents(url: URL, state: String) throws -> StubURLProtocol.Outcome {
+        let body = ["generating", state].map {
+            #"data: {"id":"\#(generationID)","status":"\#($0)"}"#
+        }.joined(separator: "\n\n")
+        let http = try XCTUnwrap(HTTPURLResponse(
+            url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/event-stream"]
+        ))
+        return .respond(http, Data((body + "\n\n").utf8))
     }
 
     static func wavResponse(url: URL, data: Data) throws -> StubURLProtocol.Outcome {

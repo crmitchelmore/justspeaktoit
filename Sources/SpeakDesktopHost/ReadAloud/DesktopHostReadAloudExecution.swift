@@ -119,7 +119,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         } else {
             let wav = try await Platform.synthesizeVoiceOutput(source, selection: selection) {
                 try await Self.readVoiceSynthesisKey(
-                    effects: effects, voice: selection.voice, consent: consent)
+                    effects: effects, selection: selection, consent: consent)
             }
             try await DesktopVoicePlaybackFile.play(
                 VoiceGeneratedAudio(validating: wav, sampleRate: selection.sampleRate),

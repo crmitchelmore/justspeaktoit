@@ -8,10 +8,23 @@ struct VoiceStudioSettingsCard: View, AppSettingsBindingProviding {
   let onVoicesChanged: () -> Void
 
   @State private var apiKeyDraft = ""
+  @State private var draftIdentifier: String?
   @State private var hasStoredAPIKey = false
   @State private var isTestingConnection = false
   @State private var statusMessage: String?
   @State private var statusIsError = false
+
+  private var credentialIdentifier: String? { try? settings.voiceStudioConfiguration.apiKeyCredentialIdentifier }
+
+  private var draftBinding: Binding<String> {
+    Binding(
+      get: { draftIdentifier == credentialIdentifier ? apiKeyDraft : "" },
+      set: {
+        draftIdentifier = credentialIdentifier
+        apiKeyDraft = $0
+      }
+    )
+  }
 
   private var endpointPolicyWarning: String? {
     do {
@@ -74,7 +87,7 @@ struct VoiceStudioSettingsCard: View, AppSettingsBindingProviding {
           HStack(spacing: 8) {
             SecureField(
               "API Key (optional on localhost, required for remote HTTPS)",
-              text: $apiKeyDraft
+              text: draftBinding
             )
             .textFieldStyle(.roundedBorder)
             .accessibilityLabel("Voice Studio API Key")
@@ -83,7 +96,8 @@ struct VoiceStudioSettingsCard: View, AppSettingsBindingProviding {
             Button("Save Key") {
               Task { await saveAPIKey() }
             }
-            .disabled(apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(credentialIdentifier == nil
+              || draftBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .accessibilityLabel("Save Voice Studio API Key")
             .accessibilityIdentifier("settings.voiceStudio.saveKey")
 
@@ -136,10 +150,17 @@ struct VoiceStudioSettingsCard: View, AppSettingsBindingProviding {
       }
     }
     .speakTooltip("Connect Voicebox, VoiceStudio, or GPT-SoVITS over HTTP(S) as a Read Aloud voice source.")
-    .task(id: settings.voiceStudioKind) {
-      hasStoredAPIKey = await environment.secureStorage.hasSecret(
-        identifier: settings.voiceStudioKind.apiKeyCredentialIdentifier
-      )
+    .onChange(of: credentialIdentifier) { _, _ in
+      apiKeyDraft = ""
+      draftIdentifier = nil
+      statusMessage = nil
+      hasStoredAPIKey = false
+    }
+    .task(id: credentialIdentifier) {
+      guard let identifier = credentialIdentifier else { return }
+      let present = await environment.secureStorage.hasSecret(identifier: identifier)
+      guard !Task.isCancelled, credentialIdentifier == identifier else { return }
+      hasStoredAPIKey = present
     }
   }
 
@@ -190,13 +211,15 @@ struct VoiceStudioSettingsCard: View, AppSettingsBindingProviding {
   }
 
   private func saveAPIKey() async {
+    guard let identifier = credentialIdentifier, draftIdentifier == identifier else { return }
     let cleaned = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !cleaned.isEmpty else { return }
     do {
       try await environment.secureStorage.storeSecret(
         cleaned,
-        identifier: settings.voiceStudioKind.apiKeyCredentialIdentifier
+        identifier: identifier
       )
+      guard credentialIdentifier == identifier else { return }
       apiKeyDraft = ""
       hasStoredAPIKey = true
       statusIsError = false
@@ -209,10 +232,12 @@ struct VoiceStudioSettingsCard: View, AppSettingsBindingProviding {
   }
 
   private func removeAPIKey() async {
+    guard let identifier = credentialIdentifier else { return }
     do {
       try await environment.secureStorage.removeSecret(
-        identifier: settings.voiceStudioKind.apiKeyCredentialIdentifier
+        identifier: identifier
       )
+      guard credentialIdentifier == identifier else { return }
       hasStoredAPIKey = false
       statusIsError = false
       statusMessage = "Removed Keychain API key for \(settings.voiceStudioKind.displayName)."
@@ -227,21 +252,18 @@ struct VoiceStudioSettingsCard: View, AppSettingsBindingProviding {
     isTestingConnection = true
     defer { isTestingConnection = false }
 
-    let draftKey = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-    let storedKey = try? await environment.secureStorage.secret(
-      identifier: settings.voiceStudioKind.apiKeyCredentialIdentifier
-    )
-    let effectiveKey = draftKey.isEmpty ? storedKey : draftKey
-
+    let config = settings.voiceStudioConfiguration
     do {
-      let result = try await VoiceStudioAPI.testConnection(
-        configuration: settings.voiceStudioConfiguration,
-        apiKey: effectiveKey
-      )
+      let identifier = try config.apiKeyCredentialIdentifier
+      let draft = draftIdentifier == identifier ? apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+      let effectiveKey = draft.isEmpty ? try? await environment.secureStorage.secret(identifier: identifier) : draft
+      let result = try await VoiceStudioAPI.testConnection(configuration: config, apiKey: effectiveKey)
+      guard config == settings.voiceStudioConfiguration else { return }
       statusIsError = false
       statusMessage = result.detailMessage
       onVoicesChanged()
     } catch {
+      guard config == settings.voiceStudioConfiguration else { return }
       statusIsError = true
       statusMessage = error.localizedDescription
     }

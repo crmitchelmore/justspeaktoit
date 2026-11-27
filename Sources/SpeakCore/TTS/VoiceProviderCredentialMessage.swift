@@ -6,6 +6,7 @@ public struct VoiceProviderCredentialRequest: Sendable {
     public let purpose: VoiceCredentialPurpose
     public let identifier: String
     public let operation: VoiceCredentialOperation
+    let slot: VoiceOutputCredentialSlot
 
     public init(
         context: VoiceAccountCredentialContext, id: UUID, purpose: String,
@@ -14,8 +15,7 @@ public struct VoiceProviderCredentialRequest: Sendable {
         guard VoiceCredentialPurpose(rawValue: purpose) == .voiceOutput else {
             throw VoiceOutputCredentialError.invalidPurpose
         }
-        let slot = try VoiceOutputCredentialSlot(provider: context.provider)
-        try slot.validate(purpose: purpose, identifier: identifier)
+        self.slot = try VoiceOutputCredentialSlot(provider: context.provider, presentedIdentifier: identifier)
         self.context = context
         self.id = id
         self.purpose = .voiceOutput
@@ -55,8 +55,7 @@ public enum VoiceProviderCredentialMessage: Sendable, CustomStringConvertible, C
               operation != .remove || key.isEmpty else { throw VoiceOutputCredentialError.invalidRequest }
         let request = try VoiceProviderCredentialRequest(
             context: context, id: id, purpose: purpose, identifier: identifier, operation: operation)
-        self = .save(operation == .remove ? "" : try VoiceOutputCredentialSlot(provider: context.provider)
-            .validatedKey(key), request)
+        self = .save(operation == .remove ? "" : try request.slot.validatedKey(key), request)
     }
 
     public var description: String {

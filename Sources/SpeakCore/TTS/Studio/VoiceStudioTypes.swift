@@ -67,7 +67,7 @@ public enum VoiceStudioKind: String, CaseIterable, Codable, Hashable, Identifiab
     public var voiceListEndpointSummary: String {
         switch self {
         case .voicebox: "GET /profiles"
-        case .voiceStudio: "GET /v1/voices"
+        case .voiceStudio: "GET /v1/audio/voices"
         case .gptSoVITS: "Reference clip & prompt"
         }
     }
@@ -229,6 +229,19 @@ public struct VoiceStudioConfiguration: Equatable, Hashable, Codable, Sendable {
         return trimmed.isEmpty ? kind.defaultBaseURLString : trimmed
     }
 
+    /// Secure storage is scoped to a studio and its validated network origin. Paths share a key.
+    public var apiKeyCredentialIdentifier: String {
+        get throws {
+            let endpoint = try VoiceStudioEndpointPolicy.validate(
+                baseURLString: resolvedBaseURLString, apiKey: nil, requireAPIKeyForRemote: false
+            )
+            let port = endpoint.port ?? (endpoint.scheme == "https" ? 443 : 80)
+            let origin = "\(endpoint.scheme)://[\(endpoint.host)]:\(port)"
+            let digest = PortableSHA256.hash(Array(origin.utf8)).map { String(format: "%02x", $0) }.joined()
+            return "\(kind.apiKeyCredentialIdentifier).\(digest)"
+        }
+    }
+
     /// Returns a human-readable error if `kind == .gptSoVITS` is missing required reference settings.
     public func gptSoVITSValidationError() -> VoiceStudioError? {
         guard kind == .gptSoVITS else { return nil }
@@ -263,6 +276,7 @@ public struct VoiceStudioVoiceInventory: Equatable, Sendable, CustomStringConver
     public let baseURL: String
     public let studioVersion: String?
     public let voices: [VoiceStudioVoice]
+    private let credentialDigest: [UInt8]
 
     public init(
         kind: VoiceStudioKind,
@@ -274,6 +288,23 @@ public struct VoiceStudioVoiceInventory: Equatable, Sendable, CustomStringConver
         self.baseURL = baseURL
         self.studioVersion = studioVersion
         self.voices = voices
+        self.credentialDigest = Self.digest("")
+    }
+
+    init(kind: VoiceStudioKind, baseURL: String, voices: [VoiceStudioVoice], credential: String?) {
+        self.kind = kind
+        self.baseURL = baseURL
+        self.studioVersion = nil
+        self.voices = voices
+        self.credentialDigest = Self.digest(credential ?? "")
+    }
+
+    func matchesCredential(_ value: String) -> Bool {
+        credentialDigest == Self.digest(value)
+    }
+
+    private static func digest(_ value: String) -> [UInt8] {
+        PortableSHA256.hash(Array(value.trimmingCharacters(in: .whitespacesAndNewlines).utf8))
     }
 
     public var desktopVoices: [DesktopSpeechVoice] {

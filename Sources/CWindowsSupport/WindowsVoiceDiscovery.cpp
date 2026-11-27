@@ -16,7 +16,7 @@ void jsti_show_voice_provider_credentials(HWND owner, uint64_t generation,
     const std::string &session, const std::string &epoch, const std::string &provider);
 
 namespace {
-enum { headingID = 990, voicesID, statusID, refreshID, chooseID, closeID, providerID = 1040, keyID = 185 };
+enum { headingID = 990, voicesID, statusID, refreshID, chooseID, closeID, providerID = 1040, testConnectionID, keyID = 185 };
 constexpr UINT inventoryMessage = WM_APP + 28;
 struct Inventory {
     uint64_t generation = 0;
@@ -110,7 +110,9 @@ void layout(HWND window) {
     MoveWindow(GetDlgItem(window, voicesID), margin, scale(window, 126), width,
         bottom - scale(window, 246), TRUE);
     MoveWindow(GetDlgItem(window, statusID), margin, bottom - scale(window, 110), width, scale(window, 100), TRUE);
-    MoveWindow(GetDlgItem(window, refreshID), margin, bottom, scale(window, 140), height, TRUE);
+    MoveWindow(GetDlgItem(window, refreshID), margin, bottom, scale(window, 100), height, TRUE);
+    MoveWindow(GetDlgItem(window, testConnectionID), margin + scale(window, 100) + gap,
+        bottom, scale(window, 130), height, TRUE);
     MoveWindow(GetDlgItem(window, chooseID), bounds.right - margin - scale(window, 250) - gap,
         bottom, scale(window, 130), height, TRUE);
     MoveWindow(GetDlgItem(window, closeID), bounds.right - margin - scale(window, 120),
@@ -119,7 +121,7 @@ void layout(HWND window) {
 void font(HWND window, Dialog &dialog) {
     HFONT next = jsti::chrome::dialogFont(window);
     if (!next) return;
-    for (int id : {headingID, providerID, keyID, voicesID, statusID, refreshID, chooseID, closeID})
+    for (int id : {headingID, providerID, keyID, voicesID, statusID, refreshID, testConnectionID, chooseID, closeID})
         SendDlgItemMessageW(window, id, WM_SETFONT, reinterpret_cast<WPARAM>(next), TRUE);
     if (dialog.font) DeleteObject(dialog.font);
     dialog.font = next;
@@ -130,6 +132,9 @@ void sensitivity(HWND window, const Dialog &dialog) {
         (dialog.acknowledged && dialog.inventoryMatched && dialog.generation == jsti_voice_provider_generation()));
     EnableWindow(GetDlgItem(window, providerID), dialog.modern && ready);
     EnableWindow(GetDlgItem(window, keyID), dialog.modern && ready);
+    const bool studio = dialog.modern && dialog.provider.rfind("studio/", 0) == 0;
+    ShowWindow(GetDlgItem(window, testConnectionID), studio ? SW_SHOWNA : SW_HIDE);
+    EnableWindow(GetDlgItem(window, testConnectionID), studio && ready);
     EnableWindow(GetDlgItem(window, refreshID), ready);
     EnableWindow(GetDlgItem(window, voicesID), ready);
     EnableWindow(GetDlgItem(window, chooseID), ready && selected >= 0 &&
@@ -179,6 +184,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             !add(L"LISTBOX", L"", LBS_NOTIFY | WS_VSCROLL | WS_HSCROLL | WS_TABSTOP, voicesID, WS_EX_CLIENTEDGE) ||
             !add(L"STATIC", L"Preparing choices. No source text is sent.", 0, statusID) ||
             !add(L"BUTTON", L"&Refresh", BS_PUSHBUTTON | WS_TABSTOP, refreshID) ||
+            !add(L"BUTTON", L"&Test connection", BS_PUSHBUTTON | WS_TABSTOP, testConnectionID) ||
             !add(L"BUTTON", L"&Choose voice", BS_DEFPUSHBUTTON | WS_TABSTOP, chooseID) ||
             !add(L"BUTTON", L"Close", BS_PUSHBUTTON | WS_TABSTOP, closeID)) return -1;
         EnableWindow(GetDlgItem(window, chooseID), FALSE);
@@ -269,6 +275,10 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             jsti_show_voice_provider_credentials(window, dialog->generation, dialog->token,
                 dialog->epoch, dialog->provider); return 0;
         }
+        if (LOWORD(wparam) == testConnectionID && IsWindowEnabled(GetDlgItem(window, testConnectionID))) {
+            dialog->shown.loading = true; sensitivity(window, *dialog);
+            emit(*dialog, "account-test-connection"); return 0;
+        }
         if (LOWORD(wparam) == refreshID && IsWindowEnabled(GetDlgItem(window, refreshID))) {
             dialog->shown.loading = true; sensitivity(window, *dialog);
             SetDlgItemTextW(window, statusID, L"Listing account voices. Close cancels.");
@@ -353,7 +363,8 @@ int32_t jsti_window_set_voice_account_providers(const char *session, const char 
         static_cast<size_t>(selected) >= names.size()) return -1;
     for (size_t index = 0; index < names.size(); ++index) {
         const auto &id = projection.ids[index];
-        if (id.empty() || id.size() > 32 || id.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-") !=
+        const size_t slug = id.rfind("studio/", 0) == 0 ? sizeof("studio/") - 1 : 0;
+        if (id.size() <= slug || id.size() > 32 || id.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-", slug) !=
             std::string::npos || names[index].size() > 512 ||
             std::find(projection.ids.begin(), projection.ids.begin() + index, id) != projection.ids.begin() + index)
             return -1;

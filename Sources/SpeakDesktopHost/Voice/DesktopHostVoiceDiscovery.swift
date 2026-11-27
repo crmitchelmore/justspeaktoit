@@ -9,6 +9,7 @@ package struct DesktopVoiceDiscoveryState: Sendable {
         set { inventories[.xai] = newValue.map(VoiceAccountInventory.xai) }
     }
     package var context: VoiceAccountCredentialContext?
+    package var studioConfiguration: VoiceStudioConfiguration?
     package var sonioxRegion: SonioxTTSRegion?
     package var sonioxOutputTicket: DesktopPlaybackRequests.Ticket?
     package var modern = false
@@ -48,6 +49,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         case .discoveryOpen(let token): openVoiceDiscovery(token)
         case .discoveryOpenModern(let session): openModernVoiceDiscovery(session)
         case .discoveryRefresh(let token): refreshVoiceDiscovery(token)
+        case .discoveryTestConnection(let epoch): testSelectedStudioConnection(epoch)
         case .discoveryClose(let token): closeVoiceDiscovery(token)
         case .discoveryChoose(let identifier, let token): chooseDiscoveredVoice(identifier, requestID: token)
         case .discoveryProvider(let context): selectVoiceAccountProvider(context)
@@ -141,6 +143,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceDiscovery.listing = nil
         voiceDiscovery.listingContext = nil
         voiceDiscovery.context = context
+        voiceDiscovery.studioConfiguration = nil
         voiceDiscovery.offeredIDs = []
     }
 

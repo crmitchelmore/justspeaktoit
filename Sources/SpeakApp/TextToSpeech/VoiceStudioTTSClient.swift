@@ -30,7 +30,7 @@ actor VoiceStudioTTSClient: TextToSpeechClient {
     guard config.enabled else { throw VoiceStudioError.disabled }
 
     let studioVoice = try Self.resolveStudioVoice(canonicalID: voice, config: config)
-    let apiKey = try? await secureStorage.secret(identifier: config.kind.apiKeyCredentialIdentifier)
+    let apiKey = try? await secureStorage.secret(identifier: config.apiKeyCredentialIdentifier)
     _ = try VoiceStudioEndpointPolicy.validate(
       baseURLString: config.resolvedBaseURLString,
       apiKey: apiKey
@@ -62,7 +62,7 @@ actor VoiceStudioTTSClient: TextToSpeechClient {
   func listVoices() async throws -> [TTSVoice] {
     let config = await MainActor.run { appSettings.voiceStudioConfiguration }
     guard config.enabled else { return [] }
-    let apiKey = try? await secureStorage.secret(identifier: config.kind.apiKeyCredentialIdentifier)
+    let apiKey = try? await secureStorage.secret(identifier: config.apiKeyCredentialIdentifier)
     let inventory = try await VoiceStudioAPI.listVoices(
       configuration: config,
       apiKey: apiKey,

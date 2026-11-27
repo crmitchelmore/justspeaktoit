@@ -285,6 +285,9 @@ enum WireUp {
       hudManager: hud,
       connectionPrewarmer: ConnectionPrewarmer(settings: settings, permissions: permissions, client: openRouter)
     )
+    hud.onStopRequested = { [weak main] in
+      Task { await main?.endSession(trigger: .uiButton) }
+    }
     let hudPresenter = HUDWindowPresenter(manager: hud, settings: settings)
     let shortcuts = ShortcutManager(permissionsManager: permissions, defaults: defaults)
 

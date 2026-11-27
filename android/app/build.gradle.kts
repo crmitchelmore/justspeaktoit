@@ -34,7 +34,9 @@ plugins {
 android {
     namespace = "com.justspeaktoit.android"
     // AndroidX 1.19 core and Compose 1.12 require compiling against API 37.
-    compileSdk = 37
+    compileSdk {
+        version = release(37) { minorApiLevel = 1 }
+    }
     // Preinstalled on GitHub's ubuntu-24.04 runners (NDK r27d), so CI needs no SDK install step.
     ndkVersion = "27.3.13750724"
 

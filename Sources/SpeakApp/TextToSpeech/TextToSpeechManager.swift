@@ -239,6 +239,7 @@ final class TextToSpeechManager: ObservableObject {
   }
 
   func hasAPIKey(for provider: TTSProvider) async -> Bool {
+    if provider == .voiceStudio { return appSettings.voiceStudioEnabled }
     guard provider.requiresAPIKey else { return true }
 
     if let key = try? await secureStorage.secret(identifier: provider.apiKeyIdentifier),
@@ -290,7 +291,7 @@ final class TextToSpeechManager: ObservableObject {
 
 extension TextToSpeechManager {
   private func requireReadAloudConsent(for provider: TTSProvider) throws {
-    guard provider != .system else { return }
+    guard provider != .system && provider != .voiceStudio else { return }
     try requireCloudSharingConsent?([
       CloudSharingRequest(
         provider: CloudSharingProviderCatalogue.resolve(id: provider.rawValue, fallbackName: provider.displayName),

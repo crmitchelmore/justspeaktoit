@@ -43,9 +43,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             VoiceOutputSourceSnapshot, DesktopSpeechSelection, @Sendable () async throws -> String
         ) async throws -> Data = { snapshot, selection, credential in
             try await DesktopSpeechSynthesis().synthesize(
-                snapshot, voice: selection.voice, options: selection.options,
-                accountInventory: selection.accountInventory, sonioxRegion: selection.sonioxRegion,
-                language: selection.language, credential: credential
+                snapshot, selection: selection, credential: credential
             )
         }
     ) {
@@ -65,7 +63,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let conversionID: UUID?
         do {
             selection = try currentVoiceSelection()
-            try requireCloudSharing([DesktopHostCloudSharing.voice(selection.voice)])
+            if let consentRequest = DesktopHostCloudSharing.voice(selection.voice) {
+                try requireCloudSharing([consentRequest])
+            }
             format = try options.format ?? VoiceAudioFormat.storedValue(voiceOutputSettings().format)
             conversionID = try admitVoiceAudioConversion(format)
         } catch {
@@ -121,7 +121,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             let prepared = try await prepareVoiceSynthesisSource(snapshot, selection: selection, ticket: ticket)
             let wav = try await synthesize(prepared, selection) {
                 try await Self.readVoiceSynthesisKey(
-                    effects: effects, name: selection.voice.apiKeyIdentifier, consent: consent)
+                    effects: effects, selection: selection, consent: consent)
             }
 
             try Task.checkCancellation()

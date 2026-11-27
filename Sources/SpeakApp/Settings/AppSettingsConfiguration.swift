@@ -146,15 +146,37 @@ final class AppSettingsConfiguration {
     }
   }
 
-  /// Checks the schema cannot express: a recordings folder must exist.
+  /// Checks schema rules the raw type constraints alone cannot express.
   private func hostIssues(_ changes: [String: JSONValue]) -> [SettingsIssue] {
-    guard case .string(let path)? = changes["recordingsDirectory"] else { return [] }
-    var isDirectory: ObjCBool = false
-    let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
-    guard path.hasPrefix("/"), exists, isDirectory.boolValue else {
-      return [.init(path: "settings.recordingsDirectory", message: "Must be the absolute path of an existing folder.")]
+    var issues: [SettingsIssue] = []
+    if case .string(let path)? = changes["recordingsDirectory"] {
+      var isDirectory: ObjCBool = false
+      let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+      if !path.hasPrefix("/") || !exists || !isDirectory.boolValue {
+        issues.append(.init(
+          path: "settings.recordingsDirectory",
+          message: "Must be the absolute path of an existing folder."
+        ))
+      }
     }
-    return []
+    if case .string(let baseURL)? = changes[VoiceStudioPreference.baseURLKey] {
+      let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !trimmed.isEmpty {
+        do {
+          _ = try VoiceStudioEndpointPolicy.validate(
+            baseURLString: trimmed,
+            apiKey: nil,
+            requireAPIKeyForRemote: false
+          )
+        } catch {
+          issues.append(.init(
+            path: "settings.\(VoiceStudioPreference.baseURLKey)",
+            message: error.localizedDescription
+          ))
+        }
+      }
+    }
+    return issues
   }
 
   /// Models and modes first, then the Auto-Clean speed and cleanup switches
@@ -345,6 +367,13 @@ extension AppSettingsConfiguration {
           if case .string(let item) = $0 { item } else { nil }
         }
       })
+    bool(VoiceStudioPreference.enabledKey, \.voiceStudioEnabled)
+    choice(VoiceStudioPreference.kindKey, \.voiceStudioKind)
+    string(VoiceStudioPreference.baseURLKey, \.voiceStudioBaseURL)
+    string(VoiceStudioPreference.gptSoVITSReferenceAudioPathKey, \.voiceStudioGPTSoVITSReferenceAudioPath)
+    string(VoiceStudioPreference.gptSoVITSReferencePromptTextKey, \.voiceStudioGPTSoVITSReferencePromptText)
+    string(VoiceStudioPreference.gptSoVITSReferencePromptLanguageKey, \.voiceStudioGPTSoVITSPromptLanguage)
+    string(VoiceStudioPreference.gptSoVITSTextLanguageKey, \.voiceStudioGPTSoVITSTextLanguage)
 
     // Integrations
     bool("paidAccessRoutingEnabled", \.paidAccessRoutingEnabled)

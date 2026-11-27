@@ -49,6 +49,7 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
         }
         try Self.validateFields(in: values)
         try Self.validatePronunciationPreferences(in: values)
+        try Self.validateVoiceStudio(in: values)
         // JSON decodes whole numbers as Int; native numeric entries use Double.
         for field in Self.fields {
             guard case .number = field.kind, let value = values[field.key],
@@ -197,6 +198,35 @@ public struct DesktopConfiguration: Codable, Equatable, Sendable {
             ),
             modulate: modulateLiveOptions, postStopFinalizeBudget: nil, stopGracePeriod: number("liveStopGracePeriod")
         ).capturingPronunciationKeyterms(pronunciationKeytermSelection)
+    }
+
+    public var voiceStudioConfiguration: VoiceStudioConfiguration {
+        let kind = VoiceStudioKind(rawValue: text(VoiceStudioPreference.kindKey)) ?? .voicebox
+        return VoiceStudioConfiguration(
+            enabled: enabled(VoiceStudioPreference.enabledKey),
+            kind: kind,
+            baseURLString: text(VoiceStudioPreference.baseURLKey),
+            gptSoVITSReferenceAudioPath: text(VoiceStudioPreference.gptSoVITSReferenceAudioPathKey),
+            gptSoVITSReferencePromptText: text(VoiceStudioPreference.gptSoVITSReferencePromptTextKey),
+            gptSoVITSReferencePromptLanguage: text(VoiceStudioPreference.gptSoVITSReferencePromptLanguageKey),
+            gptSoVITSTextLanguage: text(VoiceStudioPreference.gptSoVITSTextLanguageKey)
+        )
+    }
+
+    private static func validateVoiceStudio(in values: [String: AnyCodable]) throws {
+        guard let value = values[VoiceStudioPreference.baseURLKey],
+              case .string(let rawURL) = value.storage else { return }
+        let trimmed = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            _ = try VoiceStudioEndpointPolicy.validate(
+                baseURLString: trimmed,
+                apiKey: nil,
+                requireAPIKeyForRemote: false
+            )
+        } catch {
+            throw DesktopConfigurationError.invalidField("Local voice studio URL")
+        }
     }
 }
 

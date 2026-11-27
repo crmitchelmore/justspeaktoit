@@ -22,6 +22,7 @@ extension WireUp {
       .mistral: MistralTTSClient(secureStorage: secureStorage),
       .speechmatics: SpeechmaticsTTSClient(secureStorage: secureStorage),
       .xai: XAITTSClient(secureStorage: secureStorage),
+      .voiceStudio: VoiceStudioTTSClient(appSettings: settings, secureStorage: secureStorage),
       .system: SystemTTSClient()
     ]
     return TextToSpeechManager(

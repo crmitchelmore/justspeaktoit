@@ -116,10 +116,14 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             let key = try? await Self.readVoiceSynthesisKey(effects: effects, name: name)
             keyed[name] = key?.isEmpty == false
         }
+        let studio = await activeStudioAutomationVoices()
         let selected = try? currentVoiceSelection().voice
         var rows: [AutomationVoice] = []
         var index: [String: Int] = [:]
-        for voice in catalogue + [selected].compactMap({ $0 }) where keyed[voice.apiKeyIdentifier] != false {
+        for voice in catalogue + studio.voices + [selected].compactMap({ $0 }) {
+            if case .studio(let studioVoice) = voice {
+                guard studioVoice.studioKind == studio.validKind else { continue }
+            } else if keyed[voice.apiKeyIdentifier] == false { continue }
             let id = voice.favoriteIdentifier
             if let position = index[id] {
                 if !rows[position].models.contains(voice.modelID) { rows[position].models.append(voice.modelID) }
@@ -139,6 +143,22 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         return rows
     }
 
+    private func activeStudioAutomationVoices() async -> (voices: [DesktopSpeechVoice], validKind: VoiceStudioKind?) {
+        let studioConfig = voiceStudioConfiguration
+        guard studioConfig.enabled else { return ([], nil) }
+        let studioKey = try? await Self.readVoiceSynthesisKey(
+            effects: effects, name: studioConfig.apiKeyCredentialIdentifier
+        )
+        let validEndpoint = (try? VoiceStudioEndpointPolicy.validate(
+            baseURLString: studioConfig.resolvedBaseURLString, apiKey: studioKey
+        )) != nil
+        guard validEndpoint, studioConfig == voiceStudioConfiguration else { return ([], nil) }
+        let inventory = configuredStudioInventory(for: studioConfig.kind)
+        if let inventory, !inventory.matchesCredential(studioKey ?? "") { return ([], nil) }
+        let voices = inventory?.desktopVoices ?? studioConfig.configuredStaticVoices().map(DesktopSpeechVoice.studio)
+        return (voices, studioConfig.kind)
+    }
+
     /// The synthesis settings for one resolved voice and this call's
     /// overrides. Unchanged, the selected voice keeps its exact saved
     /// configuration; anything else is resolved strictly, never substituted,
@@ -149,8 +169,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let unchanged = choice.voice.selected && choice.model == choice.voice.model
         if unchanged, overrides.isEmpty { return try currentVoiceSelection() }
         var settings = voiceOutputSettings()
-        let inventory = choice.voice.id.hasPrefix(MistralTTSCatalog.voiceIDPrefix)
-            ? voiceDiscovery.inventories[.mistral] : selectedVoiceAccountInventory
+        let inventory = automationInventory(for: choice.voice.id)
         let selection: DesktopSpeechSelection
         do {
             if !unchanged {
@@ -159,18 +178,15 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
                 settings.modelID = choice.model
                 settings.voiceID = choice.voice.id
                 settings.strictVoiceSelection = true
-                switch voice {
-                case .openai, .elevenlabs: settings.quality = voice.defaultQuality.rawValue
-                default: break
-                }
+                if case .openai = voice { settings.quality = voice.defaultQuality.rawValue }
+                if case .elevenlabs = voice { settings.quality = voice.defaultQuality.rawValue }
             }
             try overrides.validate(for: settings.storedVoice(accountInventory: inventory))
-            if let speed = overrides.speed { settings.speed = speed }
-            if let pitch = overrides.pitch { settings.pitch = pitch }
-            if let language = overrides.language { settings.language = language }
-            // An explicit model wins where quality would otherwise pick the model.
-            if let quality = overrides.quality, !modelRequested { settings.quality = quality.rawValue }
-            selection = try settings.synthesisSelection(accountInventory: inventory)
+            applyAutomationOverrides(overrides, modelRequested: modelRequested, to: &settings)
+            selection = try settings.synthesisSelection(
+                accountInventory: inventory,
+                studioConfiguration: voiceStudioConfiguration
+            )
         } catch let error as AutomationError {
             throw error
         } catch {
@@ -184,6 +200,28 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         return selection
     }
 
+    private func automationInventory(for voiceID: String) -> VoiceAccountInventory? {
+        if voiceID.hasPrefix(MistralTTSCatalog.voiceIDPrefix) {
+            return voiceDiscovery.inventories[.mistral]
+        }
+        if let studioKind = VoiceStudioVoice.kind(forCanonicalID: voiceID) {
+            return configuredStudioInventory(for: studioKind)
+        }
+        return selectedVoiceAccountInventory
+    }
+
+    private func applyAutomationOverrides(
+        _ overrides: AutomationSpeechSettings,
+        modelRequested: Bool,
+        to settings: inout DesktopVoiceOutputSettings
+    ) {
+        if let speed = overrides.speed { settings.speed = speed }
+        if let pitch = overrides.pitch { settings.pitch = pitch }
+        if let language = overrides.language { settings.language = language }
+        // An explicit model wins where quality would otherwise pick the model.
+        if let quality = overrides.quality, !modelRequested { settings.quality = quality.rawValue }
+    }
+
     private func synthesizeAutomationSpeech(
         _ snapshot: VoiceOutputSourceSnapshot, selection: DesktopSpeechSelection,
         ticket: DesktopPlaybackRequests.Ticket
@@ -193,7 +231,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let prepared = try await prepareVoiceSynthesisSource(snapshot, selection: selection, ticket: ticket)
         let wav = try await Platform.synthesizeVoiceOutput(prepared, selection: selection) {
             try await Self.readVoiceSynthesisKey(
-                effects: effects, name: selection.voice.apiKeyIdentifier, consent: consent)
+                effects: effects, selection: selection, consent: consent)
         }
         try checkAutomationSpeech(ticket)
         return try VoiceGeneratedAudio(validating: wav, sampleRate: selection.sampleRate)

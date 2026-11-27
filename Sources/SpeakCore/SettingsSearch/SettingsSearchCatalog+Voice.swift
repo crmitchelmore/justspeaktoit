@@ -44,6 +44,17 @@ extension SettingsSearchCatalog {
             platforms: .macOS
         ),
         SettingsSearchEntry(
+            id: "voiceOutput.voiceStudio", title: "Local Voice Studio", section: .voiceOutput,
+            systemImage: "waveform.and.mic",
+            summary: "Connect Voicebox, VoiceStudio or GPT-SoVITS as a Read Aloud voice source.",
+            keywords: [
+                "voicebox", "voicestudio", "gpt-sovits", "local tts", "self-hosted", "voice cloning",
+                "reference audio", "test connection", "studio api key"
+            ],
+            settingKeys: VoiceStudioPreference.allSettingKeys,
+            platforms: .macOS
+        ),
+        SettingsSearchEntry(
             id: "pronunciation.dictionary", title: "Pronunciation Dictionary", section: .pronunciation,
             systemImage: "text.book.closed",
             summary: "Teach voice output how to say words; entries also become keyterms.",

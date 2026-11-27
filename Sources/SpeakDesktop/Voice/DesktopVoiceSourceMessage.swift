@@ -11,6 +11,7 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
     case usageTracking(Bool, requestID: String)
     case discoveryOpen(String), discoveryRefresh(String), discoveryClose(String)
     case discoveryOpenModern(UUID)
+    case discoveryTestConnection(String)
     case discoveryChoose(voiceID: String, requestID: String)
     case discoveryProvider(VoiceAccountCredentialContext)
 
@@ -78,7 +79,7 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
             default: return .discoveryClose(record)
             }
         case "account-choose":
-            guard VoiceAccountProvider.all.contains(where: {
+            guard VoiceAccountProvider.desktopProviders.contains(where: {
                 text.hasPrefix($0.id + "/") && text.utf8.count > $0.id.utf8.count + 1
             }), text.utf8.count <= 260,
                   text == text.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -92,6 +93,9 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
 
     private static func contextualDiscoveryMessage(text: String, record: String, path: String) throws -> Self? {
         switch path {
+        case "account-test-connection":
+            guard text.isEmpty, UUID(uuidString: record) != nil else { throw Failure.invalidPreferences }
+            return .discoveryTestConnection(record)
         case "account-provider": return try providerMessage(text: text, record: record)
         case "account-open-modern":
             guard text.isEmpty, record.utf8.count == 36, let session = UUID(uuidString: record) else {

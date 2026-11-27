@@ -8,6 +8,7 @@ public enum VoiceAccountInventory: Equatable, Sendable, CustomStringConvertible,
     case xai(XAIAccountVoiceInventory)
     case mistral(MistralAccountVoiceInventory)
     case soniox(SonioxAccountVoiceInventory)
+    case studio(VoiceStudioVoiceInventory)
     public var description: String { "\(provider.displayName) account inventory (\(desktopVoices.count) voices)" }
     public var debugDescription: String { description }
 
@@ -16,6 +17,7 @@ public enum VoiceAccountInventory: Equatable, Sendable, CustomStringConvertible,
         case .xai: .xai
         case .mistral: .mistral
         case .soniox: .soniox
+        case .studio(let inventory): VoiceAccountProvider(studioKind: inventory.kind)
         }
     }
 
@@ -24,6 +26,7 @@ public enum VoiceAccountInventory: Equatable, Sendable, CustomStringConvertible,
         case .xai(let inventory): inventory.desktopVoices
         case .mistral(let inventory): inventory.desktopVoices
         case .soniox(let inventory): inventory.desktopVoices
+        case .studio(let inventory): inventory.desktopVoices
         }
     }
 
@@ -42,6 +45,11 @@ public enum VoiceAccountInventory: Equatable, Sendable, CustomStringConvertible,
         return nil
     }
 
+    public var studio: VoiceStudioVoiceInventory? {
+        if case .studio(let inventory) = self { return inventory }
+        return nil
+    }
+
     public func contains(_ voice: DesktopSpeechVoice) -> Bool { desktopVoices.contains(voice) }
 
     public func matchesCredential(_ value: String) -> Bool {
@@ -49,7 +57,25 @@ public enum VoiceAccountInventory: Equatable, Sendable, CustomStringConvertible,
         case .xai(let inventory): inventory.matchesCredential(value)
         case .mistral(let inventory): inventory.matchesCredential(value)
         case .soniox(let inventory): inventory.matchesCredential(value)
+        case .studio(let inventory): inventory.matchesCredential(value)
         }
+    }
+
+    public static func fetchStudio(
+        configuration: VoiceStudioConfiguration,
+        session: URLSession = .shared,
+        credential: @Sendable () async throws -> String
+    ) async throws -> Self {
+        try Task.checkCancellation()
+        guard configuration.enabled else { throw VoiceStudioError.disabled }
+        let apiKey = try await credential()
+        try Task.checkCancellation()
+        let inventory = try await VoiceStudioAPI.listVoices(
+            configuration: configuration,
+            apiKey: apiKey,
+            session: session
+        )
+        return .studio(inventory)
     }
 
     public static func fetch(

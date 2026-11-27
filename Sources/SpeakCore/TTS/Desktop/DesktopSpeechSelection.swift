@@ -6,6 +6,7 @@ public struct DesktopSpeechSelection: Equatable, Sendable {
     public let accountInventory: VoiceAccountInventory?
     public let sonioxRegion: SonioxTTSRegion
     public let language: String?
+    public let studioConfiguration: VoiceStudioConfiguration?
     public var xaiInventory: XAIAccountVoiceInventory? { accountInventory?.xai }
     public var sampleRate: Int { voice.sampleRate(quality: options.quality) }
 
@@ -22,9 +23,38 @@ public struct DesktopSpeechSelection: Equatable, Sendable {
         voice: DesktopSpeechVoice, options: VoiceSynthesisOptions, accountInventory: VoiceAccountInventory?,
         sonioxRegion: SonioxTTSRegion = .unitedStates, language: String? = nil
     ) throws {
+        try self.init(
+            voice: voice,
+            options: options,
+            accountInventory: accountInventory,
+            sonioxRegion: sonioxRegion,
+            language: language,
+            studioConfiguration: nil
+        )
+    }
+
+    public init(
+        voice: DesktopSpeechVoice, options: VoiceSynthesisOptions, accountInventory: VoiceAccountInventory?,
+        sonioxRegion: SonioxTTSRegion = .unitedStates, language: String? = nil,
+        studioConfiguration: VoiceStudioConfiguration?
+    ) throws {
         let voice = try voice.applyingQuality(options.quality)
-        guard DesktopSpeechVoice.voices.contains(voice) || accountInventory?.contains(voice) == true else {
-            throw VoiceSynthesisConfigurationError.unsupportedVoice
+        if case .studio(let studioVoice) = voice {
+            if let studioConfiguration {
+                guard studioConfiguration.enabled else { throw VoiceStudioError.disabled }
+                guard studioConfiguration.kind == studioVoice.studioKind else {
+                    throw VoiceSynthesisConfigurationError.unsupportedVoice
+                }
+                if let gptError = studioConfiguration.gptSoVITSValidationError() {
+                    throw gptError
+                }
+            } else if accountInventory?.contains(voice) != true {
+                throw VoiceSynthesisConfigurationError.unsupportedVoice
+            }
+        } else {
+            guard DesktopSpeechVoice.voices.contains(voice) || accountInventory?.contains(voice) == true else {
+                throw VoiceSynthesisConfigurationError.unsupportedVoice
+            }
         }
         try options.validate(for: voice.capabilities)
         if case .soniox(let selected) = voice {
@@ -39,5 +69,6 @@ public struct DesktopSpeechSelection: Equatable, Sendable {
         self.accountInventory = accountInventory
         self.sonioxRegion = sonioxRegion
         self.language = language
+        self.studioConfiguration = studioConfiguration
     }
 }

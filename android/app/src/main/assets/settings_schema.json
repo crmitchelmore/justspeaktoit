@@ -454,6 +454,13 @@
     "upgradeOfflineTranscriptsWhenOnline",
     "visualDensity",
     "voiceCommandsEnabled",
+    "voiceStudioBaseURL",
+    "voiceStudioEnabled",
+    "voiceStudioGPTSoVITSPromptLanguage",
+    "voiceStudioGPTSoVITSReferenceAudioPath",
+    "voiceStudioGPTSoVITSReferencePromptText",
+    "voiceStudioGPTSoVITSTextLanguage",
+    "voiceStudioKind",
     "warmMicrophoneOnKeyPress"
   ],
   "platform" : "android",

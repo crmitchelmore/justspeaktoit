@@ -9,6 +9,7 @@ package struct DesktopVoiceDiscoveryState: Sendable {
         set { inventories[.xai] = newValue.map(VoiceAccountInventory.xai) }
     }
     package var context: VoiceAccountCredentialContext?
+    package var studioConfiguration: VoiceStudioConfiguration?
     package var sonioxRegion: SonioxTTSRegion?
     package var sonioxOutputTicket: DesktopPlaybackRequests.Ticket?
     package var modern = false
@@ -48,6 +49,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         case .discoveryOpen(let token): openVoiceDiscovery(token)
         case .discoveryOpenModern(let session): openModernVoiceDiscovery(session)
         case .discoveryRefresh(let token): refreshVoiceDiscovery(token)
+        case .discoveryTestConnection(let epoch): testSelectedStudioConnection(epoch)
         case .discoveryClose(let token): closeVoiceDiscovery(token)
         case .discoveryChoose(let identifier, let token): chooseDiscoveredVoice(identifier, requestID: token)
         case .discoveryProvider(let context): selectVoiceAccountProvider(context)
@@ -76,7 +78,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         let profileEntry = saved.voiceID.flatMap {
             VoiceProfilePickerCatalog.resolve(voiceID: $0, in: listVoiceProfiles())
         }
-        if let profileEntry, VoiceProfilePickerCatalog.isProfileVoiceIdentifier(profileEntry.id) {
+        if let profileEntry,
+           VoiceProfilePickerCatalog.isProfileVoiceIdentifier(profileEntry.id),
+           VoiceStudioVoice.kind(forCanonicalID: profileEntry.id) == nil {
             throw DesktopHostError(
                 message: VoiceProfilePickerCatalog.unavailableMessage(
                     for: profileEntry.profileName,
@@ -89,7 +93,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             inventory = voiceDiscovery.inventories[.mistral]
         } else { inventory = selectedVoiceAccountInventory }
         do {
-            let selection = try saved.synthesisSelection(accountInventory: inventory)
+            let selection = try saved.synthesisSelection(
+                accountInventory: inventory,
+                studioConfiguration: voiceStudioConfiguration
+            )
             if !DesktopSpeechVoice.voices.contains(selection.voice), voiceAccountWorkers > 0 {
                 throw VoiceOutputCredentialError.busy
             }
@@ -136,6 +143,7 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         voiceDiscovery.listing = nil
         voiceDiscovery.listingContext = nil
         voiceDiscovery.context = context
+        voiceDiscovery.studioConfiguration = nil
         voiceDiscovery.offeredIDs = []
     }
 

@@ -54,9 +54,10 @@ package enum DesktopHostCloudSharing {
         CloudSharingConsent.request(forModel: model, purpose: .postProcessing)
     }
 
-    /// Text to speak goes to the voice's provider.
-    package static func voice(_ speechVoice: DesktopSpeechVoice) -> CloudSharingRequest {
-        voice(credentialIdentifier: speechVoice.apiKeyIdentifier)
+    /// Text to speak goes to the voice's provider, except user-configured local voice studios.
+    package static func voice(_ speechVoice: DesktopSpeechVoice) -> CloudSharingRequest? {
+        if case .studio = speechVoice { return nil }
+        return voice(credentialIdentifier: speechVoice.apiKeyIdentifier)
     }
 
     package static func voice(credentialIdentifier: String) -> CloudSharingRequest {

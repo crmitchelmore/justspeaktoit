@@ -123,7 +123,7 @@ public enum ModelCredentialResolver {
 
     private static func voiceOutputRequirement(for modelIdentifier: String) -> ModelCredentialRequirement {
         let lowered = modelIdentifier.lowercased()
-        if isLocal(lowered) || lowered.hasPrefix("system/") || lowered == "system" {
+        if isLocal(lowered) || lowered.hasPrefix("system/") || lowered == "system" || lowered.hasPrefix("studio/") {
             return .notRequired
         }
         if lowered.hasPrefix("aura") || lowered.hasPrefix("deepgram/") {

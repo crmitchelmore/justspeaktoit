@@ -69,12 +69,42 @@ public struct VoiceOutputCredentialSlot: Equatable, Sendable {
     public let identifier: String
     public let providerName: String
 
+    private init(identifier: String, providerName: String) {
+        self.purpose = .voiceOutput
+        self.identifier = identifier
+        self.providerName = providerName
+    }
+
     public init(provider: VoiceAccountProvider) throws {
         guard case .apiKey(let identifier, let name) = ModelCredentialResolver.requirement(
             for: provider.id, purpose: .voiceOutput) else { throw VoiceOutputCredentialError.unavailable }
         self.purpose = .voiceOutput
         self.identifier = identifier
         self.providerName = name
+    }
+
+    // Check the native message shape here. Only the host's issued slot can authorize a save.
+    init(provider: VoiceAccountProvider, presentedIdentifier: String) throws {
+        if let kind = provider.studioKind {
+            let prefix = kind.apiKeyCredentialIdentifier + "."
+            let suffix = presentedIdentifier.dropFirst(prefix.count)
+            guard presentedIdentifier.hasPrefix(prefix), suffix.utf8.count == 64,
+                  suffix.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) })
+            else { throw VoiceOutputCredentialError.destinationChanged }
+            self.init(identifier: presentedIdentifier, providerName: kind.displayName)
+        } else {
+            try self.init(provider: provider)
+            guard identifier == presentedIdentifier else { throw VoiceOutputCredentialError.destinationChanged }
+        }
+    }
+
+    public init(provider: VoiceAccountProvider, studioConfiguration: VoiceStudioConfiguration) throws {
+        if let kind = provider.studioKind {
+            guard kind == studioConfiguration.kind else { throw VoiceOutputCredentialError.destinationChanged }
+            try self.init(identifier: studioConfiguration.apiKeyCredentialIdentifier, providerName: kind.displayName)
+        } else {
+            try self.init(provider: provider)
+        }
     }
 
     public init(voice: DesktopSpeechVoice, inventory: XAIAccountVoiceInventory? = nil) throws {
@@ -97,6 +127,18 @@ public struct VoiceOutputCredentialSlot: Equatable, Sendable {
         self.purpose = .voiceOutput
         self.identifier = identifier
         self.providerName = providerName
+    }
+
+    public init(
+        voice: DesktopSpeechVoice, accountInventory: VoiceAccountInventory?,
+        studioConfiguration: VoiceStudioConfiguration
+    ) throws {
+        if case .studio(let voice) = voice {
+            try self.init(provider: VoiceAccountProvider(studioKind: voice.studioKind),
+                          studioConfiguration: studioConfiguration)
+        } else {
+            try self.init(voice: voice, accountInventory: accountInventory)
+        }
     }
 
     public func validate(purpose: String, identifier: String) throws {

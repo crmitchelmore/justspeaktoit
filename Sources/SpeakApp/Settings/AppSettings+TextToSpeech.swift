@@ -64,6 +64,66 @@ final class TextToSpeechPreferences: ObservableObject {
     }
   }
 
+  @Published var voiceStudioEnabled: Bool {
+    didSet { persistence.storeRaw(voiceStudioEnabled, key: VoiceStudioPreference.enabledKey) }
+  }
+
+  @Published var voiceStudioKind: VoiceStudioKind {
+    didSet { persistence.storeRaw(voiceStudioKind.rawValue, key: VoiceStudioPreference.kindKey) }
+  }
+
+  @Published var voiceStudioBaseURL: String {
+    didSet { persistence.storeRaw(voiceStudioBaseURL, key: VoiceStudioPreference.baseURLKey) }
+  }
+
+  @Published var voiceStudioGPTSoVITSReferenceAudioPath: String {
+    didSet {
+      persistence.storeRaw(
+        voiceStudioGPTSoVITSReferenceAudioPath,
+        key: VoiceStudioPreference.gptSoVITSReferenceAudioPathKey
+      )
+    }
+  }
+
+  @Published var voiceStudioGPTSoVITSReferencePromptText: String {
+    didSet {
+      persistence.storeRaw(
+        voiceStudioGPTSoVITSReferencePromptText,
+        key: VoiceStudioPreference.gptSoVITSReferencePromptTextKey
+      )
+    }
+  }
+
+  @Published var voiceStudioGPTSoVITSPromptLanguage: String {
+    didSet {
+      persistence.storeRaw(
+        voiceStudioGPTSoVITSPromptLanguage,
+        key: VoiceStudioPreference.gptSoVITSReferencePromptLanguageKey
+      )
+    }
+  }
+
+  @Published var voiceStudioGPTSoVITSTextLanguage: String {
+    didSet {
+      persistence.storeRaw(
+        voiceStudioGPTSoVITSTextLanguage,
+        key: VoiceStudioPreference.gptSoVITSTextLanguageKey
+      )
+    }
+  }
+
+  var voiceStudioConfiguration: VoiceStudioConfiguration {
+    VoiceStudioConfiguration(
+      enabled: voiceStudioEnabled,
+      kind: voiceStudioKind,
+      baseURLString: voiceStudioBaseURL,
+      gptSoVITSReferenceAudioPath: voiceStudioGPTSoVITSReferenceAudioPath,
+      gptSoVITSReferencePromptText: voiceStudioGPTSoVITSReferencePromptText,
+      gptSoVITSReferencePromptLanguage: voiceStudioGPTSoVITSPromptLanguage,
+      gptSoVITSTextLanguage: voiceStudioGPTSoVITSTextLanguage
+    )
+  }
+
   init(persistence: AppSettingsPersistence) {
     self.persistence = persistence
     let defaults = persistence.defaults
@@ -94,6 +154,30 @@ final class TextToSpeechPreferences: ObservableObject {
     } else {
       ttsPronunciationDictionary = [:]
     }
+    voiceStudioEnabled = persistence.rawFlag(VoiceStudioPreference.enabledKey, default: false)
+    voiceStudioKind = VoiceStudioKind(
+      rawValue: persistence.rawString(VoiceStudioPreference.kindKey, default: VoiceStudioKind.voicebox.rawValue)
+    ) ?? .voicebox
+    voiceStudioBaseURL = persistence.rawString(VoiceStudioPreference.baseURLKey)
+    voiceStudioGPTSoVITSReferenceAudioPath = persistence.rawString(
+      VoiceStudioPreference.gptSoVITSReferenceAudioPathKey
+    )
+    voiceStudioGPTSoVITSReferencePromptText = persistence.rawString(
+      VoiceStudioPreference.gptSoVITSReferencePromptTextKey
+    )
+    voiceStudioGPTSoVITSPromptLanguage = Self.storedLanguage(
+      from: persistence,
+      key: VoiceStudioPreference.gptSoVITSReferencePromptLanguageKey
+    )
+    voiceStudioGPTSoVITSTextLanguage = Self.storedLanguage(
+      from: persistence,
+      key: VoiceStudioPreference.gptSoVITSTextLanguageKey
+    )
+  }
+
+  private static func storedLanguage(from persistence: AppSettingsPersistence, key: String) -> String {
+    let raw = persistence.rawString(key, default: VoiceStudioPreference.defaultGPTSoVITSLanguage)
+    return raw.isEmpty ? VoiceStudioPreference.defaultGPTSoVITSLanguage : raw
   }
 
   func reload(from restored: TextToSpeechPreferences) {
@@ -110,6 +194,13 @@ final class TextToSpeechPreferences: ObservableObject {
     ttsUseSSML = restored.ttsUseSSML
     ttsFavoriteVoices = restored.ttsFavoriteVoices
     ttsPronunciationDictionary = restored.ttsPronunciationDictionary
+    voiceStudioEnabled = restored.voiceStudioEnabled
+    voiceStudioKind = restored.voiceStudioKind
+    voiceStudioBaseURL = restored.voiceStudioBaseURL
+    voiceStudioGPTSoVITSReferenceAudioPath = restored.voiceStudioGPTSoVITSReferenceAudioPath
+    voiceStudioGPTSoVITSReferencePromptText = restored.voiceStudioGPTSoVITSReferencePromptText
+    voiceStudioGPTSoVITSPromptLanguage = restored.voiceStudioGPTSoVITSPromptLanguage
+    voiceStudioGPTSoVITSTextLanguage = restored.voiceStudioGPTSoVITSTextLanguage
   }
 }
 
@@ -177,5 +268,44 @@ extension AppSettings {
   var ttsPronunciationDictionary: [String: String] {
     get { textToSpeech.ttsPronunciationDictionary }
     set { textToSpeech.ttsPronunciationDictionary = newValue }
+  }
+
+  var voiceStudioEnabled: Bool {
+    get { textToSpeech.voiceStudioEnabled }
+    set { textToSpeech.voiceStudioEnabled = newValue }
+  }
+
+  var voiceStudioKind: VoiceStudioKind {
+    get { textToSpeech.voiceStudioKind }
+    set { textToSpeech.voiceStudioKind = newValue }
+  }
+
+  var voiceStudioBaseURL: String {
+    get { textToSpeech.voiceStudioBaseURL }
+    set { textToSpeech.voiceStudioBaseURL = newValue }
+  }
+
+  var voiceStudioGPTSoVITSReferenceAudioPath: String {
+    get { textToSpeech.voiceStudioGPTSoVITSReferenceAudioPath }
+    set { textToSpeech.voiceStudioGPTSoVITSReferenceAudioPath = newValue }
+  }
+
+  var voiceStudioGPTSoVITSReferencePromptText: String {
+    get { textToSpeech.voiceStudioGPTSoVITSReferencePromptText }
+    set { textToSpeech.voiceStudioGPTSoVITSReferencePromptText = newValue }
+  }
+
+  var voiceStudioGPTSoVITSPromptLanguage: String {
+    get { textToSpeech.voiceStudioGPTSoVITSPromptLanguage }
+    set { textToSpeech.voiceStudioGPTSoVITSPromptLanguage = newValue }
+  }
+
+  var voiceStudioGPTSoVITSTextLanguage: String {
+    get { textToSpeech.voiceStudioGPTSoVITSTextLanguage }
+    set { textToSpeech.voiceStudioGPTSoVITSTextLanguage = newValue }
+  }
+
+  var voiceStudioConfiguration: VoiceStudioConfiguration {
+    textToSpeech.voiceStudioConfiguration
   }
 }

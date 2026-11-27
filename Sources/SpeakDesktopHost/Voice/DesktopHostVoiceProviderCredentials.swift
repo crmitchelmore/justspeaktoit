@@ -5,8 +5,21 @@ import SpeakDesktop
 extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     package var selectedVoiceAccountInventory: VoiceAccountInventory? {
         guard let identifier = voiceOutputSettings().voiceID else { return nil }
+        if let studioKind = VoiceStudioVoice.kind(forCanonicalID: identifier) {
+            return configuredStudioInventory(for: studioKind)
+        }
         return VoiceAccountProvider.all.first(where: { identifier.hasPrefix($0.id + "/") })
             .flatMap { voiceDiscovery.inventories[$0] }
+    }
+
+    func configuredStudioInventory(for kind: VoiceStudioKind) -> VoiceAccountInventory? {
+        let config = voiceStudioConfiguration
+        guard config.enabled, config.kind == kind,
+              let inventory = voiceDiscovery.inventories[VoiceAccountProvider(studioKind: kind)],
+              let endpoint = try? VoiceStudioEndpointPolicy.validate(
+                baseURLString: config.resolvedBaseURLString, apiKey: nil, requireAPIKeyForRemote: false),
+              inventory.studio?.baseURL == endpoint.sanitizedURLString else { return nil }
+        return inventory
     }
 
     package func voiceCredentialDestinationIsCurrent(_ destination: VoiceOutputCredentialDestination) -> Bool {
@@ -45,7 +58,9 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
         -> Result<DesktopVoiceCredentialPresentation, VoiceOutputCredentialError> {
         guard voiceAccountContextIsCurrent(context) else { return .failure(.destinationChanged) }
         let slot: VoiceOutputCredentialSlot
-        do { slot = try .init(provider: context.provider) } catch { return .failure(.unavailable) }
+        do {
+            slot = try .init(provider: context.provider, studioConfiguration: voiceStudioConfiguration)
+        } catch { return .failure(.unavailable) }
         let effects = effects
         let lookup = Task.detached { () -> Result<Bool, VoiceOutputCredentialError> in
             guard !Task.isCancelled else { return .failure(.cancelled) }
@@ -79,7 +94,8 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
             completion(voiceCredentialFailure(.busy)); return
         }
         do {
-            let canonical = try VoiceOutputCredentialSlot(provider: request.context.provider)
+            let canonical = try VoiceOutputCredentialSlot(
+                provider: request.context.provider, studioConfiguration: voiceStudioConfiguration)
             guard issued == canonical else { throw VoiceOutputCredentialError.destinationChanged }
             try canonical.validate(purpose: request.purpose.rawValue, identifier: request.identifier)
             let cleaned = request.operation == .remove ? "" : try canonical.validatedKey(key)
@@ -92,8 +108,10 @@ extension DesktopHostController where Platform: DesktopHostReadAloudPlatform {
     }
 
     package func invalidateVoiceInventory(for slot: VoiceOutputCredentialSlot) {
-        for provider in VoiceAccountProvider.all
-            where (try? VoiceOutputCredentialSlot(provider: provider))?.identifier == slot.identifier {
+        for provider in VoiceAccountProvider.desktopProviders {
+            let candidate = try? VoiceOutputCredentialSlot(
+                provider: provider, studioConfiguration: voiceStudioConfiguration)
+            guard candidate == slot else { continue }
             voiceDiscovery.inventories[provider] = nil
             if voiceDiscovery.context?.provider == provider {
                 voiceDiscovery.listing = nil

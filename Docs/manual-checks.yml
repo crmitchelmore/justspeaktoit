@@ -788,6 +788,21 @@ sessions:
           - "Turn on VoiceOver and verify recording start/stop announcements, level meter updates and Escape dismissal on sheets, then delete the test profile."
         expected: "Saving is blocked without consent and failing clips show clear rejection reasons. Trimmed History clips play accurately, transcripts are editable, exported archives exclude voice profiles, VoiceOver announces recording states and deletion removes the profile cleanly."
         final_gate: false
+      - id: "mac-local-voice-studio"
+        issues:
+          - 1823
+        title: "Local voice studio: Voicebox, VoiceStudio and GPT-SoVITS Read Aloud"
+        minutes: 5
+        core: false
+        build: "Just Speak to It for Mac, the first Alpha build with #1823 local voice studio"
+        steps:
+          - "Open Settings, Voice Output, Local Voice Studio, turn it on, choose Voicebox, keep the loopback default URL, and choose Test Connection with Voicebox stopped, then start Voicebox and test again."
+          - "Choose Refresh Voices, pick a Voicebox voice in Default Voice, read text aloud and generate an export clip, then stop Voicebox and read aloud again."
+          - "Enter a non-loopback http:// URL and a remote https:// URL without a saved key, then save a Keychain API key."
+          - "Switch to GPT-SoVITS, enter a reference audio clip path and prompt text, choose Test Connection, then read aloud."
+          - "With VoiceOver on, move through the Local Voice Studio card and search Settings for \"voicebox\"."
+        expected: "Test Connection shows an explicit not-running error when stopped and reports studio version and profile count when running. Discovered voices appear in the picker; speaking works without a cloud-sharing prompt, and stopping the server shows a clear error without falling back to system or cloud voices. Non-loopback http:// and unauthenticated remote https:// are refused; saved keys live in Keychain only. VoiceOver reads every field and button; Settings search opens Local Voice Studio."
+        final_gate: false
   - id: "iphone"
     device: "iPhone"
     title: "iPhone"
@@ -2636,6 +2651,19 @@ sessions:
           - "Search Settings for withdraw consent and choose the result."
         expected: "Before anything is recorded the question names each provider, what it gets and its privacy policy, and Narrator reads each by name. Not now and Escape record and send nothing. After Allow, dictation works and the question never shows again for that provider. Withdraw removes it from the list, announces the change and the next start asks again. The search result opens About."
         final_gate: true
+      - id: "windows-local-voice-studio"
+        issues:
+          - 1823
+        title: "Windows: Local voice studio (Voicebox, VoiceStudio, GPT-SoVITS)"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Windows, the first Alpha build with #1823 local voice studio"
+        steps:
+          - "Open Settings, search for \"voicebox\", enable Local Voice Studio on a loopback URL, and store an optional API key in Windows Credential Manager if testing remote HTTPS."
+          - "Run Test Connection with the local studio stopped, then with Voicebox or VoiceStudio running, and speak a Read Aloud clip and export WAV."
+          - "Attempt saving a non-loopback http:// URL and confirm refusal; inspect settings.json to verify no studio API key is stored in plaintext."
+        expected: "Connection probes report version and voice counts; Read Aloud and WAV export synthesize via the local studio with no cloud consent dialog; stopped studios fail explicitly with zero fallback; cleartext remote http:// is refused and Credential Manager holds any API key."
+        final_gate: false
   - id: "linux"
     device: "Linux"
     title: "Linux"
@@ -2795,6 +2823,19 @@ sessions:
           - "Search Settings for withdraw consent and choose the result."
         expected: "Before anything is recorded the question names each provider, what it gets and its privacy policy, and Orca reads each by name. Not now and Escape record and send nothing. After Allow, dictation works and the question never shows again for that provider. Withdraw removes it from the list, announces the change and the next start asks again. The search result opens About."
         final_gate: true
+      - id: "linux-local-voice-studio"
+        issues:
+          - 1823
+        title: "Linux: Local voice studio (Voicebox, VoiceStudio, GPT-SoVITS)"
+        minutes: 4
+        core: false
+        build: "Just Speak to It for Linux, the first Alpha build with #1823 local voice studio"
+        steps:
+          - "Open Settings, search for \"voicestudio\", enable Local Voice Studio, and probe a loopback Voicebox, VoiceStudio, or GPT-SoVITS server."
+          - "Run Read Aloud and speak list-voices / speak say with the studio enabled, then stop the server and retry."
+          - "Try configuring a non-loopback http:// URL and inspect settings.json for any plaintext API key."
+        expected: "Settings search finds Local Voice Studio; automation and Read Aloud use studio voices with no cloud consent prompt; stopped servers fail explicitly without fallback; cleartext non-loopback http:// is blocked and secrets never appear in settings.json."
+        final_gate: false
   - id: "decisions"
     device: "Decision"
     title: "Decisions"

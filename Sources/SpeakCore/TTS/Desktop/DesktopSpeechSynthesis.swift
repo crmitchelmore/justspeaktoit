@@ -27,47 +27,109 @@ public struct DesktopSpeechSynthesis: Sendable {
                              accountInventory: xaiInventory.map(VoiceAccountInventory.xai), credential: credential)
     }
 
-    // exhaustive provider dispatch across the existing voice catalogue; no behavior change.
-    // swiftlint:disable:next cyclomatic_complexity
     public func synthesize(
         _ source: VoiceOutputSourceSnapshot, voice: DesktopSpeechVoice,
         options: VoiceSynthesisOptions, accountInventory: VoiceAccountInventory?,
         sonioxRegion: SonioxTTSRegion = .unitedStates, language: String? = nil,
         credential: @Sendable () async throws -> String
     ) async throws -> Data {
-        try Task.checkCancellation()
-        let voice = try voice.applyingQuality(options.quality)
-        guard DesktopSpeechVoice.voices.contains(voice) || accountInventory?.contains(voice) == true else {
-            throw VoiceSynthesisConfigurationError.unsupportedVoice
+        try await execute(
+            SynthesisInvocation(
+                source: source,
+                voice: voice,
+                options: options,
+                accountInventory: accountInventory,
+                sonioxRegion: sonioxRegion,
+                language: language,
+                studioConfiguration: nil
+            ),
+            credential: credential
+        )
+    }
+
+    public func synthesize(
+        _ source: VoiceOutputSourceSnapshot,
+        selection: DesktopSpeechSelection,
+        credential: @Sendable () async throws -> String
+    ) async throws -> Data {
+        try await execute(
+            SynthesisInvocation(
+                source: source,
+                voice: selection.voice,
+                options: selection.options,
+                accountInventory: selection.accountInventory,
+                sonioxRegion: selection.sonioxRegion,
+                language: selection.language,
+                studioConfiguration: selection.studioConfiguration
+            ),
+            credential: credential
+        )
+    }
+
+    private struct SynthesisInvocation {
+        let source: VoiceOutputSourceSnapshot
+        let voice: DesktopSpeechVoice
+        let options: VoiceSynthesisOptions
+        let accountInventory: VoiceAccountInventory?
+        let sonioxRegion: SonioxTTSRegion
+        let language: String?
+        let studioConfiguration: VoiceStudioConfiguration?
+    }
+
+    private func validatedVoice(for invocation: SynthesisInvocation) throws -> DesktopSpeechVoice {
+        let voice = try invocation.voice.applyingQuality(invocation.options.quality)
+        if case .studio(let studioVoice) = voice {
+            guard let config = invocation.studioConfiguration, config.enabled else {
+                throw VoiceStudioError.disabled
+            }
+            guard config.kind == studioVoice.studioKind else {
+                throw VoiceSynthesisConfigurationError.unsupportedVoice
+            }
+        } else {
+            let isKnown = DesktopSpeechVoice.voices.contains(voice)
+                || invocation.accountInventory?.contains(voice) == true
+            guard isKnown else { throw VoiceSynthesisConfigurationError.unsupportedVoice }
         }
-        try options.validate(for: voice.capabilities)
+        try invocation.options.validate(for: voice.capabilities)
+        return voice
+    }
+
+    // exhaustive provider dispatch across the existing voice catalogue; no behavior change.
+    // swiftlint:disable:next cyclomatic_complexity
+    private func execute(
+        _ invocation: SynthesisInvocation,
+        credential: @Sendable () async throws -> String
+    ) async throws -> Data {
+        try Task.checkCancellation()
+        let voice = try validatedVoice(for: invocation)
+        let source = invocation.source
+        let options = invocation.options
         switch voice {
-        case .deepgram(let voice):
+        case .deepgram(let deepgramVoice):
+            let rate = DesktopSpeechVoice.deepgram(deepgramVoice).sampleRate(quality: options.quality)
             return try await DeepgramSpeechExport(session: session).synthesize(
-                source, voice: voice,
-                sampleRate: DesktopSpeechVoice.deepgram(voice).sampleRate(quality: options.quality),
-                credential: credential
-            )
+                source, voice: deepgramVoice, sampleRate: rate, credential: credential)
         case .azureNeural, .azureMAI:
             return try await synthesizeAzure(source.text, voice: voice, options: options, credential: credential)
         case .xai:
             return try await DesktopXAISpeechSynthesis(session: session).synthesize(
-                source, voice: voice, options: options, inventory: accountInventory?.xai, credential: credential)
+                source, voice: voice, options: options,
+                inventory: invocation.accountInventory?.xai, credential: credential)
         case .cartesia:
             return try await DesktopCartesiaSpeechSynthesis(session: session).synthesize(
                 source, voice: voice, options: options, credential: credential)
         case .mistral:
             return try await DesktopMistralSpeechSynthesis(session: session).synthesize(
-                source, voice: voice, inventory: accountInventory, credential: credential)
+                source, voice: voice, inventory: invocation.accountInventory, credential: credential)
         case .soniox:
             let selection = try DesktopSpeechSelection(
-                voice: voice, options: options, accountInventory: accountInventory,
-                sonioxRegion: sonioxRegion, language: language)
+                voice: voice, options: options, accountInventory: invocation.accountInventory,
+                sonioxRegion: invocation.sonioxRegion, language: invocation.language)
             return try await DesktopSonioxSpeechSynthesis(session: session).synthesize(
                 source, selection: selection, credential: credential)
         case .gemini:
             return try await DesktopGeminiSpeechSynthesis(session: session).synthesize(
-                source, voice: voice, language: language, credential: credential)
+                source, voice: voice, language: invocation.language, credential: credential)
         case .groq:
             return try await DesktopGroqSpeechSynthesis(session: session).synthesize(
                 source, voice: voice, credential: credential)
@@ -83,6 +145,10 @@ public struct DesktopSpeechSynthesis: Sendable {
         case .elevenlabs:
             return try await DesktopElevenLabsSpeechSynthesis(session: session).synthesize(
                 source, voice: voice, credential: credential)
+        case .studio(let studioVoice):
+            return try await DesktopVoiceStudioSpeechSynthesis(session: session).synthesize(
+                source, voice: studioVoice, configuration: invocation.studioConfiguration,
+                language: invocation.language, credential: credential)
         }
     }
 

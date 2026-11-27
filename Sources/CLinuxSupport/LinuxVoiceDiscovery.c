@@ -5,7 +5,7 @@ typedef struct {
     GtkWindow *window;
     GtkDropDown *voices;
     GtkLabel *status;
-    GtkButton *refresh, *choose;
+    GtkButton *refresh, *test_connection, *choose;
     GtkDropDown *providers;
     GtkButton *key;
     gchar *token;
@@ -43,6 +43,9 @@ static void sensitivity(Discovery *dialog) {
         dialog->generation == jsti_voice_provider_generation()));
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->providers), dialog->modern && ready);
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->key), dialog->modern && ready);
+    gboolean studio = dialog->modern && dialog->provider && g_str_has_prefix(dialog->provider, "studio/");
+    gtk_widget_set_visible(GTK_WIDGET(dialog->test_connection), studio);
+    gtk_widget_set_sensitive(GTK_WIDGET(dialog->test_connection), studio && ready);
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->refresh), ready);
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->voices), ready);
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->choose), ready && dialog->identifiers != NULL &&
@@ -58,6 +61,12 @@ static void refresh(GtkButton *button, gpointer data) {
     dialog->loading = TRUE; sensitivity(dialog);
     gtk_label_set_text(dialog->status, "Listing account voices. Close cancels.");
     emit(dialog, "account-refresh", "", FALSE);
+}
+static void test_connection(GtkButton *button, gpointer data) {
+    Discovery *dialog = data;
+    if (!gtk_widget_get_sensitive(GTK_WIDGET(button))) return;
+    dialog->loading = TRUE; sensitivity(dialog);
+    emit(dialog, "account-test-connection", "", FALSE);
 }
 static void choose(GtkButton *button, gpointer data) {
     (void)button;
@@ -206,7 +215,9 @@ int32_t jsti_window_set_voice_account_providers(const char *session, const char 
         const gchar *id = value->ids[index];
         valid = id[0] != '\0' && strlen(id) <= 32 && value->labels[index][0] != '\0' &&
             strlen(value->labels[index]) <= 512 && strchr(value->labels[index], '\r') == NULL;
-        for (gsize offset = 0; valid && id[offset] != '\0'; ++offset)
+        gsize slug = g_str_has_prefix(id, "studio/") ? strlen("studio/") : 0;
+        valid = valid && id[slug] != '\0';
+        for (gsize offset = slug; valid && id[offset] != '\0'; ++offset)
             valid = g_ascii_islower(id[offset]) || g_ascii_isdigit(id[offset]) || id[offset] == '-';
         for (guint previous = 0; valid && previous < index; ++previous)
             valid = g_strcmp0(id, value->ids[previous]) != 0;
@@ -251,10 +262,13 @@ static Discovery *make_discovery(GtkWindow *owner, JSTIVoiceSourceCallback callb
     GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_box_append(GTK_BOX(box), buttons);
     dialog->refresh = GTK_BUTTON(gtk_button_new_with_label("Refresh"));
+    dialog->test_connection = GTK_BUTTON(gtk_button_new_with_label("Test connection"));
     dialog->choose = GTK_BUTTON(gtk_button_new_with_label("Choose voice"));
     GtkWidget *close = gtk_button_new_with_label("Close");
-    for (guint index = 0; index < 3; ++index) {
-        GtkWidget *button = index == 0 ? GTK_WIDGET(dialog->refresh) : index == 1 ? GTK_WIDGET(dialog->choose) : close;
+    GtkWidget *actions[] = { GTK_WIDGET(dialog->refresh), GTK_WIDGET(dialog->test_connection),
+        GTK_WIDGET(dialog->choose), close };
+    for (guint index = 0; index < G_N_ELEMENTS(actions); ++index) {
+        GtkWidget *button = actions[index];
         gtk_widget_set_size_request(button, 120, 44); gtk_box_append(GTK_BOX(buttons), button);
     }
     gtk_widget_set_sensitive(GTK_WIDGET(dialog->choose), FALSE);
@@ -262,6 +276,7 @@ static Discovery *make_discovery(GtkWindow *owner, JSTIVoiceSourceCallback callb
     g_signal_connect(dialog->voices, "notify::selected", G_CALLBACK(selection_changed), dialog);
     g_signal_connect(dialog->providers, "notify::selected", G_CALLBACK(provider_changed), dialog);
     g_signal_connect(dialog->key, "clicked", G_CALLBACK(provider_key), dialog);
+    g_signal_connect(dialog->test_connection, "clicked", G_CALLBACK(test_connection), dialog);
     g_signal_connect(dialog->refresh, "clicked", G_CALLBACK(refresh), dialog);
     g_signal_connect(dialog->choose, "clicked", G_CALLBACK(choose), dialog);
     g_signal_connect(close, "clicked", G_CALLBACK(close_discovery), dialog);

@@ -220,7 +220,24 @@ extension SettingsSchema {
               defaultValue: .bool(false)),
         Field(key: "ttsFavoriteVoices", kind: .stringArray, summary: "Favourite voice IDs.", defaultValue: .array([])),
         Field(key: "ttsPronunciationDictionary", kind: .stringMap, summary: "Word to phonetic spelling.",
-              defaultValue: .object([:]))
+              defaultValue: .object([:])),
+        Field(key: VoiceStudioPreference.enabledKey, kind: .boolean,
+              summary: "Enable local voice studio for Read Aloud.", defaultValue: .bool(false)),
+        Field(key: VoiceStudioPreference.kindKey, kind: .enumeration, summary: "Local voice studio backend.",
+              defaultValue: .string(VoiceStudioKind.voicebox.rawValue),
+              allowedValues: names(VoiceStudioKind.self)),
+        Field(key: VoiceStudioPreference.baseURLKey, kind: .string,
+              summary: "Local voice studio base URL (empty uses the studio default).", defaultValue: .string("")),
+        Field(key: VoiceStudioPreference.gptSoVITSReferenceAudioPathKey, kind: .string,
+              summary: "GPT-SoVITS reference audio clip file path on disk.", defaultValue: .string("")),
+        Field(key: VoiceStudioPreference.gptSoVITSReferencePromptTextKey, kind: .string,
+              summary: "Transcript spoken in the GPT-SoVITS reference clip.", defaultValue: .string("")),
+        Field(key: VoiceStudioPreference.gptSoVITSReferencePromptLanguageKey, kind: .string,
+              summary: "Language code of the GPT-SoVITS reference clip.",
+              defaultValue: .string(VoiceStudioPreference.defaultGPTSoVITSLanguage)),
+        Field(key: VoiceStudioPreference.gptSoVITSTextLanguageKey, kind: .string,
+              summary: "Target output language code for GPT-SoVITS.",
+              defaultValue: .string(VoiceStudioPreference.defaultGPTSoVITSLanguage))
     ]
 
     private static let integrationFields: [Field] = [

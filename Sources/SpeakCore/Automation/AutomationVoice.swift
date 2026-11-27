@@ -151,6 +151,7 @@ extension DesktopSpeechVoice {
         case .speechmatics: ("speechmatics", "Speechmatics")
         case .openai, .openaiRealtime: ("openai", "OpenAI")
         case .elevenlabs: ("elevenlabs", "ElevenLabs")
+        case .studio(let voice): (voice.studioKind.slug, voice.studioKind.displayName)
         }
     }
 }

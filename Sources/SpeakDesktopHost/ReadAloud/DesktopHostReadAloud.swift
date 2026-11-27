@@ -53,6 +53,13 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
     }
 
     package func synthesisSelection(accountInventory: VoiceAccountInventory?) throws -> DesktopSpeechSelection {
+        try synthesisSelection(accountInventory: accountInventory, studioConfiguration: nil)
+    }
+
+    package func synthesisSelection(
+        accountInventory: VoiceAccountInventory?,
+        studioConfiguration: VoiceStudioConfiguration?
+    ) throws -> DesktopSpeechSelection {
         let voice = try resolvedVoice(accountInventory: accountInventory)
         let region: SonioxTTSRegion
         if case .soniox = voice {
@@ -62,7 +69,7 @@ package struct DesktopVoiceOutputSettings: Codable, Equatable, Sendable {
         return try .init(
             voice: voice,
             options: validatedSynthesisOptions(), accountInventory: accountInventory,
-            sonioxRegion: region, language: language
+            sonioxRegion: region, language: language, studioConfiguration: studioConfiguration
         )
     }
 

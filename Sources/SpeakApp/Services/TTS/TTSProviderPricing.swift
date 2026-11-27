@@ -71,7 +71,7 @@ extension TTSProvider {
     case .groq:
       // Handled above: the rate depends on which Orpheus model the voice names.
       return nil
-    case .system, .openrouter:
+    case .system, .openrouter, .voiceStudio:
       return nil
     }
   }

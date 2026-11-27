@@ -17,6 +17,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   case mistral
   case speechmatics
   case xai
+  case voiceStudio = "studio"
   case system
 
   var id: String { rawValue }
@@ -35,13 +36,14 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .mistral: return "Mistral Voxtral"
     case .speechmatics: return "Speechmatics"
     case .xai: return "xAI"
+    case .voiceStudio: return "Local Voice Studio"
     case .system: return "macOS System"
     }
   }
 
   var requiresAPIKey: Bool {
     switch self {
-    case .system: return false
+    case .system, .voiceStudio: return false
     default: return true
     }
   }
@@ -67,7 +69,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     // One xAI key covers Grok Voice transcription, dedicated speech to text
     // and speech generation.
     case .xai: return "xai.apiKey"
-    case .system: return ""
+    case .voiceStudio, .system: return ""
     }
   }
 
@@ -79,7 +81,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     switch self {
     case .elevenlabs, .soniox, .cartesia, .openrouter,
          .groq, .gemini, .mistral, .speechmatics, .xai, .azure: return true
-    case .openai, .deepgram, .system: return false
+    case .openai, .deepgram, .voiceStudio, .system: return false
     }
   }
 
@@ -99,6 +101,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     // xAI hosts more voices than it documents, so an account voice the
     // catalogue cannot name must still survive validation.
     XAITTSCatalog.voiceIDPrefix,
+    "studio/",
     "system/"
   ]
 
@@ -117,6 +120,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     if voiceID.hasPrefix(MistralTTSCatalog.voiceIDPrefix) { return .mistral }
     if voiceID.hasPrefix(SpeechmaticsTTSCatalog.voiceIDPrefix) { return .speechmatics }
     if voiceID.hasPrefix(XAITTSCatalog.voiceIDPrefix) { return .xai }
+    if voiceID.hasPrefix("studio/") { return .voiceStudio }
     if voiceID.hasPrefix("system/") { return .system }
     return .system
   }
@@ -628,6 +632,7 @@ struct VoiceCatalog {
     case .mistral: return mistralVoices
     case .speechmatics: return speechmaticsVoices
     case .xai: return xaiVoices
+    case .voiceStudio: return []
     case .system: return systemVoices
     }
   }
@@ -657,6 +662,26 @@ struct VoiceCatalog {
   /// before the account list has loaded. An Azure MAI voice from a resource
   /// listing (another locale or model) keeps its friendly name the same way.
   static func accountListedVoice(forID id: String) -> TTSVoice? {
+    if let studioKind = VoiceStudioVoice.kind(forCanonicalID: id) {
+      if studioKind == .gptSoVITS {
+        return TTSVoice(
+          id: id,
+          name: VoiceStudioVoice.gptSoVITSDefaultVoice().name,
+          provider: .voiceStudio,
+          traits: [],
+          previewURL: nil
+        )
+      }
+      if let remoteID = VoiceStudioVoice.remoteVoiceID(fromCanonicalID: id, kind: studioKind) {
+        return TTSVoice(
+          id: id,
+          name: "\(remoteID) (\(studioKind.displayName))",
+          provider: .voiceStudio,
+          traits: [],
+          previewURL: nil
+        )
+      }
+    }
     if id.hasPrefix(AzureMAIVoiceCatalog.voiceIDPrefix),
        let name = AzureMAIVoiceCatalog.displayName(forVoiceID: id) {
       return TTSVoice(id: id, name: name, provider: .azure, traits: [], previewURL: nil)

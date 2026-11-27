@@ -99,6 +99,12 @@ struct VoiceOutputSettingsSection: View, AppSettingsBindingProviding {
 
       VoiceProfilesSettingsCard()
 
+      VoiceStudioSettingsCard {
+        Task {
+          accountListedVoices = await environment.tts.accountListedVoices()
+        }
+      }
+
       SettingsCard(title: "Audio Quality & Performance", systemImage: "waveform.circle", tint: Color.green) {
         VStack(alignment: .leading, spacing: 16) {
           VStack(alignment: .leading, spacing: 8) {

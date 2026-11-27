@@ -594,7 +594,7 @@ test('Android dependency PRs cannot pass with a missing, skipped or failed Andro
   main.android.result = 'skipped';
   main['release-paths'].outputs.android = 'false';
   assert.deepEqual(assessCIGates(main, 'push'), [], 'android.yml owns Android builds on main');
-  assert.match(jobBodies['release-paths'], /android: \$\{\{ github.event_name != 'pull_request' && 'false' \|\| steps.filter.outputs.android \}\}/);
+  assert.match(jobBodies['release-paths'], /android: \$\{\{ github.event_name != 'pull_request' && 'false' \|\| steps.select.outputs.full == 'true' && 'true' \|\| steps.filter.outputs.android \}\}/);
   assert.match(jobBodies.android, /runs-on: ubuntu-24.04/);
   assert.match(jobBodies.android, /cache-read-only: true/);
   assert.match(jobBodies.android, /run: scripts\/ci-android.sh/);

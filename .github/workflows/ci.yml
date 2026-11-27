@@ -66,7 +66,7 @@ jobs:
       pull-requests: read
     outputs:
       # Android has its own path-triggered main workflow. On PRs require an explicit filter result.
-      android: ${{ github.event_name != 'pull_request' && 'false' || steps.filter.outputs.android }}
+      android: ${{ github.event_name != 'pull_request' && 'false' || steps.select.outputs.full == 'true' && 'true' || steps.filter.outputs.android }}
       apple: ${{ steps.select.outputs.apple }}
       swift: ${{ steps.select.outputs.swift }}
       ios: ${{ steps.select.outputs.ios }}

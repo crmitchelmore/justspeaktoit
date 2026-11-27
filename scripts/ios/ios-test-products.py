@@ -31,7 +31,7 @@ def pack(products, archive, expected):
     if not Path(products).exists():
         raise FileNotFoundError("Xcode did not export the required test products.")
     data = json.dumps(expected).encode()
-    with tarfile.open(archive, "w:gz") as output:
+    with tarfile.open(archive, "w:gz", compresslevel=1) as output:
         output.add(products, arcname=PRODUCT)
         metadata = tarfile.TarInfo(METADATA)
         metadata.size = len(data)

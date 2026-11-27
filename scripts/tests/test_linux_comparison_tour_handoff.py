@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -89,7 +90,12 @@ class ComparisonTourHandoffTests(unittest.TestCase):
         source = Path(cls.directory.name) / "tour.c"
         cls.binary = Path(cls.directory.name) / "tour"
         source.write_text(HARNESS.replace("__FINAL_STAGE__", final_stage_body()), encoding="utf-8")
-        subprocess.run([compiler, "-std=c11", str(source), "-o", str(cls.binary)], check=True)
+        command = [compiler, "-std=c11", str(source), "-o", str(cls.binary)]
+        if sys.platform == "darwin" and not os.environ.get("SDKROOT"):
+            # Use the SDK paired with the selected Xcode, even with standalone CLT installed.
+            sdk = subprocess.check_output(["xcrun", "--sdk", "macosx", "--show-sdk-path"], text=True).strip()
+            command.extend(["-isysroot", sdk])
+        subprocess.run(command, check=True)
 
     def assert_handoff(self, snapshot_result):
         result = subprocess.run(

@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.rememberSliderState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -29,12 +30,16 @@ internal fun SilenceSliders(settings: SilenceSettings, onChange: (SilenceSetting
     val threshold = SilenceSettings.THRESHOLD_RANGE
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("$durationLabel: $durationValue", style = MaterialTheme.typography.labelLarge)
-        Slider(
+        val durationState = rememberSliderState(
             value = settings.durationSeconds.toFloat(),
-            onValueChange = { onChange(settings.copy(durationSeconds = (it * 2).roundToInt() / 2.0)) },
-            valueRange = duration.start.toFloat()..duration.endInclusive.toFloat(),
+            trackRange = duration.start.toFloat()..duration.endInclusive.toFloat(),
             // Half-second steps from 0.5 to 5 seconds.
             steps = ((duration.endInclusive - duration.start) * 2).roundToInt() - 1,
+        )
+        durationState.value = settings.durationSeconds.toFloat()
+        Slider(
+            state = durationState,
+            onValueChange = { onChange(settings.copy(durationSeconds = (it * 2).roundToInt() / 2.0)) },
             modifier = Modifier
                 .testTag(AutomationIds.SETTINGS_SILENCE_DURATION)
                 .semantics {
@@ -43,10 +48,14 @@ internal fun SilenceSliders(settings: SilenceSettings, onChange: (SilenceSetting
                 },
         )
         Text("$thresholdLabel: $thresholdValue", style = MaterialTheme.typography.labelLarge)
-        Slider(
+        val thresholdState = rememberSliderState(
             value = settings.threshold.toFloat(),
+            trackRange = threshold.start.toFloat()..threshold.endInclusive.toFloat(),
+        )
+        thresholdState.value = settings.threshold.toFloat()
+        Slider(
+            state = thresholdState,
             onValueChange = { onChange(settings.copy(threshold = (it * 100).roundToInt() / 100.0)) },
-            valueRange = threshold.start.toFloat()..threshold.endInclusive.toFloat(),
             modifier = Modifier
                 .testTag(AutomationIds.SETTINGS_SILENCE_THRESHOLD)
                 .semantics {

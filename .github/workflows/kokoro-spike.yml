@@ -1,0 +1,56 @@
+name: Kokoro x64 spike
+on:
+  push:
+    branches: ['precheck/kokoro-1820']
+permissions:
+  contents: read
+jobs:
+  input:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      header: ${{ steps.ipa.outputs.header }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - run: sudo apt-get update -qq && sudo apt-get install -y espeak-ng
+      - id: ipa
+        shell: python
+        run: |
+          import base64, os, pathlib, subprocess
+          report = pathlib.Path("Docs/research/sherpa-onnx-tts-spike.md").read_text()
+          paragraph = " ".join(line[2:] for line in report.splitlines() if line.startswith("> "))
+          sentences = paragraph.rstrip(".").split(". ")
+          assert len(sentences) == 10 and len(paragraph.split()) == 180
+          subprocess.run(["espeak-ng", "--version"], check=True)
+          ipa = [subprocess.check_output(["espeak-ng", "-q", "-v", "en-us", "--ipa", s+"."], text=True).strip()+"." for s in sentences]
+          header = "static const int32_t lengths[] = {" + ",".join(str(len(s)) for s in ipa) + "};\n"
+          header += "static const int32_t points[] = {" + ",".join(str(ord(c)) for s in ipa for c in s) + "};\n"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              print("header=" + base64.b64encode(header.encode()).decode(), file=out)
+  bench:
+    needs: input
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [macos-15-intel, windows-2022]
+    runs-on: ${{ matrix.host }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - if: runner.os == 'macOS'
+        run: sysctl machdep.cpu.brand_string hw.ncpu hw.memsize && sw_vers
+      - if: runner.os == 'Windows'
+        run: Get-CimInstance Win32_Processor | Select-Object Name,NumberOfLogicalProcessors
+      - run: python3 Docs/research/kokoro-probe/run.py
+        env:
+          INPUT_HEADER: ${{ needs.input.outputs.header }}
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: kokoro-${{ matrix.host }}
+          path: results.csv
+          retention-days: 7

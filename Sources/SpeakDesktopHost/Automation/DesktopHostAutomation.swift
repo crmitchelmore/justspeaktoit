@@ -4,11 +4,27 @@ import SpeakDesktop
 
 package protocol DesktopHostAutomationPlatform: DesktopHostDefaultTextOutputPlatform, DesktopHostReadAloudPlatform {}
 
+package protocol DesktopMonitorCapturePlatform: DesktopHostAutomationPlatform {
+    static var defaultMonitorDeviceID: String { get }
+}
+
+extension DesktopHostController: AutomationCaptureSourceHost where Platform: DesktopMonitorCapturePlatform {
+    package func automationStartDictation(source: AudioCaptureSource) async throws -> AutomationResult {
+        switch source {
+        case .mic: try await automationStartDictation()
+        case .system: try await startAutomationCapture(deviceID: Platform.defaultMonitorDeviceID)
+        case .both: throw AutomationError(code: .unsupportedCommand, message: "Mixed capture is unavailable.")
+        }
+    }
+}
+
 extension DesktopHostController: AutomationSpeechHost where Platform: DesktopHostAutomationPlatform {}
 
 extension DesktopHostController: AutomationCommandHost where Platform: DesktopHostAutomationPlatform {
     package func automationStatus() -> AutomationResult {
-        AutomationResult(sessionActive: dictationSessionID != nil)
+        var result = AutomationResult(sessionActive: dictationSessionID != nil)
+        result.source = dictationSessionID.flatMap { history[$0]?.captureSource?.rawValue }
+        return result
     }
 
     package func automationHistory(limit: Int) -> [AutomationHistoryEntry] {
@@ -17,7 +33,7 @@ extension DesktopHostController: AutomationCommandHost where Platform: DesktopHo
             return AutomationHistoryEntry(
                 id: record.id.uuidString, text: text, createdAt: record.createdAt,
                 model: record.modelIdentifier, durationSeconds: record.recordingDuration,
-                wordCount: AutomationHistoryEntry.wordCount(of: text)
+                wordCount: AutomationHistoryEntry.wordCount(of: text), source: record.captureSource?.rawValue
             )
         }
     }
@@ -113,6 +129,10 @@ extension DesktopHostController: AutomationCommandHost where Platform: DesktopHo
     }
 
     package func automationStartDictation() async throws -> AutomationResult {
+        try await startAutomationCapture(deviceID: selectedMicrophone())
+    }
+
+    fileprivate func startAutomationCapture(deviceID: String) async throws -> AutomationResult {
         guard isReady, !closed else { throw automationUnavailable }
         try Task.checkCancellation()
         guard dictationSessionID == nil, !busy, !handsFreeMachine.isArmed else {
@@ -122,7 +142,7 @@ extension DesktopHostController: AutomationCommandHost where Platform: DesktopHo
         let profile = captureProfile(modelIndex: index, executablePath: nil)
         try requireAutomationCloudSharing(cloudSharingRequests(for: profile, polish: captureLivePolish(profile)))
         await toggleCaptured(
-            target: nil, modelIndex: index, deviceID: selectedMicrophone(),
+            target: nil, modelIndex: index, deviceID: deviceID,
             textOutput: settings.textOutput ?? Platform.defaultTextOutput, profile: profile
         )
         guard await dictationSessionReady() else {
@@ -130,7 +150,7 @@ extension DesktopHostController: AutomationCommandHost where Platform: DesktopHo
                 code: .transcriptionFailed, message: "Dictation could not start. See the app for details."
             )
         }
-        return AutomationResult(sessionActive: true)
+        return automationStatus()
     }
 
     package func automationStopDictation() async throws -> AutomationResult {
@@ -151,10 +171,12 @@ extension DesktopHostController: AutomationCommandHost where Platform: DesktopHo
                     ?? "Dictation did not complete. Captured audio is retained in History."
             )
         }
-        return AutomationResult(
+        var result = AutomationResult(
             text: record.displayText ?? "", model: record.modelIdentifier,
             durationSeconds: record.result?.duration, sessionActive: false
         )
+        result.source = record.captureSource?.rawValue
+        return result
     }
 }
 

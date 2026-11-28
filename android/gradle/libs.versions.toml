@@ -1,5 +1,5 @@
 [versions]
-agp = "9.5.2"
+agp = "9.5.3"
 kotlin = "2.4.21"
 composeBom = "2026.11.01"
 coreKtx = "1.19.1"
@@ -10,7 +10,7 @@ orgJson = "20260814"
 okhttp = "5.5.1"
 billing = "9.1.0"
 fragment = "1.9.1"
-sentry = "8.65.0"
+sentry = "8.65.1"
 mlkitGenaiPrompt = "1.0.0-beta5"
 
 [libraries]

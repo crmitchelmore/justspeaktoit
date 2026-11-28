@@ -57,8 +57,9 @@ void refresh_actions(void) {
 /* ------------------------------------------------------------ callbacks */
 
 void on_record(GtkButton *button, gpointer data) {
-    (void)button; (void)data;
-    emit(JSTI_EVENT_TOGGLE_RECORDING, selected_microphone(), selected_model_slot());
+    (void)data;
+    gboolean system = button == dashboard_page()->record && gtk_check_button_get_active(dashboard_page()->system_audio);
+    emit(JSTI_EVENT_TOGGLE_RECORDING, system ? "@DEFAULT_MONITOR@" : selected_microphone(), selected_model_slot());
 }
 
 /* A command from the status notifier's menu (LinuxTray.c). */

@@ -9,8 +9,13 @@ extension DesktopHostController {
         microphoneWarning = warning
     }
 
+    func captureSource(for deviceID: String) -> AudioCaptureSource {
+        let monitor = (Platform.self as? any DesktopMonitorCapturePlatform.Type)?.defaultMonitorDeviceID
+        return deviceID == monitor ? .system : .mic
+    }
+
     package func selectMicrophone(_ identifier: String) {
-        guard canUseHistory else { return }
+        guard canUseHistory, captureSource(for: identifier) == .mic else { return }
         var changed = settings
         changed.microphoneDeviceID = identifier.isEmpty ? nil : identifier
         guard changed.microphoneDeviceID != settings.microphoneDeviceID else { return }

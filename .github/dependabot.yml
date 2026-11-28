@@ -85,3 +85,24 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     open-pull-requests-limit: 5
+
+  # Security-only updates for the deployed Worker and isolated qualification tool.
+  - package-ecosystem: "npm"
+    directory: "/workers/paid-access"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: "swift"
+    directory: "/Tooling/VoxtralLocalQualification"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]

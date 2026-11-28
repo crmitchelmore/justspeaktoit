@@ -5,6 +5,8 @@ import argparse
 import io
 import json
 import os
+import platform
+import plistlib
 import re
 import subprocess
 import tarfile
@@ -20,6 +22,7 @@ def provenance():
         raise ValueError("A full checkout revision is required for iOS test products.")
     return {
         "revision": revision,
+        "architecture": platform.machine(),
         "xcode": subprocess.check_output(["xcodebuild", "-version"], text=True).strip(),
         "sdk": subprocess.check_output(
             ["xcrun", "--sdk", "iphonesimulator", "--show-sdk-version"], text=True
@@ -42,10 +45,22 @@ def unpack(archive, destination, expected):
     with tarfile.open(archive, "r:gz") as source:
         metadata = source.extractfile(METADATA)
         if metadata is None or json.load(metadata) != expected:
-            raise ValueError("iOS test products do not match the checkout revision or Xcode/SDK.")
+            raise ValueError("iOS test products do not match the checkout revision, host architecture or Xcode/SDK.")
         source.extractall(destination, filter="data")
-    if not (Path(destination) / PRODUCT).exists():
+    products = Path(destination) / PRODUCT
+    if not products.exists():
         raise FileNotFoundError("The archive did not contain the required iOS test products.")
+
+    bundles = sorted(products.rglob("*.xctest"))
+    if not bundles:
+        raise ValueError("No XCTest bundles in the restored products.")
+    for bundle in bundles + sorted(products.rglob("*.app")):
+        with (bundle / "Info.plist").open("rb") as info:
+            executable = plistlib.load(info)["CFBundleExecutable"]
+        if not executable or Path(executable).name != executable or executable in (".", ".."):
+            raise ValueError(f"Invalid executable name in {bundle}")
+        binary = bundle / executable
+        subprocess.run(["lipo", str(binary), "-verify_arch", expected["architecture"]], check=True)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@
 namespace jsti::voiceSources {
 
 enum { sourceLabel = 920, sourceID, textLabel, textID, loadID, noticeID, readID, exportID, stopID };
-enum { autoPlayID = 940, saveID, generateID, playResultID, exportResultID, controlsID, usageID, discoveryID, helperID };
+enum { autoPlayID = 940, saveID, generateID, playResultID, exportResultID, controlsID, usageID, discoveryID, helperID, profileID };
 enum { markupListID = 990, markupTextID, markupCopyID, markupNoticeID, markupWrapID };
 enum { formatLabelID = 970, formatID };
 struct MarkupExample { std::wstring text, description; };

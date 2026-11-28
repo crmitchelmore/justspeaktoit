@@ -10,6 +10,7 @@ using namespace jsti::voiceSources;
 using jsti::chrome::scale;
 
 bool jsti_voice_controls_self_test(HWND owner, std::string &error);
+bool jsti_voice_profile_fixture(HWND owner, std::string &error);
 bool jsti_voice_usage_self_test(HWND owner, std::string &error);
 bool jsti_voice_discovery_self_test(HWND owner, std::string &error);
 namespace {
@@ -279,6 +280,6 @@ bool jsti_voice_sources_self_test(HWND owner, std::string &error) {
             ", boundedControls=" + std::to_string(boundedControls) + ", markup=" + std::to_string(markup) +
             ", formats=" + std::to_string(formats) + ".";
     }
-    return passed && captured && jsti_voice_controls_self_test(owner, error) &&
+    return passed && captured && jsti_voice_profile_fixture(owner, error) && jsti_voice_controls_self_test(owner, error) &&
         jsti_voice_usage_self_test(owner, error) && jsti_voice_discovery_self_test(owner, error);
 }

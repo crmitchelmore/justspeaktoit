@@ -69,6 +69,35 @@ int32_t jsti_window_finish_voice_synthesis_options(const char *request_id, int32
 /* Tagged 118 actions: path "usage-report", source -1, text snapshot; or path
  * "usage-tracking", source strict 0/1, empty text. record is an opaque dialog
  * token, never History ownership. Results/acknowledgements ignore closed tokens. */
+/* Voice action 120: source is the operation. record carries the editor session;
+ * Save appends consent version, name and language on separate lines. */
+enum JSTIVoiceProfileOperation {
+    JSTI_PROFILE_PREPARE = 0,
+    JSTI_PROFILE_PREVIEW = 1,
+    JSTI_PROFILE_TRANSCRIBE = 2,
+    JSTI_PROFILE_ADD = 3,
+    JSTI_PROFILE_SAVE = 4,
+    JSTI_PROFILE_CLOSE = 5,
+    JSTI_PROFILE_RECORD = 6,
+    JSTI_PROFILE_STOP_RECORDING = 7,
+    JSTI_PROFILE_REVIEW_DELETE = 8,
+    JSTI_PROFILE_DELETE = 9
+};
+enum JSTIVoiceProfilePhase {
+    JSTI_PROFILE_ERROR = -1,
+    JSTI_PROFILE_STATUS = 0,
+    JSTI_PROFILE_SAVED = 1,
+    JSTI_PROFILE_ADDED = 2,
+    JSTI_PROFILE_RECORDING = 3,
+    JSTI_PROFILE_LEVEL = 4,
+    JSTI_PROFILE_STAGED = 5,
+    JSTI_PROFILE_PROFILE = 6,
+    JSTI_PROFILE_CLEAR_PROFILES = 7,
+    JSTI_PROFILE_CONFIRM_DELETE = 8
+};
+/* NULL transcript preserves the current edit. PROFILE and CONFIRM_DELETE
+ * carry the saved profile's name or ID; they do not replace transcript text. */
+int32_t jsti_window_voice_profile_result(const char *session, int32_t phase, const char *status, const char *transcript);
 int32_t jsti_window_set_voice_usage(const char *request_id, const char *text, int32_t tracking);
 /* Tagged 118 account-open/refresh/choose/close: source -1; text is empty,
  * except choose carries the stable prefixed voice ID. record is the dialog

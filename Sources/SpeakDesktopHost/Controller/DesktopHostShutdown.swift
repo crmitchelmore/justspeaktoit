@@ -114,6 +114,7 @@ extension DesktopHostController {
             return shutdownReport ?? DesktopHostShutdownReport()
         }
         closed = true
+        retireVoiceProfileDraft()
         retireIssueReport()
         cancelVoiceEdit(status: "Voice edit stopped when the app closed.")
         automationTranscriptions.values.forEach { $0.cancel() }

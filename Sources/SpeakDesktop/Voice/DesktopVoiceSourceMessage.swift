@@ -6,6 +6,7 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
     case event(DesktopHistoryEvent)
     case preferences(VoiceGenerationOptions)
     case synthesisPreferences(VoiceSynthesisOptions, requestID: String)
+    case profile(DesktopVoiceProfileCommand)
     case audioFormat(String)
     case usageReport(text: String, requestID: String)
     case usageTracking(Bool, requestID: String)
@@ -24,16 +25,25 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
         case 117: self = .event(.voiceGeneratedExport(record, path: path))
         case 118:
             self = try Self.preferenceMessage(source: source, text: text, record: record, path: path)
-        case 119:
-            guard text.utf8.count <= 1_024, !record.isEmpty, record.utf8.count <= 64,
-                  record.utf8.allSatisfy({ (0x20...0x7E).contains($0) }) else { throw Failure.invalidPreferences }
-            self = .synthesisPreferences(
-                try JSONDecoder().decode(VoiceSynthesisOptions.self, from: Data(text.utf8)), requestID: record
-            )
+        case 119, 120:
+            self = try Self.editorMessage(action: action, source: source, text: text, record: record, path: path)
         case 110, 111, 115:
             self = .event(try Self.textEvent(action: action, source: source, text: text, record: record, path: path))
         default: throw Failure.invalidAction
         }
+    }
+
+    private static func editorMessage(
+        action: Int32, source: Int32, text: String, record: String, path: String
+    ) throws -> Self {
+        if action == 120 {
+            return .profile(try DesktopVoiceProfileCommand(source: source, text: text, record: record, path: path))
+        }
+        guard text.utf8.count <= 1_024, !record.isEmpty, record.utf8.count <= 64,
+              record.utf8.allSatisfy({ (0x20...0x7E).contains($0) }) else { throw Failure.invalidPreferences }
+        return .synthesisPreferences(
+            try JSONDecoder().decode(VoiceSynthesisOptions.self, from: Data(text.utf8)), requestID: record
+        )
     }
 
     // swiftlint:disable:next cyclomatic_complexity

@@ -58,6 +58,8 @@ package struct DesktopNativeComparisonCalls: Sendable {
 package struct DesktopNativeVoiceCalls: Sendable {
     package typealias CString = UnsafePointer<CChar>?
 
+    /// Session, presentation phase, status, optional replacement transcript.
+    package var profileResult: @Sendable (CString, Int32, CString, CString) -> Int32
     /// request ID, text, tracking enabled.
     package var setUsage: @Sendable (CString, CString, Int32) -> Int32
     /// request token, imported text, error.
@@ -70,12 +72,14 @@ package struct DesktopNativeVoiceCalls: Sendable {
     package var finishSynthesisOptions: @Sendable (CString, Int32) -> Int32
 
     package init(
+        profileResult: @escaping @Sendable (CString, Int32, CString, CString) -> Int32,
         setUsage: @escaping @Sendable (CString, CString, Int32) -> Int32,
         setTextImport: @escaping @Sendable (CString, CString, CString) -> Int32,
         setGeneratedResult: @escaping @Sendable (CString, Int32, CString, CString) -> Int32,
         setGenerationOptions: @escaping @Sendable (Int32) -> Int32,
         finishSynthesisOptions: @escaping @Sendable (CString, Int32) -> Int32
     ) {
+        self.profileResult = profileResult
         self.setUsage = setUsage
         self.setTextImport = setTextImport
         self.setGeneratedResult = setGeneratedResult

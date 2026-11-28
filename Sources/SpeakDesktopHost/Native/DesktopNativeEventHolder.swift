@@ -89,7 +89,15 @@ package extension DesktopNativeEventHolder {
                 action: action, source: source, text: fields[0], record: fields[1], path: fields[2]
             )
             holder.submitVoiceSource(message)
-        } catch { Platform.update(error.localizedDescription) }
+        } catch {
+            if action == 120, fields.count == 3, let first = fields[1].split(separator: "\n").first,
+               let session = UUID(uuidString: String(first)) {
+                _ = Platform.nativeVoice.profileResult(
+                    session.uuidString.lowercased(), -1, error.localizedDescription, nil)
+            } else {
+                Platform.update(error.localizedDescription)
+            }
+        }
     }
 
     /// Routes a validated Voice Output message: History events join the
@@ -97,6 +105,8 @@ package extension DesktopNativeEventHolder {
     func submitVoiceSource(_ message: DesktopVoiceSourceMessage) {
         let controller = controller
         switch message {
+        case .profile(let command):
+            enqueueSettings { await controller.handleVoiceProfileCommand(command) }
         case .audioFormat(let identifier):
             enqueueSettings {
                 await controller.beginVoiceAudioFormatSave(identifier) { saved, failure in

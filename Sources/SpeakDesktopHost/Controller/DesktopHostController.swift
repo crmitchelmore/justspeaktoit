@@ -14,6 +14,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package nonisolated let store: DesktopRecordingStore
     /// Per-device private voice profiles, isolated from History, sync and exports.
     package nonisolated let voiceProfiles: VoiceProfileStore
+    var voiceProfileDraft: DesktopHostVoiceProfileDraft?
     /// Inactive until the app entry point activates it for a real session.
     package nonisolated let telemetry: DesktopTelemetry
     let uploadStaging: SharedMultipartUploadStaging

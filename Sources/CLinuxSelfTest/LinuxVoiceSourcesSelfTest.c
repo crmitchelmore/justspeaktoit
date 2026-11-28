@@ -17,6 +17,7 @@ static void receive_fixture(int32_t action, int32_t source, const char *value,
     g_free(received->text); g_free(received->record);
     received->text = g_strdup(value); received->record = g_strdup(record);
 }
+gboolean jsti_voice_profile_fixture(Dialog *source);
 int32_t jsti_voice_controls_self_test(GtkWindow *owner, char *error, size_t capacity);
 int32_t jsti_voice_usage_self_test(GtkWindow *owner, char *error, size_t capacity);
 int32_t jsti_voice_discovery_self_test(GtkWindow *owner, char *error, size_t capacity);
@@ -239,20 +240,21 @@ int32_t jsti_voice_sources_self_test(GtkWindow *owner, char *error, size_t capac
     gboolean markup = markup_self_test(dialog) &&
         received.calls == 4 && received.generated == 1 && received.flags == 2;
     gboolean formats = format_self_test(dialog);
+    gboolean profile = jsti_voice_profile_fixture(dialog);
     gtk_window_destroy(dialog->window);
     swap_format_state(&original_formats);
     g_free(received.text); g_free(received.record);
     g_free(received.generate_flags); g_free(received.played_result);
     gboolean passed = history && typed && unavailable && history_snapshot && typed_snapshot &&
         clipboard_snapshot && file_snapshot && stale_import && failed_import && edited_import &&
-        generated_snapshot && busy_result && retained_result && markup && formats;
+        generated_snapshot && busy_result && retained_result && markup && formats && profile;
     if (!passed) {
         const gboolean checks[] = {history, typed, unavailable, history_snapshot, typed_snapshot,
             clipboard_snapshot, file_snapshot, stale_import, failed_import, edited_import,
-            generated_snapshot, busy_result, retained_result, markup, formats};
+            generated_snapshot, busy_result, retained_result, markup, formats, profile};
         const char *names[] = {"history", "typed", "unavailable", "history snapshot", "typed snapshot",
             "clipboard snapshot", "file snapshot", "stale import", "failed import", "edited import",
-            "generated snapshot", "busy result", "retained result", "markup", "formats"};
+            "generated snapshot", "busy result", "retained result", "markup", "formats", "voice profile"};
         GString *detail = g_string_new("Voice sources state/snapshot checks failed:");
         for (guint index = 0; index < G_N_ELEMENTS(checks); ++index)
             if (!checks[index]) g_string_append_printf(detail, " %s;", names[index]);

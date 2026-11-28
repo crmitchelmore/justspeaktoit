@@ -22,6 +22,13 @@ final class DesktopNativeVoiceProfileTests: XCTestCase {
         }
         try await send(0)
         try await send(6)
+        let firstSamples = await controller.voiceProfileDraft?.samples
+        let retiredSamples = try XCTUnwrap(firstSamples)
+        try await send(7)
+        try await send(6)
+        await controller.voiceProfileRecordingFailed(samples: retiredSamples, message: "Late first-take failure")
+        let stillRecording = await controller.busy
+        XCTAssertTrue(stillRecording)
         try await send(7)
         try await send(4, metadata: "\nconsent-v1\nGuided fixture\nen", text: "Edited script.")
         let profile = try XCTUnwrap(controller.voiceProfiles.listProfiles().first)

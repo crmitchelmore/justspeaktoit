@@ -11,11 +11,10 @@ extension DesktopHostController where Platform: DesktopNativeWindowPlatform {
         stopReadAloud()
         draft.preview?.cancel()
         let samples = DesktopProfileSamples()
-        let session = draft.session
         let context = DesktopCaptureContext(
             onPCM: { samples.append($0, count: $1) },
             onFailure: { [weak self] message in
-                Task { await self?.voiceProfileRecordingFailed(session: session, message: message) }
+                Task { await self?.voiceProfileRecordingFailed(samples: samples, message: message) }
             }
         )
         let capture = try effects.makeCapture(context: context, deviceID: settings.microphoneDeviceID ?? "",
@@ -36,7 +35,7 @@ extension DesktopHostController where Platform: DesktopNativeWindowPlatform {
             let deadline = ContinuousClock.now.advanced(by: .seconds(30))
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
-                guard !closed, voiceProfileDraft === draft, draft.capture != nil else { return }
+                guard !closed, voiceProfileDraft === draft, draft.samples === samples else { return }
                 let measured = samples.meter()
                 if ContinuousClock.now >= deadline || measured.seconds >= 30 {
                     do { try finishVoiceProfileRecording(draft) } catch {
@@ -50,8 +49,8 @@ extension DesktopHostController where Platform: DesktopNativeWindowPlatform {
         }
     }
 
-    private func voiceProfileRecordingFailed(session: UUID, message: String) {
-        guard let draft = voiceProfileDraft, draft.session == session, draft.capture != nil else { return }
+    func voiceProfileRecordingFailed(samples: DesktopProfileSamples, message: String) {
+        guard let draft = voiceProfileDraft, draft.samples === samples else { return }
         _ = try? stopProfileCapture(draft)
         showVoiceProfile(draft, phase: -1, status: message)
     }

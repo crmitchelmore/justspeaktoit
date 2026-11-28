@@ -123,7 +123,6 @@ static void action(GtkButton *button, gpointer data) {
         g_autofree gchar *metadata = g_strjoin("\n", form->session, "consent-v1", value(form->name), value(form->language), NULL);
         profile_request(form, JSTI_PROFILE_SAVE, value(form->transcript), metadata);
     } else if (widget == form->record) {
-        if (!form->recording) form->ready = FALSE;
         profile_request(form, form->recording ? JSTI_PROFILE_STOP_RECORDING : JSTI_PROFILE_RECORD, "", form->session);
     } else {
         int op = widget == form->preview ? JSTI_PROFILE_PREVIEW : widget == form->transcribe ? JSTI_PROFILE_TRANSCRIBE : JSTI_PROFILE_ADD;
@@ -175,7 +174,10 @@ static void apply_result(gpointer data) {
     if (result->phase == JSTI_PROFILE_LEVEL) return;
     jsti_accessible_announce(form->status, result->status, 1);
     form->recording = result->phase == JSTI_PROFILE_RECORDING;
-    if (form->recording) gtk_label_set_text(GTK_LABEL(form->reference_label), result->transcript);
+    if (form->recording) {
+        form->ready = FALSE;
+        gtk_label_set_text(GTK_LABEL(form->reference_label), result->transcript);
+    }
     form->pending = FALSE;
     if (result->phase == JSTI_PROFILE_STAGED) form->ready = TRUE;
     if (result->phase == JSTI_PROFILE_ADDED) { form->added++; form->ready = FALSE; }

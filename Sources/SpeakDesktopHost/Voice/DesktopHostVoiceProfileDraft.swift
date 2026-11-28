@@ -55,15 +55,35 @@ final class DesktopProfileSamples: @unchecked Sendable {
     }
 }
 
+// The draft gives its capture to a single cleanup operation before leaving the controller.
+private final class RetiredProfileCapture: @unchecked Sendable {
+    private let capture: any DesktopRecordingCapture
+    init(_ capture: any DesktopRecordingCapture) { self.capture = capture }
+
+    func stop() {
+        try? capture.stop()
+        capture.destroy()
+    }
+}
+
 extension DesktopHostController {
     func retireVoiceProfileDraft() {
         guard let draft = voiceProfileDraft else { return }
         voiceProfileDraft = nil
         draft.preview?.cancel()
         draft.meter?.cancel()
-        if let capture = draft.capture {
-            try? capture.stop()
-            capture.destroy()
+        guard let capture = draft.capture else { return }
+        draft.capture = nil
+        draft.samples = nil
+        let retired = RetiredProfileCapture(capture)
+        if closed {
+            // close() counts this busy operation against its existing shutdown deadline.
+            Task.detached {
+                retired.stop()
+                await self.finishBusyOperation()
+            }
+        } else {
+            retired.stop()
             finishBusyOperation()
         }
     }

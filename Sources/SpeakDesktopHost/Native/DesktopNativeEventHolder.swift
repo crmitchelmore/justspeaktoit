@@ -99,7 +99,9 @@ package extension DesktopNativeEventHolder {
         switch message {
         case let .createProfile(name, language, transcript, reference):
             enqueueSettings {
-                await controller.saveNativeVoiceProfile(name: name, language: language, transcript: transcript, reference: reference)
+                await controller.saveNativeVoiceProfile(
+                    name: name, language: language, transcript: transcript, reference: reference
+                )
             }
         case .audioFormat(let identifier):
             enqueueSettings {

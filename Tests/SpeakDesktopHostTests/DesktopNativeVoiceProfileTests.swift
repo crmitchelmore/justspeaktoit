@@ -45,6 +45,31 @@ final class DesktopNativeVoiceProfileTests: XCTestCase {
         await controller.close()
     }
 
+    func testShutdownReportsProfileCaptureStillStopping() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let release = DispatchSemaphore(value: 0)
+        let effects = NativeTestEffects(profileSamples: [], profileStop: {
+            _ = release.wait(timeout: .now() + 5)
+        })
+        let controller = try DesktopHostController<NativeTestPlatform>.consented(
+            directory: root, effects: effects, shutdownGrace: .milliseconds(100))
+        await controller.markReadyForSelfTest()
+        let session = UUID().uuidString
+        for operation: Int32 in [0, 6] {
+            let message = try DesktopVoiceSourceMessage(action: 120, source: operation, text: "", record: session, path: "")
+            guard case .profile(let command) = message else { return XCTFail("Expected profile command") }
+            await controller.handleVoiceProfileCommand(command)
+        }
+        let report = await controller.close()
+        release.signal()
+        XCTAssertEqual(report.unfinishedOperations, 1)
+        await controller.operationsEnded()
+        let busy = await controller.busy
+        XCTAssertFalse(busy)
+    }
+
     func testNativeEditor_SavesReviewedClipsAndRequiresDeletionReview() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -86,7 +111,10 @@ final class NativeProfileFixtureCapture: DesktopRecordingCapture {
     private let context: DesktopCaptureContext
     private let samples: [Int16]
 
-    init(context: DesktopCaptureContext, samples: [Int16]) {
+    private let onStop: @Sendable () -> Void
+
+    init(context: DesktopCaptureContext, samples: [Int16], onStop: @escaping @Sendable () -> Void) {
+        self.onStop = onStop
         self.context = context
         self.samples = samples
     }
@@ -97,6 +125,6 @@ final class NativeProfileFixtureCapture: DesktopRecordingCapture {
         }
     }
 
-    func stop() throws {}
+    func stop() throws { onStop() }
     func destroy() {}
 }

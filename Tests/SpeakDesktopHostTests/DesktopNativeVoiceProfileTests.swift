@@ -58,7 +58,8 @@ final class DesktopNativeVoiceProfileTests: XCTestCase {
         await controller.markReadyForSelfTest()
         let session = UUID().uuidString
         for operation: Int32 in [0, 6] {
-            let message = try DesktopVoiceSourceMessage(action: 120, source: operation, text: "", record: session, path: "")
+            let message = try DesktopVoiceSourceMessage(
+                action: 120, source: operation, text: "", record: session, path: "")
             guard case .profile(let command) = message else { return XCTFail("Expected profile command") }
             await controller.handleVoiceProfileCommand(command)
         }

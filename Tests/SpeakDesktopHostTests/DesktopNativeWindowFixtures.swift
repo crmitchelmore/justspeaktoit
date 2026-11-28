@@ -123,11 +123,15 @@ enum NativeTestPlatform: DesktopNativeWindowPlatform {
 }
 
 struct NativeTestEffects: DesktopHostEffects {
+    var profileSamples: [Int16]?
     typealias Platform = NativeTestPlatform
     func apiKey(name: String) throws -> String { "" }
     func makeCapture(
         context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
-    ) throws -> any DesktopRecordingCapture { throw DesktopHostError(message: "No capture in native window tests.") }
+    ) throws -> any DesktopRecordingCapture {
+        guard let profileSamples else { throw DesktopHostError(message: "No capture in native window tests.") }
+        return NativeProfileFixtureCapture(context: context, samples: profileSamples)
+    }
     func makeLiveClient(
         model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)? { nil }

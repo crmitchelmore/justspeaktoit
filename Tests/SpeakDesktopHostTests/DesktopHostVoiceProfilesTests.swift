@@ -282,7 +282,9 @@ private extension DesktopHostVoiceProfilesTests {
         }
         XCTAssertTrue(FakeSpeech.shared.spoken.isEmpty)
     }
+}
 
+extension DesktopHostVoiceProfilesTests {
     static func makeSpeechBuffer(
         duration: Double,
         sampleRate: Int,

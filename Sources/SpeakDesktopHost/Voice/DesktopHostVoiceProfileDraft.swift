@@ -30,6 +30,8 @@ final class DesktopProfileSamples: @unchecked Sendable {
     private var peak: Float = 0
     static let rate = 16_000
 
+    init() { samples.reserveCapacity(Self.rate * 30) }
+
     func append(_ values: UnsafePointer<Int16>, count: Int) {
         lock.withLock {
             let remaining = Self.rate * 30 - samples.count

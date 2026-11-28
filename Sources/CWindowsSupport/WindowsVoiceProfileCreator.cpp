@@ -52,7 +52,7 @@ void refresh(HWND window, const Form &form) {
 void request(HWND window, Form &form, int op) {
     const auto text = field(window, transcriptID);
     std::string metadata = form.session;
-    if (op == 4) metadata += "\nconsent-v1\n" + field(window, nameID) + "\n" + field(window, languageID);
+    if (op == JSTI_PROFILE_SAVE) metadata += "\nconsent-v1\n" + field(window, nameID) + "\n" + field(window, languageID);
     form.pending = true;
     refresh(window, form);
     form.source.config.callback(120, op, text.c_str(), metadata.c_str(), form.reference.c_str(), form.source.config.context);
@@ -66,38 +66,38 @@ void applyResult(HWND window, Form &form) {
         result = std::move(results.front());
         results.pop_front();
     }
-    if (result.phase == 7) {
+    if (result.phase == JSTI_PROFILE_CLEAR_PROFILES) {
         form.profileIDs.clear();
         SendDlgItemMessageW(window, profilesID, CB_RESETCONTENT, 0, 0);
         return;
     }
-    if (result.phase == 6 && result.transcript) {
+    if (result.phase == JSTI_PROFILE_PROFILE && result.transcript) {
         form.profileIDs.push_back(jsti::utf8(result.status));
         SendDlgItemMessageW(window, profilesID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(result.transcript->c_str()));
         if (form.profileIDs.size() == 1) SendDlgItemMessageW(window, profilesID, CB_SETCURSEL, 0, 0);
         return;
     }
-    if (result.phase == 8 && result.transcript) {
+    if (result.phase == JSTI_PROFILE_CONFIRM_DELETE && result.transcript) {
         bool confirmed = MessageBoxW(window, result.status.c_str(), L"Delete voice profile?",
             MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) == IDYES;
         form.pending = confirmed;
         refresh(window, form);
-        if (confirmed) form.source.config.callback(120, 9, "", form.session.c_str(),
+        if (confirmed) form.source.config.callback(120, JSTI_PROFILE_DELETE, "", form.session.c_str(),
             jsti::utf8(*result.transcript).c_str(), form.source.config.context);
         return;
     }
-    if (result.phase == 1) {
+    if (result.phase == JSTI_PROFILE_SAVED) {
         SetDlgItemTextW(GetWindow(window, GW_OWNER), jsti::voiceSources::noticeID, result.status.c_str());
         DestroyWindow(window);
         return;
     }
     SetDlgItemTextW(window, statusID, result.status.c_str());
-    if (result.phase == 4) return;
+    if (result.phase == JSTI_PROFILE_LEVEL) return;
     jsti::accessibility::announce(GetDlgItem(window, statusID), result.status, false);
     form.pending = false;
-    form.recording = result.phase == 3;
-    if (result.phase == 5) form.ready = true;
-    if (result.phase == 2) { ++form.added; form.ready = false; }
+    form.recording = result.phase == JSTI_PROFILE_RECORDING;
+    if (result.phase == JSTI_PROFILE_STAGED) form.ready = true;
+    if (result.phase == JSTI_PROFILE_ADDED) { ++form.added; form.ready = false; }
     if (result.transcript) SetDlgItemTextW(window, transcriptID, result.transcript->c_str());
     refresh(window, form);
 }
@@ -116,7 +116,7 @@ void choose(HWND window, Form &form) {
     SetDlgItemTextW(window, referenceID, path + picker.nFileOffset);
     SetDlgItemTextW(window, transcriptID, L"");
     form.ready = false;
-    request(window, form, 0);
+    request(window, form, JSTI_PROFILE_PREPARE);
 }
 
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -168,18 +168,18 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 if (index >= 0 && static_cast<size_t>(index) < form->profileIDs.size()) {
                     form->pending = true;
                     refresh(window, *form);
-                    form->source.config.callback(120, 8, "", form->session.c_str(),
+                    form->source.config.callback(120, JSTI_PROFILE_REVIEW_DELETE, "", form->session.c_str(),
                         form->profileIDs[index].c_str(), form->source.config.context);
                 }
                 break;
             }
-            case previewID: request(window, *form, 1); break;
-            case transcribeID: request(window, *form, 2); break;
-            case addID: request(window, *form, 3); break;
-            case saveID: request(window, *form, 4); break;
+            case previewID: request(window, *form, JSTI_PROFILE_PREVIEW); break;
+            case transcribeID: request(window, *form, JSTI_PROFILE_TRANSCRIBE); break;
+            case addID: request(window, *form, JSTI_PROFILE_ADD); break;
+            case saveID: request(window, *form, JSTI_PROFILE_SAVE); break;
             case recordID:
                 if (!form->recording) form->ready = false;
-                request(window, *form, form->recording ? 7 : 6);
+                request(window, *form, form->recording ? JSTI_PROFILE_STOP_RECORDING : JSTI_PROFILE_RECORD);
                 break;
             }
         }
@@ -190,11 +190,23 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             std::lock_guard<std::mutex> lock(profileMutex);
             if (active == window) { active = nullptr; activeSession.clear(); results.clear(); }
         }
-        form->source.config.callback(120, 5, "", form->session.c_str(), "", form->source.config.context);
+        form->source.config.callback(120, JSTI_PROFILE_CLOSE, "", form->session.c_str(), "", form->source.config.context);
         if (form->font) DeleteObject(form->font);
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }
+HWND openForm(HWND owner, Form &form) {
+    HWND window = jsti::chrome::createOwnedDialog(owner, L"JustSpeakToItVoiceProfile", procedure,
+        L"Create voice profile", 524, 560, WS_CAPTION | WS_SYSMENU, WS_EX_CONTROLPARENT, &form);
+    if (!window) return nullptr;
+    {
+        std::lock_guard<std::mutex> lock(profileMutex);
+        active = window; activeSession = form.session;
+    }
+    request(window, form, JSTI_PROFILE_PREPARE);
+    return window;
+}
+
 }
 
 void jsti_show_voice_profile(HWND owner, jsti::voiceSources::Dialog &source) {
@@ -204,14 +216,8 @@ void jsti_show_voice_profile(HWND owner, jsti::voiceSources::Dialog &source) {
     std::string session = jsti::utf8(std::wstring(token + 1, 36));
     for (char &ch : session) if (ch >= 'A' && ch <= 'F') ch += 'a' - 'A';
     Form form{source, source.record, session};
-    HWND window = jsti::chrome::createOwnedDialog(owner, L"JustSpeakToItVoiceProfile", procedure,
-        L"Create voice profile", 524, 560, WS_CAPTION | WS_SYSMENU, WS_EX_CONTROLPARENT, &form);
+    HWND window = openForm(owner, form);
     if (!window) { jsti_window_update("The voice profile editor could not open.", nullptr, -1); return; }
-    {
-        std::lock_guard<std::mutex> lock(profileMutex);
-        active = window; activeSession = session;
-    }
-    request(window, form, 0);
     jsti::chrome::runModalDialog(owner, window, nameID, [](HWND child) { DestroyWindow(child); }, "voice profile");
 }
 
@@ -224,4 +230,32 @@ int32_t jsti_window_voice_profile_result(const char *session, int32_t phase, con
     if (!PostMessageW(active, profileMessage, 0, 0)) return -1;
     results.push_back(std::move(result));
     return 0;
+}
+
+bool jsti_voice_profile_fixture(HWND owner, std::string &error) {
+    int saves = 0;
+    jsti::voiceSources::Dialog source{};
+    source.config.context = &saves;
+    source.config.callback = [](int32_t action, int32_t operation, const char *text, const char *metadata,
+                                const char *, void *context) {
+        if (action == 120 && operation == JSTI_PROFILE_SAVE && std::string(text) == "Edited fixture." &&
+            std::string(metadata) == "fixture-session\nconsent-v1\nFixture\nen") ++*static_cast<int *>(context);
+    };
+    Form form{source, "", "fixture-session"};
+    HWND window = openForm(owner, form);
+    if (!window) { error = "Voice profile fixture could not open."; return false; }
+    jsti_window_voice_profile_result(form.session.c_str(), JSTI_PROFILE_STAGED, "Synthetic clip ready", "Edited fixture.");
+    MSG msg{};
+    while (PeekMessageW(&msg, window, profileMessage, profileMessage, PM_REMOVE)) DispatchMessageW(&msg);
+    SetDlgItemTextW(window, nameID, L"Fixture");
+    SetDlgItemTextW(window, languageID, L"en");
+    bool gated = !IsWindowEnabled(GetDlgItem(window, saveID));
+    SendMessageW(window, WM_COMMAND, MAKEWPARAM(saveID, BN_CLICKED), 0);
+    SendDlgItemMessageW(window, consentID, BM_CLICK, 0, 0);
+    bool enabled = IsWindowEnabled(GetDlgItem(window, saveID));
+    SendDlgItemMessageW(window, saveID, BM_CLICK, 0, 0);
+    bool passed = gated && enabled && saves == 1 && !IsWindowEnabled(GetDlgItem(window, saveID));
+    DestroyWindow(window);
+    if (!passed) error = "Voice profile fixture failed consent, transcript or duplicate-save checks.";
+    return passed;
 }

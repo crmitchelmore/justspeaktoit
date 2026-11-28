@@ -12,9 +12,12 @@ extension DesktopHostController where Platform: DesktopNativeWindowPlatform {
         draft.preview?.cancel()
         let samples = DesktopProfileSamples()
         let session = draft.session
-        let context = DesktopCaptureContext(onPCM: { samples.append($0, count: $1) }) { [weak self] message in
-            Task { await self?.voiceProfileRecordingFailed(session: session, message: message) }
-        }
+        let context = DesktopCaptureContext(
+            onPCM: { samples.append($0, count: $1) },
+            onFailure: { [weak self] message in
+                Task { await self?.voiceProfileRecordingFailed(session: session, message: message) }
+            }
+        )
         let capture = try effects.makeCapture(context: context, deviceID: settings.microphoneDeviceID ?? "",
             sampleRate: DesktopProfileSamples.rate, frameMilliseconds: 100)
         do { try capture.start() } catch {

@@ -91,13 +91,14 @@ extension DesktopHostController {
         let heldLocal = beginLocalUse(model)
         defer { endLocalUse(heldLocal) }
 
-        let request = DesktopHostTranscriptionRequest(
+        var request = DesktopHostTranscriptionRequest(
             audio: tempURL,
             model: model,
             key: key,
             duration: buffer.durationSeconds,
             language: settings.configuration?.language
         )
+        request.historySaved = false
         let result = try await effects.transcribe(request, with: self)
         return result.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }

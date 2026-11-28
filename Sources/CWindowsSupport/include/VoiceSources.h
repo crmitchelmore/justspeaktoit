@@ -69,6 +69,9 @@ int32_t jsti_window_finish_voice_synthesis_options(const char *request_id, int32
 /* Tagged 118 actions: path "usage-report", source -1, text snapshot; or path
  * "usage-tracking", source strict 0/1, empty text. record is an opaque dialog
  * token, never History ownership. Results/acknowledgements ignore closed tokens. */
+/* Phase: 0 ready, 1 saved, 2 added, 3 recording, 4 meter, -1 refused.
+ * NULL transcript preserves the user's current edit. */
+int32_t jsti_window_voice_profile_result(const char *session, int32_t phase, const char *status, const char *transcript);
 int32_t jsti_window_set_voice_usage(const char *request_id, const char *text, int32_t tracking);
 /* Tagged 118 account-open/refresh/choose/close: source -1; text is empty,
  * except choose carries the stable prefixed voice ID. record is the dialog

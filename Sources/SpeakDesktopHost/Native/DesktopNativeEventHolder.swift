@@ -97,12 +97,8 @@ package extension DesktopNativeEventHolder {
     func submitVoiceSource(_ message: DesktopVoiceSourceMessage) {
         let controller = controller
         switch message {
-        case let .createProfile(name, language, transcript, reference):
-            enqueueSettings {
-                await controller.saveNativeVoiceProfile(
-                    name: name, language: language, transcript: transcript, reference: reference
-                )
-            }
+        case .profile(let command):
+            enqueueSettings { await controller.handleVoiceProfileCommand(command) }
         case .audioFormat(let identifier):
             enqueueSettings {
                 await controller.beginVoiceAudioFormatSave(identifier) { saved, failure in

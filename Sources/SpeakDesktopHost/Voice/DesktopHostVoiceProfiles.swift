@@ -116,24 +116,6 @@ extension DesktopHostController {
         )
     }
 
-    func saveNativeVoiceProfile(name: String, language: String, transcript: String, reference: String) async {
-        do {
-            let clip: VoiceProfilePreparedClip
-            if let id = UUID(uuidString: reference) {
-                clip = try await prepareVoiceProfileClipFromHistory(recordID: id)
-            } else {
-                clip = try await prepareVoiceProfileClipFromFile(at: URL(fileURLWithPath: reference))
-            }
-            guard !closed else { return }
-            _ = try createVoiceProfile(name: name, language: language, clips: [
-                .init(pcmBuffer: clip.pcmBuffer, targetFormat: .pcm16k, transcript: transcript, source: clip.source)
-            ], consent: ConsentAttestation())
-            update("Saved voice profile “\(name)” on this device.")
-        } catch {
-            update(error.localizedDescription)
-        }
-    }
-
     package func updateVoiceProfileClipTranscript(
         profileID: UUID,
         clipID: UUID,
@@ -181,7 +163,7 @@ extension DesktopHostController {
         return VoiceProfileWAVCodec.resample(decoded, to: targetFormat)
     }
 
-    private func batchTranscriptionModelForVoiceProfile() -> String {
+    func batchTranscriptionModelForVoiceProfile() -> String {
         if DesktopHostModels.isLocal(settings.model) && !DesktopHostModels.isLocalLive(settings.model) {
             return settings.model
         }

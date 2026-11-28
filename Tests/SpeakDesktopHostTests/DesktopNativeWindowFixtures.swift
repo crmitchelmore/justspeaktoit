@@ -68,6 +68,7 @@ enum NativeTestPlatform: DesktopNativeWindowPlatform {
         setSaveHistory: { log.record("saveHistory", [$0]) }
     )
     static let nativeVoice = DesktopNativeVoiceCalls(
+        profileResult: { log.record("profile", [$0, $1, $2, $3]) },
         setUsage: { log.record("usage", [$0, $1, $2]) },
         setTextImport: { log.record("textImport", [$0, $1, $2]) },
         setGeneratedResult: { log.record("generated", [$0, $1, $2, $3]) },

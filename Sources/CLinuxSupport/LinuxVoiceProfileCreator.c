@@ -1,14 +1,29 @@
 #include "LinuxVoiceSourcesInternal.h"
+#include <adwaita.h>
 
 typedef struct {
     GtkWindow *window;
     GtkWidget *name, *language, *transcript, *consent, *save, *reference_label;
-    gchar *reference;
+    GtkDropDown *profiles;
+    GtkStringList *names, *ids;
+    GtkWidget *remove;
+    GtkWidget *choose, *record, *preview, *transcribe, *add, *status;
+    gchar *reference, *session;
+    gboolean ready, pending, recording;
+    guint added;
     Dialog *source;
 } ProfileForm;
 
+static ProfileForm *active_profile;
+static void request(ProfileForm *form, int op, const char *text, const char *metadata);
+
 static void dispose_form(gpointer data) {
     ProfileForm *form = data;
+    if (active_profile == form) active_profile = NULL;
+    if (form->source->window)
+        form->source->callback(120, 5, "", form->session, "", form->source->context);
+    g_object_unref(form->ids);
+    g_free(form->session);
     g_free(form->reference);
     release(form->source);
     g_free(form);
@@ -19,9 +34,18 @@ static const char *value(GtkWidget *entry) { return gtk_editable_get_text(GTK_ED
 static void refresh_form(GObject *unused, gpointer data) {
     (void)unused;
     ProfileForm *form = data;
-    gtk_widget_set_sensitive(form->save, form->reference && *form->reference &&
-        *value(form->name) && *value(form->language) && *value(form->transcript) &&
-        gtk_check_button_get_active(GTK_CHECK_BUTTON(form->consent)));
+    gboolean idle = !form->pending && !form->recording;
+    gboolean has_words = *value(form->transcript) != '\0';
+    gtk_widget_set_sensitive(form->remove, idle && g_list_model_get_n_items(G_LIST_MODEL(form->ids)) > 0);
+    gtk_widget_set_sensitive(form->choose, idle);
+    gtk_widget_set_sensitive(form->record, !form->pending);
+    gtk_button_set_label(GTK_BUTTON(form->record), form->recording ? "Stop recording" : "Record guided script");
+    gtk_widget_set_sensitive(form->preview, idle && form->ready);
+    gtk_widget_set_sensitive(form->transcribe, idle && form->ready);
+    gtk_widget_set_sensitive(form->add, idle && form->ready && has_words && form->added < 2);
+    gtk_widget_set_sensitive(form->transcript, idle && form->ready);
+    gtk_widget_set_sensitive(form->save, idle && (form->ready ? has_words : form->added > 0) &&
+        *value(form->name) && *value(form->language) && gtk_check_button_get_active(GTK_CHECK_BUTTON(form->consent)));
 }
 
 static GtkWidget *entry(GtkBox *box, const char *title, const char *id) {
@@ -48,7 +72,8 @@ static void file_selected(GObject *object, GAsyncResult *result, gpointer data) 
     g_autofree gchar *name = g_file_get_basename(file);
     gtk_label_set_text(GTK_LABEL(form->reference_label), form->reference ? name : "Choose a local audio file.");
     gtk_editable_set_text(GTK_EDITABLE(form->transcript), "");
-    refresh_form(NULL, form);
+    form->ready = FALSE;
+    request(form, 0, "", form->session);
 }
 
 static void choose_file(GtkButton *unused, gpointer data) {
@@ -61,14 +86,106 @@ static void choose_file(GtkButton *unused, gpointer data) {
     gtk_file_dialog_open(dialog, form->window, NULL, file_selected, request);
 }
 
-static void save_profile(GtkButton *unused, gpointer data) {
-    (void)unused;
+static void request(ProfileForm *form, int op, const char *text, const char *metadata) {
+    if (!form->source->window) return;
+    form->pending = TRUE;
+    refresh_form(NULL, form);
+    form->source->callback(120, op, text, metadata, form->reference ? form->reference : "", form->source->context);
+}
+
+static void deletion_response(AdwMessageDialog *dialog, const char *response, gpointer data) {
+    ProfileForm *form = g_object_get_data(G_OBJECT(data), "profile-form");
+    if (!form || !g_str_equal(response, "delete")) return;
+    const char *id = g_object_get_data(G_OBJECT(dialog), "profile-id");
+    form->pending = TRUE;
+    refresh_form(NULL, form);
+    form->source->callback(120, 9, "", form->session, id, form->source->context);
+}
+
+static void action(GtkButton *button, gpointer data) {
     ProfileForm *form = data;
-    if (!gtk_widget_get_sensitive(form->save) || !form->source->window) return;
-    g_autofree gchar *metadata = g_strjoin("\n", value(form->name), value(form->language), NULL);
-    form->source->callback(120, 1, value(form->transcript), metadata, form->reference, form->source->context);
-    gtk_label_set_text(form->source->notice, "Check the main window for the profile save result.");
-    gtk_window_destroy(form->window);
+    GtkWidget *widget = GTK_WIDGET(button);
+    if (!gtk_widget_get_sensitive(widget)) return;
+    if (widget == form->remove) {
+        const char *id = gtk_string_list_get_string(form->ids, gtk_drop_down_get_selected(form->profiles));
+        if (!id) return;
+        form->pending = TRUE;
+        refresh_form(NULL, form);
+        form->source->callback(120, 8, "", form->session, id, form->source->context);
+    } else if (widget == form->save) {
+        g_autofree gchar *metadata = g_strjoin("\n", form->session, "consent-v1", value(form->name), value(form->language), NULL);
+        request(form, 4, value(form->transcript), metadata);
+    } else if (widget == form->record) {
+        if (!form->recording) form->ready = FALSE;
+        request(form, form->recording ? 7 : 6, "", form->session);
+    } else {
+        int op = widget == form->preview ? 1 : widget == form->transcribe ? 2 : 3;
+        request(form, op, value(form->transcript), form->session);
+    }
+}
+
+static GtkWidget *action_button(GtkBox *box, const char *title, const char *id, ProfileForm *form) {
+    GtkWidget *button = gtk_button_new_with_label(title);
+    gtk_widget_set_name(button, id);
+    gtk_box_append(box, button);
+    g_signal_connect(button, "clicked", G_CALLBACK(action), form);
+    return button;
+}
+
+typedef struct { gchar *session, *status, *transcript; int phase; } ProfileResult;
+static void apply_result(gpointer data) {
+    ProfileResult *result = data;
+    ProfileForm *form = active_profile;
+    if (!form || !g_str_equal(form->session, result->session)) return;
+    if (result->phase == 7) {
+        gtk_string_list_splice(form->ids, 0, g_list_model_get_n_items(G_LIST_MODEL(form->ids)), NULL);
+        gtk_string_list_splice(form->names, 0, g_list_model_get_n_items(G_LIST_MODEL(form->names)), NULL);
+        return;
+    }
+    if (result->phase == 6) {
+        gtk_string_list_append(form->ids, result->status);
+        gtk_string_list_append(form->names, result->transcript);
+        return;
+    }
+    if (result->phase == 8) {
+        form->pending = FALSE;
+        refresh_form(NULL, form);
+        GtkWidget *dialog = adw_message_dialog_new(form->window, "Delete voice profile?", result->status);
+        adw_message_dialog_add_responses(ADW_MESSAGE_DIALOG(dialog), "cancel", "Cancel", "delete", "Delete", NULL);
+        adw_message_dialog_set_default_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+        adw_message_dialog_set_close_response(ADW_MESSAGE_DIALOG(dialog), "cancel");
+        g_object_set_data_full(G_OBJECT(dialog), "profile-id", g_strdup(result->transcript), g_free);
+        g_signal_connect_object(dialog, "response", G_CALLBACK(deletion_response), form->window, 0);
+        gtk_window_present(GTK_WINDOW(dialog));
+        return;
+    }
+    if (result->phase == 1) {
+        gtk_label_set_text(form->source->notice, result->status);
+        gtk_window_destroy(form->window);
+        return;
+    }
+    gtk_label_set_text(GTK_LABEL(form->status), result->status);
+    if (result->phase == 4) return;
+    jsti_accessible_announce(form->status, result->status, 1);
+    form->recording = result->phase == 3;
+    if (form->recording) gtk_label_set_text(GTK_LABEL(form->reference_label), result->transcript);
+    form->pending = FALSE;
+    if (result->phase == 5) form->ready = TRUE;
+    if (result->phase == 2) { form->added++; form->ready = FALSE; }
+    if (result->transcript) gtk_editable_set_text(GTK_EDITABLE(form->transcript), result->transcript);
+    refresh_form(NULL, form);
+}
+
+static void free_result(gpointer data) {
+    ProfileResult *result = data;
+    g_free(result->session); g_free(result->status); g_free(result->transcript); g_free(result);
+}
+
+int32_t jsti_window_voice_profile_result(const char *session, int32_t phase, const char *status, const char *transcript) {
+    ProfileResult *result = g_new0(ProfileResult, 1);
+    result->session = g_strdup(session); result->phase = phase;
+    result->status = g_strdup(status); result->transcript = g_strdup(transcript);
+    return jsti_window_post(apply_result, result, free_result);
 }
 
 void jsti_voice_profile_open(GtkButton *button, gpointer data) {
@@ -76,6 +193,8 @@ void jsti_voice_profile_open(GtkButton *button, gpointer data) {
     Dialog *source = data;
     ProfileForm *form = g_new0(ProfileForm, 1);
     form->source = retain(source);
+    active_profile = form;
+    form->session = g_uuid_string_random();
     form->window = GTK_WINDOW(gtk_window_new());
     g_object_set_data_full(G_OBJECT(form->window), "profile-form", form, dispose_form);
     gtk_window_set_title(form->window, "Create voice profile");
@@ -84,16 +203,32 @@ void jsti_voice_profile_open(GtkButton *button, gpointer data) {
     gtk_window_set_destroy_with_parent(form->window, TRUE);
     GtkBox *box = GTK_BOX(gtk_box_new(GTK_ORIENTATION_VERTICAL, 8));
     gtk_window_set_child(form->window, GTK_WIDGET(box));
+    form->names = gtk_string_list_new(NULL);
+    form->ids = gtk_string_list_new(NULL);
+    form->profiles = GTK_DROP_DOWN(gtk_drop_down_new(G_LIST_MODEL(form->names), NULL));
+    jsti_accessible_set_name(GTK_WIDGET(form->profiles), "Saved voice profiles");
+    gtk_widget_set_name(GTK_WIDGET(form->profiles), "voice-profile-list");
+    gtk_box_append(box, label("Saved voice profiles"));
+    gtk_box_append(box, GTK_WIDGET(form->profiles));
+    form->remove = action_button(box, "Delete selected profile...", "voice-profile-delete", form);
     form->name = entry(box, "Profile name", "voice-profile-name");
     form->language = entry(box, "Language", "voice-profile-language");
     form->reference = g_strdup(source->record);
     form->reference_label = label(*source->record ? "Reference: selected History recording" : "Choose a reference clip.");
     gtk_box_append(box, form->reference_label);
-    GtkWidget *choose = gtk_button_new_with_label("Choose audio file...");
+    GtkWidget *choose = form->choose = gtk_button_new_with_label("Choose audio file...");
     gtk_widget_set_name(choose, "voice-profile-import");
     gtk_box_append(box, choose);
     g_signal_connect(choose, "clicked", G_CALLBACK(choose_file), form);
     form->transcript = entry(box, "Reference clip transcript", "voice-profile-transcript");
+    GtkBox *tools = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6));
+    gtk_box_append(box, GTK_WIDGET(tools));
+    form->record = action_button(tools, "Record guided script", "voice-profile-record", form);
+    form->preview = action_button(tools, "Play clip", "voice-profile-preview", form);
+    form->transcribe = action_button(tools, "Auto-fill transcript", "voice-profile-transcribe", form);
+    form->add = action_button(tools, "Add clip", "voice-profile-add", form);
+    form->status = label("");
+    gtk_box_append(box, form->status);
     form->consent = gtk_check_button_new_with_label(
         "This is my voice, or I have the speaker's permission to copy it. I'll use it only for my own read aloud.");
     gtk_widget_set_name(form->consent, "voice-profile-consent");
@@ -105,7 +240,8 @@ void jsti_voice_profile_open(GtkButton *button, gpointer data) {
     g_signal_connect(form->language, "changed", G_CALLBACK(refresh_form), form);
     g_signal_connect(form->transcript, "changed", G_CALLBACK(refresh_form), form);
     g_signal_connect(form->consent, "toggled", G_CALLBACK(refresh_form), form);
-    g_signal_connect(form->save, "clicked", G_CALLBACK(save_profile), form);
+    g_signal_connect(form->save, "clicked", G_CALLBACK(action), form);
     refresh_form(NULL, form);
     gtk_window_present(form->window);
+    request(form, 0, "", form->session);
 }

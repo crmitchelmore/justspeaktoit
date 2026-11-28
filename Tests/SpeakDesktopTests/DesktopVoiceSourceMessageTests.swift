@@ -4,14 +4,20 @@ import SpeakCore
 
 final class DesktopVoiceSourceMessageTests: XCTestCase {
     func testProfileSave_RequiresConsentAndPreservesEditedTranscript() throws {
-        let reference = UUID().uuidString
-        func message(consent: Int32) throws -> DesktopVoiceSourceMessage {
-            try DesktopVoiceSourceMessage(action: 120, source: consent, text: "Edited synthetic transcript.",
-                record: "Fixture\nen", path: reference)
+        let session = UUID()
+        func message(attestation: String) throws -> DesktopVoiceSourceMessage {
+            try DesktopVoiceSourceMessage(action: 120, source: 4, text: "Edited synthetic transcript.",
+                record: "\(session.uuidString)\n\(attestation)\nFixture\nen", path: "")
         }
-        XCTAssertThrowsError(try message(consent: 0))
-        XCTAssertEqual(try message(consent: 1), .createProfile(name: "Fixture", language: "en",
-            transcript: "Edited synthetic transcript.", reference: reference))
+        XCTAssertThrowsError(try message(attestation: ""))
+        guard case .profile(let command) = try message(attestation: "consent-v1") else {
+            return XCTFail("Expected a voice profile command")
+        }
+        XCTAssertEqual(command.session, session)
+        XCTAssertEqual(command.operation, .save)
+        XCTAssertEqual(command.text, "Edited synthetic transcript.")
+        XCTAssertEqual(command.name, "Fixture")
+        XCTAssertEqual(command.language, "en")
     }
 
     func testNativeMessage_PreservesImmutableSourceAndDistinctOpaqueResultOwnership() throws {

@@ -27,6 +27,7 @@ package enum DesktopNativeBindings {
     )
 
     package static let voice = DesktopNativeVoiceCalls(
+        profileResult: jsti_window_voice_profile_result,
         setUsage: jsti_window_set_voice_usage,
         setTextImport: jsti_window_set_voice_text_import,
         setGeneratedResult: jsti_window_set_voice_generated_result_with_format,

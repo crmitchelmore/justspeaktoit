@@ -2524,8 +2524,10 @@ sessions:
         steps:
           - "Open Voice Output, choose Create voice profile and select a local synthetic speech fixture."
           - "Enter a name, language and transcript. Verify Save stays disabled until you check the consent box."
-          - "Save and check the main window status. Repeat with a silent WAV."
-        expected: "The synthetic speech profile saves locally and the silent clip produces a quality rejection."
+          - "Play the prepared clip. Add it, select a second synthetic fixture and save. Verify that both transcripts stay editable before their clips are added."
+          - "Select the new saved profile, cancel deletion, then confirm deletion. Repeat file selection with a silent WAV."
+          - "With a screen reader enabled, verify the guided-script and Stop controls have names. Use synthetic microphone input only for the recording check."
+        expected: "Preview plays the staged clip. Save requires consent. Cancel preserves the profile, confirmed deletion removes it, and silent audio produces a visible quality rejection."
         final_gate: false
       - id: "windows-command-palette"
         issues:
@@ -2694,8 +2696,10 @@ sessions:
         steps:
           - "Open Voice Output, choose Create voice profile and select a local synthetic speech fixture."
           - "Enter a name, language and transcript. Verify Save stays disabled until you check the consent box."
-          - "Save and check the main window status. Repeat with a silent WAV."
-        expected: "The synthetic speech profile saves locally and the silent clip produces a quality rejection."
+          - "Play the prepared clip. Add it, select a second synthetic fixture and save. Verify that both transcripts stay editable before their clips are added."
+          - "Select the new saved profile, cancel deletion, then confirm deletion. Repeat file selection with a silent WAV."
+          - "With a screen reader enabled, verify the guided-script and Stop controls have names. Use synthetic microphone input only for the recording check."
+        expected: "Preview plays the staged clip. Save requires consent. Cancel preserves the profile, confirmed deletion removes it, and silent audio produces a visible quality rejection."
         final_gate: false
       - id: "linux-command-palette"
         issues:

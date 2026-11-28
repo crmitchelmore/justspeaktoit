@@ -8,6 +8,7 @@
 
 typedef struct DashboardPage {
     GtkButton *record;
+    GtkCheckButton *system_audio;
     GtkButton *cancel;
     GtkLabel *live_preview;
     GtkButton *dashboard_copy;

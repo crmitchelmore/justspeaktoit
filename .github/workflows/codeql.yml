@@ -20,8 +20,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Newest-only on PRs and main: a newer main push analyses a superset.
-  cancel-in-progress: true
+  # Let the active scan upload its results. GitHub coalesces waiting runs for this ref.
+  cancel-in-progress: false
 
 jobs:
   changes:
@@ -55,9 +55,9 @@ jobs:
       always() && !startsWith(github.head_ref, 'merge-batch/') && (github.event_name != 'pull_request' ||
       needs.changes.result != 'success' || needs.changes.outputs.swift == 'true')
     runs-on: macos-15
-    # CodeQL tracing slows the Swift build, so this gets more headroom than
-    # the plain CI build jobs.
-    timeout-minutes: 60
+    # A successful cold scan took nearly 60 minutes including resolution and upload.
+    # Leave room for a slower dependency download or traced compile.
+    timeout-minutes: 90
     permissions:
       actions: read
       contents: read
@@ -77,7 +77,7 @@ jobs:
           xcode-version: "26.2"
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           languages: ${{ matrix.language }}
 
@@ -101,6 +101,6 @@ jobs:
         run: swift build --disable-automatic-resolution
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           category: "/language:${{ matrix.language }}"

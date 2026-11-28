@@ -2701,6 +2701,20 @@ sessions:
           - "With a screen reader enabled, verify the guided-script and Stop controls have names. Use synthetic microphone input only for the recording check."
         expected: "Preview plays the staged clip. Save requires consent. Cancel preserves the profile, confirmed deletion removes it, and silent audio produces a visible quality rejection."
         final_gate: false
+      - id: "linux-system-audio"
+        issues:
+          - 1854
+        title: "Record desktop playback from the dashboard and CLI"
+        minutes: 3
+        core: false
+        build: "Linux Alpha containing the system capture increment for #1854"
+        steps:
+          - "Mute the microphone and play a synthetic spoken phrase through the default output."
+          - "Select Record system audio on the dashboard, start recording, then stop after the phrase."
+          - "With automation enabled, repeat using speak listen --source system and speak stop."
+          - "Inspect speak history --last 2 --json and play each recording."
+        expected: "Both entries contain the playback and report system as the source."
+        final_gate: false
       - id: "linux-command-palette"
         issues:
           - 1619

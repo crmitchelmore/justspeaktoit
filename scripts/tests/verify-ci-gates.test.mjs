@@ -345,7 +345,7 @@ test('iOS workloads are partitioned without extending budgets or dropping tests'
   assert.match(products, /xcodebuild build-for-testing/);
   assert.match(products, /-only-testing:SpeakiOSTests/);
   assert.match(products, /-only-testing:SpeakiOSUITests/);
-  assert.match(products, /ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO/);
+  assert.match(products, /ARCHS="\$\(uname -m\)" ONLY_ACTIVE_ARCH=NO/);
   assert.match(products, /scripts\/ios\/ios-test-products.py pack/);
   assert.doesNotMatch(products, /simctl|bravo-mini-local|jsti-macos-build/);
   assert.deepEqual(laneJobs.ios, ['build-ios-test-products', 'build-ios', 'build-ios-keyboard']);

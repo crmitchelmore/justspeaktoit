@@ -49,12 +49,19 @@ printf 'integration' | gnome-keyring-daemon --unlock --components=secrets >/dev/
 "$binary" --integration-test keyring
 
 step "capture (PipeWire through libpulse)"
+export PULSE_SERVER="unix:$XDG_RUNTIME_DIR/pulse/native"
 pipewire >"$work/pipewire.log" 2>&1 & pids+=($!)
 sleep 0.5
 wireplumber >"$work/wireplumber.log" 2>&1 & pids+=($!)
 pipewire-pulse >"$work/pipewire-pulse.log" 2>&1 & pulse=$!; pids+=("$pulse")
 for _ in $(seq 1 100); do pactl info >/dev/null 2>&1 && break; sleep 0.1; done
 pactl load-module module-null-sink sink_name=jsti_test >/dev/null
+# WirePlumber may still be publishing the new sink's policy metadata.
+for _ in $(seq 1 50); do
+    pactl set-default-sink jsti_test 2>/dev/null && break
+    sleep 0.1
+done
+test "$(pactl get-default-sink)" = jsti_test
 step "recording feedback (all profiles, dedicated warmed libpulse channel)"
 PULSE_SINK=jsti_test "$binary" --recording-feedback-self-test
 "$python" - "$work/tone.raw" <<'PY'
@@ -67,7 +74,7 @@ pacat --playback --device=jsti_test --format=s16le --rate=16000 --channels=1 "$w
 tone_index=${#pids[@]}
 pids+=("$tone")
 sleep 0.5
-if ! JSTI_TEST_SOURCE=jsti_test.monitor "$binary" --integration-test capture; then
+if ! JSTI_TEST_SOURCE=@DEFAULT_MONITOR@ "$binary" --integration-test capture; then
     pactl info || true
     pactl list short sinks || true
     pactl list short sources || true

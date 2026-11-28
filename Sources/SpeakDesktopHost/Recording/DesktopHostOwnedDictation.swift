@@ -69,6 +69,7 @@ extension DesktopHostController {
             let opened = try await openRecordingFile(id: id, rate: rate, profile: profile)
             file = opened.file
             record = opened.record
+            record.captureSource = captureSource(for: deviceID)
         } catch {
             await recordingFeedback?.cancelRecording(id)
             throw error

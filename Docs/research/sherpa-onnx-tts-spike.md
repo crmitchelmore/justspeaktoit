@@ -184,11 +184,10 @@ phonemiser and dictionary data.
 | --- | --- | --- |
 | Linux x64 | Done (this report) | Spike host above |
 | macOS arm64 | Kokoro and SwiftPM integration done. Pocket TTS pending. | Bravo’s Mac mini. Official checkpoint access required. |
-| macOS x64 | pending | An Intel macOS runner. None arranged. |
-| Windows x64 | pending | A Windows x64 host or runner. None was available to this spike. |
+| macOS x64 | Kokoro measured | Intel Core i7 hosted runner. Pocket TTS remains open. |
+| Windows x64 | Kokoro measured | Windows Server 2022 x64 hosted runner. Pocket TTS remains open. |
 
-Use the corresponding `osx-x64` or `win-x64-shared-MD-Release` `-lib`
-assets on the remaining hosts and measure the two selected models.
+Use the same paragraph for the remaining x64 measurements.
 
 ## Clone quality
 
@@ -311,15 +310,74 @@ accepted use terms before hosting a download. Pocket TTS preset voices have
 - Release dylibs are ad hoc signed. App bundle signing, hardened-runtime
   load and notarisation still need a release build check.
 
+## Hosted x64 Kokoro probe
+
+The [probe source](https://github.com/crmitchelmore/justspeaktoit/tree/a3a053bc63c0a5142691572f850085cd327103c6/Docs/research/kokoro-probe)
+uses the public multilingual int8 Kokoro model and the sherpa-onnx v2.0.1
+shared C library. The Ubuntu input job used eSpeak NG 1.51 with the US English
+voice to phonemise the same 180-word paragraph once for both hosts.
+Phonemisation, model download and extraction are outside the timings.
+[Input log](https://github.com/crmitchelmore/justspeaktoit/actions/runs/46130110487/job/140933171236)
+
+Each configuration starts a fresh process. The short case uses the first
+sentence. The split case makes ten generation calls, one per sentence.
+The unsplit case passes all ten phoneme sequences in one call. The probe
+requests four or two CPU threads and takes one observation per configuration.
+Load time covers engine creation. TTFA runs from generation start to the
+first nonempty audio callback. RTF is total generation time divided by
+generated audio duration at 24 kHz. Memory is process-wide in decimal MB:
+Windows reports working set after load and peak working set, while macOS
+reports resident size after load and peak RSS.
+
+### Windows Server 2022 x64, 28 November 2026
+
+The successful runner exposed four logical processors on an Intel Xeon
+Platinum 8573C. Both paragraph modes returned ten callbacks. In this single
+run, two threads reduced generation time and first-audio latency in all three
+cases. Even the fastest paragraph case took longer to generate than to play.
+[Job log](https://github.com/crmitchelmore/justspeaktoit/actions/runs/46131401160/job/140937223852) · [CSV artifact](https://github.com/crmitchelmore/justspeaktoit/actions/runs/46131401160/artifacts/15257886583)
+
+| Threads | Input | Load (s) | After load (MB) | Peak (MB) | TTFA (s) | Generate (s) | Audio (s) | RTF | Callbacks |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4 | short | 2.0591 | 280.07 | 477.13 | 8.4393 | 8.4394 | 7.3073 | 1.155 | 1 |
+| 4 | split | 1.9797 | 279.75 | 530.36 | 8.4293 | 64.2990 | 51.9250 | 1.238 | 10 |
+| 4 | unsplit | 1.9971 | 279.53 | 540.31 | 8.4222 | 64.2818 | 51.9259 | 1.238 | 10 |
+| 2 | short | 1.9800 | 279.36 | 475.24 | 7.7937 | 7.7937 | 7.3083 | 1.066 | 1 |
+| 2 | split | 1.9845 | 279.44 | 529.79 | 7.7088 | 58.0170 | 51.9426 | 1.117 | 10 |
+| 2 | unsplit | 1.9707 | 279.53 | 540.02 | 7.6938 | 58.2716 | 51.9497 | 1.122 | 10 |
+
+The first Windows job timed out during runtime archive extraction. The
+[Windows-only retry](https://github.com/crmitchelmore/justspeaktoit/commit/6b5474fdf5f17681231f7953b6e0f8708162e232)
+selected the two DLLs and the C API import library from the verified archive.
+The benchmark, model and paragraph were identical across attempts.
+
+### Intel macOS 26.6.1, 28 November 2026
+
+The hosted runner exposed four logical CPUs on a 3.20 GHz Intel Core i7-8700B
+and 14 GiB of RAM. The fastest paragraph run used two threads and one call per
+sentence. It took 112.99 s to generate 51.98 s of audio, with 14.56 s to the
+first callback. At two threads, passing the paragraph in one call increased
+generation time to 161.51 s. Each configuration was measured once.
+[Job log](https://github.com/crmitchelmore/justspeaktoit/actions/runs/46130110487/job/140933279381) · [CSV artifact](https://github.com/crmitchelmore/justspeaktoit/actions/runs/46130110487/artifacts/15259727602)
+
+| Threads | Input | Load (s) | After load (MB) | Peak (MB) | TTFA (s) | Generate (s) | Audio (s) | RTF | Callbacks |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4 | short | 9.8314 | 317.46 | 512.87 | 25.8981 | 25.8996 | 7.3058 | 3.545 | 1 |
+| 4 | split | 3.9073 | 317.38 | 559.01 | 19.7972 | 128.1464 | 51.9929 | 2.465 | 10 |
+| 4 | unsplit | 3.2757 | 317.88 | 568.05 | 26.7576 | 136.4405 | 51.9539 | 2.626 | 10 |
+| 2 | short | 2.8703 | 317.34 | 512.53 | 14.9529 | 14.9534 | 7.3075 | 2.046 | 1 |
+| 2 | split | 4.2065 | 317.87 | 559.27 | 14.5588 | 112.9877 | 51.9814 | 2.174 | 10 |
+| 2 | unsplit | 5.4970 | 317.33 | 567.25 | 20.0603 | 161.5139 | 51.9492 | 3.109 | 10 |
+
 ## Build integration notes (Windows and Intel macOS)
 
 - Windows: release v2.0.1 has `win-x64-shared-{MD,MT}-{Release,MinSizeRel,Debug,RelWithDebInfo}[-lib]`
   and static variants. The MD Release `-lib` tarball (7.3 MB) holds
   `sherpa-onnx-c-api.dll` (3.9 MB), `onnxruntime.dll` (17 MB) and import
-  `.lib` files. It is the same C API and header. Not built or run. Windows
+  `.lib` files. The hosted probe linked against the import library and generated audio in process. Windows
   arm64 was not checked.
 - Intel macOS: v2.0.1 provides `osx-x64` and `osx-universal2` shared
-  `-lib` tarballs. Neither was run.
+  `-lib` tarballs. The probe linked and ran the x64 library in process. The universal2 build remains untested.
 
 ## Recommendations
 
@@ -327,15 +385,15 @@ accepted use terms before hosting a download. Pocket TTS preset voices have
 | --- | --- | --- |
 | Linux x64 | **Ship later** | Pocket TTS streamed at RTF 0.43 with the historical export. Confirm performance and clone quality with the official weights. Kokoro needs a shippable phonemiser and ran slower than real time on this host. |
 | macOS arm64 | **Ship later** | Kokoro ran at RTF 0.491 on the split paragraph, with 3.24 s to its first sentence. Qualify the official Pocket TTS export, choose a permissive English phonemiser, and verify signing and notarisation. |
-| macOS x64 | **Ship later** (provisional) | Native libraries are available. Host measurements are pending. |
-| Windows x64 | **Ship later** (provisional) | DLL assets and import libraries exist. Host measurements are pending. |
+| macOS x64 | **Ship later** | The fastest Kokoro paragraph run took 14.56 s to first audio and generated at RTF 2.17. Pocket TTS remains unmeasured. |
+| Windows x64 | **Ship later** | Kokoro generated the split paragraph at RTF 1.12 with two threads. Its 7.71 s first callback limits interactive Read Aloud on this host. Pocket TTS remains unmeasured. |
 | iOS, Android | **N/A** | Owner decision: voice creation is desktop only. |
 
 Next steps:
 
 1. Obtain approved access to Kyutai’s checkpoint, produce the in-house int8
    ONNX export, and measure Pocket TTS on macOS arm64 using the same reference.
-2. Measure both selected models on Intel macOS and Windows x64. Repeat Pocket
+2. Measure Pocket TTS on Intel macOS and Windows x64. Repeat Pocket
    TTS on Linux with the in-house export so the platforms use identical weights.
 3. Listen to clones of consented History-style references at several lengths,
    choose the Kokoro phonemiser, and verify the signed macOS bundle.

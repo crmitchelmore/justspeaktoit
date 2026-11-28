@@ -1,6 +1,8 @@
 import importlib.util
 import io
 import json
+import plistlib
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -25,17 +27,32 @@ class IOSTestProductsTests(unittest.TestCase):
         binary.write_text("test executable")
         binary.chmod(0o755)
         (self.products / "RunnerLink").symlink_to("Runner")
+        bundle = self.products / "Suite.xctest"
+        bundle.mkdir()
+        (bundle / "Info.plist").write_bytes(plistlib.dumps({"CFBundleExecutable": "Suite"}))
+        (bundle / "Suite").write_bytes(b"fixture")
         self.archive = self.root / "products.tar.gz"
         self.expected = {"revision": "a" * 40, "architecture": "arm64", "xcode": "Xcode 26.3", "sdk": "26.3"}
 
     def test_round_trip_preserves_executable_permissions_and_relative_links(self):
         MODULE.pack(self.products, self.archive, self.expected)
         destination = self.root / "restored"
-        MODULE.unpack(self.archive, destination, self.expected)
+        with patch.object(MODULE.subprocess, "run") as verify:
+            MODULE.unpack(self.archive, destination, self.expected)
+        verify.assert_called_once_with(
+            ["lipo", str(destination / MODULE.PRODUCT / "Suite.xctest/Suite"), "-verify_arch", "arm64"],
+            check=True,
+        )
         restored = destination / MODULE.PRODUCT
         self.assertEqual((restored / "Runner").stat().st_mode & 0o777, 0o755)
         self.assertTrue((restored / "RunnerLink").is_symlink())
         self.assertEqual((restored / "RunnerLink").read_text(), "test executable")
+
+    def test_incompatible_binary_fails_even_if_provenance_matches(self):
+        MODULE.pack(self.products, self.archive, self.expected)
+        with patch.object(MODULE.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "lipo")):
+            with self.assertRaises(subprocess.CalledProcessError):
+                MODULE.unpack(self.archive, self.root / "restored", self.expected)
 
     def test_provenance_mismatches_fail_before_extraction(self):
         MODULE.pack(self.products, self.archive, self.expected)

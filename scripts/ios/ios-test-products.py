@@ -6,6 +6,7 @@ import io
 import json
 import os
 import platform
+import plistlib
 import re
 import subprocess
 import tarfile
@@ -46,8 +47,20 @@ def unpack(archive, destination, expected):
         if metadata is None or json.load(metadata) != expected:
             raise ValueError("iOS test products do not match the checkout revision, host architecture or Xcode/SDK.")
         source.extractall(destination, filter="data")
-    if not (Path(destination) / PRODUCT).exists():
+    products = Path(destination) / PRODUCT
+    if not products.exists():
         raise FileNotFoundError("The archive did not contain the required iOS test products.")
+
+    bundles = sorted(products.rglob("*.xctest"))
+    if not bundles:
+        raise ValueError("No XCTest bundles in the restored products.")
+    for bundle in bundles + sorted(products.rglob("*.app")):
+        with (bundle / "Info.plist").open("rb") as info:
+            executable = plistlib.load(info)["CFBundleExecutable"]
+        if not executable or Path(executable).name != executable or executable in (".", ".."):
+            raise ValueError(f"Invalid executable name in {bundle}")
+        binary = bundle / executable
+        subprocess.run(["lipo", str(binary), "-verify_arch", expected["architecture"]], check=True)
 
 
 if __name__ == "__main__":

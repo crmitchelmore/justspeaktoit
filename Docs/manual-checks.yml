@@ -2514,6 +2514,21 @@ sessions:
       - "A Windows 11 PC with the Just Speak to It Alpha for Windows installed and Narrator available, and at least two recordings in History."
       - "Use made-up sentences only. Keep a second computer or phone handy to export settings from."
     items:
+      - id: "windows-voice-profile-import"
+        issues:
+          - 1821
+        title: "Create a private voice profile from synthetic audio"
+        minutes: 2
+        core: false
+        build: "First Windows Alpha containing the native voice profile editor"
+        steps:
+          - "Open Voice Output, choose Create voice profile and select a local synthetic speech fixture."
+          - "Enter a name, language and transcript. Verify Save stays disabled until you check the consent box."
+          - "Play the prepared clip. Add it, select a second synthetic fixture and save. Verify that both transcripts stay editable before their clips are added."
+          - "Reopen Create voice profile in Voice Output. Select the saved profile, cancel deletion, then confirm deletion. Repeat file selection with a silent WAV."
+          - "With a screen reader enabled, verify the guided-script and Stop controls have names. Use synthetic microphone input only for the recording check."
+        expected: "Preview plays the staged clip. Save requires consent. Cancel preserves the profile, confirmed deletion removes it, and silent audio produces a visible quality rejection."
+        final_gate: false
       - id: "windows-command-palette"
         issues:
           - 1619
@@ -2671,6 +2686,21 @@ sessions:
       - "A Linux desktop (GNOME on Wayland or X11) with the Just Speak to It Alpha for Linux installed and Orca available, and at least two recordings in History."
       - "Use made-up sentences only. Keep a second computer or phone handy to export settings from."
     items:
+      - id: "linux-voice-profile-import"
+        issues:
+          - 1821
+        title: "Create a private voice profile from synthetic audio"
+        minutes: 2
+        core: false
+        build: "First Linux Alpha containing the native voice profile editor"
+        steps:
+          - "Open Voice Output, choose Create voice profile and select a local synthetic speech fixture."
+          - "Enter a name, language and transcript. Verify Save stays disabled until you check the consent box."
+          - "Play the prepared clip. Add it, select a second synthetic fixture and save. Verify that both transcripts stay editable before their clips are added."
+          - "Reopen Create voice profile in Voice Output. Select the saved profile, cancel deletion, then confirm deletion. Repeat file selection with a silent WAV."
+          - "With a screen reader enabled, verify the guided-script and Stop controls have names. Use synthetic microphone input only for the recording check."
+        expected: "Preview plays the staged clip. Save requires consent. Cancel preserves the profile, confirmed deletion removes it, and silent audio produces a visible quality rejection."
+        final_gate: false
       - id: "linux-system-audio"
         issues:
           - 1854

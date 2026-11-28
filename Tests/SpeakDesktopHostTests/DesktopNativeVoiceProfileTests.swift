@@ -50,7 +50,7 @@ final class DesktopNativeVoiceProfileTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let release = DispatchSemaphore(value: 0)
-        let effects = NativeTestEffects(profileSamples: [], profileStop: {
+        let effects = NativeTestEffects(profileSamples: [1], profileStop: {
             _ = release.wait(timeout: .now() + 5)
         })
         let controller = try DesktopHostController<NativeTestPlatform>.consented(

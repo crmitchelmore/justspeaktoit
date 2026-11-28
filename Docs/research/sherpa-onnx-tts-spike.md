@@ -184,7 +184,7 @@ phonemiser and dictionary data.
 | --- | --- | --- |
 | Linux x64 | Done (this report) | Spike host above |
 | macOS arm64 | Kokoro and SwiftPM integration done. Pocket TTS pending. | Bravo’s Mac mini. Official checkpoint access required. |
-| macOS x64 | pending | The Intel macOS probe is queued in Actions run 46130110487. |
+| macOS x64 | Kokoro measured | Intel Core i7 hosted runner. Pocket TTS remains open. |
 | Windows x64 | Kokoro measured | Windows Server 2022 x64 hosted runner. Pocket TTS remains open. |
 
 Use the same paragraph for the remaining x64 measurements.
@@ -351,6 +351,24 @@ The first Windows job timed out during runtime archive extraction. The
 selected the two DLLs and the C API import library from the verified archive.
 The benchmark, model and paragraph were identical across attempts.
 
+### Intel macOS 26.6.1, 28 November 2026
+
+The hosted runner exposed four logical CPUs on a 3.20 GHz Intel Core i7-8700B
+and 14 GiB of RAM. The fastest paragraph run used two threads and one call per
+sentence. It took 112.99 s to generate 51.98 s of audio, with 14.56 s to the
+first callback. At two threads, passing the paragraph in one call increased
+generation time to 161.51 s. Each configuration was measured once.
+[Job log](https://github.com/crmitchelmore/justspeaktoit/actions/runs/46130110487/job/140933279381) · [CSV artifact](https://github.com/crmitchelmore/justspeaktoit/actions/runs/46130110487/artifacts/15259727602)
+
+| Threads | Input | Load (s) | After load (MB) | Peak (MB) | TTFA (s) | Generate (s) | Audio (s) | RTF | Callbacks |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4 | short | 9.8314 | 317.46 | 512.87 | 25.8981 | 25.8996 | 7.3058 | 3.545 | 1 |
+| 4 | split | 3.9073 | 317.38 | 559.01 | 19.7972 | 128.1464 | 51.9929 | 2.465 | 10 |
+| 4 | unsplit | 3.2757 | 317.88 | 568.05 | 26.7576 | 136.4405 | 51.9539 | 2.626 | 10 |
+| 2 | short | 2.8703 | 317.34 | 512.53 | 14.9529 | 14.9534 | 7.3075 | 2.046 | 1 |
+| 2 | split | 4.2065 | 317.87 | 559.27 | 14.5588 | 112.9877 | 51.9814 | 2.174 | 10 |
+| 2 | unsplit | 5.4970 | 317.33 | 567.25 | 20.0603 | 161.5139 | 51.9492 | 3.109 | 10 |
+
 ## Build integration notes (Windows and Intel macOS)
 
 - Windows: release v2.0.1 has `win-x64-shared-{MD,MT}-{Release,MinSizeRel,Debug,RelWithDebInfo}[-lib]`
@@ -359,7 +377,7 @@ The benchmark, model and paragraph were identical across attempts.
   `.lib` files. The hosted probe linked against the import library and generated audio in process. Windows
   arm64 was not checked.
 - Intel macOS: v2.0.1 provides `osx-x64` and `osx-universal2` shared
-  `-lib` tarballs. Neither was run.
+  `-lib` tarballs. The probe linked and ran the x64 library in process. The universal2 build remains untested.
 
 ## Recommendations
 
@@ -367,7 +385,7 @@ The benchmark, model and paragraph were identical across attempts.
 | --- | --- | --- |
 | Linux x64 | **Ship later** | Pocket TTS streamed at RTF 0.43 with the historical export. Confirm performance and clone quality with the official weights. Kokoro needs a shippable phonemiser and ran slower than real time on this host. |
 | macOS arm64 | **Ship later** | Kokoro ran at RTF 0.491 on the split paragraph, with 3.24 s to its first sentence. Qualify the official Pocket TTS export, choose a permissive English phonemiser, and verify signing and notarisation. |
-| macOS x64 | **Ship later** (provisional) | Native libraries are available. Host measurements are pending. |
+| macOS x64 | **Ship later** | The fastest Kokoro paragraph run took 14.56 s to first audio and generated at RTF 2.17. Pocket TTS remains unmeasured. |
 | Windows x64 | **Ship later** | Kokoro generated the split paragraph at RTF 1.12 with two threads. Its 7.71 s first callback limits interactive Read Aloud on this host. Pocket TTS remains unmeasured. |
 | iOS, Android | **N/A** | Owner decision: voice creation is desktop only. |
 
@@ -375,7 +393,7 @@ Next steps:
 
 1. Obtain approved access to Kyutai’s checkpoint, produce the in-house int8
    ONNX export, and measure Pocket TTS on macOS arm64 using the same reference.
-2. Measure Kokoro on Intel macOS and Pocket TTS on Intel macOS and Windows x64. Repeat Pocket
+2. Measure Pocket TTS on Intel macOS and Windows x64. Repeat Pocket
    TTS on Linux with the in-house export so the platforms use identical weights.
 3. Listen to clones of consented History-style references at several lengths,
    choose the Kokoro phonemiser, and verify the signed macOS bundle.

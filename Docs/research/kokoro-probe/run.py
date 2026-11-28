@@ -49,7 +49,14 @@ for tag, name, digest in [
                     tar.extract(member)
                     print("Extracted", path, flush=True)
     else:
-        subprocess.run(["tar", "xf", archive], check=True)
+        with tarfile.open(archive, "r|bz2") as tar:
+            for member in tar:
+                path = Path(member.name)
+                if member.isfile() and path.name in {
+                    "sherpa-onnx-c-api.lib", "sherpa-onnx-c-api.dll", "onnxruntime.dll"
+                }:
+                    tar.extract(member, filter="data")
+                    print("Extracted", path, flush=True)
 
 download("https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/af2d8d81dbfa61c4cea4c568da78f3982edca005/sherpa-onnx/c-api/c-api.h",
          "c-api.h", "5698f38ba09ad2bdf085c56a6cbbd7741acf15e25f4ce5c7097b9702cadf437f")

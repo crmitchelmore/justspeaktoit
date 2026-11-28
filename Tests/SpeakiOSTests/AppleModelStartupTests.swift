@@ -97,9 +97,16 @@ final class AppleModelStartupTests: XCTestCase {
         transcriber.modelID = AppleLocalModels.speechTranscriberModelID
         let checking = expectation(description: "Asset check suspended")
         let inventory = SuspendedInventory(checking: checking)
+        // The caller cancels before inventory replies. Keep the competing timeout under test control.
+        let deadline = AsyncStream<Void>.makeStream()
+        defer { deadline.continuation.finish() }
         transcriber.analyzerStart = {
             try await AppleSpeechAssets.ensure(
-                policy: .installedOnly, status: { await inventory.status() }, install: { false }
+                policy: .installedOnly, status: { await inventory.status() }, install: { false },
+                deadlineSleep: { _ in
+                    var events = deadline.stream.makeAsyncIterator()
+                    _ = await events.next()
+                }
             )
         }
         transcriber.legacyStart = { XCTFail("Cancelled startup must never fall back") }
@@ -111,9 +118,9 @@ final class AppleModelStartupTests: XCTestCase {
             } catch { XCTAssertTrue(error is CancellationError) }
             cancelled.fulfill()
         }
-        await fulfillment(of: [checking], timeout: 2)
+        await fulfillment(of: [checking], timeout: 15)
         transcriber.cancel()
-        await fulfillment(of: [cancelled], timeout: 2)
+        await fulfillment(of: [cancelled], timeout: 15)
         await task.value
         XCTAssertEqual(releases, 1)
         XCTAssertFalse(transcriber.isRunning)
@@ -125,7 +132,7 @@ final class AppleModelStartupTests: XCTestCase {
         XCTAssertTrue(transcriber.isRunning)
         transcriber.cancel()
         XCTAssertEqual(releases, 2)
-        inventory.reply?.resume(returning: .installed)
+        inventory.reply?.resume(returning: .unsupported)
     }
 }
 

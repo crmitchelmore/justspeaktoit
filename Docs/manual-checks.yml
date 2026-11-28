@@ -2671,6 +2671,20 @@ sessions:
       - "A Linux desktop (GNOME on Wayland or X11) with the Just Speak to It Alpha for Linux installed and Orca available, and at least two recordings in History."
       - "Use made-up sentences only. Keep a second computer or phone handy to export settings from."
     items:
+      - id: "linux-system-audio"
+        issues:
+          - 1854
+        title: "Record desktop playback from the dashboard and CLI"
+        minutes: 3
+        core: false
+        build: "Linux Alpha containing the system capture increment for #1854"
+        steps:
+          - "Mute the microphone and play a synthetic spoken phrase through the default output."
+          - "Select Record system audio on the dashboard, start recording, then stop after the phrase."
+          - "With automation enabled, repeat using speak listen --source system and speak stop."
+          - "Inspect speak history --last 2 --json and play each recording."
+        expected: "Both entries contain the playback and report system as the source."
+        final_gate: false
       - id: "linux-command-palette"
         issues:
           - 1619

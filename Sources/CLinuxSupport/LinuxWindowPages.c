@@ -122,6 +122,10 @@ GtkWidget *build_dashboard(GtkTextBuffer *buffer) {
         NULL, "Ready when you are",
         "Turn a thought into text. Record, review, and use it anywhere.",
         &chips, &trailing);
+    GtkWidget *source = gtk_check_button_new_with_label("Record system audio");
+    dashboard_page()->system_audio = GTK_CHECK_BUTTON(source);
+    gtk_widget_set_name(source, "dashboard-record-system-audio");
+    gtk_box_append(GTK_BOX(trailing), source);
     dashboard_page()->record = GTK_BUTTON(gtk_button_new_with_label("Start Recording"));
     gtk_widget_add_css_class(GTK_WIDGET(dashboard_page()->record), "jsti-record-hero");
     g_signal_connect(dashboard_page()->record, "clicked", G_CALLBACK(on_record), NULL);
@@ -205,6 +209,7 @@ void dashboard_refresh_actions(gint32 state, gboolean copyable) {
     gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->dashboard_copy), copyable);
     gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->cancel), state == JSTI_STATE_WORKING);
     gtk_widget_set_visible(GTK_WIDGET(dashboard_page()->cancel), state == JSTI_STATE_WORKING);
+    gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->system_audio), !recording && state != JSTI_STATE_WORKING);
     gtk_widget_set_sensitive(GTK_WIDGET(dashboard_page()->record), state != JSTI_STATE_WORKING);
     gtk_button_set_label(dashboard_page()->record, recording ? "Stop Recording"
                                     : state == JSTI_STATE_WORKING ? "Working…" : "Start Recording");

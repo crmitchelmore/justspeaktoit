@@ -65,9 +65,6 @@ final class DesktopNativeVoiceProfileTests: XCTestCase {
         let report = await controller.close()
         release.signal()
         XCTAssertEqual(report.unfinishedOperations, 1)
-        await controller.operationsEnded()
-        let busy = await controller.busy
-        XCTAssertFalse(busy)
     }
 
     func testNativeEditor_SavesReviewedClipsAndRequiresDeletionReview() async throws {

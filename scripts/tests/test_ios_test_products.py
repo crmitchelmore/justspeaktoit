@@ -26,7 +26,7 @@ class IOSTestProductsTests(unittest.TestCase):
         binary.chmod(0o755)
         (self.products / "RunnerLink").symlink_to("Runner")
         self.archive = self.root / "products.tar.gz"
-        self.expected = {"revision": "a" * 40, "xcode": "Xcode 26.3", "sdk": "26.3"}
+        self.expected = {"revision": "a" * 40, "architecture": "arm64", "xcode": "Xcode 26.3", "sdk": "26.3"}
 
     def test_round_trip_preserves_executable_permissions_and_relative_links(self):
         MODULE.pack(self.products, self.archive, self.expected)
@@ -37,7 +37,7 @@ class IOSTestProductsTests(unittest.TestCase):
         self.assertTrue((restored / "RunnerLink").is_symlink())
         self.assertEqual((restored / "RunnerLink").read_text(), "test executable")
 
-    def test_revision_xcode_and_sdk_mismatches_fail_before_extraction(self):
+    def test_provenance_mismatches_fail_before_extraction(self):
         MODULE.pack(self.products, self.archive, self.expected)
         for key in self.expected:
             with self.subTest(key=key), self.assertRaisesRegex(ValueError, "do not match"):
@@ -54,7 +54,7 @@ class IOSTestProductsTests(unittest.TestCase):
     def test_provenance_reads_the_actual_revision_and_toolchain(self):
         with patch.dict(MODULE.os.environ, {"GITHUB_SHA": "a" * 40}), patch.object(
             MODULE.subprocess, "check_output", side_effect=["Xcode 26.3\n", "26.3\n"]
-        ) as tool:
+        ) as tool, patch.object(MODULE.platform, "machine", return_value="arm64"):
             self.assertEqual(MODULE.provenance(), self.expected)
         self.assertEqual(tool.call_args_list, [
             call(["xcodebuild", "-version"], text=True),

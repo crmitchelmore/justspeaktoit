@@ -5,6 +5,7 @@ import argparse
 import io
 import json
 import os
+import platform
 import re
 import subprocess
 import tarfile
@@ -20,6 +21,7 @@ def provenance():
         raise ValueError("A full checkout revision is required for iOS test products.")
     return {
         "revision": revision,
+        "architecture": platform.machine(),
         "xcode": subprocess.check_output(["xcodebuild", "-version"], text=True).strip(),
         "sdk": subprocess.check_output(
             ["xcrun", "--sdk", "iphonesimulator", "--show-sdk-version"], text=True
@@ -42,7 +44,7 @@ def unpack(archive, destination, expected):
     with tarfile.open(archive, "r:gz") as source:
         metadata = source.extractfile(METADATA)
         if metadata is None or json.load(metadata) != expected:
-            raise ValueError("iOS test products do not match the checkout revision or Xcode/SDK.")
+            raise ValueError("iOS test products do not match the checkout revision, host architecture or Xcode/SDK.")
         source.extractall(destination, filter="data")
     if not (Path(destination) / PRODUCT).exists():
         raise FileNotFoundError("The archive did not contain the required iOS test products.")

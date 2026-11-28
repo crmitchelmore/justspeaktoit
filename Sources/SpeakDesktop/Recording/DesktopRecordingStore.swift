@@ -11,7 +11,7 @@ public actor DesktopRecordingStore {
             case correctedText, lexiconSummary, lexiconDirectives, lexiconContextTags
             case postProcessingModelIdentifier, postProcessingFailure, languageIdentifier, profileName, profileNotes
             case originPlatform, migrationMetadata, recordedDuration, importedCost, importedModelIdentifiers
-            case localAudio
+            case localAudio, captureSource
             case livePolishResult
         }
 
@@ -20,6 +20,7 @@ public actor DesktopRecordingStore {
         public let audioFilename: String
         /// Local descriptive provenance, usable only with a separately verified ownership registration.
         public internal(set) var localAudio: DesktopRecordingAudioReference?
+        public var captureSource: AudioCaptureSource?
         public let modelIdentifier: String
         public var result: TranscriptionResult?
         public var failure: String?

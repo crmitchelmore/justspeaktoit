@@ -165,6 +165,21 @@ final class DesktopHostAutomationTests: XCTestCase {
         XCTAssertEqual(idleStop.error?.code, .notRecording)
     }
 
+    func testSystemCapture_RecordsSourceAndPreservesMicrophoneChoice() async throws {
+        let original = await controller.selectedMicrophone()
+        let started = try await controller.automationStartDictation(source: .system)
+        XCTAssertEqual(started.source, "system")
+        let stopped = try await controller.automationStopDictation()
+        XCTAssertEqual(stopped.source, "system")
+        let history = await controller.automationHistory(limit: 1)
+        XCTAssertEqual(history.first?.source, "system")
+        let microphone = await controller.selectedMicrophone()
+        XCTAssertEqual(microphone, original)
+        let next = try await controller.automationStartDictation()
+        XCTAssertEqual(next.source, "mic")
+        _ = try await controller.automationStopDictation()
+    }
+
     func testFailedSettingsWrite_DoesNotGrantAccessOrChangeDesiredPreference() async throws {
         await controller.close()
         let refusing = SettingsWriteEffects()

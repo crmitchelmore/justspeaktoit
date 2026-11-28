@@ -192,7 +192,8 @@ protocol FakeObservationalConsent: Sendable {
     func setLocalConsent(_ allowed: Bool, token: UInt64?) -> Bool
 }
 
-enum FakePlatform: DesktopHostAutomationPlatform {
+enum FakePlatform: DesktopMonitorCapturePlatform {
+    static let defaultMonitorDeviceID = "synthetic-output-monitor"
     static var supportsObservationalCorrections: Bool {
         FakeLog.shared.correctionReadback?.provenance == .observationalATSPISpan
     }

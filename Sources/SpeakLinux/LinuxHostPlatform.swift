@@ -24,7 +24,8 @@ struct LinuxHotKeySettings: Codable, Equatable, Sendable {
 
 /// GTK 4/libadwaita, the Secret Service, libpulse and the X11 or portal
 /// output paths behind the shared desktop host.
-enum LinuxHostPlatform: DesktopHostAutomationPlatform, DesktopNativeWindowPlatform {
+enum LinuxHostPlatform: DesktopMonitorCapturePlatform, DesktopNativeWindowPlatform {
+    static let defaultMonitorDeviceID = "@DEFAULT_MONITOR@"
     static var correctionLearningUnavailable: String? {
         nil
     }

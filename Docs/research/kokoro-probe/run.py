@@ -6,6 +6,7 @@ import os
 import platform
 import shutil
 import subprocess
+import tarfile
 from pathlib import Path
 
 root = Path.cwd()
@@ -35,7 +36,20 @@ for tag, name, digest in [
 ]:
     archive = name + ".tar.bz2"
     download(base + tag + "/" + archive, archive, digest)
-    subprocess.run(["tar", "xf", archive], check=True)
+    print("Verified", archive, flush=True)
+    if name == model:
+        # The legacy dictionary contains many small files. IPA bypasses it.
+        with tarfile.open(archive, "r|bz2") as tar:
+            for member in tar:
+                path = Path(member.name)
+                if path.parent == Path(model) and member.isfile() and (
+                    path.name in {"model.int8.onnx", "voices.bin", "tokens.txt"}
+                    or (path.match("lexicon*.txt") and "us" in path.name)
+                ):
+                    tar.extract(member)
+                    print("Extracted", path, flush=True)
+    else:
+        subprocess.run(["tar", "xf", archive], check=True)
 
 download("https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/af2d8d81dbfa61c4cea4c568da78f3982edca005/sherpa-onnx/c-api/c-api.h",
          "c-api.h", "5698f38ba09ad2bdf085c56a6cbbd7741acf15e25f4ce5c7097b9702cadf437f")

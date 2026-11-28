@@ -8,6 +8,7 @@
 #include <utility>
 
 int jsti_owned_window_save_snapshot(HWND window, const char *path, char *error, size_t capacity);
+void jsti_show_voice_profile(HWND owner, jsti::voiceSources::Dialog &source);
 void jsti_show_voice_controls(HWND owner, JSTIVoiceSourceCallback callback, void *context);
 void jsti_show_voice_usage(HWND owner, const std::string &snapshot, JSTIVoiceSourceCallback callback, void *context);
 void jsti_show_voice_discovery(HWND owner, JSTIVoiceSourceCallback callback, void *context);
@@ -420,8 +421,10 @@ static void layout(HWND window) {
     const int top = margin + scale(window, 104), note = usageRow - gap - scale(window, 90);
     move(textID, margin, top, width, std::max(scale(window, 110), note - gap - top));
     move(noticeID, margin, note, width, scale(window, 90));
-    move(usageID, margin, usageRow, (width - gap) / 2, height);
-    move(discoveryID, margin + (width + gap) / 2, usageRow, (width - gap) / 2, height);
+    const int third = (width - 2 * gap) / 3;
+    move(usageID, margin, usageRow, third, height);
+    move(discoveryID, margin + third + gap, usageRow, third, height);
+    move(profileID, margin + 2 * (third + gap), usageRow, third, height);
     const int optionWidth = (width - 2 * gap) / 3;
     move(autoPlayID, margin, optionsRow, optionWidth, scale(window, 44));
     move(saveID, margin + optionWidth + gap, optionsRow, optionWidth, scale(window, 44));
@@ -452,6 +455,7 @@ static bool create(HWND window, Dialog &dialog) {
         !add(L"STATIC", L"", SS_LEFT, noticeID) ||
         !add(L"BUTTON", L"&Usage and input estimate...", BS_PUSHBUTTON | WS_TABSTOP, usageID) ||
         !add(L"BUTTON", L"&Account voices...", BS_PUSHBUTTON | WS_TABSTOP, discoveryID) ||
+        !add(L"BUTTON", L"Create voice &profile...", BS_PUSHBUTTON | WS_TABSTOP, profileID) ||
         !add(L"STATIC", L"File &format", 0, formatLabelID) ||
         !add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, formatID) ||
         !add(L"BUTTON", L"&Auto-play generated audio", BS_AUTOCHECKBOX | BS_MULTILINE | WS_TABSTOP, autoPlayID) ||
@@ -558,6 +562,7 @@ static LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPAR
         }
         if (HIWORD(wparam) != BN_CLICKED) break;
         switch (LOWORD(wparam)) {
+        case profileID: jsti_show_voice_profile(window, *dialog); return 0;
         case helperID: showMarkup(window, *dialog); return 0;
         case discoveryID:
             jsti_show_voice_discovery(window, dialog->config.callback, dialog->config.context); return 0;

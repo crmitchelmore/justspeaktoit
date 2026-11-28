@@ -3,6 +3,17 @@ import SpeakCore
 @testable import SpeakDesktop
 
 final class DesktopVoiceSourceMessageTests: XCTestCase {
+    func testProfileSave_RequiresConsentAndPreservesEditedTranscript() throws {
+        let reference = UUID().uuidString
+        func message(consent: Int32) throws -> DesktopVoiceSourceMessage {
+            try DesktopVoiceSourceMessage(action: 120, source: consent, text: "Edited synthetic transcript.",
+                record: "Fixture\nen", path: reference)
+        }
+        XCTAssertThrowsError(try message(consent: 0))
+        XCTAssertEqual(try message(consent: 1), .createProfile(name: "Fixture", language: "en",
+            transcript: "Edited synthetic transcript.", reference: reference))
+    }
+
     func testNativeMessage_PreservesImmutableSourceAndDistinctOpaqueResultOwnership() throws {
         let history = UUID().uuidString
         let source = try VoiceOutputSourceSnapshot(

@@ -2514,6 +2514,19 @@ sessions:
       - "A Windows 11 PC with the Just Speak to It Alpha for Windows installed and Narrator available, and at least two recordings in History."
       - "Use made-up sentences only. Keep a second computer or phone handy to export settings from."
     items:
+      - id: "windows-voice-profile-import"
+        issues:
+          - 1821
+        title: "Create a private voice profile from synthetic audio"
+        minutes: 2
+        core: false
+        build: "First Windows Alpha containing the native voice profile editor"
+        steps:
+          - "Open Voice Output, choose Create voice profile and select a local synthetic speech fixture."
+          - "Enter a name, language and transcript. Verify Save stays disabled until you check the consent box."
+          - "Save and check the main window status. Repeat with a silent WAV."
+        expected: "The synthetic speech profile saves locally and the silent clip produces a quality rejection."
+        final_gate: false
       - id: "windows-command-palette"
         issues:
           - 1619
@@ -2671,6 +2684,19 @@ sessions:
       - "A Linux desktop (GNOME on Wayland or X11) with the Just Speak to It Alpha for Linux installed and Orca available, and at least two recordings in History."
       - "Use made-up sentences only. Keep a second computer or phone handy to export settings from."
     items:
+      - id: "linux-voice-profile-import"
+        issues:
+          - 1821
+        title: "Create a private voice profile from synthetic audio"
+        minutes: 2
+        core: false
+        build: "First Linux Alpha containing the native voice profile editor"
+        steps:
+          - "Open Voice Output, choose Create voice profile and select a local synthetic speech fixture."
+          - "Enter a name, language and transcript. Verify Save stays disabled until you check the consent box."
+          - "Save and check the main window status. Repeat with a silent WAV."
+        expected: "The synthetic speech profile saves locally and the silent clip produces a quality rejection."
+        final_gate: false
       - id: "linux-command-palette"
         issues:
           - 1619

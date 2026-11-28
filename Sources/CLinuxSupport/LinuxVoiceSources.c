@@ -135,6 +135,10 @@ Dialog *make_dialog(GtkWindow *owner, const char *record, const char *history) {
     gtk_widget_set_size_request(account, -1, 44);
     GtkWidget *discovery = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_set_hexpand(usage, TRUE); gtk_widget_set_hexpand(account, TRUE);
+    GtkWidget *profile = gtk_button_new_with_label("Create voice profile...");
+    gtk_widget_set_name(profile, "voice-profile-create");
+    g_signal_connect(profile, "clicked", G_CALLBACK(jsti_voice_profile_open), dialog);
+    gtk_box_append(GTK_BOX(discovery), profile);
     gtk_box_append(GTK_BOX(discovery), usage); gtk_box_append(GTK_BOX(discovery), account);
     gtk_box_append(GTK_BOX(box), discovery);
     g_signal_connect(usage, "clicked", G_CALLBACK(usage_report), dialog);

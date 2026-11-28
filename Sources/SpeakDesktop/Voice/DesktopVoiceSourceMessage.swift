@@ -6,6 +6,7 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
     case event(DesktopHistoryEvent)
     case preferences(VoiceGenerationOptions)
     case synthesisPreferences(VoiceSynthesisOptions, requestID: String)
+    case createProfile(name: String, language: String, transcript: String, reference: String)
     case audioFormat(String)
     case usageReport(text: String, requestID: String)
     case usageTracking(Bool, requestID: String)
@@ -24,6 +25,12 @@ public enum DesktopVoiceSourceMessage: Equatable, Sendable {
         case 117: self = .event(.voiceGeneratedExport(record, path: path))
         case 118:
             self = try Self.preferenceMessage(source: source, text: text, record: record, path: path)
+        case 120:
+            let fields = record.components(separatedBy: "\n")
+            guard source == 1, fields.count == 2, !fields[0].isEmpty, fields[0].count <= 120,
+                  !fields[1].isEmpty, fields[1].count <= 64, !path.isEmpty,
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Failure.invalidPreferences }
+            self = .createProfile(name: fields[0], language: fields[1], transcript: text, reference: path)
         case 119:
             guard text.utf8.count <= 1_024, !record.isEmpty, record.utf8.count <= 64,
                   record.utf8.allSatisfy({ (0x20...0x7E).contains($0) }) else { throw Failure.invalidPreferences }

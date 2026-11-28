@@ -55,6 +55,7 @@ typedef struct {
 
 typedef struct { Dialog *dialog; gchar *text, *record, *format; guint source; gboolean retained; } Export;
 
+void jsti_voice_profile_open(GtkButton *button, gpointer data);
 void jsti_show_voice_controls(GtkWindow *owner, JSTIVoiceSourceCallback callback, void *context);
 void jsti_show_voice_usage(GtkWindow *owner, const char *snapshot, JSTIVoiceSourceCallback callback, void *context);
 void jsti_show_voice_discovery(GtkWindow *owner, JSTIVoiceSourceCallback callback, void *context);

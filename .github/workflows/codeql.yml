@@ -20,8 +20,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Newest-only on PRs and main: a newer main push analyses a superset.
-  cancel-in-progress: true
+  # Let the active scan upload its results. GitHub coalesces waiting runs for this ref.
+  cancel-in-progress: false
 
 jobs:
   changes:
@@ -55,9 +55,9 @@ jobs:
       always() && !startsWith(github.head_ref, 'merge-batch/') && (github.event_name != 'pull_request' ||
       needs.changes.result != 'success' || needs.changes.outputs.swift == 'true')
     runs-on: macos-15
-    # CodeQL tracing slows the Swift build, so this gets more headroom than
-    # the plain CI build jobs.
-    timeout-minutes: 60
+    # A successful cold scan took nearly 60 minutes including resolution and upload.
+    # Leave room for a slower dependency download or traced compile.
+    timeout-minutes: 90
     permissions:
       actions: read
       contents: read
